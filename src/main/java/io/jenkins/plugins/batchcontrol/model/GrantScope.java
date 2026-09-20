@@ -51,6 +51,13 @@ public final class GrantScope {
         if (type == Type.JOB) {
             return fullName.equals(itemFullName);
         }
+        if (fullName.isEmpty()) {
+            // FOLDER scope "" is the Jenkins root itself: it includes every item full name and
+            // the root ("") — where root-level Item/Create is checked on the root ACL. Such a
+            // scope is only creatable through the service/API; the HTTP form requires a
+            // non-empty scope name.
+            return true;
+        }
         return itemFullName.equals(fullName) || itemFullName.startsWith(fullName + "/");
     }
 

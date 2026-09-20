@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import jenkins.model.IComputer;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -95,6 +96,15 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
     @NonNull
     @Override
     public ACL getACL(@NonNull Computer computer) {
+        return noScope(delegate == null ? null : delegate.getACL(computer));
+    }
+
+    @NonNull
+    @Override
+    public ACL getACL(@NonNull IComputer computer) {
+        // Without this override, core's default for a non-Computer IComputer would fall back
+        // to THIS strategy's getRootACL() instead of the delegate's own IComputer override
+        // (ARCHITECTURE section 4: ALL getACL overloads must delegate).
         return noScope(delegate == null ? null : delegate.getACL(computer));
     }
 
