@@ -1,0 +1,9 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core">
+  <div class="jenkins-alert jenkins-alert-info">
+    <strong>Batch Control:</strong> the Role Strategy plugin is the active authorization
+    strategy. Just-in-time change permissions (grants) are not supported on Role Strategy in
+    this release; run control and audit recording still work. See the plugin README for known
+    limitations.
+  </div>
+</j:jelly>

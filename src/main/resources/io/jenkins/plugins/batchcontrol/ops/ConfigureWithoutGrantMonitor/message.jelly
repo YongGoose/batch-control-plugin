@@ -1,0 +1,10 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core">
+  <div class="jenkins-alert jenkins-alert-warning">
+    <strong>Batch Control:</strong> change control is enabled, but some users hold direct
+    Item Create/Configure/Delete permissions outside the just-in-time grant flow (or the
+    Batch Control wrapping authorization strategy is not selected). Changes made by those
+    users bypass grant control and are only recorded in the audit history.
+    <a class="jenkins-button" href="${rootURL}/manage/configureSecurity">Review authorization strategy</a>
+  </div>
+</j:jelly>
