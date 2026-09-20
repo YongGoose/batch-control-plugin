@@ -24,48 +24,48 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-01-06 | 1 | integration | P1 | runControlEnabled=true | 관리자가 false로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, true→false)가 남는다 | GlobalSwitchTest |
 | T-02-01 | 2 | integration | P0 | Manage 없는 사용자 | 전역 설정 POST | 403 | PermissionsTest |
 | T-02-02 | 2 | integration | P1 | Matrix Authorization 전략 활성 | 권한 설정 화면 조회 | "Batch Control" 그룹에 Request/Approve/RequestGrant/ViewHistory/Manage 5종이 표시된다 (DOM 존재 기준, 시각 확인은 Phase 5) | PermissionsTest |
-| T-02-03 | 2 | integration | P0 | 관리자(Overall/Administer), allowAdminSelfApproval=true(기본) | 본인 요청을 본인이 승인 | 승인 성공, 요청에 selfApproved=true 기록 | S2로 이월(결재 서비스 필요) |
-| T-02-04 | 2 | integration | P0 | allowAdminSelfApproval=false | 관리자가 본인 요청 승인 시도 | 거부된다(직무 분리 적용), 상태 PENDING 유지 | S2로 이월(결재 서비스 필요) |
+| T-02-03 | 2 | integration | P0 | 관리자(Overall/Administer), allowAdminSelfApproval=true(기본) | 본인 요청을 본인이 승인 | 승인 성공, 요청에 selfApproved=true 기록 | RunRequestServiceTest |
+| T-02-04 | 2 | integration | P0 | allowAdminSelfApproval=false | 관리자가 본인 요청 승인 시도 | 거부된다(직무 분리 적용), 상태 PENDING 유지 | RunRequestServiceTest |
 | T-02-05 | 2 | integration | P1 | Manage 권한 있는 사용자 | 전역 설정·결재자 목록 POST | 200, 저장된다 | PermissionsTest |
-| T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | |
-| T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | |
-| T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | |
-| T-03-04 | 3 | integration | P1 | approvers=[a1,a2], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a2로 변경 | 성공, 요청 이력에 (a1, a2, 변경자, 시각)이 남는다 | |
-| T-03-05 | 3 | integration | P1 | 이미 결재된(APPROVED) 요청 | 요청자가 결재자 변경 시도 | 거부 (결재 전까지만 변경 가능) | |
-| T-03-06 | 3 | integration | P1 | 관리자, allowAdminSelfApproval=true | 관리자가 본인을 결재자로 지정해 요청 | 요청 생성 성공 (관리자 예외) | |
+| T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | RunRequestServiceTest |
+| T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | RunRequestServiceTest |
+| T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | RunRequestServiceTest |
+| T-03-04 | 3 | integration | P1 | approvers=[a1,a2], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a2로 변경 | 성공, 요청 이력에 (a1, a2, 변경자, 시각)이 남는다 | RunRequestServiceTest |
+| T-03-05 | 3 | integration | P1 | 이미 결재된(APPROVED) 요청 | 요청자가 결재자 변경 시도 | 거부 (결재 전까지만 변경 가능) | RunRequestServiceTest |
+| T-03-06 | 3 | integration | P1 | 관리자, allowAdminSelfApproval=true | 관리자가 본인을 결재자로 지정해 요청 | 요청 생성 성공 (관리자 예외) | RunRequestServiceTest |
 | T-04-01 | 4 | integration | P0 | PENDING 요청 1건 | Jenkins 재시작(JenkinsSessionRule) | PENDING 그대로 복구 | StoreDurabilityTest |
-| T-04-02 | 4 | integration | P0 | APPROVED, 큐 투입 전 | 재시작 | 재시작 후 정확히 1회 투입 | S2로 이월(결재 서비스 필요) |
+| T-04-02 | 4 | integration | P0 | APPROVED, 큐 투입 전 | 재시작 | 재시작 후 정확히 1회 투입 | RestartRecoveryTest |
 | T-04-03 | 4 | integration | P0 | 승인 요청으로 실행 완료된 빌드 #N, RunRecord 존재 | 빌드 #N 삭제(보관 정책 상당) | RunRecord와 관련 요청이 여전히 조회된다 | StoreDurabilityTest |
-| T-04-04 | 4 | integration | P1 | 저장된 RunRecord·ChangeRecord | 수정·삭제 HTTP 엔드포인트 호출 시도 | 404 또는 405 — 수정·삭제 API가 존재하지 않는다(추가 전용) | S2로 이월(웹 엔드포인트 필요) |
-| T-05-01 | 5 | integration | P0 | 승인 대상 잡, 파라미터 {DATE=2026-09-01} | 요청→승인 | 실행된 빌드 파라미터 == {DATE=2026-09-01} | |
-| T-05-02 | 5 | integration | P0 | 요청 폼 | 사유 빈 값 | 거부 | |
-| T-05-03 | 5 | integration | P0 | APPROVED 요청 | 저장된 파라미터 변경 엔드포인트/폼 접근 시도 | 존재하지 않음(404/405) — 바꾸려면 새 요청 필요 | |
-| T-05-04 | 5 | integration | P0 | PENDING 요청, 지정 결재자 | 사유 빈 값으로 반려 POST | 반려 거부, 상태 PENDING 유지 | |
-| T-05-05 | 5 | integration | P0 | 요청→승인→실행 완료 | 빌드의 Cause·Action 조회 | 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다 | |
-| T-05-06 | 5 | integration | P1 | 전역 approvers=[a1,a2], JobProperty 잡별 결재자 제한=[a1] | a2를 결재자로 지정해 요청 | 요청 생성 거부 | |
-| T-06-01 | 6 | integration | P0 | 통제 on, approvalRequired | POST /job/X/build | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | |
-| T-06-02 | 6 | integration | P0 | 동일 | POST /job/X/buildWithParameters | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | |
-| T-06-03 | 6 | integration | P0 | 동일 | CLI build X | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | |
-| T-06-04 | 6 | integration | P0 | 동일, Pipeline 잡 | Replay | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | |
-| T-06-05 | 6 | integration | P0 | 동일, 상위 잡 Y가 build 스텝으로 X 호출, blockUpstream=true | Y 실행 | X 큐 진입 없음, X nextBuildNumber 불변 | |
-| T-06-06 | 6 | integration | P0 | 동일, TimerTrigger | cron 발화 | 실행됨 | |
-| T-06-07 | 6 | integration | P0 | 동일, blockTimer=true | cron 발화 | 차단 — 큐 비어 있음, 빌드 없음(무인 Cause는 조용히 거부 + 로그) | |
-| T-06-08 | 6 | integration | P0 | 승인된 요청 | 플러그인 투입 | 실행됨 | |
-| T-06-09 | 6 | integration | P0 | 통제 on, approvalRequired | 잡 페이지의 빌드 버튼(Build Now 앵커) 클릭 (WebClient) | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | |
-| T-06-10 | 6 | integration | P0 | 통제 on, approvalRequired 잡 X, blockUpstream 기본값(false), 상위 잡 Y가 build 스텝으로 X 호출 | Y 실행 | X 실행됨 (UpstreamCause 기본 통과) | |
-| T-06-11 | 6 | integration | P0 | blockUpstream=true, allowedUpstreamJobs=[Y] | Y가 build 스텝으로 X 호출 | X 실행됨 (허용 목록 통과) | |
-| T-06-12 | 6 | integration | P0 | blockUpstream=true, allowedUpstreamJobs=[Y], 상위 잡 Z | Z가 build 스텝으로 X 호출 | X 큐 진입 없음, 상위 잡 Z는 FAILURE로 종료(PoC 확인 부수 효과) | |
-| T-06-13 | 6 | integration | P0 | 통제 on, approvalRequired | POST /job/X/build (사용자 유래 Cause) | HTTP 400 + 응답 본문에 "승인 필요" 안내와 요청 화면 링크 표시 (조용한 실패 금지) | |
-| T-06-14 | 6 | integration | P0 | 동일 | CLI build X | exit code 1, stderr에 승인 필요 안내 메시지 포함 | |
-| T-06-15 | 6 | integration | P1 | 통제 on, approvalRequired (Freestyle과 Pipeline 각각) | 잡 페이지 HTML 조회 (WebClient) | "Build Now" 문자열 없음, "Request Run" 사이드바 링크 렌더링 | |
-| T-06-16 | 6 | integration | P0 | 통제 on, approvalRequired=false인 잡 | POST /job/X/build | 빌드 정상 실행 (통제 대상 아닌 잡은 영향 없음) | |
-| T-07-01 | 7 | integration | P0 | pendingTimeoutHours=1, PENDING 요청 | 시각을 2시간 후로 (Clock 주입) + PeriodicWork 실행 | EXPIRED, 이력에 남는다 | |
-| T-07-02 | 7 | integration | P0 | PENDING 요청, 요청자 u1 | u2가 취소 | 403 | |
-| T-07-03 | 7 | integration | P0 | approvedRunTimeoutMinutes=60, APPROVED 후 큐 투입되지 않음 | Clock을 61분 후로 + 만료 판정 실행 | EXPIRED, 이력에 남는다 | |
-| T-07-04 | 7 | integration | P0 | APPROVED 미투입 요청, 정지 상태로 61분 이상 경과 | 재시작(JenkinsSessionRule) 후 복구 | 복구 시점 기준으로 판정되어 정상 투입된다(EXPIRED 아님 — 재시작 복구 지연 예외) | |
-| T-07-05 | 7 | integration | P0 | PENDING 요청, 요청자 u1 | u1이 취소 POST | 상태 CANCELLED, 이력에 남는다 | |
-| T-07-06 | 7 | integration | P1 | PENDING 요청, Manage 권한자 m1(요청자 아님) | m1이 취소 POST | 상태 CANCELLED | |
-| T-07-07 | 7 | integration | P0 | APPROVED 요청, 요청자 u1 | u1이 취소 시도 | 거부 (취소는 PENDING 상태에서만 가능) | |
+| T-04-04 | 4 | integration | P1 | 저장된 RunRecord·ChangeRecord | 수정·삭제 HTTP 엔드포인트 호출 시도 | 404 또는 405 — 수정·삭제 API가 존재하지 않는다(추가 전용) | RunRequestWebTest |
+| T-05-01 | 5 | integration | P0 | 승인 대상 잡, 파라미터 {DATE=2026-09-01} | 요청→승인 | 실행된 빌드 파라미터 == {DATE=2026-09-01} | RunRequestServiceTest |
+| T-05-02 | 5 | integration | P0 | 요청 폼 | 사유 빈 값 | 거부 | RunRequestServiceTest |
+| T-05-03 | 5 | integration | P0 | APPROVED 요청 | 저장된 파라미터 변경 엔드포인트/폼 접근 시도 | 존재하지 않음(404/405) — 바꾸려면 새 요청 필요 | RunRequestWebTest |
+| T-05-04 | 5 | integration | P0 | PENDING 요청, 지정 결재자 | 사유 빈 값으로 반려 POST | 반려 거부, 상태 PENDING 유지 | RunRequestServiceTest |
+| T-05-05 | 5 | integration | P0 | 요청→승인→실행 완료 | 빌드의 Cause·Action 조회 | 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다 | RunRequestServiceTest |
+| T-05-06 | 5 | integration | P1 | 전역 approvers=[a1,a2], JobProperty 잡별 결재자 제한=[a1] | a2를 결재자로 지정해 요청 | 요청 생성 거부 | RunRequestServiceTest |
+| T-06-01 | 6 | integration | P0 | 통제 on, approvalRequired | POST /job/X/build | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | QueueBlockTest |
+| T-06-02 | 6 | integration | P0 | 동일 | POST /job/X/buildWithParameters | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | QueueBlockTest |
+| T-06-03 | 6 | integration | P0 | 동일 | CLI build X | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | QueueBlockTest |
+| T-06-04 | 6 | integration | P0 | 동일, Pipeline 잡 | Replay | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | QueueBlockTest |
+| T-06-05 | 6 | integration | P0 | 동일, 상위 잡 Y가 build 스텝으로 X 호출, blockUpstream=true | Y 실행 | X 큐 진입 없음, X nextBuildNumber 불변 | QueueBlockTest |
+| T-06-06 | 6 | integration | P0 | 동일, TimerTrigger | cron 발화 | 실행됨 | QueueBlockTest |
+| T-06-07 | 6 | integration | P0 | 동일, blockTimer=true | cron 발화 | 차단 — 큐 비어 있음, 빌드 없음(무인 Cause는 조용히 거부 + 로그) | QueueBlockTest |
+| T-06-08 | 6 | integration | P0 | 승인된 요청 | 플러그인 투입 | 실행됨 | QueueBlockTest |
+| T-06-09 | 6 | integration | P0 | 통제 on, approvalRequired | 잡 페이지의 빌드 버튼(Build Now 앵커) 클릭 (WebClient) | 큐 비어 있음, nextBuildNumber 불변, 빌드 없음 | QueueBlockTest |
+| T-06-10 | 6 | integration | P0 | 통제 on, approvalRequired 잡 X, blockUpstream 기본값(false), 상위 잡 Y가 build 스텝으로 X 호출 | Y 실행 | X 실행됨 (UpstreamCause 기본 통과) | QueueBlockTest |
+| T-06-11 | 6 | integration | P0 | blockUpstream=true, allowedUpstreamJobs=[Y] | Y가 build 스텝으로 X 호출 | X 실행됨 (허용 목록 통과) | QueueBlockTest |
+| T-06-12 | 6 | integration | P0 | blockUpstream=true, allowedUpstreamJobs=[Y], 상위 잡 Z | Z가 build 스텝으로 X 호출 | X 큐 진입 없음, 상위 잡 Z는 FAILURE로 종료(PoC 확인 부수 효과) | QueueBlockTest |
+| T-06-13 | 6 | integration | P0 | 통제 on, approvalRequired | POST /job/X/build (사용자 유래 Cause) | HTTP 400 + 응답 본문에 "승인 필요" 안내와 요청 화면 링크 표시 (조용한 실패 금지) | RunRequestWebTest |
+| T-06-14 | 6 | integration | P0 | 동일 | CLI build X | exit code 1, stderr에 승인 필요 안내 메시지 포함 | RunRequestWebTest |
+| T-06-15 | 6 | integration | P1 | 통제 on, approvalRequired (Freestyle과 Pipeline 각각) | 잡 페이지 HTML 조회 (WebClient) | "Build Now" 문자열 없음, "Request Run" 사이드바 링크 렌더링 | RunRequestWebTest |
+| T-06-16 | 6 | integration | P0 | 통제 on, approvalRequired=false인 잡 | POST /job/X/build | 빌드 정상 실행 (통제 대상 아닌 잡은 영향 없음) | QueueBlockTest |
+| T-07-01 | 7 | integration | P0 | pendingTimeoutHours=1, PENDING 요청 | 시각을 2시간 후로 (Clock 주입) + PeriodicWork 실행 | EXPIRED, 이력에 남는다 | ExpiryAndCancelTest |
+| T-07-02 | 7 | integration | P0 | PENDING 요청, 요청자 u1 | u2가 취소 | 403 | ExpiryAndCancelTest |
+| T-07-03 | 7 | integration | P0 | approvedRunTimeoutMinutes=60, APPROVED 후 큐 투입되지 않음 | Clock을 61분 후로 + 만료 판정 실행 | EXPIRED, 이력에 남는다 | ExpiryAndCancelTest |
+| T-07-04 | 7 | integration | P0 | APPROVED 미투입 요청, 정지 상태로 61분 이상 경과 | 재시작(JenkinsSessionRule) 후 복구 | 복구 시점 기준으로 판정되어 정상 투입된다(EXPIRED 아님 — 재시작 복구 지연 예외) | RestartRecoveryTest |
+| T-07-05 | 7 | integration | P0 | PENDING 요청, 요청자 u1 | u1이 취소 POST | 상태 CANCELLED, 이력에 남는다 | ExpiryAndCancelTest |
+| T-07-06 | 7 | integration | P1 | PENDING 요청, Manage 권한자 m1(요청자 아님) | m1이 취소 POST | 상태 CANCELLED | ExpiryAndCancelTest |
+| T-07-07 | 7 | integration | P0 | APPROVED 요청, 요청자 u1 | u1이 취소 시도 | 거부 (취소는 PENDING 상태에서만 가능) | ExpiryAndCancelTest |
 | T-08-01 | 8 | integration | P0 | Matrix: u1은 Item/Read만. Grant(u1, JOB X, CONFIGURE, 30분) 승인 | u1이 X config POST | 200, 저장됨 | |
 | T-08-02 | 8 | integration | P0 | 동일 | u1이 잡 Y config POST | 403 | |
 | T-08-03 | 8 | integration | P0 | 동일, Clock을 31분 후로 | u1이 X config POST | 403 (만료 후 첫 권한 검사부터 거부, 타이머 의존 없음) | |
@@ -112,12 +112,12 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-CFG-01 | 5절 | integration | P1 | 신규 설치 (설정 저장 이력 없음) | 전역 설정 조회 | 기본값이 SPEC 5절 표와 일치: runControlEnabled=false, changeControlEnabled=false, approvers=[], allowAdminSelfApproval=true, pendingTimeoutHours=72, approvedRunTimeoutMinutes=60, grantDurationOptions=[15,30,60], maxGrantMinutes=240, incidentResults=[FAILURE,UNSTABLE], retentionMonths=24 | GlobalConfigDefaultsTest |
 | T-CFG-02 | 5절 | integration | P1 | 전역 설정을 기본값과 다르게 저장 | 재시작 | 저장한 값 유지 | GlobalConfigDefaultsTest |
 | T-CFG-03 | 5절 | integration | P2 | 전역 설정 폼 | pendingTimeoutHours에 음수/0 등 잘못된 값 저장 시도 | 거부되거나 기존 값 유지 (임의 값으로 저장되지 않음) | GlobalConfigDefaultsTest |
-| T-SEC-01 | 6 | integration | P0 | 결재자 | GET /batch-control/requests/<id>/approve | 405 또는 거부 (POST만) | |
-| T-SEC-02 | 5 | integration | P0 | Approve 권한 없는 사용자 | POST approve | 403 | |
+| T-SEC-01 | 6 | integration | P0 | 결재자 | GET /batch-control/requests/<id>/approve | 405 또는 거부 (POST만) | RunRequestWebTest |
+| T-SEC-02 | 5 | integration | P0 | Approve 권한 없는 사용자 | POST approve | 403 | RunRequestWebTest |
 | T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | PathCodecTest |
 | T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x", 제어문자 포함 이름, 255자 초과 초장문 이름 (RT-12 확장) | 스냅숏·변경 파일 경로 계산 | "../x"는 예외(경로 탈출 차단), 제어문자·초장문 이름은 안전하게 인코딩되어 기록 누락·타 잡 파일 덮어쓰기가 없다 | PathCodecTest |
-| T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | |
-| T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | |
+| T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | RunRequestWebTest |
+| T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | RunRequestWebTest (reject·cancel; revoke·Incident 전이·스위치 변경은 S3) |
 | T-SEC-07 | 6절 | integration | P0 | Password 파라미터를 가진 잡 | 요청→승인→실행 후 요청 상세·RunRecord·CSV 조회 | 비밀값이 어디에도 평문으로 노출되지 않는다 (마스킹 저장) | |
 | T-E2E-01 | 5,6 | e2e | P0 | requester/approver 계정 | requester 요청 → approver 승인 | 빌드 실행, 대시보드에 요청 ID 연결 표시 | |
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
@@ -127,21 +127,21 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-E2E-06 | 8 | e2e | P1 | CONFIGURE Grant가 승인됐다가 만료된 requester, 잡 설정 화면을 열어 둔 상태 | 설정 저장 시도 | 권한 창 만료 안내가 표시되고 권한 재요청 링크가 보인다 | |
 | T-E2E-07 | 10 | e2e | P1 | 승인 요청으로 실행된 빌드 1건(대시보드에 APPROVED_REQUEST 행 표시) | 대시보드에서 해당 행의 요청 링크 클릭 | 해당 요청 상세 화면으로 이동한다(요청 ID 일치) | |
 | T-E2E-08 | 3 | e2e | P1 | 실행 통제 on, 전역 설정 approvers가 빈 목록, approvalRequired 잡 (R-1 관련) | requester가 실행 요청 화면 접속 | 결재자 목록이 비어 있다는 경고가 화면에 표시된다 | |
-| T-RT-01 | 6 | integration | P0 | 통제 on, 보호 잡 B(approvalRequired, blockUpstream=true, allowedUpstreamJobs 미설정/빈 목록), 통제 off 잡 A가 build 스텝으로 B 호출 | A 실행 | B 큐 진입 없음 — 빈/미설정 허용 목록은 "전부 차단"으로 해석된다 (SPEC 보강 필요: R-1 — 미설정 시 동작과 Upstream 기본 개방 정책 명확화) | |
-| T-RT-02 | 6 | integration | P0 | 잡 X의 승인 요청 마커(ApprovedRunAction)가 붙은 투입 1회 통과 완료 | 동일 마커/Cause 상당을 다른 잡 Y 또는 다른 파라미터로 재투입 시도(재큐·rebuild 경로 포함) | 통과되지 않는다 — 마커는 requestId+jobFullName+parameters에 바인딩되고 1회만 소비된다 (SPEC 보강 필요: R-8) | |
-| T-RT-03 | 5 | integration | P0 | 잡 A에 대한 APPROVED 요청(큐 투입 전) | A를 A2로 rename, 다른 잡 B를 A로 rename(스왑)한 뒤 투입 시점 도달 | 투입이 거부되거나 원래 잡 신원에만 실행된다 — 결재자가 검토한 잡과 다른 잡은 절대 실행되지 않는다 (SPEC 보강 필요: R-6) | |
+| T-RT-01 | 6 | integration | P0 | 통제 on, 보호 잡 B(approvalRequired, blockUpstream=true, allowedUpstreamJobs 미설정/빈 목록), 통제 off 잡 A가 build 스텝으로 B 호출 | A 실행 | B 큐 진입 없음 — 빈/미설정 허용 목록은 "전부 차단"으로 해석된다 (SPEC 보강 필요: R-1 — 미설정 시 동작과 Upstream 기본 개방 정책 명확화) | RequestIntegrityTest |
+| T-RT-02 | 6 | integration | P0 | 잡 X의 승인 요청 마커(ApprovedRunAction)가 붙은 투입 1회 통과 완료 | 동일 마커/Cause 상당을 다른 잡 Y 또는 다른 파라미터로 재투입 시도(재큐·rebuild 경로 포함) | 통과되지 않는다 — 마커는 requestId+jobFullName+parameters에 바인딩되고 1회만 소비된다 (SPEC 보강 필요: R-8) | RequestIntegrityTest |
+| T-RT-03 | 5 | integration | P0 | 잡 A에 대한 APPROVED 요청(큐 투입 전) | A를 A2로 rename, 다른 잡 B를 A로 rename(스왑)한 뒤 투입 시점 도달 | 투입이 거부되거나 원래 잡 신원에만 실행된다 — 결재자가 검토한 잡과 다른 잡은 절대 실행되지 않는다 (SPEC 보강 필요: R-6) | RequestIntegrityTest |
 | T-RT-05 | 8 | integration | P0 | 실행 통제 on, u1에게 FOLDER "team/batch" [CREATE,CONFIGURE] Grant(30분) 활성 | u1이 권한 창 안에서 cron(TimerTrigger) 잡 J 생성, Clock을 만료 후로 이동, cron 발화 | 창 만료 후 J의 cron 실행이 승인 통제를 우회하지 않는다(예: 권한 창 내 생성 잡은 approvalRequired/blockTimer 기본 활성) (SPEC 보강 필요: R-2) | |
 | T-RT-06 | 8 | integration | P0 | 만료 임박 CONFIGURE Grant(Clock 제어), 다수 잡을 쓰는 일괄 변경 작업(Job DSL seed 상당) | 만료 경계에 걸치도록 일괄 변경 실행 | 만료 시각 이후의 write는 잡 단위로 재검사되어 각각 거부된다(진입 시 1회 검사에 편승 불가) | |
 | T-RT-07 | 3 | integration | P1 | approvers=[a1,a2,a3], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a1→a2→a3로 연속 변경 후 a3가 승인 | 각 변경이 approverChanges에 (from,to,by,at)로 빠짐없이 남고, 최종 결재자 a3의 승인만 유효하다(감사 추적 보장) | |
 | T-RT-10 | 6절 | integration | P1 | 사유·파라미터 값·(권한 창) 잡 이름에 `<script>`·`<img onerror>` 페이로드를 담은 요청 | 요청 상세·결재 화면·대시보드 렌더링(WebClient) | 페이로드가 이스케이프되어 텍스트로만 표시된다 — 스크립트 실행·태그 삽입 없음 (SPEC 보강 필요: R-3 상당의 출력 무해화 수용 기준 없음 — CLAUDE.md 규약만 존재) | |
 | T-RT-11 | 12 | integration | P1 | 사유가 `=1+1`, 파라미터 값이 `+HYPERLINK(...)`·`@SUM(...)`·`-2+3`으로 시작하는 요청·실행 기록 | 4종 CSV 내보내기 | 해당 셀이 수식으로 해석되지 않도록 무해화된다(선행 `= + - @` 이스케이프/`'` 프리픽스/인용) (SPEC 보강 필요: R-3) | |
 | T-RT-13 | 11 | integration | P1 | 콘솔에 비밀 토큰 문자열을 출력하고 FAILURE로 끝나는 빌드 | Incident 생성 후 logTail 조회 | Secret 값·알려진 비밀 패턴이 logTail에 평문으로 남지 않는다(마스킹) (SPEC 보강 필요: R-4 — 마스킹 규칙 추가 또는 한계 문서화 결정) | |
-| T-RT-14 | 5 | integration | P0 | PENDING 요청 1건, 승인 POST 2건 준비 | 두 승인 POST를 동시에 실행 | 정확히 1건만 APPROVED가 되고 빌드는 정확히 1회만 투입된다(상태 전이 compare-and-set) (SPEC 보강 필요: R-5) | |
-| T-RT-15 | 7 | integration | P0 | PENDING 요청, 요청자의 취소 POST와 결재자의 승인 POST 준비 | 동시에 실행 | 둘 중 하나만 성립한다(선착 CAS). 취소가 이기면 어떤 빌드도 투입되지 않고, CANCELLED 요청에 executedRunId가 남는 등의 상태 혼합이 없다 (SPEC 보강 필요: R-5) | |
-| T-RT-16 | 7 | integration | P0 | approvedRunTimeoutMinutes 경계의 APPROVED 요청 | 큐 투입 시도와 ExpiryPeriodicWork 만료 처리를 동시에 진행 | 투입 직전 시각 재확인(check-at-submit)으로 만료 요청은 절대 투입되지 않고, 상태는 EXPIRED/EXECUTED 중 정확히 하나로 수렴한다 (SPEC 보강 필요: R-5) | |
-| T-RT-17 | 4 | integration | P0 | 승인 후 scheduleBuild2 완료·onStarted 미도달(executedRunId=null) 상태에서 재시작(JenkinsSessionRule) | 복구 실행 | 요청당 빌드가 정확히 1회만 존재한다 — 재시작 후 복원된 큐 항목과 복구 재투입이 requestId 기반 idempotency로 중복 제거된다 (SPEC 보강 필요: R-5, R-8) | |
+| T-RT-14 | 5 | integration | P0 | PENDING 요청 1건, 승인 POST 2건 준비 | 두 승인 POST를 동시에 실행 | 정확히 1건만 APPROVED가 되고 빌드는 정확히 1회만 투입된다(상태 전이 compare-and-set) (SPEC 보강 필요: R-5) | RequestConcurrencyTest |
+| T-RT-15 | 7 | integration | P0 | PENDING 요청, 요청자의 취소 POST와 결재자의 승인 POST 준비 | 동시에 실행 | 둘 중 하나만 성립한다(선착 CAS). 취소가 이기면 어떤 빌드도 투입되지 않고, CANCELLED 요청에 executedRunId가 남는 등의 상태 혼합이 없다 (SPEC 보강 필요: R-5) | RequestConcurrencyTest |
+| T-RT-16 | 7 | integration | P0 | approvedRunTimeoutMinutes 경계의 APPROVED 요청 | 큐 투입 시도와 ExpiryPeriodicWork 만료 처리를 동시에 진행 | 투입 직전 시각 재확인(check-at-submit)으로 만료 요청은 절대 투입되지 않고, 상태는 EXPIRED/EXECUTED 중 정확히 하나로 수렴한다 (SPEC 보강 필요: R-5) | ExpiryAndCancelTest (비고 13 근사) |
+| T-RT-17 | 4 | integration | P0 | 승인 후 scheduleBuild2 완료·onStarted 미도달(executedRunId=null) 상태에서 재시작(JenkinsSessionRule) | 복구 실행 | 요청당 빌드가 정확히 1회만 존재한다 — 재시작 후 복원된 큐 항목과 복구 재투입이 requestId 기반 idempotency로 중복 제거된다 (SPEC 보강 필요: R-5, R-8) | RestartRecoveryTest (비고 11 근사) |
 | T-RT-18 | 6절 | integration | P2 | Request/RequestGrant 권한만 가진 사용자 | 단시간에 대량(N건) RunRequest·GrantRequest 생성 POST 반복 | 사용자당 PENDING 상한/rate limit으로 거부되거나, 목록 조회·재시작 복구 성능이 한계 내로 유지된다 (SPEC 보강 필요: R-7) | |
-| T-RT-19 | 6절 | integration | P1 | 수 MB급 사유·파라미터 값을 담은 요청 생성 POST | 요청 생성 | 필드별 크기 상한으로 거부되거나 안전하게 절단 저장된다(요청 파일·인메모리 캐시·RunRecord 비대화 방지) (SPEC 보강 필요: R-7) | |
+| T-RT-19 | 6절 | integration | P1 | 수 MB급 사유·파라미터 값을 담은 요청 생성 POST | 요청 생성 | 필드별 크기 상한으로 거부되거나 안전하게 절단 저장된다(요청 파일·인메모리 캐시·RunRecord 비대화 방지) (SPEC 보강 필요: R-7) | RequestIntegrityTest |
 | T-RT-20 | 9 | integration | P2 | 활성 CONFIGURE Grant | 동일 잡 config를 짧은 시간에 수백 회 반복 저장(REST config.xml POST 루프) | 변경 기록(diff/스냅숏)이 누락 없이 baseline 정합을 유지하고, 기록 파이프라인이 다른 잡의 기록을 블로킹하지 않는다 (SPEC 보강 필요: R-7) | |
 
 ## 비고 (전제와 요청 사항)
@@ -158,6 +158,10 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 10. **동시성 행 재현 방법**(T-RT-14/15/16): 2-스레드 동시 POST(ExecutorService + CyclicBarrier 상당)로 경합을 재현하고, 결과 단언은 상태·빌드 수로만 한다. T-RT-16은 Clock 이동 + PeriodicWork 수동 트리거(비고 1·2 전제)와 조합한다.
 11. **T-RT-17 전제**: "scheduleBuild2 완료·onStarted 미도달" 크래시 타이밍을 재현하려면 큐 투입 직후 세션을 종료할 수 있는 훅(예: QuietDown 상태에서 투입 후 세션 재시작)이 필요하다. 재현이 불가능하면 최소한 T-04-02에 이 타이밍 명시를 추가한 통합 테스트로 근사한다. → 요청: core-dev에 복구 로직의 idempotency 키 설계 공유.
 12. **RT-08 문서화 요청**: 결재자 계정은 실인(實人) 1:1, 공용·부계정 금지를 알려진 한계로 README에 명시. → 요청: `README.md` (release-manager 소유) 알려진 한계 절 추가.
+13. **T-RT-16 근사 (S2)**: 테스트에서 호출 가능한 공개 "재투입" 경로가 없어(투입은 approve() 내부에서 일어남), 경합을 "만료 시각이 이미 지난 PENDING 요청에 대한 approve()(=공개 투입 경로) vs ExpiryPeriodicWork.doRun()" 2-스레드 barrier 경합으로 재현했다. 단언은 D-20의 불변식 그대로: 만료 요청은 절대 투입되지 않고(빌드 0, executedRunId=null) 최종 상태는 EXPIRED 하나로 수렴.
+14. **T-RT-17 근사 채택 (S2, 비고 11 이행)**: QuietDown 상태에서 approve로 큐 투입(scheduleBuild2 완료) 후 빌드 시작 전에 JenkinsSessionRule 세션을 종료하는 방식으로 "scheduleBuild2 완료·onStarted 미도달" 갭을 재현했다. 재시작 후 복원 큐 항목 + 복구 재투입의 중복 제거를 "요청당 빌드 정확히 1건"으로 단언.
+15. **T-RT-02 '재사용 차단 기록' 단언 유보 (S2)**: 마커 재사용 차단 자체(동일 잡 재큐·타 잡 재투입 모두 불가, 빌드 수 불변)는 단언했으나, "차단 사실이 기록된다"의 기록 위치(로그인지 ChangeRecord인지)가 SPEC에 미정의라 단언하지 않았다. 기록 위치가 확정되면 단언 추가.
+16. **APPROVED-미투입 상태 만들기 (S2 전제)**: T-07-03/07-04/04-02/RT-03(approved 변형)은 `Jenkins.doQuietDown()`으로 빌드 시작을 막은 채 approve하고 필요 시 `Queue.clear()`로 큐 항목을 제거해 "APPROVED이나 큐 미투입" 상태를 만든다. 전제: approve()는 스케줄 결과와 무관하게 APPROVED 상태를 기록하며, 큐 투입 실패/유실 시에도 예외로 상태를 되돌리지 않는다.
 
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
