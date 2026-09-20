@@ -13,5 +13,9 @@
 
 ---
 
-## (아직 시작 전)
-- 다음 작업: Phase 0
+## 2026-09-20 16:27 — Phase 0 완료
+- 위임: 없음 (메인 세션 직접, WORKFLOW Phase 0)
+- 결과: pom.xml(parent 6.2236.v12dd4c483242, jenkins.version 2.568.3, bom-2.568.x:7046.v43536164769c, 의존성 structs·cloudbees-folder + 테스트 스코프 workflow-job·workflow-cps·workflow-basic-steps·matrix-auth), Jenkinsfile(buildPlugin), src/main/resources/index.jelly, .gitignore, git init + 첫 커밋. `mvn clean verify` BUILD SUCCESS (JDK 21 Temurin, Maven 3.9.16).
+- 비고: 아키타입 대신 pom 직접 작성(비대화식 환경). 빌드 도구는 로컬 설치: JDK 17/21(winget Temurin), Maven ~/tools/apache-maven-3.9.16.
+- 대기: 없음
+- 다음 작업: Phase 1 (poc-engineer 위임)
