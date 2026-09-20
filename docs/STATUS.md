@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-09-20 21:00 — Phase 3 S2 done → S3 started (standing instruction: proceed when no BLOCKER)
+- S2 result: commits c56872e (tests) + 752c38b (impl). Full `mvn clean verify`: 79/79 tests green, SpotBugs 0, 4m26s. spec-review-S2.md = PASS WITH NOTES, BLOCKER 0.
+- MAJOR fixed by main session: DECISIONS.md P-02/P-03 fusion restored; new proposals P-04 (marker re-use record location) and P-05 (SPEC §3 model field sync) registered.
+- MINOR routing: expiry/queue-snapshot race + guidance link → core-dev (carried into S3 delegation); T-RT-02 wording + T-RT-07 file column → test-author (carried into S3 delegation); test-import one-line fixes (CLICommandInvoker) noted for retroactive human approval; root-action icon visibility = informational.
+- Language policy: from now on all written artifacts are in English (user instruction; CLAUDE.md updated, commit 3e27580).
+- GitHub: public repo https://github.com/YongGoose/batch-control-plugin created; main + all phase branches pushed; push on every phase gate from now on.
+- Delegating: test-author ← S3 tests (SPEC 8, 9 + T-SEC-06 remainder + carried fixes)
+
 ## 2026-09-20 19:40 — Phase 3 S1 완료 → S2 시작 (사람 사전 지시: BLOCKER 없으면 직행)
 - S1 결과: 커밋 ea742d3. 테스트 16/16 녹색, SpotBugs 0, hpi 패키징 성공. spec-review-S1.md = PASS WITH NOTES, BLOCKER 0.
 - T-02-02 판정 기록: 실패 원인은 matrix-auth 3.3 카드 UI(그룹 제목이 접힌 DOM에 렌더링)로, 기능은 정상. 오케스트레이터 판정 후 **test-author가** 단언을 raw DOM 기준으로 수정(사유 주석 + 매트릭스 병기). spec-review의 MAJOR(테스트 수정 소급 승인 건)는 수정 주체가 core-dev가 아닌 test-author 위임이었음을 명시해 종결 — 사람이 이의 있으면 재론.
