@@ -23,7 +23,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-01-05 | 1 | integration | P1 | changeControlEnabled=true, runControlEnabled=false, approvalRequired=true 잡 | Build Now + 잡 페이지 조회 | 빌드 실행됨(실행 차단 없음), Request Run 등 실행 통제 UI가 나타나지 않는다 | GlobalSwitchTest |
 | T-01-06 | 1 | integration | P1 | runControlEnabled=true | 관리자가 false로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, true→false)가 남는다 | GlobalSwitchTest |
 | T-02-01 | 2 | integration | P0 | Manage 없는 사용자 | 전역 설정 POST | 403 | PermissionsTest |
-| T-02-02 | 2 | integration | P1 | Matrix Authorization 전략 활성 | 권한 설정 화면 조회 | "Batch Control" 그룹에 Request/Approve/RequestGrant/ViewHistory/Manage 5종이 표시된다 | PermissionsTest |
+| T-02-02 | 2 | integration | P1 | Matrix Authorization 전략 활성 | 권한 설정 화면 조회 | "Batch Control" 그룹에 Request/Approve/RequestGrant/ViewHistory/Manage 5종이 표시된다 (DOM 존재 기준, 시각 확인은 Phase 5) | PermissionsTest |
 | T-02-03 | 2 | integration | P0 | 관리자(Overall/Administer), allowAdminSelfApproval=true(기본) | 본인 요청을 본인이 승인 | 승인 성공, 요청에 selfApproved=true 기록 | S2로 이월(결재 서비스 필요) |
 | T-02-04 | 2 | integration | P0 | allowAdminSelfApproval=false | 관리자가 본인 요청 승인 시도 | 거부된다(직무 분리 적용), 상태 PENDING 유지 | S2로 이월(결재 서비스 필요) |
 | T-02-05 | 2 | integration | P1 | Manage 권한 있는 사용자 | 전역 설정·결재자 목록 POST | 200, 저장된다 | PermissionsTest |

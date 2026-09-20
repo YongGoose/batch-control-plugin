@@ -1,0 +1,18 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:entry title="Require approval to run" field="approvalRequired">
+    <f:checkbox/>
+  </f:entry>
+  <f:entry title="Block cron (timer) triggers" field="blockTimer">
+    <f:checkbox/>
+  </f:entry>
+  <f:entry title="Block upstream triggers" field="blockUpstream">
+    <f:checkbox/>
+  </f:entry>
+  <f:entry title="Allowed upstream jobs" field="allowedUpstreamJobsText">
+    <f:textarea/>
+  </f:entry>
+  <f:entry title="Job-level approvers (optional restriction)" field="jobApproversText">
+    <f:textarea/>
+  </f:entry>
+</j:jelly>
