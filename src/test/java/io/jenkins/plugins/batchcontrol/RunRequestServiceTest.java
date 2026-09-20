@@ -38,7 +38,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * SPEC items 2 (admin self-approval), 3 (approver designation) and 5 (run request and decision),
  * exercised at the {@code RunRequestService} level.
- * Matrix rows T-02-03, T-02-04, T-03-01..06, T-05-01, T-05-02, T-05-04, T-05-05, T-05-06.
+ * Matrix rows T-02-03, T-02-04, T-03-01..06, T-05-01, T-05-02, T-05-04, T-05-05, T-05-06
+ * and T-RT-07 (multi-hop approver-change audit trail).
  * (T-05-03 lives in RunRequestWebTest because it is an HTTP-surface row.)
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
@@ -152,6 +153,52 @@ public class RunRequestServiceTest {
                 });
         assertEquals("the designated approver must stay unchanged",
                 "a1", RunRequestService.get().load(request.getId()).getApprover());
+    }
+
+    /**
+     * T-RT-07: multi-hop approver changes (a1 -> a2 -> a3) are fully audited in
+     * approverChanges, superseded approvers can no longer decide, and only the final
+     * approver's decision is valid.
+     */
+    @Test
+    public void t_rt_07_multiHopApproverChangesAuditedAndOnlyFinalApproverDecides() throws Exception {
+        RunRequest request = createAs("u1", "a1", "month-end batch", params("DATE", "2026-09-01"));
+
+        try (ACLContext ignored = as("u1")) {
+            RunRequestService.get().changeApprover(request.getId(), "a2");
+            RunRequestService.get().changeApprover(request.getId(), "a3");
+        }
+
+        RunRequest reloaded = RunRequestService.get().load(request.getId());
+        assertEquals("a3", reloaded.getApprover());
+        List<RunRequest.ApproverChange> changes = reloaded.getApproverChanges();
+        assertEquals("every hop must be audited, none may be collapsed or dropped", 2, changes.size());
+        assertEquals("a1", changes.get(0).getFrom());
+        assertEquals("a2", changes.get(0).getTo());
+        assertEquals("u1", changes.get(0).getBy());
+        assertNotNull(changes.get(0).getAt());
+        assertEquals("a2", changes.get(1).getFrom());
+        assertEquals("a3", changes.get(1).getTo());
+        assertEquals("u1", changes.get(1).getBy());
+        assertNotNull(changes.get(1).getAt());
+
+        // superseded approvers must not be able to decide
+        assertRefused("a1 was superseded and must not be able to approve",
+                () -> approveAs("a1", request.getId(), "stale approver a1"));
+        assertRefused("a2 was superseded and must not be able to approve",
+                () -> approveAs("a2", request.getId(), "stale approver a2"));
+        assertEquals("the refused decisions must leave the request PENDING",
+                RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus());
+        j.waitUntilNoActivity();
+        assertTrue("no build may run from a superseded approver's decision", job.getBuilds().isEmpty());
+
+        // only the final approver's decision is valid
+        approveAs("a3", request.getId(), "ok");
+        RequestStatus finalStatus = RunRequestService.get().load(request.getId()).getStatus();
+        assertTrue("the final approver's decision must go through",
+                finalStatus == RequestStatus.APPROVED || finalStatus == RequestStatus.EXECUTED);
+        j.waitUntilNoActivity();
+        assertEquals("the approved run must execute exactly once", 1, job.getBuilds().size());
     }
 
     /** T-03-06: an admin may designate themselves while allowAdminSelfApproval=true (default). */
