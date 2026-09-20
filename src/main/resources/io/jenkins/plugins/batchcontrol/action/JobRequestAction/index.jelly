@@ -1,0 +1,50 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Request Run - ${it.job.fullDisplayName}">
+    <st:include page="sidepanel.jelly" it="${it.job}"/>
+    <l:main-panel>
+      <h1>Request Run: ${it.job.fullDisplayName}</h1>
+      <j:choose>
+        <j:when test="${!it.active}">
+          <div class="jenkins-alert jenkins-alert-info">
+            This job does not require run approval, or run control is disabled.
+          </div>
+        </j:when>
+        <j:when test="${empty(it.approverOptions)}">
+          <div class="jenkins-alert jenkins-alert-warning">
+            No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
+          </div>
+        </j:when>
+        <j:otherwise>
+          <p class="jenkins-description">
+            This job requires an approved run request. Fill in the reason, pick an approver and
+            confirm the parameters; the build starts automatically once the request is approved.
+          </p>
+          <f:form method="post" action="submit" name="batch-control-request">
+            <f:entry title="Reason" description="Why this run is needed (required).">
+              <f:textarea name="reason" value=""/>
+            </f:entry>
+            <f:entry title="Approver" description="The approver who will review this request.">
+              <select name="approver" class="jenkins-select__input">
+                <j:forEach var="a" items="${it.approverOptions}">
+                  <option value="${a}">${a}</option>
+                </j:forEach>
+              </select>
+            </f:entry>
+            <j:if test="${!empty(it.parameterDefinitions)}">
+              <f:section title="Parameters"/>
+              <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
+                <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
+                <st:include it="${parameterDefinition}" page="index.jelly"/>
+              </j:forEach>
+            </j:if>
+            <f:bottomButtonBar>
+              <f:submit value="Submit Request"/>
+              <a href="${rootURL}/${it.job.url}" class="jenkins-button">Cancel</a>
+            </f:bottomButtonBar>
+          </f:form>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

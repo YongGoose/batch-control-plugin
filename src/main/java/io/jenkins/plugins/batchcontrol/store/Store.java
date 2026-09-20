@@ -28,6 +28,9 @@ public interface Store {
     /** Loads a request by id, or returns {@code null} if it does not exist. */
     RunRequest loadRunRequest(String id);
 
+    /** Loads every stored run request, sorted by id (creation order). */
+    List<RunRequest> listRunRequests();
+
     /** Appends one run record to the monthly JSONL bucket derived from its start time. */
     void appendRunRecord(RunRecord record);
 

@@ -69,6 +69,20 @@ public final class RunRequest {
     private List<ApproverChange> approverChanges = new ArrayList<>();
     private String incidentId;
     private String executedRunId;
+    /**
+     * Consumption ticket (D-23): the instant the approval marker was consumed by a queue
+     * submission, or {@code null} while the ticket is still unused. Only the policy service
+     * claims or re-issues it.
+     */
+    private Long queuedAtMillis;
+    /**
+     * Base instant for the approved-run timeout judgment. Set to {@code decidedAt} on approval
+     * and moved forward to the recovery instant by startup recovery (SPEC item 7: downtime is
+     * not counted against {@code approvedRunTimeoutMinutes}).
+     */
+    private Long expiryBaseMillis;
+    /** Human-readable history note for an INVALIDATED request (D-21: target renamed/moved). */
+    private String invalidationReason;
 
     private RunRequest(String id, String jobFullName, Map<String, String> parameters, String reason,
                        String requester, String approver, RequestStatus status, Instant createdAt) {
@@ -185,5 +199,35 @@ public final class RunRequest {
 
     public void setExecutedRunId(String executedRunId) {
         this.executedRunId = executedRunId;
+    }
+
+    /** The instant the consumption ticket was claimed, or {@code null} if still unused. */
+    public Instant getQueuedAt() {
+        return queuedAtMillis == null ? null : Instant.ofEpochMilli(queuedAtMillis);
+    }
+
+    /** Only the policy service claims ({@code non-null}) or re-issues ({@code null}) the ticket. */
+    public void setQueuedAt(Instant queuedAt) {
+        this.queuedAtMillis = queuedAt == null ? null : queuedAt.toEpochMilli();
+    }
+
+    /** Base instant for the approved-run timeout; falls back to {@link #getDecidedAt()}. */
+    public Instant getExpiryBase() {
+        if (expiryBaseMillis != null) {
+            return Instant.ofEpochMilli(expiryBaseMillis);
+        }
+        return getDecidedAt();
+    }
+
+    public void setExpiryBase(Instant expiryBase) {
+        this.expiryBaseMillis = expiryBase == null ? null : expiryBase.toEpochMilli();
+    }
+
+    public String getInvalidationReason() {
+        return invalidationReason;
+    }
+
+    public void setInvalidationReason(String invalidationReason) {
+        this.invalidationReason = invalidationReason;
     }
 }

@@ -18,10 +18,12 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.DirectoryStream;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,6 +121,37 @@ public final class FileStore implements Store {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load run request " + id, e);
         }
+    }
+
+    @Override
+    public List<RunRequest> listRunRequests() {
+        Path dir = runRequestDir();
+        List<RunRequest> requests = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return requests;
+        }
+        List<Path> files = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.xml")) {
+            for (Path file : stream) {
+                files.add(file);
+            }
+        } catch (NoSuchFileException e) {
+            return requests;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to list run requests in " + dir, e);
+        }
+        // Same directory for every entry, so the full path sorts identically to the file name.
+        files.sort(Comparator.comparing(Path::toString));
+        for (Path file : files) {
+            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                requests.add((RunRequest) xstream.fromXML(reader));
+            } catch (NoSuchFileException e) {
+                // Deleted between listing and reading; skip.
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to load run request file " + file, e);
+            }
+        }
+        return requests;
     }
 
     @Override

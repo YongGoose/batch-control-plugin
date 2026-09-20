@@ -52,6 +52,6 @@
 
 ## 제안 (에이전트가 추가, 사람이 판정)
 
-**P-02 | 권한 함의 구조·스코프 문서화 (spec-review-S1 MINOR)** | 구현은 REQUEST/APPROVE/REQUEST_GRANT/VIEW_HISTORY가 MANAGE에 함의되고 MANAGE는 ADMINISTER에 함의되는 구조이며, 5종 모두 `PermissionScope.JENKINS`다. ① 이 함의 구조를 SPEC 2에 명문화할지, ② ARCHITECTURE §2의 "Item 스코프" 기술을 "JENKINS 스코프"로 정정할지 사람 판정 필요. 실질 위험은 낮음(SPEC 3의 결재자 이중 검증이 방어). | 상태: 대기
+**P-03 | 비밀(Password) 파라미터의 요청·재실행 처리 (ui-dev S2)** | 요청 파라미터가 `Map<String,String>`으로 서비스에 전달되므로 타입 정보가 소실되어, 저장 계층의 타입 기반 마스킹이 작동할 수 없음. 현재 구현: ui-dev가 액션에서 sensitive 값(`ParameterValue.isSensitive()`/Secret)을 `********`로 마스킹 후 전달 — 평문은 어디에도 저장되지 않으나, **비밀 파라미터를 가진 잡은 승인 실행 시 원본 비밀값을 재현할 수 없음**(T-05-01은 비민감 파라미터에서만 성립). 대안: ① 현행 유지 + 한계 문서화(README) ② 요청 모델에 `List<ParameterValue>`를 병행 저장(Secret은 XStream 암호화 저장, 표시만 마스킹)해 재현 보장 — 구현 비용 중간, 보안 검토 필요. | 상태: 사람 판정 대기 | 권한 함의 구조·스코프 문서화 (spec-review-S1 MINOR)** | 구현은 REQUEST/APPROVE/REQUEST_GRANT/VIEW_HISTORY가 MANAGE에 함의되고 MANAGE는 ADMINISTER에 함의되는 구조이며, 5종 모두 `PermissionScope.JENKINS`다. ① 이 함의 구조를 SPEC 2에 명문화할지, ② ARCHITECTURE §2의 "Item 스코프" 기술을 "JENKINS 스코프"로 정정할지 사람 판정 필요. 실질 위험은 낮음(SPEC 3의 결재자 이중 검증이 방어). | 상태: 대기
 
 **P-01 | 2차: Role Strategy용 JIT 구현체(임시 역할 부여 API 활용)** | Phase 1 PoC에서 Role Strategy를 delegate로 래핑하면 권한 판정은 정상이나 역할 관리 화면(`getInstance()`/`persistChanges()`의 전역 전략 instanceof 검사)이 동작 불능임을 확인. C-2 결정에 따라 MVP는 Matrix 계열만 지원하고 제약을 문서화하며, Role Strategy 지원은 2차에서 임시 역할 부여 API 활용으로 검토. | 상태: 사람 승인으로 등록됨 (2026-09-20, Phase 1 게이트)

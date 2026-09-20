@@ -1,0 +1,142 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Run Request ${it.id}">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/requests/" icon="symbol-arrow-left" title="Back to Run Requests"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Run Request ${it.id}</h1>
+
+      <table class="jenkins-table">
+        <tbody>
+          <tr>
+            <th style="text-align: left; width: 12rem;">Job</th>
+            <td>
+              <j:choose>
+                <j:when test="${it.jobUrl != null}">
+                  <a href="${rootURL}/${it.jobUrl}">${it.request.jobFullName}</a>
+                </j:when>
+                <j:otherwise>${it.request.jobFullName}</j:otherwise>
+              </j:choose>
+            </td>
+          </tr>
+          <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
+          <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
+          <tr><th style="text-align: left;">Approver</th><td>${it.request.approver}</td></tr>
+          <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
+          <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
+          <j:if test="${it.request.decisionComment != null}">
+            <tr><th style="text-align: left;">Decision comment</th><td>${it.request.decisionComment}</td></tr>
+          </j:if>
+          <j:if test="${it.request.selfApproved}">
+            <tr><th style="text-align: left;">Self-approved</th><td>Yes</td></tr>
+          </j:if>
+          <j:if test="${it.request.executedRunId != null}">
+            <tr><th style="text-align: left;">Executed run</th><td>${it.request.executedRunId}</td></tr>
+          </j:if>
+        </tbody>
+      </table>
+
+      <h2>Reason</h2>
+      <p style="white-space: pre-wrap;">${it.request.reason}</p>
+
+      <h2>Parameters</h2>
+      <j:choose>
+        <j:when test="${empty(it.request.parameters)}">
+          <p>No parameters.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr><th>Name</th><th>Value</th></tr>
+            </thead>
+            <tbody>
+              <j:forEach var="p" items="${it.request.parameters.entrySet()}">
+                <tr>
+                  <td>${p.key}</td>
+                  <td style="white-space: pre-wrap;">${p.value}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+        </j:otherwise>
+      </j:choose>
+
+      <j:if test="${!empty(it.request.approverChanges)}">
+        <h2>Approver Changes</h2>
+        <table class="jenkins-table">
+          <thead>
+            <tr><th>From</th><th>To</th><th>Changed by</th><th>At</th></tr>
+          </thead>
+          <tbody>
+            <j:forEach var="c" items="${it.request.approverChanges}">
+              <tr>
+                <td>${c.from}</td>
+                <td>${c.to}</td>
+                <td>${c.by}</td>
+                <td>${it.format(c.at)}</td>
+              </tr>
+            </j:forEach>
+          </tbody>
+        </table>
+      </j:if>
+
+      <j:if test="${it.canDecide}">
+        <h2>Decision</h2>
+        <f:form method="post" action="approve" name="approve">
+          <f:entry title="Comment (optional)">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <f:submit value="Approve"/>
+          </f:bottomButtonBar>
+        </f:form>
+        <f:form method="post" action="reject" name="reject">
+          <f:entry title="Rejection comment (required)" description="Rejection is final for this request; a rejected request cannot be reopened.">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
+          </f:bottomButtonBar>
+        </f:form>
+      </j:if>
+
+      <j:if test="${it.canChangeApprover}">
+        <h2>Change Approver</h2>
+        <j:choose>
+          <j:when test="${empty(it.approverOptions)}">
+            <div class="jenkins-alert jenkins-alert-warning">
+              No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
+            </div>
+          </j:when>
+          <j:otherwise>
+            <f:form method="post" action="changeApprover" name="changeApprover">
+              <f:entry title="New approver">
+                <select name="approver" class="jenkins-select__input">
+                  <j:forEach var="a" items="${it.approverOptions}">
+                    <option value="${a}">${a}</option>
+                  </j:forEach>
+                </select>
+              </f:entry>
+              <f:bottomButtonBar>
+                <f:submit value="Change Approver"/>
+              </f:bottomButtonBar>
+            </f:form>
+          </j:otherwise>
+        </j:choose>
+      </j:if>
+
+      <j:if test="${it.canCancel}">
+        <h2>Cancel</h2>
+        <p>
+          <l:confirmationLink href="cancel" post="true" title="Cancel this run request?"
+                              message="The request will be closed as CANCELLED. This cannot be undone.">
+            Cancel Request
+          </l:confirmationLink>
+        </p>
+      </j:if>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

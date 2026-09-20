@@ -1,0 +1,53 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Run Requests">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Run Requests</h1>
+      <j:choose>
+        <j:when test="${it.total == 0}">
+          <p>No run requests.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Job</th>
+                <th>Requester</th>
+                <th>Approver</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="r" items="${it.pageItems}">
+                <tr>
+                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td>${r.jobFullName}</td>
+                  <td>${r.requester}</td>
+                  <td>${r.approver}</td>
+                  <td>${r.status}</td>
+                  <td>${it.format(r.createdAt)}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasPrevious}">
+              <a class="jenkins-button" href="?page=${it.page - 1}">Newer</a>
+            </j:if>
+            <span>Page ${it.page} (${it.total} requests)</span>
+            <j:if test="${it.hasNext}">
+              <a class="jenkins-button" href="?page=${it.page + 1}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>
