@@ -1,0 +1,10 @@
+target/
+work/
+*.iml
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+.flattened-pom.xml

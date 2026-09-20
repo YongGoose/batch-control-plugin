@@ -1,0 +1,8 @@
+<?jelly escape-by-default='true'?>
+<div>
+  Run approval workflow, just-in-time change permissions, and append-only audit
+  history for Jenkins instances that are used as a batch execution manager.
+  Manual runs of protected jobs require an approval by a designated approver,
+  job configuration changes require a time-boxed permission grant, and every
+  run, change, and failure is recorded independently of build retention.
+</div>
