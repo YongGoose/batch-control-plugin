@@ -12,7 +12,7 @@
 | 기능 | 확장 포인트 / API | 비고 |
 |---|---|---|
 | 잡별 승인 설정 | `hudson.model.JobProperty` + `JobPropertyDescriptor` | `approvalRequired`, `blockTimer`, `blockUpstream`, `allowedUpstreamJobs` |
-| 실행 차단 | `hudson.model.Queue.QueueDecisionHandler#shouldSchedule(Task, List<Action>)` | `CauseAction`으로 원인 분류. 승인 투입은 `ApprovedRunAction`(마커)으로 통과 |
+| 실행 차단 | `hudson.model.Queue.QueueDecisionHandler#shouldSchedule(Task, List<Action>)` | `CauseAction`으로 원인 분류. 승인 투입은 `ApprovedRunAction`(마커)으로 통과. 차단 시 사용자 유래 Cause(UserIdCause·CLI·REST)는 `Failure` throw로 안내, Timer·SCM 등 무인 Cause는 `return false` + 로그 |
 | 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | 요청 저장 파라미터 그대로 |
 | 삭제 차단 | `ItemListener#onCheckDelete(Item)` → `throw new Failure(...)` | 변경 통제 on + 활성 Grant(DELETE) 없으면 거부 |
 | 변경 기록 | `ItemListener#onCreated/onUpdated/onDeleted/onRenamed/onLocationChanged` | 사후 훅. 현재 인증 `Jenkins.getAuthentication2()` 기록 |
@@ -64,6 +64,7 @@ GrantAwareACL extends ACL
       return delegateACL.hasPermission2(auth, perm)
 ```
 
+- 위임: `getRootACL()`뿐 아니라 **모든 `getACL` 오버로드**(Job, AbstractItem, ItemGroup, Computer, Node, View, User, Cloud 등)를 delegate에 위임한다. Role Strategy 등 다른 전략이 이 오버로드들을 재정의하기 때문이다. (Phase 1 PoC 발견 사항)
 - 만료: `hasActiveGrant`가 `expiresAt > now && revokedAt == null`을 검사. 타이머 없음.
 - 범위: `scope.type == FOLDER`면 `item.getFullName()`이 폴더 경로로 시작하는지, `JOB`이면 정확히 일치.
 - CREATE는 폴더(ItemGroup)의 ACL에서 검사되므로 FOLDER 범위 Grant만 CREATE를 부여할 수 있다.
@@ -112,7 +113,9 @@ $JENKINS_HOME/batch-control/
 누구든 Build Now → QueueDecisionHandler.shouldSchedule
   → 실행 통제 off 또는 approvalRequired=false → 통과
   → CauseAction 분석: ApprovedRunAction 있음 → 통과 / Timer & !blockTimer → 통과 / Upstream 정책 → 통과 or 차단
-  → 그 외 → false 반환 + 사용자에게 안내 (Action의 doBuild 재정의로 리다이렉트, 혹은 큐 거부 메시지)
+  → Upstream 분류는 instanceof Cause.UpstreamCause (build 스텝의 Cause는 BuildUpstreamCause로 UpstreamCause의 하위 클래스)
+  → 차단 시: 사용자 유래 Cause(UserIdCause·CLI·REST) → Failure throw로 안내(요청 화면 링크 포함)
+             Timer·SCM 등 무인 Cause → false 반환 + 로그
 ```
 
 ## 7. 알려진 제약 (문서에 명시할 것)
@@ -121,3 +124,5 @@ $JENKINS_HOME/batch-control/
 - 디스크에서 직접 고친 뒤 "Reload Configuration from Disk"를 하면 CONFIGURE 변경 기록이 남지 않는다(`onLoaded`만 호출됨).
 - Multibranch/Organization Folder 하위 잡은 자동 생성되므로 변경 통제 대상이 아니다. 실행 기록과 오류 등록은 된다.
 - 잡 설정 화면의 "저장"은 가로챌 수 없으므로 변경 통제는 권한 전략 기반이다. 권한 전략을 이 플러그인의 위임형으로 바꾸지 않으면 변경 통제는 동작하지 않으며, 그 경우 관리 화면에 경고가 표시된다.
+- `build` 스텝으로 호출된 보호 잡이 차단되면 상위 잡은 FAILURE로 끝난다(`wait: false`여도 동일). (Phase 1 PoC 발견 사항)
+- JIT 변경 통제는 Matrix 계열 권한 전략에서만 지원한다. Role Strategy에서는 실행 통제와 기록만 동작하며, Role Strategy가 선택된 경우 AdministrativeMonitor로 안내한다. (C-2 결정: MVP는 제약 문서화)

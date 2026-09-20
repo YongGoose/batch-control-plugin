@@ -98,6 +98,7 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 활성 권한이 있는 상태에서 재시작해도 만료 전이면 유지, 만료 후면 즉시 없음.
 - 수용 기준: `Manage` 권한자는 활성 권한을 즉시 회수(revoke)할 수 있고 이력에 남는다.
 - 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다.
+- 수용 기준: Role Strategy가 전역 권한 전략으로 선택된 경우 관리 화면에 JIT 변경 통제 미지원 안내(AdministrativeMonitor)가 표시된다.
 - 구현: 기존 권한 전략을 감싸는 위임형 AuthorizationStrategy. 관리자가 전역 보안 설정에서 선택.
 
 **9. 변경 자동 기록**

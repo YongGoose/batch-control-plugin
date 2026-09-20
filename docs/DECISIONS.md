@@ -36,4 +36,4 @@
 
 ## 제안 (에이전트가 추가, 사람이 판정)
 
-_(비어 있음)_
+**P-01 | 2차: Role Strategy용 JIT 구현체(임시 역할 부여 API 활용)** | Phase 1 PoC에서 Role Strategy를 delegate로 래핑하면 권한 판정은 정상이나 역할 관리 화면(`getInstance()`/`persistChanges()`의 전역 전략 instanceof 검사)이 동작 불능임을 확인. C-2 결정에 따라 MVP는 Matrix 계열만 지원하고 제약을 문서화하며, Role Strategy 지원은 2차에서 임시 역할 부여 API 활용으로 검토. | 상태: 사람 승인으로 등록됨 (2026-09-20, Phase 1 게이트)
