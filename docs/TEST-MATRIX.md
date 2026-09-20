@@ -115,7 +115,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-SEC-01 | 6 | integration | P0 | 결재자 | GET /batch-control/requests/<id>/approve | 405 또는 거부 (POST만) | |
 | T-SEC-02 | 5 | integration | P0 | Approve 권한 없는 사용자 | POST approve | 403 | |
 | T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | |
-| T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x" | 스냅숏 경로 계산 | 예외 (경로 탈출 차단) | |
+| T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x", 제어문자 포함 이름, 255자 초과 초장문 이름 (RT-12 확장) | 스냅숏·변경 파일 경로 계산 | "../x"는 예외(경로 탈출 차단), 제어문자·초장문 이름은 안전하게 인코딩되어 기록 누락·타 잡 파일 덮어쓰기가 없다 | |
 | T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | |
 | T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | |
 | T-SEC-07 | 6절 | integration | P0 | Password 파라미터를 가진 잡 | 요청→승인→실행 후 요청 상세·RunRecord·CSV 조회 | 비밀값이 어디에도 평문으로 노출되지 않는다 (마스킹 저장) | |
@@ -123,6 +123,22 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
 | T-E2E-03 | 8 | e2e | P0 | requester | 권한 요청→승인→설정 화면 | 저장 성공, 만료 후 저장 403 안내 | |
 | T-E2E-04 | 12 | e2e | P1 | 실행 10건 | CSV 내보내기 | 10행 + 헤더, 파라미터 열 포함 | |
+| T-RT-01 | 6 | integration | P0 | 통제 on, 보호 잡 B(approvalRequired, blockUpstream=true, allowedUpstreamJobs 미설정/빈 목록), 통제 off 잡 A가 build 스텝으로 B 호출 | A 실행 | B 큐 진입 없음 — 빈/미설정 허용 목록은 "전부 차단"으로 해석된다 (SPEC 보강 필요: R-1 — 미설정 시 동작과 Upstream 기본 개방 정책 명확화) | |
+| T-RT-02 | 6 | integration | P0 | 잡 X의 승인 요청 마커(ApprovedRunAction)가 붙은 투입 1회 통과 완료 | 동일 마커/Cause 상당을 다른 잡 Y 또는 다른 파라미터로 재투입 시도(재큐·rebuild 경로 포함) | 통과되지 않는다 — 마커는 requestId+jobFullName+parameters에 바인딩되고 1회만 소비된다 (SPEC 보강 필요: R-8) | |
+| T-RT-03 | 5 | integration | P0 | 잡 A에 대한 APPROVED 요청(큐 투입 전) | A를 A2로 rename, 다른 잡 B를 A로 rename(스왑)한 뒤 투입 시점 도달 | 투입이 거부되거나 원래 잡 신원에만 실행된다 — 결재자가 검토한 잡과 다른 잡은 절대 실행되지 않는다 (SPEC 보강 필요: R-6) | |
+| T-RT-05 | 8 | integration | P0 | 실행 통제 on, u1에게 FOLDER "team/batch" [CREATE,CONFIGURE] Grant(30분) 활성 | u1이 권한 창 안에서 cron(TimerTrigger) 잡 J 생성, Clock을 만료 후로 이동, cron 발화 | 창 만료 후 J의 cron 실행이 승인 통제를 우회하지 않는다(예: 권한 창 내 생성 잡은 approvalRequired/blockTimer 기본 활성) (SPEC 보강 필요: R-2) | |
+| T-RT-06 | 8 | integration | P0 | 만료 임박 CONFIGURE Grant(Clock 제어), 다수 잡을 쓰는 일괄 변경 작업(Job DSL seed 상당) | 만료 경계에 걸치도록 일괄 변경 실행 | 만료 시각 이후의 write는 잡 단위로 재검사되어 각각 거부된다(진입 시 1회 검사에 편승 불가) | |
+| T-RT-07 | 3 | integration | P1 | approvers=[a1,a2,a3], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a1→a2→a3로 연속 변경 후 a3가 승인 | 각 변경이 approverChanges에 (from,to,by,at)로 빠짐없이 남고, 최종 결재자 a3의 승인만 유효하다(감사 추적 보장) | |
+| T-RT-10 | 6절 | integration | P1 | 사유·파라미터 값·(권한 창) 잡 이름에 `<script>`·`<img onerror>` 페이로드를 담은 요청 | 요청 상세·결재 화면·대시보드 렌더링(WebClient) | 페이로드가 이스케이프되어 텍스트로만 표시된다 — 스크립트 실행·태그 삽입 없음 (SPEC 보강 필요: R-3 상당의 출력 무해화 수용 기준 없음 — CLAUDE.md 규약만 존재) | |
+| T-RT-11 | 12 | integration | P1 | 사유가 `=1+1`, 파라미터 값이 `+HYPERLINK(...)`·`@SUM(...)`·`-2+3`으로 시작하는 요청·실행 기록 | 4종 CSV 내보내기 | 해당 셀이 수식으로 해석되지 않도록 무해화된다(선행 `= + - @` 이스케이프/`'` 프리픽스/인용) (SPEC 보강 필요: R-3) | |
+| T-RT-13 | 11 | integration | P1 | 콘솔에 비밀 토큰 문자열을 출력하고 FAILURE로 끝나는 빌드 | Incident 생성 후 logTail 조회 | Secret 값·알려진 비밀 패턴이 logTail에 평문으로 남지 않는다(마스킹) (SPEC 보강 필요: R-4 — 마스킹 규칙 추가 또는 한계 문서화 결정) | |
+| T-RT-14 | 5 | integration | P0 | PENDING 요청 1건, 승인 POST 2건 준비 | 두 승인 POST를 동시에 실행 | 정확히 1건만 APPROVED가 되고 빌드는 정확히 1회만 투입된다(상태 전이 compare-and-set) (SPEC 보강 필요: R-5) | |
+| T-RT-15 | 7 | integration | P0 | PENDING 요청, 요청자의 취소 POST와 결재자의 승인 POST 준비 | 동시에 실행 | 둘 중 하나만 성립한다(선착 CAS). 취소가 이기면 어떤 빌드도 투입되지 않고, CANCELLED 요청에 executedRunId가 남는 등의 상태 혼합이 없다 (SPEC 보강 필요: R-5) | |
+| T-RT-16 | 7 | integration | P0 | approvedRunTimeoutMinutes 경계의 APPROVED 요청 | 큐 투입 시도와 ExpiryPeriodicWork 만료 처리를 동시에 진행 | 투입 직전 시각 재확인(check-at-submit)으로 만료 요청은 절대 투입되지 않고, 상태는 EXPIRED/EXECUTED 중 정확히 하나로 수렴한다 (SPEC 보강 필요: R-5) | |
+| T-RT-17 | 4 | integration | P0 | 승인 후 scheduleBuild2 완료·onStarted 미도달(executedRunId=null) 상태에서 재시작(JenkinsSessionRule) | 복구 실행 | 요청당 빌드가 정확히 1회만 존재한다 — 재시작 후 복원된 큐 항목과 복구 재투입이 requestId 기반 idempotency로 중복 제거된다 (SPEC 보강 필요: R-5, R-8) | |
+| T-RT-18 | 6절 | integration | P2 | Request/RequestGrant 권한만 가진 사용자 | 단시간에 대량(N건) RunRequest·GrantRequest 생성 POST 반복 | 사용자당 PENDING 상한/rate limit으로 거부되거나, 목록 조회·재시작 복구 성능이 한계 내로 유지된다 (SPEC 보강 필요: R-7) | |
+| T-RT-19 | 6절 | integration | P1 | 수 MB급 사유·파라미터 값을 담은 요청 생성 POST | 요청 생성 | 필드별 크기 상한으로 거부되거나 안전하게 절단 저장된다(요청 파일·인메모리 캐시·RunRecord 비대화 방지) (SPEC 보강 필요: R-7) | |
+| T-RT-20 | 9 | integration | P2 | 활성 CONFIGURE Grant | 동일 잡 config를 짧은 시간에 수백 회 반복 저장(REST config.xml POST 루프) | 변경 기록(diff/스냅숏)이 누락 없이 baseline 정합을 유지하고, 기록 파이프라인이 다른 잡의 기록을 블로킹하지 않는다 (SPEC 보강 필요: R-7) | |
 
 ## 비고 (전제와 요청 사항)
 
@@ -133,5 +149,26 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 5. **테스트 의존성 필요** (pom.xml은 release-manager 소유): `org.jenkins-ci.plugins:pipeline-build-step` (T-06-05/10/11/12, PoC 보고서에서 기요청), `job-dsl` (T-09-06), `role-strategy` (T-08-08), `cloudbees-folder` (T-08-11, T-09-08), `matrix-auth` (권한 시나리오 전반), `workflow-multibranch` 또는 `branch-api` (T-10-07).
 6. **T-06-12 부수 효과**: build 스텝 차단 시 상위 잡이 FAILURE로 끝나는 것은 PoC에서 확인된 Jenkins 동작이며, 이 행은 그 동작을 회귀 고정한다(문서화 대상).
 7. **성능 요구**(6절: 하루 5,000 실행 규모에서 최근 7일 조회 2초 이내)는 자동 회귀 매트릭스에서 제외하고 Phase 5에서 로컬 수동 측정으로 확인한다.
-8. **T-RT-\* 행 미포함.** red-team 보고서가 병렬 작성 중이므로 이번 판에는 넣지 않았다. 2차 병합 시 `T-RT-*`로 추가하고, 제외한 시나리오는 이 절 아래에 "제외 사유"로 남긴다.
-9. **ID 규칙 보충**: 전역 설정 기본값(SPEC 5절 표)은 항목 5(실행 요청)와 번호가 겹치지 않도록 `T-CFG-*`, 비기능 보안(6절)은 `T-SEC-*`를 쓴다. 기존 시드의 T-SEC-01~04는 SPEC 열이 관련 항목 번호를 가리키던 것을 그대로 유지했다.
+8. **T-RT-\* 병합 완료 (red-team-01 2차 병합).** `T-RT-<nn>`의 `<nn>`은 `docs/reports/red-team-01.md`의 RT 번호와 일치시켰다(추적성). 번호가 비는 곳(04, 08, 09, 12)은 아래 "red-team 시나리오 제외 사유" 절에 있다. **주의: `(SPEC 보강 필요: R-n)`이 붙은 T-RT 행의 Then은 현행 SPEC 수용 기준이 아니라 red-team 제안(R-1~R-8)에 기반한 "바라는 동작"이다.** 사람이 SPEC/DECISIONS에서 R-n을 채택·기각하기 전까지 해당 행은 확정이 아니며, 기각되면 행을 수정·제외한다. R-n 없는 T-RT 행(T-RT-06, T-RT-07)은 현행 SPEC 문언(8절 "만료 시각 경과 후 첫 권한 검사부터 거부", 3절 결재자 변경 이력)에서 직접 도출했다.
+9. **ID 규칙 보충**: 전역 설정 기본값(SPEC 5절 표)은 항목 5(실행 요청)와 번호가 겹치지 않도록 `T-CFG-*`, 비기능 보안(6절)은 `T-SEC-*`를 쓴다. 기존 시드의 T-SEC-01~04는 SPEC 열이 관련 항목 번호를 가리키던 것을 그대로 유지했다. T-SEC-04는 RT-12의 실질 엣지(제어문자·초장문 이름)를 흡수해 확장했다(행 추가 없음).
+10. **동시성 행 재현 방법**(T-RT-14/15/16): 2-스레드 동시 POST(ExecutorService + CyclicBarrier 상당)로 경합을 재현하고, 결과 단언은 상태·빌드 수로만 한다. T-RT-16은 Clock 이동 + PeriodicWork 수동 트리거(비고 1·2 전제)와 조합한다.
+11. **T-RT-17 전제**: "scheduleBuild2 완료·onStarted 미도달" 크래시 타이밍을 재현하려면 큐 투입 직후 세션을 종료할 수 있는 훅(예: QuietDown 상태에서 투입 후 세션 재시작)이 필요하다. 재현이 불가능하면 최소한 T-04-02에 이 타이밍 명시를 추가한 통합 테스트로 근사한다. → 요청: core-dev에 복구 로직의 idempotency 키 설계 공유.
+12. **RT-08 문서화 요청**: 결재자 계정은 실인(實人) 1:1, 공용·부계정 금지를 알려진 한계로 README에 명시. → 요청: `README.md` (release-manager 소유) 알려진 한계 절 추가.
+
+## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
+
+| RT | 제외 사유 |
+|---|---|
+| RT-04 (FOLDER prefix 오판) | 기존 행과 중복: T-SEC-03(unit, `team/batch` vs `team/batch-other` 경계 판정)과 T-08-11(integration, 폴더 안/밖 통합 검증)이 동일 공격을 커버. POC C에서도 검증됨. 새 엣지 없음. |
+| RT-08 (다계정 자가 결재) | 자동 테스트 불가(설계 범위 밖). 플러그인은 계정↔실인 매핑을 알 수 없다 — 조직 통제(IdP 계정 위생) 영역. 비고 12의 README 문서화 요청으로 대체. |
+| RT-09 (권한 상실 결재자) | 기존 행과 중복: T-03-03이 "목록 등재 + Approve 권한 상실 → 결재 거부"를 그대로 커버. 부수 위험(요청 PENDING 고착)은 T-07-01(pendingTimeout 만료)로 회수 검증됨. 지정 시점 차단은 SPEC이 요구하지 않음(결재 시점 검사만 명시). |
+| RT-12 (잡 이름 경로 탈출·초장문) | 기존 행 확장으로 흡수: 경로 탈출(`../`)은 T-SEC-04가 이미 커버, 시나리오가 추가한 실질 엣지(제어문자·255자 초과 이름)를 T-SEC-04의 Given/Then에 병합했다. 별도 행 불필요. |
+
+## 요약 (Phase 2 최종 — red-team 병합 후)
+
+- **총 행 수: 123** (SPEC 도출 107 + T-RT 16)
+- **우선순위**: P0 80 / P1 36 / P2 7
+- **계층**: unit 2 / integration 116 / e2e 5
+- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 7, T-E2E 4, T-RT 16
+- **T-RT 우선순위**: P0 9 (T-RT-01/02/03/05/06/14/15/16/17), P1 5 (T-RT-07/10/11/13/19), P2 2 (T-RT-18/20)
+- **사람 게이트 대기(SPEC 보강 필요)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17

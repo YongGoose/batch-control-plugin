@@ -13,6 +13,12 @@
 
 ---
 
+## 2026-09-20 17:40 — Phase 2 완료, 게이트 대기 🧑
+- 위임 결과: test-author 1차(107행) + red-team-01.md(20 시나리오) + 병합 2차(T-RT 16행 추가, 4건 제외 사유 기록). release-manager: pom에 pipeline-build-step·job-dsl·role-strategy·workflow-multibranch test 의존성 추가(전부 BOM 관리, verify 녹색).
+- 최종 매트릭스: 총 123행, P0 80 / P1 36 / P2 7, integration 116 / unit 2 / e2e 5.
+- 대기: 사람이 TEST-MATRIX 직접 읽고 승인 🧑 + red-team 제안 R-1~R-8 판정(T-RT 12개 행이 SPEC 보강 결정에 종속).
+- 미해결 요청: README에 다계정 자가 결재 한계 명시(RT-08, release-manager Phase 7에서) / core-dev에 Clock 교체 API·PeriodicWork 수동 실행·idempotency 키 설계(Phase 3 위임 시 전달).
+
 ## 2026-09-20 17:00 — Phase 1 게이트 통과 🧑✓ → Phase 2 시작
 - 사람 결정: 설계 유지, Phase 2 진행. ARCHITECTURE 갱신 승인(전 getACL 오버로드 위임 / 차단 시 사용자 유래 Cause는 Failure throw·무인 Cause는 false+로그 / BuildUpstreamCause instanceof 분류 / 제약 2건 추가). SPEC 8에 Role Strategy 미지원 안내 수용 기준 추가. C-2=(a), DECISIONS 제안 P-01 등록. pipeline-build-step 테스트 의존성 추가 승인(release-manager, Phase 2와 병렬).
 - phase-1-poc → main 머지 완료.
