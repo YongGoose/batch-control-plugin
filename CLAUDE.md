@@ -42,7 +42,7 @@
 
 - Java 17, Maven. 부모 POM은 `org.jenkins-ci.plugins:plugin` 최신 버전, `jenkins.version`은 plugin BOM이 지원하는 최신 LTS 라인.
 - `groupId`: `io.jenkins.plugins`, `artifactId`: `batch-control`, 패키지: `io.jenkins.plugins.batchcontrol`.
-- 코드, 주석, 커밋 메시지, README는 영어. 설계 문서(docs/)는 한국어.
+- 모든 산출물은 영어로 작성한다: 코드, 주석, 커밋 메시지, README, 설계 문서(docs/), 리포트, GitHub 이슈·PR (2026-09-20 사람 지시 — Jenkins는 글로벌 사용자 대상). 기존 한국어 문서는 소급 번역하지 않는다(사람이 별도 지시할 때만). 사용자와의 대화는 한국어.
 - 상태를 바꾸는 모든 Stapler 웹 메서드(`do*`)는 `@RequirePOST` + 권한 체크가 첫 두 줄이다. 예외 없음.
 - 사용자 입력이 파일 경로, 잡 이름, HTML 출력에 들어가는 곳은 반드시 검증/이스케이프한다.
 - `ACL.SYSTEM2`로 전환하는 코드는 이유를 주석으로 남기고, 전환 전에 요청자·결재자 권한 체크가 끝나 있어야 한다.
