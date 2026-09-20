@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-09-21 01:05 — Phase 3 S3 done → S4 started
+- S3 result: commits f1f4793 (tests) + e3bbc3f (impl) + 4f89602 (monitor banners). Full verify green twice (core-dev run and orchestrator run, 119/119, SpotBugs 0). spec-review-S3.md = PASS WITH NOTES, BLOCKER 0.
+- MAJOR (getACL(IComputer) delegation gap) + MINOR (root-scope "" consistency) routed to core-dev for immediate fix.
+- All 5 documented core-dev deviations accepted by spec-guardian (SaveableListener CONFIGURE recording, Grant.id==requestId, P-06 pending, masked-note diffs, folder-rename MOVE records).
+- New proposals: P-06 (RequestGrant HTTP-layer-only enforcement), P-07 (GrantRequest approver-change model conflict). Pending human: CLAUDE.md ownership row for src/main/webapp/help/** (assigned to ui-dev by orchestrator), Grants-link switch-independence judgment, P-01..P-07.
+- Session-limit interruptions: S3 core-dev/ui-dev were killed once by the API session limit and resumed cleanly (no disk state lost).
+- Delegating: test-author ← S4 tests (SPEC 10, 11, 12) — in progress; spec-guardian S3 and orchestrator verify ran in parallel.
+
 ## 2026-09-20 21:00 — Phase 3 S2 done → S3 started (standing instruction: proceed when no BLOCKER)
 - S2 result: commits c56872e (tests) + 752c38b (impl). Full `mvn clean verify`: 79/79 tests green, SpotBugs 0, 4m26s. spec-review-S2.md = PASS WITH NOTES, BLOCKER 0.
 - MAJOR fixed by main session: DECISIONS.md P-02/P-03 fusion restored; new proposals P-04 (marker re-use record location) and P-05 (SPEC §3 model field sync) registered.

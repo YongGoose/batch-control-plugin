@@ -52,6 +52,8 @@
 
 ## 제안 (에이전트가 추가, 사람이 판정)
 
+**P-07 | GrantRequest approver-change: SPEC §2 item 3 vs §3 model conflict (spec-review-S3 MINOR)** | SPEC item 3 says a requester may change the approver on any pending request, but the §3 data model gives `approverChanges[]` to RunRequest only, and the GrantRequest implementation has no approver-change API/history. Options: (a) declare item 3 approver-change as run-request-only in SPEC (document), (b) add approverChanges + changeApprover to GrantRequest for symmetry. | Status: awaiting human decision
+
 **P-06 | RequestGrant permission enforced at HTTP layer only (core-dev S3)** | `GrantRequestService.create` does not check BatchControl/RequestGrant itself; the permission is enforced in `GrantsSection.doCreate` (verified by T-08-13). This is asymmetric with `RunRequestService.create`, which checks REQUEST in the service. The S3 test contract requires this (tests create grant requests as users without RequestGrant through the service API). Options: (a) accept the asymmetry and document that the service API is @Restricted internal, (b) align by adding the check to the service and adjusting tests. | Status: awaiting human decision
 
 **P-04 | Where to record blocked marker re-use (spec-review-S2 MINOR 3)** | D-23 says re-use of an approved-run marker is "blocked and recorded", but the record location is undefined in SPEC; the current implementation only logs a JUL warning. Candidates: (a) a ChangeRecord-like audit entry (new type MARKER_REUSE_BLOCKED), (b) a field on the RunRequest (e.g. reuseAttempts), (c) keep JUL logging + document. Matrix note 15 reserved the T-RT-02 assertion pending this decision. | Status: awaiting human decision
