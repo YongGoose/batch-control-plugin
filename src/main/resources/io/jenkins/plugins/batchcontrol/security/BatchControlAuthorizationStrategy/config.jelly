@@ -1,0 +1,15 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Global security configuration for the delegating authorization strategy (SPEC item 8).
+  The wrapped ("delegate") strategy keeps its full configuration; this plugin only adds
+  time-limited Item/Create, Item/Configure and Item/Delete permissions from active grants
+  on top of the delegate's decisions.
+
+  ${descriptor.delegateDescriptors} must return all AuthorizationStrategy descriptors except
+  this plugin's own (to prevent nesting the strategy inside itself) — provided by core-dev on
+  BatchControlAuthorizationStrategy.DescriptorImpl.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:dropdownDescriptorSelector field="delegate" title="Delegate authorization strategy"
+                                descriptors="${descriptor.delegateDescriptors}"/>
+</j:jelly>

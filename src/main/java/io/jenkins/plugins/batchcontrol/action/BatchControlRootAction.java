@@ -15,6 +15,9 @@ import jenkins.model.Jenkins;
  *   <li>{@code /batch-control/} — landing page</li>
  *   <li>{@code /batch-control/requests/} — run request list (paged, newest first)</li>
  *   <li>{@code /batch-control/requests/<id>/} — request detail with decision endpoints</li>
+ *   <li>{@code /batch-control/grants/} — grant request list, active grants, create/decision/revoke
+ *       endpoints</li>
+ *   <li>{@code /batch-control/changes/} — change record list (per month, read-only)</li>
  * </ul>
  *
  * <p>The sidebar icon is hidden when the user has no plugin permission <em>and</em> run control
@@ -30,6 +33,7 @@ public class BatchControlRootAction implements RootAction {
         Jenkins jenkins = Jenkins.get();
         boolean anyPermission = jenkins.hasPermission(BatchControlPermissions.REQUEST)
                 || jenkins.hasPermission(BatchControlPermissions.APPROVE)
+                || jenkins.hasPermission(BatchControlPermissions.REQUEST_GRANT)
                 || jenkins.hasPermission(BatchControlPermissions.VIEW_HISTORY)
                 || jenkins.hasPermission(BatchControlPermissions.MANAGE);
         if (!anyPermission && !BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
@@ -52,5 +56,15 @@ public class BatchControlRootAction implements RootAction {
     /** Stapler: serves {@code /batch-control/requests/...}. */
     public RequestsSection getRequests() {
         return new RequestsSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/grants/...}. */
+    public GrantsSection getGrants() {
+        return new GrantsSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/changes/...}. */
+    public ChangesSection getChanges() {
+        return new ChangesSection();
     }
 }

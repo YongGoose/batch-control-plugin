@@ -4,6 +4,8 @@
     <l:side-panel>
       <l:tasks>
         <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list" title="Run Requests"/>
+        <l:task href="${rootURL}/batch-control/grants/" icon="symbol-lock-closed" title="Grants"/>
+        <l:task href="${rootURL}/batch-control/changes/" icon="symbol-clock" title="Change Records"/>
       </l:tasks>
     </l:side-panel>
     <l:main-panel>
@@ -13,6 +15,8 @@
       </p>
       <p>
         <a class="jenkins-button jenkins-button--primary" href="requests/">Run Requests</a>
+        <a class="jenkins-button" href="grants/">Grants</a>
+        <a class="jenkins-button" href="changes/">Change Records</a>
       </p>
     </l:main-panel>
   </l:layout>

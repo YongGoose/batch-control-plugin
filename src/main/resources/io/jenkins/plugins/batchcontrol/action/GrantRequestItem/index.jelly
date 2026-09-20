@@ -1,0 +1,69 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Grant Request ${it.id}">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/grants/" icon="symbol-arrow-left" title="Back to Grants"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Grant Request ${it.id}</h1>
+
+      <table class="jenkins-table">
+        <tbody>
+          <tr>
+            <th style="text-align: left; width: 12rem;">Scope</th>
+            <td>${it.request.scope.type}: ${it.request.scope.fullName}</td>
+          </tr>
+          <tr><th style="text-align: left;">Actions</th><td>${it.join(it.request.actions)}</td></tr>
+          <tr><th style="text-align: left;">Duration</th><td>${it.request.durationMinutes} minutes</td></tr>
+          <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
+          <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
+          <tr><th style="text-align: left;">Approver</th><td>${it.request.approver}</td></tr>
+          <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
+          <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
+          <j:if test="${it.request.decisionComment != null}">
+            <tr><th style="text-align: left;">Decision comment</th><td>${it.request.decisionComment}</td></tr>
+          </j:if>
+        </tbody>
+      </table>
+
+      <h2>Reason</h2>
+      <p style="white-space: pre-wrap;">${it.request.reason}</p>
+
+      <j:if test="${it.canDecide}">
+        <h2>Decision</h2>
+        <p class="jenkins-description">
+          Approving immediately grants the requester the selected permissions in the requested
+          scope for the requested duration.
+        </p>
+        <f:form method="post" action="approve" name="approve">
+          <f:entry title="Comment (optional)">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <f:submit value="Approve"/>
+          </f:bottomButtonBar>
+        </f:form>
+        <f:form method="post" action="reject" name="reject">
+          <f:entry title="Rejection comment (required)" description="Rejection is final for this request; a rejected request cannot be reopened.">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
+          </f:bottomButtonBar>
+        </f:form>
+      </j:if>
+
+      <j:if test="${it.canCancel}">
+        <h2>Cancel</h2>
+        <p>
+          <l:confirmationLink href="cancel" post="true" title="Cancel this grant request?"
+                              message="The request will be closed as CANCELLED. This cannot be undone.">
+            Cancel Request
+          </l:confirmationLink>
+        </p>
+      </j:if>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

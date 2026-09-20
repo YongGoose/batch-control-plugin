@@ -316,10 +316,19 @@ public final class RunRequestService {
      * never-executed requests past {@code approvedRunTimeoutMinutes} whose submission is not
      * sitting in the queue right now.
      *
+     * <p>Boundary-window hardening (spec-review-S2 MINOR 1): the queue snapshot is taken
+     * outside this service's lock (lock-order discipline with the queue gate), so a marker
+     * consumed between the snapshot and the per-request lock acquisition is missing from the
+     * snapshot even though the request WAS submitted in time. The consumption ticket
+     * ({@code queuedAt}), re-read here under the lock, closes that window: a ticket claimed at
+     * or after the snapshot instant proves the snapshot is stale for this request, so it is
+     * skipped this cycle (the next cycle sees it in the queue, executed, or genuinely gone).
+     *
      * @param queuedRequestIds ids of requests that currently have a queue item carrying their
      *        approval marker (collected by the caller outside this service's lock)
+     * @param queueSnapshotAt the instant just before the caller collected the snapshot
      */
-    public void expireOverdue(Set<String> queuedRequestIds) {
+    public void expireOverdue(Set<String> queuedRequestIds, Instant queueSnapshotAt) {
         Instant now = BatchClock.now();
         for (RunRequest snapshot : store.listRunRequests()) {
             RequestStatus status = snapshot.getStatus();
@@ -340,6 +349,7 @@ public final class RunRequestService {
                 } else if (request.getStatus() == RequestStatus.APPROVED
                         && request.getExecutedRunId() == null
                         && !queuedRequestIds.contains(request.getId())
+                        && ticketNotFresherThan(request, queueSnapshotAt)
                         && approvedExpired(request, now)) {
                     request.setStatus(RequestStatus.EXPIRED);
                     store.saveRunRequest(request);
@@ -350,6 +360,17 @@ public final class RunRequestService {
                 lock.unlock();
             }
         }
+    }
+
+    /**
+     * Whether the queue snapshot is authoritative for this request: true when the ticket was
+     * never claimed, or was claimed strictly before the snapshot was taken (absent from the
+     * snapshot then really means gone — e.g. the queue item was cleared). A ticket claimed at
+     * or after the snapshot instant means the snapshot is stale for this request.
+     */
+    private static boolean ticketNotFresherThan(RunRequest request, Instant queueSnapshotAt) {
+        Instant queuedAt = request.getQueuedAt();
+        return queuedAt == null || queuedAt.isBefore(queueSnapshotAt);
     }
 
     // ---------------------------------------------------------------- invalidation (D-21)

@@ -1,0 +1,187 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Grants">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Grants</h1>
+      <p class="jenkins-description">
+        Temporary (just-in-time) permission requests for creating, configuring or deleting jobs,
+        and the grants currently active.
+      </p>
+
+      <h2>Grant Requests</h2>
+      <j:choose>
+        <j:when test="${it.total == 0}">
+          <p>No grant requests.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Scope</th>
+                <th>Actions</th>
+                <th>Duration</th>
+                <th>Reason</th>
+                <th>Requester</th>
+                <th>Approver</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="r" items="${it.pageItems}">
+                <tr>
+                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td>${r.scope.type}: ${r.scope.fullName}</td>
+                  <td>${it.join(r.actions)}</td>
+                  <td>${r.durationMinutes} min</td>
+                  <td>${r.reason}</td>
+                  <td>${r.requester}</td>
+                  <td>${r.approver}</td>
+                  <td>${r.status}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasPrevious}">
+              <a class="jenkins-button" href="?page=${it.page - 1}&amp;activePage=${it.activePage}">Newer</a>
+            </j:if>
+            <span>Page ${it.page} (${it.total} requests)</span>
+            <j:if test="${it.hasNext}">
+              <a class="jenkins-button" href="?page=${it.page + 1}&amp;activePage=${it.activePage}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+
+      <h2>Active Grants</h2>
+      <j:choose>
+        <j:when test="${it.activeTotal == 0}">
+          <p>No active grants.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Scope</th>
+                <th>Actions</th>
+                <th>Granted</th>
+                <th>Expires</th>
+                <j:if test="${it.canRevoke}">
+                  <th/>
+                </j:if>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="g" items="${it.activePageItems}">
+                <tr>
+                  <td>${g.id}</td>
+                  <td>${g.user}</td>
+                  <td>${g.scope.type}: ${g.scope.fullName}</td>
+                  <td>${it.join(g.actions)}</td>
+                  <td>${it.format(g.grantedAt)}</td>
+                  <td>${it.format(g.expiresAt)}</td>
+                  <j:if test="${it.canRevoke}">
+                    <td>
+                      <l:confirmationLink href="active/${g.id}/revoke" post="true"
+                                          title="Revoke this grant?"
+                                          message="The user immediately loses the granted permissions. This cannot be undone.">
+                        Revoke
+                      </l:confirmationLink>
+                    </td>
+                  </j:if>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasActivePrevious}">
+              <a class="jenkins-button" href="?activePage=${it.activePage - 1}&amp;page=${it.page}">Newer</a>
+            </j:if>
+            <span>Page ${it.activePage} (${it.activeTotal} active grants)</span>
+            <j:if test="${it.hasActiveNext}">
+              <a class="jenkins-button" href="?activePage=${it.activePage + 1}&amp;page=${it.page}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+
+      <j:if test="${it.canRequest}">
+        <h2>New Grant Request</h2>
+        <f:form method="post" action="create" name="createGrantRequest">
+          <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
+            <select name="scopeType" class="jenkins-select__input">
+              <option value="JOB">Job (exact full name)</option>
+              <option value="FOLDER">Folder (the folder and everything below it)</option>
+            </select>
+          </f:entry>
+          <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
+            <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"/>
+          </f:entry>
+          <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
+            <div class="jenkins-checkbox-help-wrapper">
+              <span class="jenkins-checkbox">
+                <input type="checkbox" name="actions" value="CREATE" id="grant-action-create"/>
+                <label for="grant-action-create" class="attach-previous">Create</label>
+              </span>
+            </div>
+            <div class="jenkins-checkbox-help-wrapper">
+              <span class="jenkins-checkbox">
+                <input type="checkbox" name="actions" value="CONFIGURE" id="grant-action-configure"/>
+                <label for="grant-action-configure" class="attach-previous">Configure</label>
+              </span>
+            </div>
+            <div class="jenkins-checkbox-help-wrapper">
+              <span class="jenkins-checkbox">
+                <input type="checkbox" name="actions" value="DELETE" id="grant-action-delete"/>
+                <label for="grant-action-delete" class="attach-previous">Delete</label>
+              </span>
+            </div>
+          </f:entry>
+          <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
+            <select name="durationMinutes" class="jenkins-select__input">
+              <j:forEach var="d" items="${it.durationOptions}">
+                <option value="${d}">${d} minutes</option>
+              </j:forEach>
+            </select>
+          </f:entry>
+          <f:entry title="Custom duration (minutes)"
+                   description="Optional. Overrides the preset above when set. Maximum: ${it.maxGrantMinutes} minutes.">
+            <input type="number" name="customDurationMinutes" class="jenkins-input"
+                   min="1" max="${it.maxGrantMinutes}" step="1"/>
+          </f:entry>
+          <f:entry title="Reason" help="/plugin/batch-control/help/grant-reason.html">
+            <f:textarea name="reason" value=""/>
+          </f:entry>
+          <j:choose>
+            <j:when test="${empty(it.approverOptions)}">
+              <div class="jenkins-alert jenkins-alert-warning">
+                No approvers are configured. Ask an administrator to add approvers in the
+                Batch Control global configuration before requesting a grant.
+              </div>
+            </j:when>
+            <j:otherwise>
+              <f:entry title="Approver" help="/plugin/batch-control/help/grant-approver.html">
+                <select name="approver" class="jenkins-select__input">
+                  <j:forEach var="a" items="${it.approverOptions}">
+                    <option value="${a}">${a}</option>
+                  </j:forEach>
+                </select>
+              </f:entry>
+              <f:bottomButtonBar>
+                <f:submit value="Request Grant"/>
+              </f:bottomButtonBar>
+            </j:otherwise>
+          </j:choose>
+        </f:form>
+      </j:if>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

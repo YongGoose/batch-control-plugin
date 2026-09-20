@@ -4,6 +4,8 @@ import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.Grant;
+import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.io.IOException;
@@ -71,12 +73,28 @@ public final class FileStore implements Store {
         return root().resolve("requests").resolve("run");
     }
 
+    private Path grantRequestDir() {
+        return root().resolve("requests").resolve("grant");
+    }
+
+    private Path grantDir() {
+        return root().resolve("grants");
+    }
+
+    private Path snapshotDir() {
+        return root().resolve("snapshots");
+    }
+
     private Path runsDir() {
         return root().resolve("runs");
     }
 
     private Path changesDir() {
         return root().resolve("changes");
+    }
+
+    private Path diffDir() {
+        return changesDir().resolve("diff");
     }
 
     private static String monthFileName(YearMonth month) {
@@ -90,68 +108,78 @@ public final class FileStore implements Store {
     @Override
     public void saveRunRequest(RunRequest request) {
         Objects.requireNonNull(request, "request");
-        Path dir = runRequestDir();
-        Path target = PathCodec.resolveUnder(dir, request.getId() + ".xml");
-        writeLock.lock();
-        try {
-            Files.createDirectories(dir);
-            Path tmp = Files.createTempFile(dir, request.getId(), ".tmp");
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                xstream.toXML(request, writer);
-            }
-            moveAtomically(tmp, target);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to save run request " + request.getId(), e);
-        } finally {
-            writeLock.unlock();
-        }
+        saveXmlEntity(runRequestDir(), request.getId(), request, "run request");
     }
 
     @Override
     public RunRequest loadRunRequest(String id) {
-        Objects.requireNonNull(id, "id");
-        Path file = PathCodec.resolveUnder(runRequestDir(), id + ".xml");
-        if (!Files.isRegularFile(file)) {
-            return null;
-        }
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return (RunRequest) xstream.fromXML(reader);
-        } catch (NoSuchFileException e) {
-            return null;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to load run request " + id, e);
-        }
+        return loadXmlEntity(runRequestDir(), id, RunRequest.class, "run request");
     }
 
     @Override
     public List<RunRequest> listRunRequests() {
-        Path dir = runRequestDir();
-        List<RunRequest> requests = new ArrayList<>();
-        if (!Files.isDirectory(dir)) {
-            return requests;
-        }
-        List<Path> files = new ArrayList<>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.xml")) {
-            for (Path file : stream) {
-                files.add(file);
-            }
-        } catch (NoSuchFileException e) {
-            return requests;
+        return listXmlEntities(runRequestDir(), RunRequest.class, "run request");
+    }
+
+    @Override
+    public void saveGrantRequest(GrantRequest request) {
+        Objects.requireNonNull(request, "request");
+        saveXmlEntity(grantRequestDir(), request.getId(), request, "grant request");
+    }
+
+    @Override
+    public GrantRequest loadGrantRequest(String id) {
+        return loadXmlEntity(grantRequestDir(), id, GrantRequest.class, "grant request");
+    }
+
+    @Override
+    public List<GrantRequest> listGrantRequests() {
+        return listXmlEntities(grantRequestDir(), GrantRequest.class, "grant request");
+    }
+
+    @Override
+    public void saveGrant(Grant grant) {
+        Objects.requireNonNull(grant, "grant");
+        saveXmlEntity(grantDir(), grant.getId(), grant, "grant");
+    }
+
+    @Override
+    public Grant loadGrant(String id) {
+        return loadXmlEntity(grantDir(), id, Grant.class, "grant");
+    }
+
+    @Override
+    public List<Grant> listGrants() {
+        return listXmlEntities(grantDir(), Grant.class, "grant");
+    }
+
+    @Override
+    public void saveConfigSnapshot(String jobFullName, String configXml) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Objects.requireNonNull(configXml, "configXml");
+        writeTextAtomically(snapshotDir(), PathCodec.encode(jobFullName) + ".xml", configXml,
+                "config snapshot of " + jobFullName);
+    }
+
+    @Override
+    public String loadConfigSnapshot(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        return readTextOrNull(file);
+    }
+
+    @Override
+    public void deleteConfigSnapshot(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        writeLock.lock();
+        try {
+            Files.deleteIfExists(file);
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to list run requests in " + dir, e);
+            throw new UncheckedIOException("Failed to delete config snapshot of " + jobFullName, e);
+        } finally {
+            writeLock.unlock();
         }
-        // Same directory for every entry, so the full path sorts identically to the file name.
-        files.sort(Comparator.comparing(Path::toString));
-        for (Path file : files) {
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                requests.add((RunRequest) xstream.fromXML(reader));
-            } catch (NoSuchFileException e) {
-                // Deleted between listing and reading; skip.
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to load run request file " + file, e);
-            }
-        }
-        return requests;
     }
 
     @Override
@@ -172,6 +200,14 @@ public final class FileStore implements Store {
     @Override
     public void appendChangeRecord(ChangeRecord record) {
         Objects.requireNonNull(record, "record");
+        // The diff text goes to changes/diff/<id>.patch (ARCHITECTURE section 5); the JSONL
+        // line stays diff-free. The patch is written first so a reader that sees the line
+        // always finds the patch.
+        String diff = record.getDiff();
+        if (diff != null) {
+            writeTextAtomically(diffDir(), record.getId() + ".patch", diff,
+                    "diff patch of change record " + record.getId());
+        }
         appendLine(changesDir(), monthOf(record.getAt()), changeRecordToJson(record));
     }
 
@@ -179,12 +215,108 @@ public final class FileStore implements Store {
     public List<ChangeRecord> listChangeRecords(YearMonth month) {
         List<ChangeRecord> records = new ArrayList<>();
         for (String line : readLines(changesDir(), month)) {
-            records.add(changeRecordFromJson(JSONObject.fromObject(line)));
+            ChangeRecord record = changeRecordFromJson(JSONObject.fromObject(line));
+            if (record.getDiff() == null) {
+                record.setDiff(readTextOrNull(
+                        PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
+            }
+            records.add(record);
         }
         return records;
     }
 
     // ---------------------------------------------------------------- I/O helpers
+
+    /** Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}). */
+    private void saveXmlEntity(Path dir, String id, Object entity, String what) {
+        Path target = PathCodec.resolveUnder(dir, id + ".xml");
+        writeLock.lock();
+        try {
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, id, ".tmp");
+            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                xstream.toXML(entity, writer);
+            }
+            moveAtomically(tmp, target);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to save " + what + " " + id, e);
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private <T> T loadXmlEntity(Path dir, String id, Class<T> type, String what) {
+        Objects.requireNonNull(id, "id");
+        Path file = PathCodec.resolveUnder(dir, id + ".xml");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            return type.cast(xstream.fromXML(reader));
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load " + what + " " + id, e);
+        }
+    }
+
+    private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
+        List<T> entities = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return entities;
+        }
+        List<Path> files = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.xml")) {
+            for (Path file : stream) {
+                files.add(file);
+            }
+        } catch (NoSuchFileException e) {
+            return entities;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to list " + what + " files in " + dir, e);
+        }
+        // Same directory for every entry, so the full path sorts identically to the file name.
+        files.sort(Comparator.comparing(Path::toString));
+        for (Path file : files) {
+            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                entities.add(type.cast(xstream.fromXML(reader)));
+            } catch (NoSuchFileException e) {
+                // Deleted between listing and reading; skip.
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to load " + what + " file " + file, e);
+            }
+        }
+        return entities;
+    }
+
+    /** Writes a plain-text file atomically (temp file, then {@code ATOMIC_MOVE}). */
+    private void writeTextAtomically(Path dir, String fileName, String text, String what) {
+        Path target = PathCodec.resolveUnder(dir, fileName);
+        writeLock.lock();
+        try {
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, "write", ".tmp");
+            Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+            moveAtomically(tmp, target);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write " + what, e);
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private static String readTextOrNull(Path file) {
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read " + file, e);
+        }
+    }
 
     private static void moveAtomically(Path tmp, Path target) throws IOException {
         try {
@@ -293,7 +425,8 @@ public final class FileStore implements Store {
         putIfNotNull(json, "user", record.getUser());
         json.element("at", record.getAt().toEpochMilli());
         putIfNotNull(json, "grantId", record.getGrantId());
-        putIfNotNull(json, "diff", record.getDiff());
+        // The diff text is intentionally NOT inlined: it lives in changes/diff/<id>.patch
+        // (see appendChangeRecord). Reading still accepts a legacy inline "diff" field.
         putIfNotNull(json, "detail", record.getDetail());
         return json;
     }

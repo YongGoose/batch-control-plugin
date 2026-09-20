@@ -147,12 +147,17 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return causes;
     }
 
-    /** English guidance with the word "approval" and a link path containing "batch-control". */
+    /**
+     * English guidance with the word "approval" and a link containing "batch-control", pointing
+     * at the per-job request form (spec-review-S2 MINOR 2: that is where a request is created;
+     * the global landing page only lists requests).
+     */
     private static String approvalRequiredMessage(Job<?, ?> job) {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         String rootUrl = jenkins != null && jenkins.getRootUrl() != null ? jenkins.getRootUrl() : "/";
         return "Approval required: job '" + job.getFullName()
                 + "' only runs through an approved batch-control run request. "
-                + "Submit a run request at " + rootUrl + "batch-control/ and wait for approval.";
+                + "Submit a run request at " + rootUrl + job.getUrl()
+                + "batch-control/ and wait for approval.";
     }
 }

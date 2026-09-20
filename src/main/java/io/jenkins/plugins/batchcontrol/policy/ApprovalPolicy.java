@@ -86,10 +86,24 @@ public final class ApprovalPolicy {
      * @throws AccessDeniedException if the caller may not decide the request
      */
     public static boolean checkDecision(RunRequest request) {
+        return checkDecision(request.getId(), request.getRequester(), request.getApprover());
+    }
+
+    /**
+     * Request-type-agnostic decision check, shared by run requests and grant requests
+     * (SPEC item 8 reuses the SPEC item 3 approver rules).
+     *
+     * @param requestId the request id (for error messages only)
+     * @param requester the request's requester id
+     * @param designatedApprover the request's currently designated approver id
+     * @return {@code true} when this decision is a self-approval (requester == decider)
+     * @throws AccessDeniedException if the caller may not decide the request
+     */
+    public static boolean checkDecision(String requestId, String requester, String designatedApprover) {
         String caller = Jenkins.getAuthentication2().getName();
-        if (!caller.equals(request.getApprover())) {
+        if (!caller.equals(designatedApprover)) {
             throw new AccessDeniedException(
-                    "Only the designated approver may decide request " + request.getId() + ".");
+                    "Only the designated approver may decide request " + requestId + ".");
         }
         // Both conditions are required at decision time: permission AND list membership.
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
@@ -97,7 +111,7 @@ public final class ApprovalPolicy {
             throw new AccessDeniedException(
                     "User '" + caller + "' is no longer on the configured approver list.");
         }
-        boolean selfApproval = caller.equals(request.getRequester());
+        boolean selfApproval = caller.equals(requester);
         if (selfApproval && !selfApprovalAllowedForCaller()) {
             throw new AccessDeniedException(
                     "Separation of duties: you may not decide your own request.");
