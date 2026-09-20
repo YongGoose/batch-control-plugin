@@ -1,0 +1,115 @@
+package io.jenkins.plugins.batchcontrol;
+
+import hudson.security.GlobalMatrixAuthorizationStrategy;
+import hudson.security.Permission;
+import hudson.security.PermissionGroup;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import java.util.Arrays;
+import java.util.List;
+import jenkins.model.Jenkins;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.Page;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
+import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+/**
+ * SPEC item 2 (permission system). Matrix rows T-02-01, T-02-02, T-02-05.
+ * T-02-03 and T-02-04 (admin self-approval) need the approval service and are deferred to slice S2.
+ *
+ * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
+ */
+public class PermissionsTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
+    /** T-02-01: a user without BatchControl/Manage cannot save the global configuration (403). */
+    @Test
+    public void t_02_01_userWithoutManageCannotSaveGlobalConfig() throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
+                .grant(Jenkins.READ,
+                        BatchControlPermissions.REQUEST,
+                        BatchControlPermissions.APPROVE,
+                        BatchControlPermissions.REQUEST_GRANT,
+                        BatchControlPermissions.VIEW_HISTORY).everywhere().to("u1"));
+
+        JenkinsRule.WebClient wc = j.createWebClient()
+                .withThrowExceptionOnFailingStatusCode(false)
+                .login("u1");
+        Page page = wc.getPage(new WebRequest(wc.createCrumbedUrl("configSubmit"), HttpMethod.POST));
+        assertEquals("a user holding every BatchControl permission except Manage must get 403",
+                403, page.getWebResponse().getStatusCode());
+        assertFalse("the rejected POST must not have changed any switch",
+                BatchControlGlobalConfiguration.get().isRunControlEnabled());
+    }
+
+    /** T-02-02: the five permissions appear as a "Batch Control" group in the Matrix Authorization screen. */
+    @Test
+    public void t_02_02_matrixScreenShowsBatchControlGroupWithFivePermissions() throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        GlobalMatrixAuthorizationStrategy strategy = new GlobalMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        j.jenkins.setAuthorizationStrategy(strategy);
+
+        PermissionGroup group = BatchControlPermissions.GROUP;
+        assertEquals("Batch Control", group.title.toString());
+
+        List<Permission> permissions = group.getPermissions();
+        Permission[] expected = {
+                BatchControlPermissions.REQUEST,
+                BatchControlPermissions.APPROVE,
+                BatchControlPermissions.REQUEST_GRANT,
+                BatchControlPermissions.VIEW_HISTORY,
+                BatchControlPermissions.MANAGE,
+        };
+        String[] expectedNames = {"Request", "Approve", "RequestGrant", "ViewHistory", "Manage"};
+        for (int i = 0; i < expected.length; i++) {
+            assertTrue(expectedNames[i] + " must belong to the Batch Control group",
+                    permissions.contains(expected[i]));
+            assertEquals(expectedNames[i], expected[i].name);
+            assertTrue(expectedNames[i] + " must be enabled so authorization strategies expose it",
+                    expected[i].getEnabled());
+        }
+
+        HtmlPage page = j.createWebClient().login("admin").goTo("configureSecurity");
+        assertTrue("the security configuration screen must show the Batch Control permission group",
+                page.asNormalizedText().contains("Batch Control"));
+    }
+
+    /** T-02-05: a Manage holder can POST the global config form; values are saved (form round-trip keeps them). */
+    @Test
+    public void t_02_05_manageUserCanSaveGlobalConfig() throws Exception {
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("m1")); // BatchControl/Manage is implied by Administer
+
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setApprovers(Arrays.asList("a1", "a2"));
+        cfg.setAllowAdminSelfApproval(false);
+        cfg.setPendingTimeoutHours(48);
+        cfg.save();
+
+        JenkinsRule.WebClient wc = j.createWebClient().login("m1");
+        HtmlForm form = wc.goTo("configure").getFormByName("config");
+        j.submit(form); // must succeed (200) for a Manage holder
+
+        BatchControlGlobalConfiguration reloaded = BatchControlGlobalConfiguration.get();
+        assertEquals("approver list must survive the config form round-trip",
+                Arrays.asList("a1", "a2"), reloaded.getApprovers());
+        assertFalse(reloaded.isAllowAdminSelfApproval());
+        assertEquals(48, reloaded.getPendingTimeoutHours());
+    }
+}

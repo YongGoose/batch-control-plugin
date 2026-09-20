@@ -16,27 +16,27 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 | ID | SPEC | 계층 | 우선순위 | Given | When | Then | 테스트 파일 |
 |---|---|---|---|---|---|---|---|
-| T-01-01 | 1 | integration | P0 | 플러그인 설치, 스위치 모두 off, approvalRequired=true인 잡 | Build Now | 빌드가 정상 실행된다 | |
-| T-01-02 | 1 | integration | P0 | runControlEnabled=false | 관리자가 true로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, false→true)가 남는다 | |
-| T-01-03 | 1 | integration | P0 | 스위치 모두 off | 잡 설정 변경 + 잡 삭제 | 이전과 동일하게 성공한다(차단 없음) | |
-| T-01-04 | 1 | integration | P1 | runControlEnabled=true, changeControlEnabled=false | 잡 설정 변경·삭제 + 잡 페이지 조회 | 변경 통제 차단 없음(성공), 변경 통제 관련 UI가 나타나지 않는다 | |
-| T-01-05 | 1 | integration | P1 | changeControlEnabled=true, runControlEnabled=false, approvalRequired=true 잡 | Build Now + 잡 페이지 조회 | 빌드 실행됨(실행 차단 없음), Request Run 등 실행 통제 UI가 나타나지 않는다 | |
-| T-01-06 | 1 | integration | P1 | runControlEnabled=true | 관리자가 false로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, true→false)가 남는다 | |
-| T-02-01 | 2 | integration | P0 | Manage 없는 사용자 | 전역 설정 POST | 403 | |
-| T-02-02 | 2 | integration | P1 | Matrix Authorization 전략 활성 | 권한 설정 화면 조회 | "Batch Control" 그룹에 Request/Approve/RequestGrant/ViewHistory/Manage 5종이 표시된다 | |
-| T-02-03 | 2 | integration | P0 | 관리자(Overall/Administer), allowAdminSelfApproval=true(기본) | 본인 요청을 본인이 승인 | 승인 성공, 요청에 selfApproved=true 기록 | |
-| T-02-04 | 2 | integration | P0 | allowAdminSelfApproval=false | 관리자가 본인 요청 승인 시도 | 거부된다(직무 분리 적용), 상태 PENDING 유지 | |
-| T-02-05 | 2 | integration | P1 | Manage 권한 있는 사용자 | 전역 설정·결재자 목록 POST | 200, 저장된다 | |
+| T-01-01 | 1 | integration | P0 | 플러그인 설치, 스위치 모두 off, approvalRequired=true인 잡 | Build Now | 빌드가 정상 실행된다 | GlobalSwitchTest |
+| T-01-02 | 1 | integration | P0 | runControlEnabled=false | 관리자가 true로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, false→true)가 남는다 | GlobalSwitchTest |
+| T-01-03 | 1 | integration | P0 | 스위치 모두 off | 잡 설정 변경 + 잡 삭제 | 이전과 동일하게 성공한다(차단 없음) | GlobalSwitchTest |
+| T-01-04 | 1 | integration | P1 | runControlEnabled=true, changeControlEnabled=false | 잡 설정 변경·삭제 + 잡 페이지 조회 | 변경 통제 차단 없음(성공), 변경 통제 관련 UI가 나타나지 않는다 | GlobalSwitchTest |
+| T-01-05 | 1 | integration | P1 | changeControlEnabled=true, runControlEnabled=false, approvalRequired=true 잡 | Build Now + 잡 페이지 조회 | 빌드 실행됨(실행 차단 없음), Request Run 등 실행 통제 UI가 나타나지 않는다 | GlobalSwitchTest |
+| T-01-06 | 1 | integration | P1 | runControlEnabled=true | 관리자가 false로 변경 | ChangeRecord(CONFIG_TOGGLE, admin, true→false)가 남는다 | GlobalSwitchTest |
+| T-02-01 | 2 | integration | P0 | Manage 없는 사용자 | 전역 설정 POST | 403 | PermissionsTest |
+| T-02-02 | 2 | integration | P1 | Matrix Authorization 전략 활성 | 권한 설정 화면 조회 | "Batch Control" 그룹에 Request/Approve/RequestGrant/ViewHistory/Manage 5종이 표시된다 | PermissionsTest |
+| T-02-03 | 2 | integration | P0 | 관리자(Overall/Administer), allowAdminSelfApproval=true(기본) | 본인 요청을 본인이 승인 | 승인 성공, 요청에 selfApproved=true 기록 | S2로 이월(결재 서비스 필요) |
+| T-02-04 | 2 | integration | P0 | allowAdminSelfApproval=false | 관리자가 본인 요청 승인 시도 | 거부된다(직무 분리 적용), 상태 PENDING 유지 | S2로 이월(결재 서비스 필요) |
+| T-02-05 | 2 | integration | P1 | Manage 권한 있는 사용자 | 전역 설정·결재자 목록 POST | 200, 저장된다 | PermissionsTest |
 | T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | |
 | T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | |
 | T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | |
 | T-03-04 | 3 | integration | P1 | approvers=[a1,a2], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a2로 변경 | 성공, 요청 이력에 (a1, a2, 변경자, 시각)이 남는다 | |
 | T-03-05 | 3 | integration | P1 | 이미 결재된(APPROVED) 요청 | 요청자가 결재자 변경 시도 | 거부 (결재 전까지만 변경 가능) | |
 | T-03-06 | 3 | integration | P1 | 관리자, allowAdminSelfApproval=true | 관리자가 본인을 결재자로 지정해 요청 | 요청 생성 성공 (관리자 예외) | |
-| T-04-01 | 4 | integration | P0 | PENDING 요청 1건 | Jenkins 재시작(JenkinsSessionRule) | PENDING 그대로 복구 | |
-| T-04-02 | 4 | integration | P0 | APPROVED, 큐 투입 전 | 재시작 | 재시작 후 정확히 1회 투입 | |
-| T-04-03 | 4 | integration | P0 | 승인 요청으로 실행 완료된 빌드 #N, RunRecord 존재 | 빌드 #N 삭제(보관 정책 상당) | RunRecord와 관련 요청이 여전히 조회된다 | |
-| T-04-04 | 4 | integration | P1 | 저장된 RunRecord·ChangeRecord | 수정·삭제 HTTP 엔드포인트 호출 시도 | 404 또는 405 — 수정·삭제 API가 존재하지 않는다(추가 전용) | |
+| T-04-01 | 4 | integration | P0 | PENDING 요청 1건 | Jenkins 재시작(JenkinsSessionRule) | PENDING 그대로 복구 | StoreDurabilityTest |
+| T-04-02 | 4 | integration | P0 | APPROVED, 큐 투입 전 | 재시작 | 재시작 후 정확히 1회 투입 | S2로 이월(결재 서비스 필요) |
+| T-04-03 | 4 | integration | P0 | 승인 요청으로 실행 완료된 빌드 #N, RunRecord 존재 | 빌드 #N 삭제(보관 정책 상당) | RunRecord와 관련 요청이 여전히 조회된다 | StoreDurabilityTest |
+| T-04-04 | 4 | integration | P1 | 저장된 RunRecord·ChangeRecord | 수정·삭제 HTTP 엔드포인트 호출 시도 | 404 또는 405 — 수정·삭제 API가 존재하지 않는다(추가 전용) | S2로 이월(웹 엔드포인트 필요) |
 | T-05-01 | 5 | integration | P0 | 승인 대상 잡, 파라미터 {DATE=2026-09-01} | 요청→승인 | 실행된 빌드 파라미터 == {DATE=2026-09-01} | |
 | T-05-02 | 5 | integration | P0 | 요청 폼 | 사유 빈 값 | 거부 | |
 | T-05-03 | 5 | integration | P0 | APPROVED 요청 | 저장된 파라미터 변경 엔드포인트/폼 접근 시도 | 존재하지 않음(404/405) — 바꾸려면 새 요청 필요 | |
@@ -109,13 +109,13 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-12-03 | 12 | integration | P1 | 실행 기록·오류 건·변경 기록·요청 이력 데이터 각각 존재 | 각 화면에서 기간 필터 적용 + CSV 내보내기 | 4종 모두 필터 결과 정확, CSV 다운로드 성공 | |
 | T-12-04 | 12 | integration | P1 | 한 달간 실행 SUCCESS 2 / FAILURE 1 / UNSTABLE 1, 요청 승인 1 / 반려 1, Incident OPEN 1 / RESOLVED 1 | 월별 집계 조회 | 실행 수·성공/실패/불안정 수·오류 OPEN/RESOLVED 수·승인/반려 수가 모두 정확 | |
 | T-12-05 | 12 | integration | P0 | ViewHistory 없는 사용자 | CSV 내보내기 엔드포인트 호출 (4종 각각) | 403 | |
-| T-CFG-01 | 5절 | integration | P1 | 신규 설치 (설정 저장 이력 없음) | 전역 설정 조회 | 기본값이 SPEC 5절 표와 일치: runControlEnabled=false, changeControlEnabled=false, approvers=[], allowAdminSelfApproval=true, pendingTimeoutHours=72, approvedRunTimeoutMinutes=60, grantDurationOptions=[15,30,60], maxGrantMinutes=240, incidentResults=[FAILURE,UNSTABLE], retentionMonths=24 | |
-| T-CFG-02 | 5절 | integration | P1 | 전역 설정을 기본값과 다르게 저장 | 재시작 | 저장한 값 유지 | |
-| T-CFG-03 | 5절 | integration | P2 | 전역 설정 폼 | pendingTimeoutHours에 음수/0 등 잘못된 값 저장 시도 | 거부되거나 기존 값 유지 (임의 값으로 저장되지 않음) | |
+| T-CFG-01 | 5절 | integration | P1 | 신규 설치 (설정 저장 이력 없음) | 전역 설정 조회 | 기본값이 SPEC 5절 표와 일치: runControlEnabled=false, changeControlEnabled=false, approvers=[], allowAdminSelfApproval=true, pendingTimeoutHours=72, approvedRunTimeoutMinutes=60, grantDurationOptions=[15,30,60], maxGrantMinutes=240, incidentResults=[FAILURE,UNSTABLE], retentionMonths=24 | GlobalConfigDefaultsTest |
+| T-CFG-02 | 5절 | integration | P1 | 전역 설정을 기본값과 다르게 저장 | 재시작 | 저장한 값 유지 | GlobalConfigDefaultsTest |
+| T-CFG-03 | 5절 | integration | P2 | 전역 설정 폼 | pendingTimeoutHours에 음수/0 등 잘못된 값 저장 시도 | 거부되거나 기존 값 유지 (임의 값으로 저장되지 않음) | GlobalConfigDefaultsTest |
 | T-SEC-01 | 6 | integration | P0 | 결재자 | GET /batch-control/requests/<id>/approve | 405 또는 거부 (POST만) | |
 | T-SEC-02 | 5 | integration | P0 | Approve 권한 없는 사용자 | POST approve | 403 | |
-| T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | |
-| T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x", 제어문자 포함 이름, 255자 초과 초장문 이름 (RT-12 확장) | 스냅숏·변경 파일 경로 계산 | "../x"는 예외(경로 탈출 차단), 제어문자·초장문 이름은 안전하게 인코딩되어 기록 누락·타 잡 파일 덮어쓰기가 없다 | |
+| T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | PathCodecTest |
+| T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x", 제어문자 포함 이름, 255자 초과 초장문 이름 (RT-12 확장) | 스냅숏·변경 파일 경로 계산 | "../x"는 예외(경로 탈출 차단), 제어문자·초장문 이름은 안전하게 인코딩되어 기록 누락·타 잡 파일 덮어쓰기가 없다 | PathCodecTest |
 | T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | |
 | T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | |
 | T-SEC-07 | 6절 | integration | P0 | Password 파라미터를 가진 잡 | 요청→승인→실행 후 요청 상세·RunRecord·CSV 조회 | 비밀값이 어디에도 평문으로 노출되지 않는다 (마스킹 저장) | |
@@ -153,7 +153,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 5. **테스트 의존성 필요** (pom.xml은 release-manager 소유): `org.jenkins-ci.plugins:pipeline-build-step` (T-06-05/10/11/12, PoC 보고서에서 기요청), `job-dsl` (T-09-06), `role-strategy` (T-08-08), `cloudbees-folder` (T-08-11, T-09-08), `matrix-auth` (권한 시나리오 전반), `workflow-multibranch` 또는 `branch-api` (T-10-07).
 6. **T-06-12 부수 효과**: build 스텝 차단 시 상위 잡이 FAILURE로 끝나는 것은 PoC에서 확인된 Jenkins 동작이며, 이 행은 그 동작을 회귀 고정한다(문서화 대상).
 7. **성능 요구**(6절: 하루 5,000 실행 규모에서 최근 7일 조회 2초 이내)는 자동 회귀 매트릭스에서 제외하고 Phase 5에서 로컬 수동 측정으로 확인한다.
-8. **T-RT-\* 병합 완료 (red-team-01 2차 병합).** `T-RT-<nn>`의 `<nn>`은 `docs/reports/red-team-01.md`의 RT 번호와 일치시켰다(추적성). 번호가 비는 곳(04, 08, 09, 12)은 아래 "red-team 시나리오 제외 사유" 절에 있다. **주의: `(SPEC 보강 필요: R-n)`이 붙은 T-RT 행의 Then은 현행 SPEC 수용 기준이 아니라 red-team 제안(R-1~R-8)에 기반한 "바라는 동작"이다.** 사람이 SPEC/DECISIONS에서 R-n을 채택·기각하기 전까지 해당 행은 확정이 아니며, 기각되면 행을 수정·제외한다. R-n 없는 T-RT 행(T-RT-06, T-RT-07)은 현행 SPEC 문언(8절 "만료 시각 경과 후 첫 권한 검사부터 거부", 3절 결재자 변경 이력)에서 직접 도출했다.
+8. **T-RT-\* 확정 (R-1~R-8 SPEC 채택 완료).** `T-RT-<nn>`의 `<nn>`은 `docs/reports/red-team-01.md`의 RT 번호와 일치시켰다(추적성). 번호가 비는 곳(04, 08, 09, 12)은 아래 "red-team 시나리오 제외 사유" 절에 있다. 사람이 red-team 제안 R-1~R-8을 전부 SPEC에 채택했다(D-16~D-23으로 SPEC v1.0 수용 기준에 반영됨). 따라서 **모든 T-RT 행의 Then은 이제 현행 SPEC 수용 기준에서 직접 도출된 확정 행이다.** 행 안에 남아 있는 `(SPEC 보강 필요: R-n)` 표기는 채택 이전의 이력 주석이며, 해당 R-n이 D-16~D-23으로 SPEC에 반영되었다는 근거 표시로 읽는다(행 문언은 추적성을 위해 유지). R-n 없는 T-RT 행(T-RT-06, T-RT-07)은 원래부터 현행 SPEC 문언(8절 "만료 시각 경과 후 첫 권한 검사부터 거부", 3절 결재자 변경 이력)에서 직접 도출했다.
 9. **ID 규칙 보충**: 전역 설정 기본값(SPEC 5절 표)은 항목 5(실행 요청)와 번호가 겹치지 않도록 `T-CFG-*`, 비기능 보안(6절)은 `T-SEC-*`를 쓴다. 기존 시드의 T-SEC-01~04는 SPEC 열이 관련 항목 번호를 가리키던 것을 그대로 유지했다. T-SEC-04는 RT-12의 실질 엣지(제어문자·초장문 이름)를 흡수해 확장했다(행 추가 없음).
 10. **동시성 행 재현 방법**(T-RT-14/15/16): 2-스레드 동시 POST(ExecutorService + CyclicBarrier 상당)로 경합을 재현하고, 결과 단언은 상태·빌드 수로만 한다. T-RT-16은 Clock 이동 + PeriodicWork 수동 트리거(비고 1·2 전제)와 조합한다.
 11. **T-RT-17 전제**: "scheduleBuild2 완료·onStarted 미도달" 크래시 타이밍을 재현하려면 큐 투입 직후 세션을 종료할 수 있는 훅(예: QuietDown 상태에서 투입 후 세션 재시작)이 필요하다. 재현이 불가능하면 최소한 T-04-02에 이 타이밍 명시를 추가한 통합 테스트로 근사한다. → 요청: core-dev에 복구 로직의 idempotency 키 설계 공유.
@@ -175,4 +175,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **계층**: unit 2 / integration 116 / e2e 9
 - **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 7, T-E2E 8, T-RT 16
 - **T-RT 우선순위**: P0 9 (T-RT-01/02/03/05/06/14/15/16/17), P1 5 (T-RT-07/10/11/13/19), P2 2 (T-RT-18/20)
-- **사람 게이트 대기(SPEC 보강 필요)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17
+- **red-team 제안 채택 확정(비고 8, D-16~D-23 반영)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17
