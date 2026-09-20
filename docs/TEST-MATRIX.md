@@ -90,25 +90,25 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-09-09 | 9 | integration | P1 | 활성 Grant가 없는 사용자(관리자) | 설정 변경 | ChangeRecord.grantId == null, "권한 부여 없는 변경"으로 조회된다 | ChangeRecordTest |
 | T-09-10 | 9 | integration | P1 | changeControlEnabled=false, runControlEnabled=true | 잡 설정 변경 | ChangeRecord가 남는다 (기록은 어느 스위치든 켜지면 활성) | ChangeRecordTest |
 | T-09-11 | 9 | integration | P2 | 두 스위치 모두 off | 잡 설정 변경 | ChangeRecord가 남지 않는다 | ChangeRecordTest |
-| T-10-01 | 10 | integration | P0 | Freestyle 1회, Pipeline 1회 실행 | 대시보드 조회 | 2건, causeType 정확 | |
-| T-10-02 | 10 | integration | P1 | 실행 중 빌드 | u1이 중단 | RunRecord.abortedBy == u1 | |
-| T-10-03 | 10 | integration | P1 | USER/TIMER/UPSTREAM/APPROVED_REQUEST/SCM 원인으로 각각 실행 + 기타 Cause 1건 | RunRecord 조회 | causeType이 각각 USER/TIMER/UPSTREAM/APPROVED_REQUEST/SCM으로, 기타는 OTHER로 분류된다 | |
-| T-10-04 | 10 | integration | P0 | 승인 요청으로 실행된 빌드 | RunRecord와 요청 조회 | causeType=APPROVED_REQUEST, runRequestId로 요청 상세에 연결, 요청의 executedRunId 설정 | |
-| T-10-05 | 10 | integration | P0 | ViewHistory 없는 사용자 | 대시보드 GET | 403 | |
-| T-10-06 | 10 | e2e | P2 | 8일 전 실행 1건 + 최근 실행 60건 | 대시보드 기본 화면 | 최근 7일 건만 표시, 페이지당 50건 페이징 | |
-| T-10-07 | 10 | integration | P2 | Multibranch 하위 잡 | 브랜치 잡 실행 | RunRecord 기록됨, 실행 통제는 적용되지 않음(기록만 — SPEC 6절 호환) | |
-| T-11-01 | 11 | integration | P0 | cron 잡이 FAILURE | 완료 | Incident OPEN 생성, logTail 100줄 이하 | |
-| T-11-02 | 11 | integration | P0 | Incident i1 | 재실행 요청→승인→SUCCESS | i1.resolvedByRunId 설정, 상태는 OPEN 유지 | |
-| T-11-03 | 11 | integration | P0 | incidentResults=[FAILURE] | UNSTABLE 완료 | Incident 없음 | |
-| T-11-04 | 11 | integration | P1 | OPEN Incident | u1이 ACKNOWLEDGED(코멘트) → u2가 RESOLVED(코멘트) | 각 전이에 사용자·시각·코멘트가 transitions에 남는다 | |
-| T-11-05 | 11 | integration | P1 | RESOLVED Incident | OPEN 또는 ACKNOWLEDGED로 되돌리기 시도 | 거부 (역방향 전이 없음), RESOLVED 상태에서 코멘트 추가는 가능 | |
-| T-11-06 | 11 | integration | P1 | 파라미터 {DATE=2026-09-01} 빌드의 FAILURE로 생성된 Incident i1 | i1에서 "재실행 요청" | 원래 파라미터가 채워진 RunRequest 생성, incidentId=i1 연결, i1.rerunRequestIds에 추가 | |
-| T-11-07 | 11 | integration | P2 | incidentResults=[FAILURE, UNSTABLE, ABORTED] | ABORTED 완료 | Incident 생성 | |
-| T-12-01 | 12 | integration | P0 | ViewHistory 없는 사용자 | GET /batch-control/history | 403 | |
-| T-12-02 | 12 | integration | P1 | retentionMonths=1, 3개월 전 runs 파일 | RetentionPeriodicWork | 파일 삭제 + ChangeRecord(RETENTION) | |
-| T-12-03 | 12 | integration | P1 | 실행 기록·오류 건·변경 기록·요청 이력 데이터 각각 존재 | 각 화면에서 기간 필터 적용 + CSV 내보내기 | 4종 모두 필터 결과 정확, CSV 다운로드 성공 | |
-| T-12-04 | 12 | integration | P1 | 한 달간 실행 SUCCESS 2 / FAILURE 1 / UNSTABLE 1, 요청 승인 1 / 반려 1, Incident OPEN 1 / RESOLVED 1 | 월별 집계 조회 | 실행 수·성공/실패/불안정 수·오류 OPEN/RESOLVED 수·승인/반려 수가 모두 정확 | |
-| T-12-05 | 12 | integration | P0 | ViewHistory 없는 사용자 | CSV 내보내기 엔드포인트 호출 (4종 각각) | 403 | |
+| T-10-01 | 10 | integration | P0 | Freestyle 1회, Pipeline 1회 실행 | 대시보드 조회 | 2건, causeType 정확 | RunRecordListenerTest |
+| T-10-02 | 10 | integration | P1 | 실행 중 빌드 | u1이 중단 | RunRecord.abortedBy == u1 | RunRecordListenerTest |
+| T-10-03 | 10 | integration | P1 | USER/TIMER/UPSTREAM/APPROVED_REQUEST/SCM 원인으로 각각 실행 + 기타 Cause 1건 | RunRecord 조회 | causeType이 각각 USER/TIMER/UPSTREAM/APPROVED_REQUEST/SCM으로, 기타는 OTHER로 분류된다 | RunRecordListenerTest |
+| T-10-04 | 10 | integration | P0 | 승인 요청으로 실행된 빌드 | RunRecord와 요청 조회 | causeType=APPROVED_REQUEST, runRequestId로 요청 상세에 연결, 요청의 executedRunId 설정 | RunRecordListenerTest |
+| T-10-05 | 10 | integration | P0 | ViewHistory 없는 사용자 | 대시보드 GET | 403 | RunRecordListenerTest |
+| T-10-06 | 10 | e2e | P2 | 8일 전 실행 1건 + 최근 실행 60건 | 대시보드 기본 화면 | 최근 7일 건만 표시, 페이지당 50건 페이징 | Phase 5 (e2e) |
+| T-10-07 | 10 | integration | P2 | Multibranch 하위 잡 | 브랜치 잡 실행 | RunRecord 기록됨, 실행 통제는 적용되지 않음(기록만 — SPEC 6절 호환) | RunRecordListenerTest (approximated, note 22) |
+| T-11-01 | 11 | integration | P0 | cron 잡이 FAILURE | 완료 | Incident OPEN 생성, logTail 100줄 이하 | IncidentTest |
+| T-11-02 | 11 | integration | P0 | Incident i1 | 재실행 요청→승인→SUCCESS | i1.resolvedByRunId 설정, 상태는 OPEN 유지 | IncidentTest |
+| T-11-03 | 11 | integration | P0 | incidentResults=[FAILURE] | UNSTABLE 완료 | Incident 없음 | IncidentTest |
+| T-11-04 | 11 | integration | P1 | OPEN Incident | u1이 ACKNOWLEDGED(코멘트) → u2가 RESOLVED(코멘트) | 각 전이에 사용자·시각·코멘트가 transitions에 남는다 | IncidentTest |
+| T-11-05 | 11 | integration | P1 | RESOLVED Incident | OPEN 또는 ACKNOWLEDGED로 되돌리기 시도 | 거부 (역방향 전이 없음), RESOLVED 상태에서 코멘트 추가는 가능 | IncidentTest (note 24) |
+| T-11-06 | 11 | integration | P1 | 파라미터 {DATE=2026-09-01} 빌드의 FAILURE로 생성된 Incident i1 | i1에서 "재실행 요청" | 원래 파라미터가 채워진 RunRequest 생성, incidentId=i1 연결, i1.rerunRequestIds에 추가 | IncidentTest |
+| T-11-07 | 11 | integration | P2 | incidentResults=[FAILURE, UNSTABLE, ABORTED] | ABORTED 완료 | Incident 생성 | IncidentTest |
+| T-12-01 | 12 | integration | P0 | ViewHistory 없는 사용자 | GET /batch-control/history | 403 | HistoryWebTest |
+| T-12-02 | 12 | integration | P1 | retentionMonths=1, 3개월 전 runs 파일 | RetentionPeriodicWork | 파일 삭제 + ChangeRecord(RETENTION) | HistoryWebTest |
+| T-12-03 | 12 | integration | P1 | 실행 기록·오류 건·변경 기록·요청 이력 데이터 각각 존재 | 각 화면에서 기간 필터 적용 + CSV 내보내기 | 4종 모두 필터 결과 정확, CSV 다운로드 성공 | HistoryWebTest |
+| T-12-04 | 12 | integration | P1 | 한 달간 실행 SUCCESS 2 / FAILURE 1 / UNSTABLE 1, 요청 승인 1 / 반려 1, Incident OPEN 1 / RESOLVED 1 | 월별 집계 조회 | 실행 수·성공/실패/불안정 수·오류 OPEN/RESOLVED 수·승인/반려 수가 모두 정확 | HistoryWebTest (note 23) |
+| T-12-05 | 12 | integration | P0 | ViewHistory 없는 사용자 | CSV 내보내기 엔드포인트 호출 (4종 각각) | 403 | HistoryWebTest |
 | T-CFG-01 | 5절 | integration | P1 | 신규 설치 (설정 저장 이력 없음) | 전역 설정 조회 | 기본값이 SPEC 5절 표와 일치: runControlEnabled=false, changeControlEnabled=false, approvers=[], allowAdminSelfApproval=true, pendingTimeoutHours=72, approvedRunTimeoutMinutes=60, grantDurationOptions=[15,30,60], maxGrantMinutes=240, incidentResults=[FAILURE,UNSTABLE], retentionMonths=24 | GlobalConfigDefaultsTest |
 | T-CFG-02 | 5절 | integration | P1 | 전역 설정을 기본값과 다르게 저장 | 재시작 | 저장한 값 유지 | GlobalConfigDefaultsTest |
 | T-CFG-03 | 5절 | integration | P2 | 전역 설정 폼 | pendingTimeoutHours에 음수/0 등 잘못된 값 저장 시도 | 거부되거나 기존 값 유지 (임의 값으로 저장되지 않음) | GlobalConfigDefaultsTest |
@@ -117,7 +117,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | PathCodecTest |
 | T-SEC-04 | 4 | unit | P0 | 잡 이름 "../x", 제어문자 포함 이름, 255자 초과 초장문 이름 (RT-12 확장) | 스냅숏·변경 파일 경로 계산 | "../x"는 예외(경로 탈출 차단), 제어문자·초장문 이름은 안전하게 인코딩되어 기록 누락·타 잡 파일 덮어쓰기가 없다 | PathCodecTest |
 | T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | RunRequestWebTest |
-| T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | RunRequestWebTest (reject·cancel) + GrantWebTest (revoke); Incident 전이·스위치 변경 GET은 S4 |
+| T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | RunRequestWebTest (reject·cancel) + GrantWebTest (revoke) + HistoryWebTest (incident transitions, switch toggle — note 25) |
 | T-SEC-07 | 6절 | integration | P0 | Password 파라미터를 가진 잡 | 요청→승인→실행 후 요청 상세·RunRecord·CSV 조회 | 비밀값이 어디에도 평문으로 노출되지 않는다 (마스킹 저장) | pending P-03 decision |
 | T-E2E-01 | 5,6 | e2e | P0 | requester/approver 계정 | requester 요청 → approver 승인 | 빌드 실행, 대시보드에 요청 ID 연결 표시 | |
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
@@ -134,13 +134,13 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-RT-06 | 8 | integration | P0 | 만료 임박 CONFIGURE Grant(Clock 제어), 다수 잡을 쓰는 일괄 변경 작업(Job DSL seed 상당) | 만료 경계에 걸치도록 일괄 변경 실행 | 만료 시각 이후의 write는 잡 단위로 재검사되어 각각 거부된다(진입 시 1회 검사에 편승 불가) | GrantWindowAbuseTest |
 | T-RT-07 | 3 | integration | P1 | approvers=[a1,a2,a3], 결재자 a1인 PENDING 요청 | 요청자가 결재자를 a1→a2→a3로 연속 변경 후 a3가 승인 | 각 변경이 approverChanges에 (from,to,by,at)로 빠짐없이 남고, 최종 결재자 a3의 승인만 유효하다(감사 추적 보장) | RunRequestServiceTest |
 | T-RT-10 | 6절 | integration | P1 | 사유·파라미터 값·(권한 창) 잡 이름에 `<script>`·`<img onerror>` 페이로드를 담은 요청 | 요청 상세·결재 화면·대시보드 렌더링(WebClient) | 페이로드가 이스케이프되어 텍스트로만 표시된다 — 스크립트 실행·태그 삽입 없음 (SPEC 보강 필요: R-3 상당의 출력 무해화 수용 기준 없음 — CLAUDE.md 규약만 존재) | |
-| T-RT-11 | 12 | integration | P1 | 사유가 `=1+1`, 파라미터 값이 `+HYPERLINK(...)`·`@SUM(...)`·`-2+3`으로 시작하는 요청·실행 기록 | 4종 CSV 내보내기 | 해당 셀이 수식으로 해석되지 않도록 무해화된다(선행 `= + - @` 이스케이프/`'` 프리픽스/인용) (SPEC 보강 필요: R-3) | |
-| T-RT-13 | 11 | integration | P1 | 콘솔에 비밀 토큰 문자열을 출력하고 FAILURE로 끝나는 빌드 | Incident 생성 후 logTail 조회 | Secret 값·알려진 비밀 패턴이 logTail에 평문으로 남지 않는다(마스킹) (SPEC 보강 필요: R-4 — 마스킹 규칙 추가 또는 한계 문서화 결정) | |
+| T-RT-11 | 12 | integration | P1 | 사유가 `=1+1`, 파라미터 값이 `+HYPERLINK(...)`·`@SUM(...)`·`-2+3`으로 시작하는 요청·실행 기록 | 4종 CSV 내보내기 | 해당 셀이 수식으로 해석되지 않도록 무해화된다(선행 `= + - @` 이스케이프/`'` 프리픽스/인용) (SPEC 보강 필요: R-3) | HistoryWebTest (note 26) |
+| T-RT-13 | 11 | integration | P1 | 콘솔에 비밀 토큰 문자열을 출력하고 FAILURE로 끝나는 빌드 | Incident 생성 후 logTail 조회 | Secret 값·알려진 비밀 패턴이 logTail에 평문으로 남지 않는다(마스킹) (SPEC 보강 필요: R-4 — 마스킹 규칙 추가 또는 한계 문서화 결정) | IncidentTest |
 | T-RT-14 | 5 | integration | P0 | PENDING 요청 1건, 승인 POST 2건 준비 | 두 승인 POST를 동시에 실행 | 정확히 1건만 APPROVED가 되고 빌드는 정확히 1회만 투입된다(상태 전이 compare-and-set) (SPEC 보강 필요: R-5) | RequestConcurrencyTest |
 | T-RT-15 | 7 | integration | P0 | PENDING 요청, 요청자의 취소 POST와 결재자의 승인 POST 준비 | 동시에 실행 | 둘 중 하나만 성립한다(선착 CAS). 취소가 이기면 어떤 빌드도 투입되지 않고, CANCELLED 요청에 executedRunId가 남는 등의 상태 혼합이 없다 (SPEC 보강 필요: R-5) | RequestConcurrencyTest |
 | T-RT-16 | 7 | integration | P0 | approvedRunTimeoutMinutes 경계의 APPROVED 요청 | 큐 투입 시도와 ExpiryPeriodicWork 만료 처리를 동시에 진행 | 투입 직전 시각 재확인(check-at-submit)으로 만료 요청은 절대 투입되지 않고, 상태는 EXPIRED/EXECUTED 중 정확히 하나로 수렴한다 (SPEC 보강 필요: R-5) | ExpiryAndCancelTest (비고 13 근사) |
 | T-RT-17 | 4 | integration | P0 | 승인 후 scheduleBuild2 완료·onStarted 미도달(executedRunId=null) 상태에서 재시작(JenkinsSessionRule) | 복구 실행 | 요청당 빌드가 정확히 1회만 존재한다 — 재시작 후 복원된 큐 항목과 복구 재투입이 requestId 기반 idempotency로 중복 제거된다 (SPEC 보강 필요: R-5, R-8) | RestartRecoveryTest (비고 11 근사) |
-| T-RT-18 | 6절 | integration | P2 | Request/RequestGrant 권한만 가진 사용자 | 단시간에 대량(N건) RunRequest·GrantRequest 생성 POST 반복 | 사용자당 PENDING 상한/rate limit으로 거부되거나, 목록 조회·재시작 복구 성능이 한계 내로 유지된다 (SPEC 보강 필요: R-7) | |
+| T-RT-18 | 6절 | integration | P2 | Request/RequestGrant 권한만 가진 사용자 | 단시간에 대량(N건) RunRequest·GrantRequest 생성 POST 반복 | 사용자당 PENDING 상한/rate limit으로 거부되거나, 목록 조회·재시작 복구 성능이 한계 내로 유지된다 (SPEC 보강 필요: R-7) | deferred (D-22) |
 | T-RT-19 | 6절 | integration | P1 | 수 MB급 사유·파라미터 값을 담은 요청 생성 POST | 요청 생성 | 필드별 크기 상한으로 거부되거나 안전하게 절단 저장된다(요청 파일·인메모리 캐시·RunRecord 비대화 방지) (SPEC 보강 필요: R-7) | RequestIntegrityTest |
 | T-RT-20 | 9 | integration | P2 | 활성 CONFIGURE Grant | 동일 잡 config를 짧은 시간에 수백 회 반복 저장(REST config.xml POST 루프) | 변경 기록(diff/스냅숏)이 누락 없이 baseline 정합을 유지하고, 기록 파이프라인이 다른 잡의 기록을 블로킹하지 않는다 (SPEC 보강 필요: R-7) | GrantWindowAbuseTest (bounded: 30 rapid POSTs, 비고 19) |
 
@@ -168,6 +168,11 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 19. **T-RT-05 assertion scope (D-17) and T-RT-20 bounded version (S3)**: T-RT-05 asserts exactly what SPEC 8/D-17 promises — a job created inside an active grant window automatically carries `approvalRequired=true`, so a MANUAL run is blocked after (and independent of) window expiry; timer runs still follow the SPEC 6 timer policy (default pass), so no cron block is asserted. T-RT-20 (P2) is implemented as a bounded regression: 30 rapid `config.xml` POSTs under an active CONFIGURE grant must leave ≥30 CONFIGURE records whose diffs chain against the previous baseline (rev-(n-1) → rev-n), plus one interleaved record of another job (pipeline not blocked). The "hundreds of saves" load variant stays a Phase 5 manual measurement (note 7).
 20. **T-RT-02 wording aligned to D-23 (S3, spec-review-S2 carry-over)**: the row previously said the marker binds to "requestId+job+parameters"; SPEC/D-23 bind the marker to requestId (and thereby the request's job) only — no user-facing path attaches arbitrary parameters to a marker. The row's When/Then were rewritten to requestId+jobFullName binding. The existing RequestIntegrityTest assertions (re-queue and cross-job re-submission both blocked) already match this binding; no test change was needed.
 21. **Grant restart rows split into GrantRestartTest (S3)**: T-08-04/07 need JenkinsSessionRule, which cannot share a class with the plain JenkinsRule used by GrantServiceTest — same split as RestartRecoveryTest in S2.
+22. **T-10-07 approximated (S4)**: the multibranch project is a real `WorkflowMultiBranchProject`, but its branch comes from `SingleSCMSource` over `NullSCM` (no git fixture is available among the test dependencies, so a real SCM indexing run would be brittle). Branch builds may end FAILURE (NullSCM checks out no Jenkinsfile); the row asserts that a completion of any result is recorded for `mb/main` and that, with run control on, a manual user-cause run of the branch child is not blocked. The control-exemption is asserted only in the child's natural state (no approval property is injected — a computed child cannot be configured that way through any product path). If `SingleSCMSource` discovery behaves differently in the resolved scm-api version, re-approximate with the matrix owner.
+23. **T-12-04 summary contract assumption (S4)**: the fixed S4 endpoint contract says `batch-control/history/summary?month=YYYY-MM` "returns counts" without naming a format. The test pins a machine-readable JSON body with keys `runs`, `success`, `failure`, `unstable`, `incidentsOpen`, `incidentsResolved`, `requestsApproved`, `requestsRejected` (whitespace-tolerant `"key": n` matching). → Request: ui-dev to serve the summary as JSON with exactly these keys, or report the actual field names so the test is adjusted.
+24. **T-11-05 comment storage assumption (S4)**: SPEC's Incident model has `transitions` and no separate comment list, so `IncidentService.addComment(id, comment)` on a RESOLVED incident is asserted to append an entry to `transitions` (comment + by recorded, status unchanged RESOLVED).
+25. **T-SEC-06 switch-toggle GET sub-case (S4)**: there is no plugin-owned toggle endpoint — switches change only through the Jenkins global config POST (S1-covered). The test asserts the real invariants: GET `/configure` renders (200) without flipping either switch, and GET `/configSubmit` is rejected (>=400, Jenkins core `@RequirePOST`) leaving both switch values unchanged.
+26. **T-RT-11 assertion shape (S4, D-18)**: the reason (`=1+1`) is a cell of its own in requests.csv, so it is asserted strictly (present and every occurrence preceded by `'`). The parameter payloads must be present in runs.csv; across all four CSVs every payload occurrence is additionally checked to never sit at a raw cell start (position 0 / after a delimiter / after an opening quote) unescaped — occurrences embedded mid-cell (e.g. a `key=value` aggregate) are not formula-injectable and pass, which is exactly the D-18 criterion (cells *starting* with `= + - @`).
 
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
