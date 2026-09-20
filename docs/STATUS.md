@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-20 18:10 — Phase 2 게이트 통과 🧑✓ → Phase 3 S1 시작
+- 사람 결정: 매트릭스 승인. R-1~R-8 권고안 그대로 채택(R-1·3·4·5·6·8 채택, R-2 경량, R-7 크기 상한만). SPEC 수정 위임 허가(이번 건 한정).
+- 반영: SPEC 5·6·7·8·11·12·비기능에 수용 기준 8건 추가, 상태 머신·데이터 모델에 INVALIDATED 추가. DECISIONS 확정 D-16~D-23 기록. test-author가 e2e 4행 추가(T-E2E-05~08, P1) → 최종 127행, P0 80 / P1 40 / P2 7, e2e 9.
+- RT-08 → README "Known limitations" 항목으로 release-manager에 전달 예정(Phase 7).
+- phase-2-matrix → main 머지, phase-3-impl 브랜치 생성.
+- 위임: test-author ← S1(SPEC 1,2,4 + T-CFG + T-SEC-04) 테스트 작성 (src/main 읽기 금지)
+
 ## 2026-09-20 17:40 — Phase 2 완료, 게이트 대기 🧑
 - 위임 결과: test-author 1차(107행) + red-team-01.md(20 시나리오) + 병합 2차(T-RT 16행 추가, 4건 제외 사유 기록). release-manager: pom에 pipeline-build-step·job-dsl·role-strategy·workflow-multibranch test 의존성 추가(전부 BOM 관리, verify 녹색).
 - 최종 매트릭스: 총 123행, P0 80 / P1 36 / P2 7, integration 116 / unit 2 / e2e 5.

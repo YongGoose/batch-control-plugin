@@ -34,6 +34,22 @@
 
 **D-15 | 이름 `batch-control`** | 목적(배치 실행 관리)을 드러내 검색성 좋음. CI용 승인과 구분. | ops-approval, job-gatekeeper: 후보였음.
 
+**D-16 | Upstream 정책 명확화 (R-1)** | `blockUpstream=true` + `allowedUpstreamJobs` 빈/미설정 = 모든 상위 잡 차단(빈 목록은 미설정과 동일), 목록 있으면 그 잡만 통과. `blockUpstream=false` = 전부 통과. 빈 목록의 해석 모호성이 red-team RT-01에서 우회 경로로 지적됨. | 빈 목록을 blockUpstream과 무관하게 전부 차단으로 해석: 기본 개방 원칙(D-12)과 기존 잡 호환성 훼손으로 기각.
+
+**D-17 | 권한 창 내 생성 잡은 approvalRequired 기본 true (R-2 경량)** | 실행 통제 on일 때 활성 Grant 안에서 생성된 잡에 자동 적용. 권한 창에 cron 잡을 심어 만료 후 무승인 실행하는 우회(RT-05) 차단. | 권한 창 내 트리거 설정 자체 금지: 정상 업무(배치 잡 생성) 저해로 기각. 완전 방치: 우회 허용으로 기각.
+
+**D-18 | 출력 무해화 수용 기준 명문화 (R-3)** | CSV 셀 `= + - @` 선행 시 `'` 프리픽스, 모든 화면에서 사용자 입력 이스케이프. HOSTING-CHECKLIST 규약을 SPEC 수용 기준으로 승격해 테스트 근거 확보(RT-10/11). | 체크리스트 규약만 유지: 매트릭스 행의 SPEC 근거 부재로 기각.
+
+**D-19 | logTail 마스킹은 비밀 파라미터·Secret 평문 한정 (R-4)** | Incident logTail 저장 시 해당 빌드의 비밀 파라미터 값과 Secret 평문만 마스킹, 그 외 콘솔 노출 비밀은 한계로 문서화(RT-13). | 범용 비밀 패턴 탐지: 오탐·누락 불가피, 잘못된 안전감 유발로 기각.
+
+**D-20 | 상태 전이 원자성 + check-at-submit + idempotency (R-5)** | 요청 상태 전이는 CAS, 동시 승인·승인/취소 경합은 1건만 성립, 큐 투입 직전 만료 재확인, 복구 재투입은 requestId 기반 중복 제거(RT-14~17). | 파일 락 없는 낙관 재작성: 경합 시 상태 파손으로 기각.
+
+**D-21 | 대상 잡 rename/move 시 요청 INVALIDATED (R-6)** | PENDING/APPROVED 요청의 대상 잡이 rename/move되면 INVALIDATED로 종료하고 이력에 남김. 결재자가 검토한 잡과 다른 잡이 실행되는 스왑 공격(RT-03) 차단. | 잡 신원(UUID) 추적으로 계속 유효 유지: 결재 시점과 다른 맥락(경로·상위 폴더 권한)에서 실행될 위험으로 기각.
+
+**D-22 | 크기 상한만 MVP, rate limit은 2차 (R-7 부분)** | 사유 4,000자, 문자열 파라미터 값 개당 10,000자 초과 시 요청 생성 거부(RT-19). 요청 rate limit·PENDING 상한은 2차. | 즉시 rate limit 도입: 정책 튜닝 비용 대비 MVP 가치 낮아 연기.
+
+**D-23 | 승인 마커는 requestId 바인딩 + 1회 소비 (R-8)** | 마커는 요청 ID에 묶이고 큐 투입 1회로 소비, 재사용(재큐·rebuild)은 차단·기록(RT-02/17). | 무상태 마커: 재사용·재큐 공격 허용으로 기각.
+
 ## 제안 (에이전트가 추가, 사람이 판정)
 
 **P-01 | 2차: Role Strategy용 JIT 구현체(임시 역할 부여 API 활용)** | Phase 1 PoC에서 Role Strategy를 delegate로 래핑하면 권한 판정은 정상이나 역할 관리 화면(`getInstance()`/`persistChanges()`의 전역 전략 instanceof 검사)이 동작 불능임을 확인. C-2 결정에 따라 MVP는 Matrix 계열만 지원하고 제약을 문서화하며, Role Strategy 지원은 2차에서 임시 역할 부여 API 활용으로 검토. | 상태: 사람 승인으로 등록됨 (2026-09-20, Phase 1 게이트)

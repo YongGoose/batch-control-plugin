@@ -123,6 +123,10 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
 | T-E2E-03 | 8 | e2e | P0 | requester | 권한 요청→승인→설정 화면 | 저장 성공, 만료 후 저장 403 안내 | |
 | T-E2E-04 | 12 | e2e | P1 | 실행 10건 | CSV 내보내기 | 10행 + 헤더, 파라미터 열 포함 | |
+| T-E2E-05 | 5 | e2e | P1 | approvalRequired 잡(최근 실행 이력 있음), 요청자·사유·파라미터를 담은 PENDING 요청 | approver가 결재 화면 접속 | 잡 이름·요청자·사유·파라미터 원본·해당 잡의 최근 실행 결과가 한 화면에 함께 표시된다 | |
+| T-E2E-06 | 8 | e2e | P1 | CONFIGURE Grant가 승인됐다가 만료된 requester, 잡 설정 화면을 열어 둔 상태 | 설정 저장 시도 | 권한 창 만료 안내가 표시되고 권한 재요청 링크가 보인다 | |
+| T-E2E-07 | 10 | e2e | P1 | 승인 요청으로 실행된 빌드 1건(대시보드에 APPROVED_REQUEST 행 표시) | 대시보드에서 해당 행의 요청 링크 클릭 | 해당 요청 상세 화면으로 이동한다(요청 ID 일치) | |
+| T-E2E-08 | 3 | e2e | P1 | 실행 통제 on, 전역 설정 approvers가 빈 목록, approvalRequired 잡 (R-1 관련) | requester가 실행 요청 화면 접속 | 결재자 목록이 비어 있다는 경고가 화면에 표시된다 | |
 | T-RT-01 | 6 | integration | P0 | 통제 on, 보호 잡 B(approvalRequired, blockUpstream=true, allowedUpstreamJobs 미설정/빈 목록), 통제 off 잡 A가 build 스텝으로 B 호출 | A 실행 | B 큐 진입 없음 — 빈/미설정 허용 목록은 "전부 차단"으로 해석된다 (SPEC 보강 필요: R-1 — 미설정 시 동작과 Upstream 기본 개방 정책 명확화) | |
 | T-RT-02 | 6 | integration | P0 | 잡 X의 승인 요청 마커(ApprovedRunAction)가 붙은 투입 1회 통과 완료 | 동일 마커/Cause 상당을 다른 잡 Y 또는 다른 파라미터로 재투입 시도(재큐·rebuild 경로 포함) | 통과되지 않는다 — 마커는 requestId+jobFullName+parameters에 바인딩되고 1회만 소비된다 (SPEC 보강 필요: R-8) | |
 | T-RT-03 | 5 | integration | P0 | 잡 A에 대한 APPROVED 요청(큐 투입 전) | A를 A2로 rename, 다른 잡 B를 A로 rename(스왑)한 뒤 투입 시점 도달 | 투입이 거부되거나 원래 잡 신원에만 실행된다 — 결재자가 검토한 잡과 다른 잡은 절대 실행되지 않는다 (SPEC 보강 필요: R-6) | |
@@ -166,9 +170,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 ## 요약 (Phase 2 최종 — red-team 병합 후)
 
-- **총 행 수: 123** (SPEC 도출 107 + T-RT 16)
-- **우선순위**: P0 80 / P1 36 / P2 7
-- **계층**: unit 2 / integration 116 / e2e 5
-- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 7, T-E2E 4, T-RT 16
+- **총 행 수: 127** (SPEC 도출 111 + T-RT 16)
+- **우선순위**: P0 80 / P1 40 / P2 7
+- **계층**: unit 2 / integration 116 / e2e 9
+- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 7, T-E2E 8, T-RT 16
 - **T-RT 우선순위**: P0 9 (T-RT-01/02/03/05/06/14/15/16/17), P1 5 (T-RT-07/10/11/13/19), P2 2 (T-RT-18/20)
 - **사람 게이트 대기(SPEC 보강 필요)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17

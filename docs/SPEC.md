@@ -65,6 +65,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 승인 후 실행된 빌드의 파라미터가 요청 시 저장된 파라미터와 정확히 일치한다.
 - 수용 기준: 승인 후 파라미터를 바꾸는 경로가 없다. 바꾸려면 새 요청을 만들어야 한다.
 - 수용 기준: 반려 사유가 비어 있으면 반려가 거부된다.
+- 수용 기준: 사유가 4,000자를 초과하거나 문자열 파라미터 값이 개당 10,000자를 초과하면 요청 생성이 거부된다. (R-7 부분 채택, D-22)
 - 수용 기준: 실행된 빌드에는 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다.
 - 잡 단위 설정(JobProperty): `approvalRequired`(bool), 잡별 결재자 목록 제한(선택).
 
@@ -75,6 +76,8 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 승인된 요청의 투입(플러그인 내부 Cause 포함)은 통과된다.
 - 수용 기준: TimerTrigger(cron) Cause는 기본 통과, 잡 설정 `blockTimer=true`면 차단.
 - 수용 기준: UpstreamCause는 기본 통과, 잡 설정 `blockUpstream=true`면 차단. `allowedUpstreamJobs` 목록이 있으면 그 잡만 통과.
+- 수용 기준: `blockUpstream=true`일 때 `allowedUpstreamJobs`가 비어 있거나 미설정이면 모든 상위 잡이 차단된다(빈 목록은 미설정과 동일). `blockUpstream=false`면 목록과 무관하게 모든 상위 잡이 통과한다. (R-1, D-16)
+- 수용 기준: 승인 투입 마커는 요청 ID에 묶이고 큐 투입 1회로 소비된다. 동일 마커의 재사용(재큐·rebuild 등)은 차단되고 기록된다. (R-8, D-23)
 - 수용 기준: 차단 시 사용자에게 "승인 필요" 안내와 요청 화면 링크가 표시된다(조용한 실패 금지).
 - 수용 기준: 승인 대상 잡의 사이드바에서 "Build Now"가 "Request Run"으로 대체된다.
 
@@ -85,6 +88,8 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 만료 시 상태가 EXPIRED로 바뀌고 이력에 남는다.
 - 수용 기준: APPROVED 상태에서 `approvedRunTimeoutMinutes` 안에 큐 투입이 안 되면 EXPIRED가 된다(재시작 복구 지연은 예외로 허용: 복구 시점 기준으로 판정).
 - 수용 기준: 취소는 요청자 본인 또는 `Manage` 권한자만 가능하고, PENDING 상태에서만 가능하다.
+- 수용 기준: 요청 상태 전이는 원자적이다(compare-and-set). 동시 승인 2건 중 정확히 1건만 성립하고 빌드는 정확히 1회만 투입된다. 승인과 취소가 경합하면 하나만 성립하며 상태 혼합(예: CANCELLED에 executedRunId)이 없다. 큐 투입 직전에 만료를 재확인(check-at-submit)하여 만료된 승인 건은 절대 투입되지 않는다. (R-5, D-20)
+- 수용 기준: PENDING/APPROVED 요청의 대상 잡이 rename 또는 move되면 요청은 상태 INVALIDATED로 종료되고 이력에 남는다. (R-6, D-21)
 
 ### 변경 통제
 
@@ -99,6 +104,7 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: `Manage` 권한자는 활성 권한을 즉시 회수(revoke)할 수 있고 이력에 남는다.
 - 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다.
 - 수용 기준: Role Strategy가 전역 권한 전략으로 선택된 경우 관리 화면에 JIT 변경 통제 미지원 안내(AdministrativeMonitor)가 표시된다.
+- 수용 기준: 실행 통제가 켜져 있으면, 활성 Grant(권한 창) 안에서 생성된 잡은 `approvalRequired=true`가 기본으로 적용된다(권한 창을 이용해 무승인 실행 경로를 심는 것 방지). (R-2 경량 채택, D-17)
 - 구현: 기존 권한 전략을 감싸는 위임형 AuthorizationStrategy. 관리자가 전역 보안 설정에서 선택.
 
 **9. 변경 자동 기록**
@@ -129,6 +135,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 - 수용 기준: Incident에서 "재실행 요청" 시 원래 파라미터가 채워진 RunRequest가 생성되고 `incidentId`가 연결된다.
 - 수용 기준: 연결된 재실행이 SUCCESS면 Incident에 `resolvedByRunId`가 자동 기록된다(상태 자동 변경은 하지 않음; 사람이 RESOLVED 처리).
 - 수용 기준: 콘솔 로그 마지막 100줄이 Incident에 발췌 저장된다.
+- 수용 기준: logTail 저장 시 해당 빌드의 비밀 파라미터 값과 Jenkins `Secret` 평문이 발견되면 마스킹된다. 그 외 콘솔에 출력된 비밀은 탐지 한계로 마스킹되지 않을 수 있으며 이를 문서에 명시한다. (R-4, D-19)
 
 **12. 조회와 집계**
 기간, 잡, 사용자, 결과, 처리 상태로 필터링해 조회하고 월 단위 집계 화면을 제공합니다.
@@ -138,6 +145,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 - 수용 기준: 월별 집계에 실행 수, 성공/실패/불안정 수, 오류 건 OPEN/RESOLVED 수, 요청 승인/반려 수가 나온다.
 - 수용 기준: `ViewHistory` 권한이 없으면 모든 조회 화면과 CSV가 403이다.
 - 수용 기준: 보관 기간 지난 월 파일은 주기 작업이 삭제하고, 삭제 사실을 ChangeRecord(type=RETENTION)로 남긴다.
+- 수용 기준: CSV 셀 값이 `=`, `+`, `-`, `@`로 시작하면 수식으로 해석되지 않도록 무해화(`'` 프리픽스)된다. (R-3, D-18)
 
 ### 확장 (2차)
 
@@ -157,7 +165,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 
 ```
 RunRequest        id, jobFullName, parameters(Map), reason, requester, approver,
-                  status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED|EXECUTED),
+                  status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED|EXECUTED|INVALIDATED),
                   createdAt, decidedAt, decisionComment, selfApproved,
                   approverChanges[{from,to,by,at}], incidentId?, executedRunId?
 GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGURE|DELETE],
@@ -179,6 +187,7 @@ ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RET
 RunRequest:  PENDING -> APPROVED -> EXECUTED
              PENDING -> REJECTED | CANCELLED | EXPIRED
              APPROVED -> EXPIRED (approvedRunTimeout)
+             PENDING | APPROVED -> INVALIDATED (대상 잡 rename/move, D-21)
 GrantRequest: PENDING -> APPROVED(=Grant 생성) | REJECTED | CANCELLED | EXPIRED
 Grant:       ACTIVE -> EXPIRED(시각) | REVOKED(수동)
 Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서 코멘트 추가는 가능)
@@ -204,4 +213,5 @@ Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서
 - 재시작 내구성: 4번 수용 기준.
 - 성능: 하루 5,000 실행 규모에서 대시보드 최근 7일 조회가 2초 이내(로컬 기준).
 - 보안: 모든 상태 변경은 POST + 권한 체크. CSRF crumb 준수. 비밀 파라미터(Password parameter)는 이력에 마스킹 저장.
+- 보안: 사용자 입력(사유, 파라미터 값, 잡 이름)은 모든 화면 렌더링에서 이스케이프되어 스크립트·태그로 실행되지 않는다. (R-3, D-18)
 - 호환: 최신 LTS 라인. Freestyle, Pipeline(WorkflowJob), Folder 지원. Multibranch는 기록만(통제 대상 아님, 문서에 명시).
