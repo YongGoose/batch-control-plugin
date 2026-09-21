@@ -132,14 +132,15 @@ public final class IncidentService {
         }
     }
 
-    /** {@code OPEN|ACKNOWLEDGED -> RESOLVED}; a RESOLVED incident stays RESOLVED. */
+    /** {@code ACKNOWLEDGED -> RESOLVED} only (SPEC section 4: OPEN must pass ACKNOWLEDGED first). */
     public Incident resolve(String id, String comment) {
         lock.lock();
         try {
             Incident incident = require(id);
-            if (incident.getStatus() == IncidentStatus.RESOLVED) {
-                throw new IllegalStateException("Incident " + id
-                        + " is already RESOLVED (no reverse transitions).");
+            if (incident.getStatus() != IncidentStatus.ACKNOWLEDGED) {
+                throw new IllegalStateException("Incident " + id + " is " + incident.getStatus()
+                        + "; only ACKNOWLEDGED incidents can be resolved"
+                        + " (OPEN -> ACKNOWLEDGED -> RESOLVED, no skips, no reverse).");
             }
             incident.setStatus(IncidentStatus.RESOLVED);
             incident.addTransition(new IncidentTransition(IncidentStatus.RESOLVED,

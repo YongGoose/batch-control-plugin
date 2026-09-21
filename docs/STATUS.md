@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-09-21 (afternoon) — Phase 3 CLOSED → Phase 4 started
+- S4 result: tests f87d8f0 + impl f49dbad + review fixes (resolve() requires ACKNOWLEDGED; dead HistoryService/CsvSupport deleted; FileStore month bucketing unified on BatchClock zone) + new XssEscapingTest (T-RT-10). spec-review-S4 = PASS WITH NOTES, BLOCKER 0.
+- Final verify: 148/148 tests green, SpotBugs 0 (9m12s).
+- Phase 3 closing gate: P0 non-e2e 76/77 (98.7%) — sole gap T-SEC-07, blocked on human P-03 decision (carried as release-blocking follow-up); P1 non-e2e 35/35 after T-RT-10 landed (was 34/35); P2 5/6 (T-RT-18 deferred per D-22); 9 e2e rows → Phase 5 by design. Gate judged CLOSED with the T-SEC-07 carry.
+- New proposal P-08 (summary counting semantics). Human-pending pile: P-01..P-08, T-SEC-07/P-03, CLAUDE.md ownership row for src/main/webapp/help/**, retroactive approvals for two mechanical test edits (CLICommandInvoker imports, (Cause) null cast).
+- phase-3-impl merged to main, pushed.
+- Environment: Docker Desktop 29.8.0 + Compose v5.5.1 now installed and running (user action) — Phase 5 can run the designed docker-compose flow; browser automation via connected Chrome replaces Playwright MCP.
+- Delegating: security-reviewer ← Phase 4 full src/main review (HOSTING-CHECKLIST section B) → docs/reports/security-01.md
+
 ## 2026-09-21 01:05 — Phase 3 S3 done → S4 started
 - S3 result: commits f1f4793 (tests) + e3bbc3f (impl) + 4f89602 (monitor banners). Full verify green twice (core-dev run and orchestrator run, 119/119, SpotBugs 0). spec-review-S3.md = PASS WITH NOTES, BLOCKER 0.
 - MAJOR (getACL(IComputer) delegation gap) + MINOR (root-scope "" consistency) routed to core-dev for immediate fix.

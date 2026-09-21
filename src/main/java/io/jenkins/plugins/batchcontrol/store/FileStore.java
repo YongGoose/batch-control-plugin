@@ -24,7 +24,6 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.DirectoryStream;
 import java.time.Instant;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -110,8 +109,9 @@ public final class FileStore implements Store {
         return String.format("%04d-%02d.jsonl", month.getYear(), month.getMonthValue());
     }
 
+    /** Month bucketing follows the {@link BatchClock} zone, like every other time judgment. */
     private static YearMonth monthOf(Instant instant) {
-        return YearMonth.from(instant.atZone(ZoneId.systemDefault()));
+        return YearMonth.from(instant.atZone(BatchClock.clock().getZone()));
     }
 
     @Override
@@ -240,8 +240,7 @@ public final class FileStore implements Store {
         writeLock.lock();
         try {
             saveXmlEntity(incidentDir(), incident.getId(), incident, "incident");
-            appendLine(incidentIndexDir(), YearMonth.from(
-                    incident.getCreatedAt().atZone(ZoneId.systemDefault())),
+            appendLine(incidentIndexDir(), monthOf(incident.getCreatedAt()),
                     incidentIndexToJson(incident));
         } finally {
             writeLock.unlock();
