@@ -94,6 +94,16 @@ public final class RunRequestService {
      */
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
                              String approver) {
+        return create(job, parameters, reason, approver, null);
+    }
+
+    /**
+     * Creates a PENDING run request linked to an incident (SPEC item 11: a rerun request
+     * carries {@code incidentId} so the run listener can auto-link a successful rerun back
+     * to the incident). Same validation as {@link #create(Job, Map, String, String)}.
+     */
+    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
+                             String approver, String incidentId) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
@@ -117,6 +127,9 @@ public final class RunRequestService {
 
         RunRequest request = RunRequest.create(job.getFullName(), parameters, reason,
                 requester, approver);
+        if (incidentId != null) {
+            request.setIncidentId(incidentId);
+        }
         lock.lock();
         try {
             store.saveRunRequest(request);

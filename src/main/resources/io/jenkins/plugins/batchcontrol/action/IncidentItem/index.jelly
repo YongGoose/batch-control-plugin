@@ -1,0 +1,172 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Incident ${it.id}">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-arrow-left" title="Back to Incidents"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Incident ${it.id}</h1>
+
+      <table class="jenkins-table">
+        <tbody>
+          <tr>
+            <th style="text-align: left; width: 12rem;">Run</th>
+            <td>
+              <j:choose>
+                <j:when test="${it.runUrl != null}">
+                  <a href="${rootURL}/${it.runUrl}">${it.incident.runId}</a>
+                </j:when>
+                <j:otherwise>${it.incident.runId}</j:otherwise>
+              </j:choose>
+            </td>
+          </tr>
+          <tr><th style="text-align: left;">Job</th><td>${it.incident.jobFullName}</td></tr>
+          <tr><th style="text-align: left;">Result</th><td>${it.incident.result}</td></tr>
+          <tr><th style="text-align: left;">Status</th><td>${it.incident.status}</td></tr>
+          <tr><th style="text-align: left;">Created</th><td>${it.format(it.createdAt)}</td></tr>
+          <j:if test="${it.incident.resolvedByRunId != null}">
+            <tr>
+              <th style="text-align: left;">Resolved by run</th>
+              <td>
+                <j:choose>
+                  <j:when test="${it.resolvedByRunUrl != null}">
+                    <a href="${rootURL}/${it.resolvedByRunUrl}">${it.incident.resolvedByRunId}</a>
+                  </j:when>
+                  <j:otherwise>${it.incident.resolvedByRunId}</j:otherwise>
+                </j:choose>
+              </td>
+            </tr>
+          </j:if>
+          <j:if test="${!empty(it.incident.rerunRequestIds)}">
+            <tr>
+              <th style="text-align: left;">Rerun requests</th>
+              <td>
+                <j:forEach var="rid" items="${it.incident.rerunRequestIds}">
+                  <a href="${rootURL}/batch-control/requests/${rid}/" style="margin-right: 0.5rem;">${rid}</a>
+                </j:forEach>
+              </td>
+            </tr>
+          </j:if>
+        </tbody>
+      </table>
+
+      <h2>Parameters</h2>
+      <j:choose>
+        <j:when test="${empty(it.incident.parameters)}">
+          <p>No parameters.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr><th>Name</th><th>Value</th></tr>
+            </thead>
+            <tbody>
+              <j:forEach var="p" items="${it.incident.parameters.entrySet()}">
+                <tr>
+                  <td>${p.key}</td>
+                  <td style="white-space: pre-wrap;">${p.value}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+        </j:otherwise>
+      </j:choose>
+
+      <h2>History</h2>
+      <table class="jenkins-table">
+        <thead>
+          <tr><th>Status</th><th>By</th><th>At</th><th>Comment</th></tr>
+        </thead>
+        <tbody>
+          <j:forEach var="t" items="${it.incident.transitions}">
+            <tr>
+              <td>${t.status}</td>
+              <td>${t.by}</td>
+              <td>${it.format(t.at)}</td>
+              <td style="white-space: pre-wrap;">${t.comment}</td>
+            </tr>
+          </j:forEach>
+        </tbody>
+      </table>
+
+      <h2>Console Log Tail</h2>
+      <j:choose>
+        <j:when test="${empty(it.incident.logTail)}">
+          <p>No log excerpt was captured.</p>
+        </j:when>
+        <j:otherwise>
+          <!-- Escaped by default: console output is untrusted text. Secrets known to Jenkins
+               were masked at capture time; other secrets printed to the console may not be
+               (documented detection limit, D-19). -->
+          <pre style="overflow-x: auto; max-height: 30rem;">${it.logTailText}</pre>
+        </j:otherwise>
+      </j:choose>
+
+      <j:if test="${it.canAcknowledge}">
+        <h2>Acknowledge</h2>
+        <f:form method="post" action="acknowledge" name="acknowledge">
+          <f:entry title="Comment (optional)">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <f:submit value="Acknowledge"/>
+          </f:bottomButtonBar>
+        </f:form>
+      </j:if>
+
+      <j:if test="${it.canResolve}">
+        <h2>Resolve</h2>
+        <f:form method="post" action="resolve" name="resolve">
+          <f:entry title="Comment (optional)" description="Resolution is final: a resolved incident cannot be reopened (comments stay possible).">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <f:submit value="Resolve"/>
+          </f:bottomButtonBar>
+        </f:form>
+      </j:if>
+
+      <j:if test="${it.canComment}">
+        <h2>Add Comment</h2>
+        <f:form method="post" action="comment" name="comment">
+          <f:entry title="Comment">
+            <f:textarea name="comment" value=""/>
+          </f:entry>
+          <f:bottomButtonBar>
+            <f:submit value="Add Comment"/>
+          </f:bottomButtonBar>
+        </f:form>
+      </j:if>
+
+      <j:if test="${it.canRerun}">
+        <h2>Request Rerun</h2>
+        <p class="jenkins-description">
+          Creates a run request pre-filled with the original parameters and linked to this incident.
+        </p>
+        <j:choose>
+          <j:when test="${empty(it.approverOptions)}">
+            <div class="jenkins-alert jenkins-alert-warning">
+              No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
+            </div>
+          </j:when>
+          <j:otherwise>
+            <f:form method="post" action="rerun" name="rerun">
+              <f:entry title="Approver">
+                <select name="approver" class="jenkins-select__input">
+                  <j:forEach var="a" items="${it.approverOptions}">
+                    <option value="${a}">${a}</option>
+                  </j:forEach>
+                </select>
+              </f:entry>
+              <f:bottomButtonBar>
+                <f:submit value="Request Rerun"/>
+              </f:bottomButtonBar>
+            </f:form>
+          </j:otherwise>
+        </j:choose>
+      </j:if>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

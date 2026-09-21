@@ -18,6 +18,11 @@ import jenkins.model.Jenkins;
  *   <li>{@code /batch-control/grants/} — grant request list, active grants, create/decision/revoke
  *       endpoints</li>
  *   <li>{@code /batch-control/changes/} — change record list (per month, read-only)</li>
+ *   <li>{@code /batch-control/dashboard/} — run record dashboard (last 7 days by default)</li>
+ *   <li>{@code /batch-control/incidents/} — incident list; {@code <id>/} detail with
+ *       acknowledge/resolve/comment/rerun endpoints</li>
+ *   <li>{@code /batch-control/history/} — filtered history, {@code summary} JSON and CSV
+ *       exports</li>
  * </ul>
  *
  * <p>The sidebar icon is hidden when the user has no plugin permission <em>and</em> run control
@@ -66,5 +71,20 @@ public class BatchControlRootAction implements RootAction {
     /** Stapler: serves {@code /batch-control/changes/...}. */
     public ChangesSection getChanges() {
         return new ChangesSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/dashboard/...}. */
+    public DashboardSection getDashboard() {
+        return new DashboardSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/incidents/...}. */
+    public IncidentsSection getIncidents() {
+        return new IncidentsSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/history/...}. */
+    public HistorySection getHistory() {
+        return new HistorySection();
     }
 }

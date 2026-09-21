@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.store;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.time.YearMonth;
@@ -71,4 +72,39 @@ public interface Store {
 
     /** Reads every change record of the given month (empty list if the month file is absent). */
     List<ChangeRecord> listChangeRecords(YearMonth month);
+
+    /**
+     * Persists a freshly opened incident: writes {@code incidents/<id>.xml} and appends the
+     * monthly index line ({@code incidents/index/YYYY-MM.jsonl}, bucket derived from the
+     * incident's creation time).
+     */
+    void createIncident(Incident incident);
+
+    /** Rewrites an existing incident's XML atomically (handling transitions, links). */
+    void saveIncident(Incident incident);
+
+    /** Loads an incident by id, or returns {@code null} if it does not exist. */
+    Incident loadIncident(String id);
+
+    /**
+     * Loads every incident created in the given month via the monthly index, in index
+     * (creation) order. Index lines whose XML has been deleted are skipped.
+     */
+    List<Incident> listIncidents(YearMonth month);
+
+    /**
+     * Every month for which any record bucket exists (runs, changes or incident index),
+     * sorted ascending. Used by retention cleanup.
+     */
+    List<YearMonth> listStoredMonths();
+
+    /**
+     * Deletes every record bucket of the given month: the runs and changes JSONL files, the
+     * diff patches of that month's change records, the incident XMLs listed in that month's
+     * index and the index file itself. This is the ONLY deletion path of the store
+     * (SPEC item 4: append-only apart from retention cleanup).
+     *
+     * @return {@code true} if anything was deleted
+     */
+    boolean deleteMonth(YearMonth month);
 }

@@ -1,0 +1,77 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Incidents">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
+        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
+        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Incidents</h1>
+      <p class="jenkins-description">
+        Failed and unstable builds are registered automatically as incidents (SPEC item 11).
+        Open an incident to acknowledge, comment, resolve, or request a rerun.
+      </p>
+
+      <!-- Month selector: a plain GET form; changing the month never changes state. -->
+      <form method="get" action="." style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <a class="jenkins-button" href="?month=${it.previousMonth}">&#171; ${it.previousMonth}</a>
+        <input type="month" name="month" value="${it.monthValue}" class="jenkins-input" style="width: auto;"/>
+        <button type="submit" class="jenkins-button">Show</button>
+        <j:if test="${it.hasNextMonth}">
+          <a class="jenkins-button" href="?month=${it.nextMonth}">${it.nextMonth} &#187;</a>
+        </j:if>
+      </form>
+
+      <j:choose>
+        <j:when test="${it.total == 0}">
+          <p>No incidents in ${it.monthValue}.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>Incident</th>
+                <th>Run</th>
+                <th>Job</th>
+                <th>Result</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="i" items="${it.pageItems}">
+                <tr>
+                  <td><a href="${i.id}/">${i.id}</a></td>
+                  <td>
+                    <j:choose>
+                      <j:when test="${it.runUrl(i) != null}">
+                        <a href="${rootURL}/${it.runUrl(i)}">${i.runId}</a>
+                      </j:when>
+                      <j:otherwise>${i.runId}</j:otherwise>
+                    </j:choose>
+                  </td>
+                  <td>${i.jobFullName}</td>
+                  <td>${i.result}</td>
+                  <td>${i.status}</td>
+                  <td>${it.format(it.createdAt(i))}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasPrevious}">
+              <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page - 1}">Newer</a>
+            </j:if>
+            <span>Page ${it.page} (${it.total} incidents in ${it.monthValue})</span>
+            <j:if test="${it.hasNext}">
+              <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page + 1}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

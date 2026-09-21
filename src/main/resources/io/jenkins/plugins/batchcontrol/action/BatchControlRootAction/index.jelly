@@ -6,6 +6,9 @@
         <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list" title="Run Requests"/>
         <l:task href="${rootURL}/batch-control/grants/" icon="symbol-lock-closed" title="Grants"/>
         <l:task href="${rootURL}/batch-control/changes/" icon="symbol-clock" title="Change Records"/>
+        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
+        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
+        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
       </l:tasks>
     </l:side-panel>
     <l:main-panel>
@@ -17,6 +20,9 @@
         <a class="jenkins-button jenkins-button--primary" href="requests/">Run Requests</a>
         <a class="jenkins-button" href="grants/">Grants</a>
         <a class="jenkins-button" href="changes/">Change Records</a>
+        <a class="jenkins-button" href="dashboard/">Dashboard</a>
+        <a class="jenkins-button" href="incidents/">Incidents</a>
+        <a class="jenkins-button" href="history/">History</a>
       </p>
     </l:main-panel>
   </l:layout>

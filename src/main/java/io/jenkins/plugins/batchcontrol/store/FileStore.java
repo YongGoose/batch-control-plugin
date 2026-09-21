@@ -6,6 +6,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.io.IOException;
@@ -95,6 +96,14 @@ public final class FileStore implements Store {
 
     private Path diffDir() {
         return changesDir().resolve("diff");
+    }
+
+    private Path incidentDir() {
+        return root().resolve("incidents");
+    }
+
+    private Path incidentIndexDir() {
+        return incidentDir().resolve("index");
     }
 
     private static String monthFileName(YearMonth month) {
@@ -223,6 +232,125 @@ public final class FileStore implements Store {
             records.add(record);
         }
         return records;
+    }
+
+    @Override
+    public void createIncident(Incident incident) {
+        Objects.requireNonNull(incident, "incident");
+        writeLock.lock();
+        try {
+            saveXmlEntity(incidentDir(), incident.getId(), incident, "incident");
+            appendLine(incidentIndexDir(), YearMonth.from(
+                    incident.getCreatedAt().atZone(ZoneId.systemDefault())),
+                    incidentIndexToJson(incident));
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    @Override
+    public void saveIncident(Incident incident) {
+        Objects.requireNonNull(incident, "incident");
+        saveXmlEntity(incidentDir(), incident.getId(), incident, "incident");
+    }
+
+    @Override
+    public Incident loadIncident(String id) {
+        return loadXmlEntity(incidentDir(), id, Incident.class, "incident");
+    }
+
+    @Override
+    public List<Incident> listIncidents(YearMonth month) {
+        List<Incident> incidents = new ArrayList<>();
+        for (String line : readLines(incidentIndexDir(), month)) {
+            String id = optString(JSONObject.fromObject(line), "id");
+            if (id == null) {
+                continue;
+            }
+            Incident incident = loadIncident(id);
+            if (incident != null) {
+                incidents.add(incident);
+            }
+        }
+        return incidents;
+    }
+
+    // ---------------------------------------------------------------- retention (SPEC item 12)
+
+    @Override
+    public List<YearMonth> listStoredMonths() {
+        java.util.TreeSet<YearMonth> months = new java.util.TreeSet<>();
+        for (Path dir : new Path[] {runsDir(), changesDir(), incidentIndexDir()}) {
+            if (!Files.isDirectory(dir)) {
+                continue;
+            }
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.jsonl")) {
+                for (Path file : stream) {
+                    Path name = file.getFileName();
+                    YearMonth month = name == null ? null : parseMonthFileName(name.toString());
+                    if (month != null) {
+                        months.add(month);
+                    }
+                }
+            } catch (NoSuchFileException e) {
+                // Nothing stored there yet.
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to list month files in " + dir, e);
+            }
+        }
+        return new ArrayList<>(months);
+    }
+
+    @Override
+    public boolean deleteMonth(YearMonth month) {
+        Objects.requireNonNull(month, "month");
+        writeLock.lock();
+        try {
+            boolean deleted = false;
+            // Incident XMLs first (found through the index), then the index file itself.
+            for (String line : readLines(incidentIndexDir(), month)) {
+                String id = optString(JSONObject.fromObject(line), "id");
+                if (id != null) {
+                    deleted |= Files.deleteIfExists(PathCodec.resolveUnder(incidentDir(), id + ".xml"));
+                }
+            }
+            deleted |= Files.deleteIfExists(
+                    PathCodec.resolveUnder(incidentIndexDir(), monthFileName(month)));
+            deleted |= Files.deleteIfExists(PathCodec.resolveUnder(runsDir(), monthFileName(month)));
+            // Diff patches are named <id>.patch and ids start with yyyyMMdd, so the month
+            // bucket of a patch is recoverable from its file-name prefix.
+            String idMonthPrefix = String.format("%04d%02d", month.getYear(), month.getMonthValue());
+            if (Files.isDirectory(diffDir())) {
+                try (DirectoryStream<Path> stream = Files.newDirectoryStream(
+                        diffDir(), idMonthPrefix + "*.patch")) {
+                    for (Path patch : stream) {
+                        deleted |= Files.deleteIfExists(patch);
+                    }
+                }
+            }
+            deleted |= Files.deleteIfExists(
+                    PathCodec.resolveUnder(changesDir(), monthFileName(month)));
+            return deleted;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to delete month bucket " + month, e);
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private static YearMonth parseMonthFileName(String fileName) {
+        if (!fileName.endsWith(".jsonl")) {
+            return null;
+        }
+        String base = fileName.substring(0, fileName.length() - ".jsonl".length());
+        if (!base.matches("\\d{4}-\\d{2}")) {
+            return null;
+        }
+        try {
+            return YearMonth.parse(base);
+        } catch (java.time.format.DateTimeParseException e) {
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- I/O helpers
@@ -415,6 +543,17 @@ public final class FileStore implements Store {
         record.setAbortedBy(optString(json, "abortedBy"));
         record.setRunRequestId(optString(json, "runRequestId"));
         return record;
+    }
+
+    /** The monthly incident index line: id, runId, jobFullName, result, createdAt. */
+    private static JSONObject incidentIndexToJson(Incident incident) {
+        JSONObject json = new JSONObject();
+        json.element("id", incident.getId());
+        json.element("runId", incident.getRunId());
+        json.element("jobFullName", incident.getJobFullName());
+        json.element("result", incident.getResult());
+        json.element("createdAt", incident.getCreatedAt().toEpochMilli());
+        return json;
     }
 
     private static JSONObject changeRecordToJson(ChangeRecord record) {

@@ -1,0 +1,79 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Run Dashboard">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
+        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
+        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Run Dashboard</h1>
+      <p class="jenkins-description">
+        Every build of every job with cause, user, parameters, result and duration (SPEC item 10).
+        Showing the last ${it.days} day(s), newest first. Secret parameter values are stored masked.
+      </p>
+
+      <!-- Window selector: a plain GET form; changing the window never changes state. -->
+      <form method="get" action="." style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <label for="days">Days:</label>
+        <input type="number" id="days" name="days" min="1" max="365" value="${it.days}" class="jenkins-input" style="width: 6rem;"/>
+        <button type="submit" class="jenkins-button">Show</button>
+      </form>
+
+      <j:choose>
+        <j:when test="${it.total == 0}">
+          <p>No runs recorded in the last ${it.days} day(s).</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Job</th>
+                <th>Cause</th>
+                <th>User</th>
+                <th>Parameters</th>
+                <th>Result</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Aborted by</th>
+                <th>Request</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="r" items="${it.pageItems}">
+                <tr>
+                  <td><a href="${rootURL}/${it.runUrl(r)}">#${r.number}</a></td>
+                  <td>${r.jobFullName}</td>
+                  <td>${r.causeType}</td>
+                  <td>${r.user}</td>
+                  <td style="white-space: pre-wrap;">${it.parameters(r.parameters)}</td>
+                  <td>${r.result}</td>
+                  <td>${it.format(r.startedAt)}</td>
+                  <td>${it.duration(r.durationMs)}</td>
+                  <td>${r.abortedBy}</td>
+                  <td>
+                    <j:if test="${r.runRequestId != null}">
+                      <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
+                    </j:if>
+                  </td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasPrevious}">
+              <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page - 1}">Newer</a>
+            </j:if>
+            <span>Page ${it.page} (${it.total} runs in the last ${it.days} day(s))</span>
+            <j:if test="${it.hasNext}">
+              <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page + 1}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

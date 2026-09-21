@@ -314,7 +314,7 @@ public class IncidentTest {
                 return false; // fail the build so an incident opens
             }
         });
-        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, null,
+        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, (hudson.model.Cause) null,
                 new ParametersAction(new PasswordParameterValue("TOKEN", secretValue))));
         j.waitUntilNoActivity();
 

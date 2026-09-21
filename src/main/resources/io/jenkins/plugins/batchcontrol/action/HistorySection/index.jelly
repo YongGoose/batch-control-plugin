@@ -1,0 +1,201 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="History">
+    <l:side-panel>
+      <l:tasks>
+        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
+        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
+        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>History</h1>
+      <p class="jenkins-description">
+        Filtered audit views of run records, incidents, change records and run requests
+        (SPEC item 12). The job filter matches a substring of the full name; user, result and
+        status match exactly. Dates are inclusive.
+      </p>
+
+      <!-- Filter form: a plain GET form; filtering never changes state. -->
+      <form method="get" action="." style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end;">
+        <input type="hidden" name="kind" value="${it.kind}"/>
+        <div>
+          <label for="filter-from">From</label><br/>
+          <input type="date" id="filter-from" name="from" value="${it.filter.fromValue}" class="jenkins-input" style="width: auto;"/>
+        </div>
+        <div>
+          <label for="filter-to">To</label><br/>
+          <input type="date" id="filter-to" name="to" value="${it.filter.toValue}" class="jenkins-input" style="width: auto;"/>
+        </div>
+        <div>
+          <label for="filter-job">Job</label><br/>
+          <input type="text" id="filter-job" name="job" value="${it.filter.job}" class="jenkins-input" style="width: 12rem;"/>
+        </div>
+        <div>
+          <label for="filter-user">User</label><br/>
+          <input type="text" id="filter-user" name="user" value="${it.filter.user}" class="jenkins-input" style="width: 10rem;"/>
+        </div>
+        <div>
+          <label for="filter-result">Result</label><br/>
+          <input type="text" id="filter-result" name="result" value="${it.filter.result}" class="jenkins-input" style="width: 8rem;" placeholder="SUCCESS"/>
+        </div>
+        <div>
+          <label for="filter-status">Status</label><br/>
+          <input type="text" id="filter-status" name="status" value="${it.filter.status}" class="jenkins-input" style="width: 8rem;" placeholder="OPEN"/>
+        </div>
+        <button type="submit" class="jenkins-button jenkins-button--primary">Filter</button>
+      </form>
+
+      <!-- Kind tabs: links that preserve the filter and reset paging. -->
+      <p>
+        <a class="jenkins-button ${it.kind == 'runs' ? 'jenkins-button--primary' : ''}" href="?${it.query('runs')}">Runs</a>
+        <a class="jenkins-button ${it.kind == 'incidents' ? 'jenkins-button--primary' : ''}" href="?${it.query('incidents')}">Incidents</a>
+        <a class="jenkins-button ${it.kind == 'changes' ? 'jenkins-button--primary' : ''}" href="?${it.query('changes')}">Changes</a>
+        <a class="jenkins-button ${it.kind == 'requests' ? 'jenkins-button--primary' : ''}" href="?${it.query('requests')}">Requests</a>
+      </p>
+
+      <j:choose>
+        <j:when test="${it.total == 0}">
+          <p>No matching records between ${it.filter.fromValue} and ${it.filter.toValue}.</p>
+        </j:when>
+        <j:otherwise>
+          <j:choose>
+            <j:when test="${it.kind == 'incidents'}">
+              <table class="jenkins-table">
+                <thead>
+                  <tr><th>Incident</th><th>Run</th><th>Job</th><th>Result</th><th>Status</th><th>Created</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="i" items="${it.pageItems}">
+                    <tr>
+                      <td><a href="${rootURL}/batch-control/incidents/${i.id}/">${i.id}</a></td>
+                      <td>
+                        <j:choose>
+                          <j:when test="${it.incidentRunUrl(i) != null}">
+                            <a href="${rootURL}/${it.incidentRunUrl(i)}">${i.runId}</a>
+                          </j:when>
+                          <j:otherwise>${i.runId}</j:otherwise>
+                        </j:choose>
+                      </td>
+                      <td>${i.jobFullName}</td>
+                      <td>${i.result}</td>
+                      <td>${i.status}</td>
+                      <td>${it.format(it.incidentCreatedAt(i))}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+            </j:when>
+            <j:when test="${it.kind == 'changes'}">
+              <table class="jenkins-table">
+                <thead>
+                  <tr><th>Type</th><th>Target</th><th>User</th><th>At</th><th>Grant</th><th>Detail</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="c" items="${it.pageItems}">
+                    <tr>
+                      <td>${c.type}</td>
+                      <td>${c.target}</td>
+                      <td>${c.user}</td>
+                      <td>${it.format(c.at)}</td>
+                      <td>
+                        <j:if test="${c.grantId != null}">
+                          <a href="${rootURL}/batch-control/grants/${c.grantId}/">${c.grantId}</a>
+                        </j:if>
+                      </td>
+                      <td>${c.detail}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+            </j:when>
+            <j:when test="${it.kind == 'requests'}">
+              <table class="jenkins-table">
+                <thead>
+                  <tr><th>Request</th><th>Job</th><th>Requester</th><th>Approver</th><th>Status</th><th>Created</th><th>Decided</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="q" items="${it.pageItems}">
+                    <tr>
+                      <td><a href="${rootURL}/batch-control/requests/${q.id}/">${q.id}</a></td>
+                      <td>${q.jobFullName}</td>
+                      <td>${q.requester}</td>
+                      <td>${q.approver}</td>
+                      <td>${q.status}</td>
+                      <td>${it.format(q.createdAt)}</td>
+                      <td>${it.format(q.decidedAt)}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+            </j:when>
+            <j:otherwise>
+              <table class="jenkins-table">
+                <thead>
+                  <tr><th>Run</th><th>Job</th><th>Cause</th><th>User</th><th>Parameters</th><th>Result</th><th>Started</th><th>Duration</th><th>Aborted by</th><th>Request</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="r" items="${it.pageItems}">
+                    <tr>
+                      <td><a href="${rootURL}/${it.runUrl(r)}">#${r.number}</a></td>
+                      <td>${r.jobFullName}</td>
+                      <td>${r.causeType}</td>
+                      <td>${r.user}</td>
+                      <td style="white-space: pre-wrap;">${it.parameters(r.parameters)}</td>
+                      <td>${r.result}</td>
+                      <td>${it.format(r.startedAt)}</td>
+                      <td>${it.duration(r.durationMs)}</td>
+                      <td>${r.abortedBy}</td>
+                      <td>
+                        <j:if test="${r.runRequestId != null}">
+                          <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
+                        </j:if>
+                      </td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+            </j:otherwise>
+          </j:choose>
+          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <j:if test="${it.hasPrevious}">
+              <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page - 1}">Newer</a>
+            </j:if>
+            <span>Page ${it.page} (${it.total} matching records)</span>
+            <j:if test="${it.hasNext}">
+              <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page + 1}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+
+      <h2>Export</h2>
+      <p class="jenkins-description">
+        CSV exports honor the filter above. Cells starting with <code>=</code>, <code>+</code>,
+        <code>-</code> or <code>@</code> are prefixed with a quote so spreadsheets never execute
+        them as formulas.
+      </p>
+      <p>
+        <a class="jenkins-button" href="runs.csv?${it.baseQuery}">runs.csv</a>
+        <a class="jenkins-button" href="incidents.csv?${it.baseQuery}">incidents.csv</a>
+        <a class="jenkins-button" href="changes.csv?${it.baseQuery}">changes.csv</a>
+        <a class="jenkins-button" href="requests.csv?${it.baseQuery}">requests.csv</a>
+      </p>
+
+      <h2>Monthly Summary (${it.summaryMonth})</h2>
+      <table class="jenkins-table" style="max-width: 30rem;">
+        <tbody>
+          <j:forEach var="s" items="${it.summary.entrySet()}">
+            <tr>
+              <th style="text-align: left;">${s.key}</th>
+              <td>${s.value}</td>
+            </tr>
+          </j:forEach>
+        </tbody>
+      </table>
+      <p>
+        <a href="summary?month=${it.summaryMonth}">Monthly aggregate as JSON</a>
+      </p>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>
