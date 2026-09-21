@@ -19,6 +19,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import jenkins.model.IComputer;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -36,14 +38,26 @@ import org.kohsuke.stapler.DataBoundConstructor;
  * <p>A missing delegate (broken form submission, manual config edit) fails safe: every ACL
  * denies everything except SYSTEM.
  */
+@Restricted(NoExternalUse.class) // selected via the security form / JCasC, not a code-level API
 public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
 
     /** The wrapped strategy; its own configuration (matrix entries etc.) stays untouched. */
     @CheckForNull
     private final AuthorizationStrategy delegate;
 
+    /**
+     * @throws IllegalArgumentException if the delegate is itself this wrapper type (S-11):
+     *         self-nesting is otherwise only prevented by the UI dropdown, but JCasC or a
+     *         hand-written form submission could pass one in. A nested wrapper double-consults
+     *         grants and confuses the administrative monitors.
+     */
     @DataBoundConstructor
     public BatchControlAuthorizationStrategy(@CheckForNull AuthorizationStrategy delegate) {
+        if (delegate instanceof BatchControlAuthorizationStrategy) {
+            throw new IllegalArgumentException(
+                    "The Batch Control strategy cannot wrap itself; choose the real "
+                            + "authorization strategy (Matrix etc.) as the delegate.");
+        }
         this.delegate = delegate;
     }
 

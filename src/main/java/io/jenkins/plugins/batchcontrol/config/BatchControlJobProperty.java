@@ -8,6 +8,8 @@ import io.jenkins.plugins.batchcontrol.Messages;
 import java.util.ArrayList;
 import java.util.List;
 import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 
@@ -17,6 +19,7 @@ import org.kohsuke.stapler.DataBoundSetter;
  *
  * <p>These settings have no effect while the global run-control switch is off.
  */
+@Restricted(NoExternalUse.class) // configured via the job form / JCasC, not a code-level API
 public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
 
     private final boolean approvalRequired;

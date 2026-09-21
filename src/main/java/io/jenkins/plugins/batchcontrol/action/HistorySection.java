@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
@@ -58,6 +60,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * the whole subtree with 403 otherwise (T-12-01, T-12-05). All URLs are read-only: non-GET
  * verbs get 405. Query parsing and validation live in {@link FilterParser}.
  */
+@Restricted(NoExternalUse.class)
 public class HistorySection implements ModelObject, StaplerProxy {
 
     /** Page size for every table. */

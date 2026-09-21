@@ -18,6 +18,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -33,6 +35,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * (validated, capped at {@value #MAX_DAYS}). Requires {@code ViewHistory} for the whole subtree
  * ({@link #getTarget()}); records are read-only, so every verb except GET/HEAD is 405.
  */
+@Restricted(NoExternalUse.class)
 public class DashboardSection implements ModelObject, StaplerProxy {
 
     /** Page size for the run record list. */

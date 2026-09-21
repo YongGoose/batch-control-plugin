@@ -4,8 +4,11 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /** Timestamp formatting for the Jelly views (controller-local zone, second precision). */
+@Restricted(NoExternalUse.class)
 public final class Dates {
 
     private static final DateTimeFormatter FORMAT =

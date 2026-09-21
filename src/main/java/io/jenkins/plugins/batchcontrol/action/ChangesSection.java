@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -29,6 +31,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * endpoints at all) and requires {@code ViewHistory}, enforced for the whole subtree by
  * {@link #getTarget()}.
  */
+@Restricted(NoExternalUse.class)
 public class ChangesSection implements ModelObject, StaplerProxy {
 
     /** Page size for the change record list. */

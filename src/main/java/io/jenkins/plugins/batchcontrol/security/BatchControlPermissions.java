@@ -7,6 +7,8 @@ import hudson.security.PermissionGroup;
 import hudson.security.PermissionScope;
 import io.jenkins.plugins.batchcontrol.Messages;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * The five plugin permissions (SPEC item 2), exposed to Matrix/Role authorization strategies as
@@ -14,7 +16,11 @@ import jenkins.model.Jenkins;
  *
  * <p>Implications: {@link #MANAGE} is implied by {@code Overall/Administer}; every other
  * permission is implied by {@link #MANAGE}, so administrators pass all checks.
+ *
+ * <p>Restricted (S-10): other plugins interact with these permissions through the
+ * authorization-strategy screens, not by referencing this class.
  */
+@Restricted(NoExternalUse.class)
 public class BatchControlPermissions {
 
     /** The "Batch Control" permission group shown on the authorization matrix screen. */

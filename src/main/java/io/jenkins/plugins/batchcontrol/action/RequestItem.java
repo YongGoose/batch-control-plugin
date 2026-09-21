@@ -17,6 +17,8 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
@@ -34,6 +36,7 @@ import org.springframework.security.core.Authentication;
  * requester-only/requester-or-Manage rules, atomic state transitions) are enforced by
  * {@link RunRequestService} — this class contains zero state logic.
  */
+@Restricted(NoExternalUse.class)
 public class RequestItem implements ModelObject {
 
     private final RunRequest request;

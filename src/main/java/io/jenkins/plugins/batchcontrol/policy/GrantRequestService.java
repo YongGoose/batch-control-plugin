@@ -124,18 +124,26 @@ public final class GrantRequestService {
         return request;
     }
 
-    /** The scope target must exist so approvers never approve a window on a phantom path. */
+    /**
+     * The scope target must exist so approvers never approve a window on a phantom path.
+     *
+     * <p>S-03: an empty full name is rejected for every scope type. A {@code FOLDER:""} scope
+     * would be instance-wide ({@code GrantScope.includes} matches everything under the root),
+     * which SPEC item 8 never defines; root-scope grants stay impossible until a deliberate
+     * DECISIONS entry introduces them. The empty-string semantics of
+     * {@code GrantScope.includes} are therefore dead code by construction.
+     */
     private static void checkScopeExists(GrantScope scope) {
         String fullName = scope.getFullName();
+        if (fullName == null || fullName.isEmpty()) {
+            throw new IllegalArgumentException("root-scope grants are not supported");
+        }
         if (scope.getType() == GrantScope.Type.JOB) {
             Item item = Jenkins.get().getItemByFullName(fullName);
             if (!(item instanceof Job)) {
                 throw new IllegalArgumentException("No such job: '" + fullName + "'.");
             }
         } else {
-            if (fullName.isEmpty()) {
-                return; // the Jenkins root is a valid folder scope
-            }
             Item item = Jenkins.get().getItemByFullName(fullName);
             if (!(item instanceof ItemGroup)) {
                 throw new IllegalArgumentException("No such folder: '" + fullName + "'.");

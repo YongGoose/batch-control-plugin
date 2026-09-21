@@ -14,6 +14,8 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
@@ -30,6 +32,7 @@ import org.springframework.security.core.Authentication;
  * requester-or-Manage cancel rule, atomic state transitions, grant creation on approval) are
  * enforced by {@link GrantRequestService} — this class contains zero state logic.
  */
+@Restricted(NoExternalUse.class)
 public class GrantRequestItem implements ModelObject {
 
     private final GrantRequest request;

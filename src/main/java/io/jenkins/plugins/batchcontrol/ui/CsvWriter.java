@@ -3,6 +3,8 @@ package io.jenkins.plugins.batchcontrol.ui;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import java.io.IOException;
 import java.io.PrintWriter;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerResponse2;
 
 /**
@@ -13,6 +15,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * formula, and standard CSV quoting is applied (cells containing comma, quote or line breaks are
  * wrapped in double quotes with inner quotes doubled). Permission checks are the caller's job.
  */
+@Restricted(NoExternalUse.class)
 public final class CsvWriter {
 
     private final PrintWriter out;

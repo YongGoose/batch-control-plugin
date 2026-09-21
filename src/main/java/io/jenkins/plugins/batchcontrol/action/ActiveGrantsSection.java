@@ -7,6 +7,8 @@ import io.jenkins.plugins.batchcontrol.security.GrantService;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -19,6 +21,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * <p>The whole subtree sits behind the {@link GrantsSection#getTarget()} permission gate; the
  * revoke endpoint additionally requires {@code Manage} (SPEC item 8).
  */
+@Restricted(NoExternalUse.class)
 public class ActiveGrantsSection {
 
     /**

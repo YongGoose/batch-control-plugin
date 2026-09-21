@@ -7,6 +7,8 @@ import hudson.model.Job;
 import java.util.Collection;
 import java.util.Collections;
 import jenkins.model.TransientActionFactory;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Attaches {@link JobRequestAction} to every job so {@code /job/<name>/batch-control/} is always
@@ -14,6 +16,7 @@ import jenkins.model.TransientActionFactory;
  * approval and the user holds {@code BatchControl/Request}.
  */
 @Extension
+@Restricted(NoExternalUse.class)
 public class JobRequestActionFactory extends TransientActionFactory<Job> {
 
     @Override

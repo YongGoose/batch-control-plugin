@@ -36,6 +36,14 @@ import org.springframework.security.core.userdetails.UserDetails;
  * strategy's own granted sids (read reflectively — matrix-auth is an optional dependency).
  * The scan is capped at {@value #MAX_CANDIDATES} candidates and every impersonation failure is
  * swallowed: this is a best-effort warning, never an enforcement point.
+ *
+ * <p>S-05: {@code isActivated()} is evaluated by Jenkins on (almost) every admin page render,
+ * and the candidate scan performs up to {@value #MAX_CANDIDATES} synchronous security-realm
+ * lookups (remote round-trips on LDAP/AD). The scan result is therefore cached per delegate
+ * instance with a {@value #CACHE_TTL_MINUTES}-minute TTL (monotonic {@link System#nanoTime}):
+ * a strategy swap recomputes immediately (identity key), a change-control toggle invalidates
+ * explicitly, and permission edits inside the same delegate show up within the TTL. The cheap
+ * pre-checks (switch off, wrong strategy, missing delegate) are never cached.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -46,8 +54,33 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     private static final int MAX_CANDIDATES = 100;
 
+    private static final long CACHE_TTL_MINUTES = 5;
+    private static final long CACHE_TTL_NANOS =
+            java.util.concurrent.TimeUnit.MINUTES.toNanos(CACHE_TTL_MINUTES);
+
     private static final Permission[] CHANGE_PERMISSIONS =
             {Item.CONFIGURE, Item.CREATE, Item.DELETE};
+
+    /** The cached result of one expensive candidate scan (immutable snapshot). */
+    private static final class CachedScan {
+        final AuthorizationStrategy delegate; // identity key: a swapped delegate recomputes
+        final boolean standingPermissionFound;
+        final long computedAtNanos;
+
+        CachedScan(AuthorizationStrategy delegate, boolean standingPermissionFound,
+                   long computedAtNanos) {
+            this.delegate = delegate;
+            this.standingPermissionFound = standingPermissionFound;
+            this.computedAtNanos = computedAtNanos;
+        }
+    }
+
+    private static volatile CachedScan cachedScan;
+
+    /** Drops the cached scan (called on a change-control toggle; next render recomputes). */
+    public static void invalidateCache() {
+        cachedScan = null;
+    }
 
     @Override
     public String getDisplayName() {
@@ -69,6 +102,28 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             // Deny-all safe default: nobody holds any change permission directly.
             return false;
         }
+        return cachedScanResult(delegate);
+    }
+
+    /**
+     * The TTL-cached scan result for the given delegate: serves the cached value while it is
+     * fresh and keyed to the same delegate instance, otherwise recomputes and stores. Static
+     * because the cache is static — the monitor is an extension singleton either way.
+     */
+    private static boolean cachedScanResult(AuthorizationStrategy delegate) {
+        CachedScan cached = cachedScan;
+        long now = System.nanoTime();
+        if (cached != null && cached.delegate == delegate
+                && now - cached.computedAtNanos < CACHE_TTL_NANOS) {
+            return cached.standingPermissionFound;
+        }
+        boolean found = scanForStandingPermissions(delegate);
+        cachedScan = new CachedScan(delegate, found, now);
+        return found;
+    }
+
+    /** The expensive part: impersonates candidate sids against the delegate's root ACL. */
+    private static boolean scanForStandingPermissions(AuthorizationStrategy delegate) {
         ACL delegateRootAcl = delegate.getRootACL();
         for (String sid : candidateSids(delegate)) {
             Authentication auth = authenticate(sid);

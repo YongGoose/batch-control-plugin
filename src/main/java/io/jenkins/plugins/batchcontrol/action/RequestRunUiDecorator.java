@@ -7,6 +7,8 @@ import hudson.util.AlternativeUiTextProvider;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import jenkins.model.ParameterizedJobMixIn;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Replaces the "Build Now" sidebar label with "Request Run" for approval-protected jobs (SPEC
@@ -19,6 +21,7 @@ import jenkins.model.ParameterizedJobMixIn;
  * at the queue by core-dev's decision handler.
  */
 @Extension
+@Restricted(NoExternalUse.class)
 public class RequestRunUiDecorator extends AlternativeUiTextProvider {
 
     /** The replacement label, also used by {@link JobRequestAction#getDisplayName()}. */

@@ -6,6 +6,8 @@ import hudson.model.RootAction;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Global "Batch Control" page at {@code /batch-control}.
@@ -30,6 +32,7 @@ import jenkins.model.Jenkins;
  * {@link RequestsSection#getTarget()}.
  */
 @Extension
+@Restricted(NoExternalUse.class)
 public class BatchControlRootAction implements RootAction {
 
     @Override

@@ -6,6 +6,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -14,6 +15,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -28,6 +31,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * see their own requests, approvers their inbox), enforced for the whole subtree by
  * {@link #getTarget()}.
  */
+@Restricted(NoExternalUse.class)
 public class RequestsSection implements ModelObject, StaplerProxy {
 
     /** Page size for the request list. */
@@ -69,7 +73,11 @@ public class RequestsSection implements ModelObject, StaplerProxy {
         req.getView(this, "index.jelly").forward(req, rsp);
     }
 
-    /** Stapler: serves {@code /batch-control/requests/<id>/}; {@code null} renders a 404. */
+    /**
+     * Stapler: serves {@code /batch-control/requests/<id>/}; {@code null} renders a 404.
+     * A request the caller may not see (P-09, S-01) renders exactly like a nonexistent one so
+     * its existence is not disclosed.
+     */
     @CheckForNull
     public RequestItem getDynamic(String id) {
         if (id == null || id.isEmpty()) {
@@ -81,7 +89,10 @@ public class RequestsSection implements ModelObject, StaplerProxy {
         } catch (IllegalArgumentException e) {
             return null;
         }
-        return request == null ? null : new RequestItem(request);
+        if (request == null || !Visibility.canSeeRunRequest(request)) {
+            return null;
+        }
+        return new RequestItem(request);
     }
 
     // ---------------------------------------------------------------- paging (used from Jelly)
@@ -132,7 +143,14 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     private List<RunRequest> allSorted() {
         if (sorted == null) {
-            List<RunRequest> all = new ArrayList<>(RunRequestService.get().list());
+            // P-09 visibility (S-01): rows the caller may not see are filtered out silently;
+            // paging runs over the filtered list. Same predicate as the detail URL.
+            List<RunRequest> all = new ArrayList<>();
+            for (RunRequest request : RunRequestService.get().list()) {
+                if (Visibility.canSeeRunRequest(request)) {
+                    all.add(request);
+                }
+            }
             all.sort(Comparator.comparing(RunRequest::getCreatedAt)
                     .thenComparing(RunRequest::getId)
                     .reversed());

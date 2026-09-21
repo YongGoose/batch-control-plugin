@@ -3,12 +3,15 @@ package io.jenkins.plugins.batchcontrol.ui;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
 import java.util.Map;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Builds root-relative build URLs from stored identifiers, and small display helpers shared by
  * the dashboard/incident/history views. Read-only, no Jenkins model lookups: records may refer
  * to builds or jobs that no longer exist, and the link is then simply a 404.
  */
+@Restricted(NoExternalUse.class)
 public final class RunLinks {
 
     private RunLinks() {

@@ -2,8 +2,11 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
+import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.ModelObject;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -19,6 +22,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
@@ -34,6 +39,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * state machine, comment recording, rerun request creation and linking) are enforced by
  * {@link IncidentService} — this class contains zero state logic.
  */
+@Restricted(NoExternalUse.class)
 public class IncidentItem implements ModelObject {
 
     private final Incident incident;
@@ -177,6 +183,19 @@ public class IncidentItem implements ModelObject {
     public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp,
             @QueryParameter String approver) throws IOException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // S-06: mirror JobRequestAction.doSubmit — no run requests for jobs the caller cannot
+        // read. The existence lookup runs as SYSTEM2 because the caller-scoped lookup returns
+        // null for an existing-but-unreadable job, which would silently skip exactly the check
+        // this exists for; the permission check itself runs as the real caller after the
+        // context is closed. When the job is truly gone, the service decides what a rerun of
+        // it means.
+        Job<?, ?> job;
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            job = Jenkins.get().getItemByFullName(incident.getJobFullName(), Job.class);
+        }
+        if (job != null) {
+            job.checkPermission(Item.READ);
+        }
         RunRequest created;
         try {
             created = IncidentService.get().rerun(incident.getId(), approver);

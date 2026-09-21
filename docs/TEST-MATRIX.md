@@ -119,6 +119,13 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-SEC-05 | 6절 | integration | P0 | 인증된 사용자, CSRF crumb 없음 | 상태 변경 POST (요청 생성·승인 등) | 403 (crumb 필수) | RunRequestWebTest |
 | T-SEC-06 | 6절 | integration | P0 | 인증된 사용자 | GET으로 상태 변경 엔드포인트 호출 (reject, cancel, revoke, Incident 전이, 스위치 변경) | 각각 405 또는 거부 (모든 상태 변경은 POST + 권한 체크) | RunRequestWebTest (reject·cancel) + GrantWebTest (revoke) + HistoryWebTest (incident transitions, switch toggle — note 25) |
 | T-SEC-07 | 6절 | integration | P0 | Password 파라미터를 가진 잡 | 요청→승인→실행 후 요청 상세·RunRecord·CSV 조회 | 비밀값이 어디에도 평문으로 노출되지 않는다 (마스킹 저장) | pending P-03 decision |
+| T-SEC-08 | 6절 (S-01/P-09) | integration | P0 | Request holders u2 (no Item/Read on jobA) and u3 (Item/Read on jobA), u1's request on jobA, designated approver a1, MANAGE m1 | each GETs the requests list and u1's request detail URL | u2: list silently filtered (no id, no reason text), detail 404 (same as nonexistent); u3, a1, m1: visible (list contains id, detail 200) | SecurityRegressionTest |
+| T-SEC-09 | 6절 (S-01/P-09) | integration | P0 | RequestGrant holders g1 (own request+grant), g2 (nothing own, Item/Read everywhere), g3 (own request+grant), approver a1, MANAGE m1 | each GETs the grants screen; g2 GETs g1's grant-request detail URL | g2: no foreign request/grant id listed, foreign detail 404; g1: own request+grant only (not g3's); a1: both assigned requests; m1: everything incl. both active grants | SecurityRegressionTest |
+| T-SEC-10 | 11 (S-06) | integration | P1 | user with ViewHistory+Request but NO Item/Read on the failed job, OPEN incident | POST incidents/&lt;id&gt;/rerun | 403; no RunRequest created, incident.rerunRequestIds stays empty | SecurityRegressionTest |
+| T-SEC-11 | 5 (S-07) | integration | P1 | user with Item/Read only (no BatchControl/Request), approval-required job | GET /job/X/batch-control/ | 403; a Request holder still gets 200 | SecurityRegressionTest |
+| T-SEC-12 | 8 (S-03) | integration | P0 | RequestGrant holder | GrantRequestService.create with scope fullName "" (JOB and FOLDER types) | rejected (IllegalArgumentException/Failure) — root-scope grants are not supported; nothing stored | SecurityRegressionTest |
+| T-SEC-13 | 8 (S-11) | integration | P2 | a BatchControlAuthorizationStrategy instance | construct another BatchControlAuthorizationStrategy with it as delegate | IllegalArgumentException (self-nesting guard) | SecurityRegressionTest |
+| T-SEC-14 | 8 (S-05) | integration | P2 | change control on, wrapper over matrix delegate, non-admin with direct Item/Configure | isActivated() twice in a row; then toggle changeControlEnabled off/on | back-to-back calls agree; cached result flips promptly after each toggle (cache invalidation) | SecurityRegressionTest |
 | T-E2E-01 | 5,6 | e2e | P0 | requester/approver 계정 | requester 요청 → approver 승인 | 빌드 실행, 대시보드에 요청 ID 연결 표시 | |
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
 | T-E2E-03 | 8 | e2e | P0 | requester | 권한 요청→승인→설정 화면 | 저장 성공, 만료 후 저장 403 안내 | |
@@ -174,6 +181,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 25. **T-SEC-06 switch-toggle GET sub-case (S4)**: there is no plugin-owned toggle endpoint — switches change only through the Jenkins global config POST (S1-covered). The test asserts the real invariants: GET `/configure` renders (200) without flipping either switch, and GET `/configSubmit` is rejected (>=400, Jenkins core `@RequirePOST`) leaving both switch values unchanged.
 26. **T-RT-11 assertion shape (S4, D-18)**: the reason (`=1+1`) is a cell of its own in requests.csv, so it is asserted strictly (present and every occurrence preceded by `'`). The parameter payloads must be present in runs.csv; across all four CSVs every payload occurrence is additionally checked to never sit at a raw cell start (position 0 / after a delimiter / after an opening quote) unescaped — occurrences embedded mid-cell (e.g. a `key=value` aggregate) are not formula-injectable and pass, which is exactly the D-18 criterion (cells *starting* with `= + - @`).
 27. **T-RT-10 coverage shape (S4 close)**: reason (`<script>alert(...)</script>`) and parameter value (`<img src=x onerror=...>`) payloads are asserted on three render surfaces — request detail (escaped forms present, unescaped absent), dashboard (escaped parameter present after the approved build ran, unescaped absent) and request list (no unescaped payload, no injected DOM element; presence not required there since SPEC does not pin the list's columns). A `CollectingAlertHandler` additionally asserts that no injected script executed on any fetched page. The row's job-name payload variant is unreachable by design: Jenkins core `checkGoodName` rejects `<`/`>` in item names, so no such job can be created. Observed at run time: Jelly's default expression escaping neutralizes `<` (as `&lt;`) and `&` but leaves `>` raw — that is safe (no element can open without a live `<`), so the test accepts both `&lt;script&gt;alert` and `&lt;script>alert` as the escaped form; the no-raw-payload, DOM and alert-handler assertions are unconditional.
+28. **P-09 visibility reconciliation audit (Phase 4)**: after the S-01/P-09 visibility model landed, every existing web test was audited against it. NO existing row's Then changed meaning and no fixture needed an extra permission: every actor that reads a request/grant is its requester, its designated approver, a MANAGE/ADMINISTER holder, or holds Item/Read on the target job (e.g. RunRequestWebTest's u2 holds Item/Read everywhere, so T-SEC-02's 403 still isolates the missing Approve permission; GrantWebTest's readers are the requester u1, approver a1, m1 or admin; IncidentTest's rerun caller u1 holds Item/Read; QueueBlockTest's job-page fetches run unsecured or as Request holders). The new visibility rules themselves are covered by T-SEC-08/09 (and S-06/S-07 by T-SEC-10/11).
 
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
@@ -186,9 +194,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 ## 요약 (Phase 2 최종 — red-team 병합 후)
 
-- **총 행 수: 127** (SPEC 도출 111 + T-RT 16)
-- **우선순위**: P0 80 / P1 40 / P2 7
-- **계층**: unit 2 / integration 116 / e2e 9
-- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 7, T-E2E 8, T-RT 16
+- **총 행 수: 134** (SPEC 도출 111 + T-RT 16 + Phase 4 security regressions T-SEC-08..14)
+- **우선순위**: P0 83 / P1 42 / P2 9
+- **계층**: unit 2 / integration 123 / e2e 9
+- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 14, T-E2E 8, T-RT 16
 - **T-RT 우선순위**: P0 9 (T-RT-01/02/03/05/06/14/15/16/17), P1 5 (T-RT-07/10/11/13/19), P2 2 (T-RT-18/20)
 - **red-team 제안 채택 확정(비고 8, D-16~D-23 반영)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17

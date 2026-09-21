@@ -6,6 +6,8 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Computes the approver candidates shown in request forms: the global approver list intersected
@@ -16,6 +18,7 @@ import jenkins.model.Jenkins;
  * display-side convenience only; {@code RunRequestService} re-validates eligibility on
  * submission.
  */
+@Restricted(NoExternalUse.class)
 public final class ApproverOptions {
 
     private ApproverOptions() {

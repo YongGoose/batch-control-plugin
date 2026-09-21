@@ -2,11 +2,14 @@ package io.jenkins.plugins.batchcontrol.queue;
 
 import hudson.model.Cause;
 import java.util.Objects;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Cause carried by every build that runs on behalf of an approved run request (SPEC item 5):
  * links the build to the request id, the requester and the approver.
  */
+@Restricted(NoExternalUse.class)
 public class ApprovedCause extends Cause {
 
     private final String requestId;

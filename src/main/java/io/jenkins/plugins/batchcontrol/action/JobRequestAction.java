@@ -25,6 +25,9 @@ import java.util.Map;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -36,10 +39,12 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * {@link RunRequestService#create}.
  *
  * <p>The sidebar link is only visible when run control is on, the job requires approval and the
- * user holds {@code BatchControl/Request}; the URL itself stays routable and the view degrades to
- * an informational message.
+ * user holds {@code BatchControl/Request}. The URL space itself is gated on
+ * {@code BatchControl/Request} too ({@link #getTarget()}, S-07): the form exposes the eligible
+ * approver user-id list, which is not for plain {@code Item/Read} holders.
  */
-public class JobRequestAction implements Action {
+@Restricted(NoExternalUse.class)
+public class JobRequestAction implements Action, StaplerProxy {
 
     /** Mask stored instead of secret parameter values; never persist password plaintext. */
     private static final String SECRET_MASK = "********";
@@ -52,6 +57,15 @@ public class JobRequestAction implements Action {
 
     public Job<?, ?> getJob() {
         return job;
+    }
+
+    @Override
+    public Object getTarget() {
+        // Gate the whole /job/<name>/batch-control/** subtree (S-07): the request form and the
+        // data it exposes (approver ids) require BatchControl/Request, not just Item/Read.
+        // doSubmit re-checks on top of this.
+        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        return this;
     }
 
     // ---------------------------------------------------------------- Action

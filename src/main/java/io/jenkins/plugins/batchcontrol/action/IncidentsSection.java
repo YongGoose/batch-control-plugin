@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -33,6 +35,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * {@link #getTarget()}. The list itself is read-only (405 on non-GET); the state-changing
  * endpoints live on {@link IncidentItem} under {@code /batch-control/incidents/<id>/}.
  */
+@Restricted(NoExternalUse.class)
 public class IncidentsSection implements ModelObject, StaplerProxy {
 
     /** Page size for the incident list. */

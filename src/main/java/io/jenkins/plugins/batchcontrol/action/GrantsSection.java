@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -23,6 +24,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -48,6 +51,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * permissions (requesters see their requests, approvers their inbox, managers the active
  * grants), enforced for the whole subtree by {@link #getTarget()}.
  */
+@Restricted(NoExternalUse.class)
 public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Page size for both the request list and the active grant list. */
@@ -93,7 +97,11 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- routing
 
-    /** Stapler: serves {@code /batch-control/grants/<id>/}; {@code null} renders a 404. */
+    /**
+     * Stapler: serves {@code /batch-control/grants/<id>/}; {@code null} renders a 404.
+     * A grant request the caller may not see (P-09, S-01) renders exactly like a nonexistent
+     * one so its existence is not disclosed.
+     */
     @CheckForNull
     public GrantRequestItem getDynamic(String id) {
         if (id == null || id.isEmpty()) {
@@ -105,7 +113,10 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         } catch (IllegalArgumentException e) {
             return null;
         }
-        return request == null ? null : new GrantRequestItem(request);
+        if (request == null || !Visibility.canSeeGrantRequest(request)) {
+            return null;
+        }
+        return new GrantRequestItem(request);
     }
 
     /** Stapler: serves {@code /batch-control/grants/active/...} (revoke endpoints). */
@@ -305,7 +316,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     private List<GrantRequest> allRequestsSorted() {
         if (sortedRequests == null) {
-            List<GrantRequest> all = new ArrayList<>(GrantRequestService.get().list());
+            // P-09 visibility (S-01): only Manage, the requester or the designated approver see
+            // a grant request; paging runs over the filtered list. Same predicate as the detail.
+            List<GrantRequest> all = new ArrayList<>();
+            for (GrantRequest request : GrantRequestService.get().list()) {
+                if (Visibility.canSeeGrantRequest(request)) {
+                    all.add(request);
+                }
+            }
             all.sort(Comparator.comparing(GrantRequest::getCreatedAt)
                     .thenComparing(GrantRequest::getId)
                     .reversed());
@@ -316,7 +334,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     private List<Grant> allActiveSorted() {
         if (sortedActive == null) {
-            List<Grant> all = new ArrayList<>(GrantService.get().listActive());
+            // P-09 visibility (S-01): the active grant table shows only the caller's own grants
+            // unless the caller has Manage (who holds what where is recon data).
+            List<Grant> all = new ArrayList<>();
+            for (Grant grant : GrantService.get().listActive()) {
+                if (Visibility.canSeeGrant(grant)) {
+                    all.add(grant);
+                }
+            }
             all.sort(Comparator.comparing(Grant::getGrantedAt)
                     .thenComparing(Grant::getId)
                     .reversed());

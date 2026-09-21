@@ -12,6 +12,8 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
 
 /**
@@ -23,6 +25,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  * hand-edited URL can never produce a stack trace. The date range is capped at
  * {@value #MAX_MONTHS} months to bound how many monthly store files a single request may read.
  */
+@Restricted(NoExternalUse.class)
 public final class FilterParser {
 
     /** Hard cap on the number of monthly buckets one request may scan. */

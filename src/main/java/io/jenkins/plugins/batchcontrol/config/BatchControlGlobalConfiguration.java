@@ -14,6 +14,8 @@ import jenkins.model.GlobalConfiguration;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
 
 /**
@@ -26,6 +28,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  */
 @Extension
 @Symbol("batchControl")
+@Restricted(NoExternalUse.class) // configured via the global form / JCasC, not a code-level API
 public class BatchControlGlobalConfiguration extends GlobalConfiguration {
 
     private boolean runControlEnabled;
@@ -87,6 +90,9 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         boolean previous = this.changeControlEnabled;
         this.changeControlEnabled = changeControlEnabled;
         recordToggle("changeControlEnabled", previous, changeControlEnabled);
+        // S-05: the standing-permission warning caches its expensive scan; a toggle must show
+        // the fresh state on the next admin page render, not after the TTL.
+        io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
     }
 
     private static void recordToggle(String key, boolean previous, boolean current) {
