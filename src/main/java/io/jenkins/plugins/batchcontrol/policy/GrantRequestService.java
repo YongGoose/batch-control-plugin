@@ -127,11 +127,14 @@ public final class GrantRequestService {
     /**
      * The scope target must exist so approvers never approve a window on a phantom path.
      *
-     * <p>S-03: an empty full name is rejected for every scope type. A {@code FOLDER:""} scope
-     * would be instance-wide ({@code GrantScope.includes} matches everything under the root),
-     * which SPEC item 8 never defines; root-scope grants stay impossible until a deliberate
-     * DECISIONS entry introduces them. The empty-string semantics of
-     * {@code GrantScope.includes} are therefore dead code by construction.
+     * <p>S-03: an empty full name is rejected for every scope type. A root scope would be
+     * instance-wide, which SPEC item 8 never defines; root-scope grants stay impossible until a
+     * deliberate DECISIONS entry introduces them.
+     *
+     * <p>S-13: this runs both at creation and again at approval, so a request whose target was
+     * deleted or renamed in between — or one persisted by a build that predates this rule —
+     * cannot turn into a live grant. {@code GrantScope.includes} additionally matches nothing
+     * for an empty scope name, so even a hand-edited store file cannot confer anything.
      */
     private static void checkScopeExists(GrantScope scope) {
         String fullName = scope.getFullName();
@@ -159,6 +162,11 @@ public final class GrantRequestService {
      * window is {@code [now, now + durationMinutes)} on the {@link BatchClock}; SPEC item 8:
      * the requester holds the permissions immediately.
      *
+     * <p>The stored scope is re-validated here (S-13), so approval fails with
+     * {@link IllegalArgumentException} if the target no longer exists or the scope is a root
+     * scope. The lookup is caller-scoped like every other item lookup in this service: the
+     * approver must be able to see the scope target to approve a window on it.
+     *
      * @return the created, immediately effective {@link Grant}
      */
     public Grant approve(String id, String comment) {
@@ -170,6 +178,12 @@ public final class GrantRequestService {
                         + request.getStatus() + " and can no longer be approved.");
             }
             ApprovalPolicy.checkDecision(request.getId(), request.getRequester(), request.getApprover());
+            // S-13: re-validate the stored scope before it becomes a live grant. Creation-time
+            // validation does not bind a request that was persisted earlier (or whose target has
+            // since been deleted or renamed), and approval is the last point where a bad scope
+            // can still be stopped. Deliberately after checkDecision, so a non-approver learns
+            // nothing about the scope's validity.
+            checkScopeExists(request.getScope());
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
                 request.setStatus(RequestStatus.EXPIRED);

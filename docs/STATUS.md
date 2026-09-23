@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-23 (later) — Phase 4 CLOSED (gate met) → Phase 5 is next
+- security-02 re-review done (commit 16666a2): **BLOCKER 0 / HIGH 0 — Phase 4 gate MET**. S-01/S-03/S-05/S-06/S-07/S-10/S-11 all verified FIXED with file:line evidence; S-02, S-04/P-06, S-08, S-09 deferred by pending human decisions. The new ACL.SYSTEM2 block in IncidentItem.doRerun was scrutinised and cleared (existence lookup only; permission decision outside the context).
+- Coverage gap closed (commit 5937ab1): T-SEC-15 asserts the run-request submit POST is refused (403, no request, no build) without BatchControl/Request — previously only the GET form was asserted. Matrix now 135 rows / 84 P0; suite 156 tests.
+- New LOW findings from the re-review: S-12 (history/CSV surfaces are deliberately outside the P-09 visibility boundary — documentation item, added to issue #6) and S-13 (residue from the S-03 fix — stale comment, an advertised root-level Item/Create that no longer exists, no scope re-validation on approve; cleanup in progress).
+- Also noted: regression test s_05 is shallow (would pass with the monitor cache removed) — strengthening queued.
+- Issue #1 closed. Next: issue #2 (Phase 5 E2E), then #3 (overall cross-review + red-team second pass).
+
 ## 2026-09-23 — HANDOFF checkpoint (Phase 4 nearly done; security-02 pending)
 - Done since last entry: security-01 (BLOCKER 0 / HIGH 1 / MEDIUM 4 / LOW 6) → all routable findings fixed (S-01 P-09 visibility model, S-03, S-05 incl. SpotBugs restructure, S-06, S-07, S-10, S-11) + SecurityRegressionTest (7 methods, T-SEC-08..14; matrix now 134 rows) + jenkins-security-scan workflow. Final verify at `6f37f2d`: 155/155 tests, SpotBugs 0.
 - NOT done: security-02 re-review (the Phase 4 closing gate check) — the reviewer agent was killed by an API session limit before starting. Everything else queued behind it: Phase 5 E2E, overall cross-review, Phase 6, Phase 7.

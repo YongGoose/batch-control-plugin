@@ -9,6 +9,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p>Folder matching is done on path-segment boundaries: scope {@code team/batch} includes
  * {@code team/batch} itself and {@code team/batch/job1}, but never {@code team/batch-other}.
+ *
+ * <p>An empty full name (the Jenkins root) is not a valid scope: it is rejected when a grant
+ * request is created and again when it is approved, and {@link #includes(String)} matches
+ * nothing for it. There is no root-scope / instance-wide grant.
  */
 @Restricted(NoExternalUse.class)
 public final class GrantScope {
@@ -42,21 +46,25 @@ public final class GrantScope {
      *   <li>{@code JOB}: exact match only.</li>
      *   <li>{@code FOLDER}: the folder itself (CREATE is checked on the folder ACL)
      *       and any descendant, with a {@code /} segment-boundary check.</li>
+     *   <li>An empty scope name matches nothing at all, for either type — see below.</li>
      * </ul>
      */
     public boolean includes(String itemFullName) {
         if (itemFullName == null) {
             return false;
         }
+        // S-13: an empty scope name (the Jenkins root item-group) matches NOTHING. Root-scope
+        // grants are not a supported capability: GrantRequestService rejects an empty scope both
+        // at creation and at approval, so this state cannot be produced through the plugin. The
+        // guard stays because XStream rebuilds persisted Grant/GrantRequest objects without
+        // running the constructor, so a hand-edited or pre-S-03 store file could still carry
+        // GrantScope("") — and the safe answer for such a scope is "includes nothing", never the
+        // instance-wide "includes everything" this branch used to return.
+        if (fullName.isEmpty()) {
+            return false;
+        }
         if (type == Type.JOB) {
             return fullName.equals(itemFullName);
-        }
-        if (fullName.isEmpty()) {
-            // FOLDER scope "" is the Jenkins root itself: it includes every item full name and
-            // the root ("") — where root-level Item/Create is checked on the root ACL. Such a
-            // scope is only creatable through the service/API; the HTTP form requires a
-            // non-empty scope name.
-            return true;
         }
         return itemFullName.equals(fullName) || itemFullName.startsWith(fullName + "/");
     }

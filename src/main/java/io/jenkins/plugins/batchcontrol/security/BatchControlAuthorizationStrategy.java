@@ -69,11 +69,12 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
     @NonNull
     @Override
     public ACL getRootACL() {
-        if (delegate == null) {
-            return GrantAwareACL.denyAll();
-        }
-        // "" is the root item-group: a FOLDER-scope grant on "" covers root-level Item/Create.
-        return new GrantAwareACL(delegate.getRootACL(), "");
+        // S-13: the root item-group carries NO grant scope. Root-scope grants are not a
+        // supported capability — an empty scope name is rejected at grant-request creation and
+        // at approval (GrantRequestService.checkScopeExists) — so root-level Item/Create can
+        // only come from the delegate, never from a grant. Passing no scope here makes that
+        // structural: the root ACL never consults GrantService at all.
+        return noScope(delegate == null ? null : delegate.getRootACL());
     }
 
     @NonNull
@@ -140,7 +141,11 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
         return delegate == null ? Collections.emptySet() : delegate.getGroups();
     }
 
-    /** Grants never apply to non-item objects; wrap only for the null-delegate safe default. */
+    /**
+     * Wraps an ACL that no grant scope can ever apply to — non-item objects (views, users,
+     * computers, clouds, nodes) and the Jenkins root (S-13) — so the wrapper only supplies the
+     * null-delegate safe default and otherwise passes every decision to the delegate.
+     */
     @NonNull
     private static ACL noScope(@CheckForNull ACL delegateAcl) {
         return delegateAcl == null ? GrantAwareACL.denyAll() : new GrantAwareACL(delegateAcl, null);

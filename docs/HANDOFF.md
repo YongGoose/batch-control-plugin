@@ -6,21 +6,22 @@ Last updated: 2026-09-23. This document lets any account/machine resume the work
 
 ```
 P0 setup ✅ → P1 PoC ✅🧑 → P2 test matrix ✅🧑 → P3 implementation (S1..S4) ✅
-→ P4 security (security-01 ✅, fixes ✅, security-scan workflow ✅, security-02 re-review ⏳ NOT RUN)
-→ P5 E2E ⏳ → P6 pilot 🧑 ⏳ → P7 release/hosting ⏳
+→ P4 security ✅ (security-01, fixes, security-scan workflow, security-02 — gate MET: BLOCKER 0 / HIGH 0)
+→ P5 E2E ⏳ NEXT → P6 pilot 🧑 ⏳ → P7 release/hosting ⏳
 ```
 
 - Branch state: everything is merged to `main` (`6f37f2d`). Phase branches `phase-1-poc`, `phase-2-matrix`, `phase-3-impl` are historical.
 - Build state at `6f37f2d`: `mvn clean verify` = **BUILD SUCCESS, 155/155 tests, SpotBugs 0** (verified twice).
 - Test matrix: `docs/TEST-MATRIX.md`, 134 rows. P0 non-e2e coverage 76/77 (the only gap is T-SEC-07, blocked on decision P-03). P1 non-e2e 100%. 9 e2e rows are Phase 5 scope.
-- Reports so far: `docs/POC-RESULTS.md`, `docs/reports/red-team-01.md`, `spec-review-S1..S4.md`, `security-01.md`. **`security-02.md` does not exist yet** — the re-review after the security fixes is the immediate next step (see the Phase 4 issue).
+- Reports so far: `docs/POC-RESULTS.md`, `docs/reports/red-team-01.md`, `spec-review-S1..S4.md`, `security-01.md`, `security-02.md`.
 
 ## Immediate next steps (in order)
 
-1. **security-02 re-review** (Phase 4 gate: BLOCKER 0 / HIGH 0). Verify each security-01 finding against commit `6f37f2d`: S-01 (P-09 visibility, `ui/Visibility.java`), S-03, S-05, S-06 (note: introduces a NEW `ACL.SYSTEM2` lookup-only site in `IncidentItem.doRerun` — scrutinize), S-07, S-10, S-11. S-02 and S-04 are deferred by pending human decisions; S-08/S-09 are README-documentation items for Phase 7.
-2. **Phase 5 E2E** per `docs/WORKFLOW.md` Phase 5 and the e2e rows in the matrix (T-E2E-01..08, T-10-06), plus the visual checks deferred from earlier phases (PoC assumption D, T-02-02 visible-text check, T-06-15).
-3. **Overall cross-review** (user-requested): feature-vs-SPEC and test-coverage assessment after Phase 5; includes the red-team second pass (its role file mandates a re-run against real code after Phase 4).
-4. Phase 6 (human pilot), Phase 7 (release prep + hosting request draft).
+1. **Phase 5 E2E** (issue #2) per `docs/WORKFLOW.md` Phase 5 and the e2e rows in the matrix (T-E2E-01..08, T-10-06), plus the visual checks deferred from earlier phases (PoC assumption D, T-02-02 visible-text check, T-06-15). This is the only remaining verification layer — everything below the browser is covered.
+2. **Overall cross-review** (issue #3): feature-vs-SPEC and test-coverage assessment after Phase 5; includes the red-team second pass (its role file mandates a re-run against real code after Phase 4).
+3. Phase 6 (human pilot, issue #5), Phase 7 (release prep + hosting request draft, issue #6).
+
+Small carried items: strengthen the shallow `s_05` monitor-cache regression test (it would pass with the cache removed); finish the S-13 residue cleanup if not already merged.
 
 ## Open human decisions (blocking various follow-ups)
 

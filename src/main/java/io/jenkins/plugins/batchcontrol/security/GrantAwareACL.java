@@ -28,9 +28,9 @@ final class GrantAwareACL extends ACL {
     private final ACL delegate;
 
     /**
-     * Full name of the item this ACL guards ({@code ""} for the Jenkins root, where root-level
-     * Item/Create is checked); {@code null} for objects grants never apply to (views, nodes,
-     * users, clouds, computers).
+     * Full name of the item this ACL guards; {@code null} for everything grants never apply to —
+     * views, nodes, users, clouds, computers, and the Jenkins root itself (S-13: there is no
+     * root-scope grant, so root-level Item/Create is the delegate's decision alone).
      */
     @CheckForNull
     private final String itemFullName;
