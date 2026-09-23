@@ -126,6 +126,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-SEC-12 | 8 (S-03) | integration | P0 | RequestGrant holder | GrantRequestService.create with scope fullName "" (JOB and FOLDER types) | rejected (IllegalArgumentException/Failure) — root-scope grants are not supported; nothing stored | SecurityRegressionTest |
 | T-SEC-13 | 8 (S-11) | integration | P2 | a BatchControlAuthorizationStrategy instance | construct another BatchControlAuthorizationStrategy with it as delegate | IllegalArgumentException (self-nesting guard) | SecurityRegressionTest |
 | T-SEC-14 | 8 (S-05) | integration | P2 | change control on, wrapper over matrix delegate, non-admin with direct Item/Configure | isActivated() twice in a row; then toggle changeControlEnabled off/on | back-to-back calls agree; cached result flips promptly after each toggle (cache invalidation) | SecurityRegressionTest |
+| T-SEC-15 | 2, 5 (6절) | integration | P0 | run control on, approval-required job, approvers=[a1]; user u1 with Jenkins/Read + Item/Read but NO BatchControl/Request | POST `job/X/batch-control/submit` with a valid crumb and a complete valid form (reason + approver=a1), bypassing the UI form u1 cannot load (T-SEC-11 covers the GET form only) | 403; no RunRequest created (store unchanged); no build started and getNextBuildNumber() unchanged (no silent no-op) | SecurityRegressionTest |
 | T-E2E-01 | 5,6 | e2e | P0 | requester/approver 계정 | requester 요청 → approver 승인 | 빌드 실행, 대시보드에 요청 ID 연결 표시 | |
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
 | T-E2E-03 | 8 | e2e | P0 | requester | 권한 요청→승인→설정 화면 | 저장 성공, 만료 후 저장 403 안내 | |
@@ -194,9 +195,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 ## 요약 (Phase 2 최종 — red-team 병합 후)
 
-- **총 행 수: 134** (SPEC 도출 111 + T-RT 16 + Phase 4 security regressions T-SEC-08..14)
-- **우선순위**: P0 83 / P1 42 / P2 9
-- **계층**: unit 2 / integration 123 / e2e 9
-- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 14, T-E2E 8, T-RT 16
+- **총 행 수: 135** (SPEC 도출 111 + T-RT 16 + Phase 4 security regressions T-SEC-08..14 + coverage-gap row T-SEC-15)
+- **우선순위**: P0 84 / P1 42 / P2 9
+- **계층**: unit 2 / integration 124 / e2e 9
+- **ID 그룹별 분포**: T-01 6, T-02 5, T-03 6, T-04 4, T-05 6, T-06 16, T-07 7, T-08 13, T-09 11, T-10 7, T-11 7, T-12 5, T-CFG 3, T-SEC 15, T-E2E 8, T-RT 16
 - **T-RT 우선순위**: P0 9 (T-RT-01/02/03/05/06/14/15/16/17), P1 5 (T-RT-07/10/11/13/19), P2 2 (T-RT-18/20)
 - **red-team 제안 채택 확정(비고 8, D-16~D-23 반영)**: R-1→T-RT-01, R-2→T-RT-05, R-3→T-RT-10(준용)·T-RT-11, R-4→T-RT-13, R-5→T-RT-14/15/16/17, R-6→T-RT-03, R-7→T-RT-18/19/20, R-8→T-RT-02/17

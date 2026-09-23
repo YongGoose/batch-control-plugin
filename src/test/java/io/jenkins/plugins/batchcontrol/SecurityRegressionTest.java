@@ -238,6 +238,46 @@ public class SecurityRegressionTest {
                 200, get(webClient("u1"), "job/batch-x/batch-control/").getStatusCode());
     }
 
+    /**
+     * T-SEC-15 (SPEC 2 + 5, §6): the per-job submit POST itself requires BatchControl/Request.
+     * The sibling T-SEC-11 covers only the GET form; a user without Request must not be able to
+     * create a run request by POSTing straight at the submit endpoint, bypassing the UI form
+     * they cannot even load. "Every state change is POST + permission check" (SPEC §6).
+     */
+    @Test
+    public void t_sec_15_submitRunRequestWithoutRequestPermissionIs403() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("batch-x");
+        job.addProperty(new BatchControlJobProperty(true));
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
+                // u1 can read Jenkins and the job, but holds NO BatchControl/Request
+                .grant(Jenkins.READ, Item.READ).everywhere().to("u1")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
+
+        int requestsBefore = RunRequestService.get().list().size();
+        int nextBuildNumberBefore = job.getNextBuildNumber();
+
+        // a complete, otherwise-valid submission: the job takes no parameters, so reason and
+        // approver are the whole form. Only the missing permission may stop it.
+        JenkinsRule.WebClient u1 = webClient("u1");
+        WebRequest submit = new WebRequest(
+                wcCrumbed(u1, "job/batch-x/batch-control/submit"), HttpMethod.POST);
+        submit.setRequestParameters(Arrays.asList(
+                new NameValuePair("reason", "direct submit without the Request permission"),
+                new NameValuePair("approver", "a1")));
+
+        assertEquals("a POST to the per-job submit endpoint without BatchControl/Request must be 403",
+                403, u1.getPage(submit).getWebResponse().getStatusCode());
+
+        assertEquals("the rejected submit must not have created a run request",
+                requestsBefore, RunRequestService.get().list().size());
+        // the denial must not degrade into a silent no-op that still runs the job
+        j.waitUntilNoActivity();
+        assertTrue("no build may have been started by the rejected submit", job.getBuilds().isEmpty());
+        assertEquals("the job's next build number must be unchanged",
+                nextBuildNumberBefore, job.getNextBuildNumber());
+    }
+
     /** T-SEC-12 (S-03): an empty scope full name is rejected for both JOB and FOLDER types. */
     @Test
     public void s_03_emptyScopeNameIsRejected() throws Exception {
