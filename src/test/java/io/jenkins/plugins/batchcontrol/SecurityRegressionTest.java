@@ -7,7 +7,9 @@ import hudson.model.Result;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
+import hudson.security.AbstractPasswordBasedSecurityRealm;
 import hudson.security.GlobalMatrixAuthorizationStrategy;
+import hudson.security.GroupDetails;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -15,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.Incident;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
@@ -22,12 +25,15 @@ import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.net.URL;
 import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
@@ -41,6 +47,9 @@ import org.junit.function.ThrowingRunnable;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -50,7 +59,8 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Phase 4 security-fix regressions, derived from docs/reports/security-01.md and
- * docs/DECISIONS.md P-09 (visibility model). Matrix rows T-SEC-08 .. T-SEC-14.
+ * docs/DECISIONS.md P-09 (visibility model) and P-10 (no root-scope grants).
+ * Matrix rows T-SEC-08 .. T-SEC-15, T-SEC-17, T-SEC-18.
  *
  * - S-01 / P-09: run-request and grant-request visibility filtering (silent list filter,
  *   404 on non-visible detail URLs, active-grant table own-only unless MANAGE).
@@ -58,8 +68,11 @@ import static org.junit.Assert.assertTrue;
  * - S-07: the per-job request form requires BatchControl/Request.
  * - S-03: empty-string scope names are rejected (no root-scope grants).
  * - S-11: the wrapper strategy refuses to nest itself as delegate.
- * - S-05: the configure-without-grant monitor is consistent across calls and its cached
- *   result is invalidated by a change-control toggle.
+ * - S-05: the configure-without-grant monitor is consistent across calls, its scan result is
+ *   really cached (measured with a lookup-counting security realm) and the cache is
+ *   invalidated by a change-control toggle.
+ * - S-13 / P-10: a stored grant request with an empty scope name cannot be approved, and
+ *   approval re-validates the scope as the approver.
  *
  * Written from the security report, DECISIONS P-09 and the coordinator contract only
  * (no src/main knowledge).
@@ -316,11 +329,20 @@ public class SecurityRegressionTest {
 
     /**
      * T-SEC-14 (S-05): the configure-without-grant monitor answers consistently on
-     * back-to-back calls (cached) and the cache is invalidated promptly by a
-     * change-control toggle.
+     * back-to-back calls, its expensive realm scan is actually CACHED (a second call performs
+     * no further security-realm lookup — this is the page-load DoS that S-05 was about), and
+     * the cache is invalidated promptly by a change-control toggle, after which the scan runs
+     * again and still answers correctly.
+     *
+     * <p>The caching dimension is measured with a security realm that counts every
+     * {@code loadUserByUsername2} call, so a build in which the cache were removed fails here
+     * instead of passing on the (uncached but still consistent) verdict alone.
      */
     @Test
     public void s_05_monitorActivationConsistentAndInvalidatedOnToggle() throws Exception {
+        CountingSecurityRealm realm = new CountingSecurityRealm();
+        j.jenkins.setSecurityRealm(realm);
+
         AdministrativeMonitor monitor =
                 AdministrativeMonitor.all().get(ConfigureWithoutGrantMonitor.class);
         assertNotNull(monitor);
@@ -335,20 +357,129 @@ public class SecurityRegressionTest {
         j.jenkins.setAuthorizationStrategy(
                 new BatchControlAuthorizationStrategy(withDirectConfigure));
 
+        // 1. first render: the scan runs and consults the security realm.
+        int beforeFirst = realm.lookups.get();
         boolean first = monitor.isActivated();
-        boolean second = monitor.isActivated();
+        int afterFirst = realm.lookups.get();
         assertTrue("a non-admin with direct Item/Configure must activate the monitor", first);
-        assertEquals("back-to-back isActivated() calls must agree (S-05 cache)", first, second);
+        assertTrue("fixture: the activation scan must consult the security realm at least once, "
+                + "otherwise this test cannot measure the S-05 cache (observed "
+                + (afterFirst - beforeFirst) + " lookups)", afterFirst > beforeFirst);
 
+        // 2. second render, nothing changed: same verdict AND no new realm lookup (cache hit).
+        boolean second = monitor.isActivated();
+        assertEquals("back-to-back isActivated() calls must agree (S-05)", first, second);
+        assertEquals("the second isActivated() must be served from the cache: a /manage render "
+                + "must not repeat the security-realm lookups (S-05 — this is the LDAP page-load "
+                + "DoS the fix removed)", afterFirst, realm.lookups.get());
+
+        // 3. turning change control off must invalidate, and answer false.
         cfg.setChangeControlEnabled(false);
         cfg.save();
         assertFalse("the cached activation must be invalidated by the change-control toggle "
                 + "(S-05)", monitor.isActivated());
 
+        // 4. turning it back on must invalidate again: the next call re-scans (new lookups)
+        //    and the verdict is still correct.
         cfg.setChangeControlEnabled(true);
         cfg.save();
+        int beforeReactivation = realm.lookups.get();
         assertTrue("re-enabling change control must promptly re-activate the monitor (S-05)",
                 monitor.isActivated());
+        assertTrue("after the toggle the cache must have been invalidated, so the realm scan must "
+                + "run again instead of answering from the stale snapshot (S-05)",
+                realm.lookups.get() > beforeReactivation);
+
+        // 5. and the freshly recomputed result is cached again.
+        int afterReactivation = realm.lookups.get();
+        assertTrue(monitor.isActivated());
+        assertEquals("the recomputed result must be cached again (S-05)",
+                afterReactivation, realm.lookups.get());
+    }
+
+    /**
+     * T-SEC-17 (SPEC item 8 / DECISIONS P-10, security-02 S-13c): a grant request that carries an
+     * empty scope full name — the shape a pre-P-10 build could persist, or a hand-edited store
+     * file could contain — must NOT be approvable into a live grant. Creation of such a request is
+     * already refused (T-SEC-12); this row pins the second gate, at approval time, for the
+     * requests that creation never saw.
+     */
+    @Test
+    public void s_13_storedEmptyScopeGrantRequestCannotBeApproved() throws Exception {
+        j.createFreeStyleProject("batch-x");
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST_GRANT)
+                        .everywhere().to("g1")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+
+        for (GrantScope.Type type : new GrantScope.Type[] {
+                GrantScope.Type.FOLDER, GrantScope.Type.JOB}) {
+            // written straight to the store, bypassing the service-side creation guard
+            GrantRequest stored = GrantRequest.create(new GrantScope(type, ""),
+                    Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE, GrantAction.DELETE),
+                    30, "persisted before the empty-scope rule existed", "g1", "a1");
+            FileStore.get().saveGrantRequest(stored);
+            assertEquals("fixture: the request must really be in the store as PENDING",
+                    RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus());
+
+            assertRejectedAsInvalid("approving a stored " + type + " request whose scope name is "
+                    + "empty must be refused (P-10: no instance-wide grants)", () -> {
+                        try (ACLContext ignored = as("a1")) {
+                            GrantRequestService.get().approve(stored.getId(), "looks fine to me");
+                        }
+                    });
+
+            assertEquals("the refused approval must leave the request PENDING",
+                    RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus());
+            assertTrue("no active grant may exist after the refused approval",
+                    GrantService.get().listActive().isEmpty());
+            for (String anyJob : new String[] {"batch-x", "team/other"}) {
+                for (hudson.security.Permission action : new hudson.security.Permission[] {
+                        Item.CREATE, Item.CONFIGURE, Item.DELETE}) {
+                    assertFalse("a " + type + ":\"\" request must never confer " + action.getId()
+                            + " on " + anyJob,
+                            GrantService.get().hasActiveGrant("g1", anyJob, action));
+                }
+            }
+        }
+    }
+
+    /**
+     * T-SEC-18 (SPEC item 8, side effect recorded in DECISIONS P-10): approval re-validates the
+     * scope with a CALLER-scoped lookup, so an approver who cannot see the scope target cannot
+     * approve a change window on it — the approval decision may not be made blind.
+     */
+    @Test
+    public void s_13_approvalRequiresTheApproverToSeeTheScopeTarget() throws Exception {
+        j.createFreeStyleProject("batch-x");
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST_GRANT)
+                        .everywhere().to("g1")
+                // a1 is the designated approver but deliberately holds NO Item/Read anywhere
+                .grant(Jenkins.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+
+        GrantRequest request = grantRequestAs("g1");
+        assertEquals(RequestStatus.PENDING, GrantRequestService.get().load(request.getId()).getStatus());
+
+        assertRejectedAsInvalid("an approver who cannot see the scope target must not be able to "
+                + "approve a grant on it (P-10: approval re-validates the scope as the caller)",
+                () -> {
+                    try (ACLContext ignored = as("a1")) {
+                        GrantRequestService.get().approve(request.getId(), "rubber stamp");
+                    }
+                });
+
+        assertEquals("the refused approval must leave the request PENDING",
+                RequestStatus.PENDING, GrantRequestService.get().load(request.getId()).getStatus());
+        assertFalse("no grant may have been created by the refused approval",
+                GrantService.get().hasActiveGrant("g1", "batch-x", Item.CONFIGURE));
+        assertTrue("no active grant may exist at all", GrantService.get().listActive().isEmpty());
     }
 
     // ---------------------------------------------------------------- helpers
@@ -380,6 +511,38 @@ public class SecurityRegressionTest {
     private Grant approveGrant(String requestId) {
         try (ACLContext ignored = as("a1")) {
             return GrantRequestService.get().approve(requestId, "ok");
+        }
+    }
+
+    /**
+     * A {@link JenkinsRule#createDummySecurityRealm()}-equivalent realm that counts every
+     * user lookup. Used by T-SEC-14 to prove that the administrative monitor caches its scan
+     * instead of re-querying the realm (potentially once per configured sid) on every
+     * /manage render — the S-05 page-load DoS against LDAP-backed instances.
+     */
+    private static final class CountingSecurityRealm extends AbstractPasswordBasedSecurityRealm {
+
+        private final AtomicInteger lookups = new AtomicInteger();
+
+        @Override
+        protected UserDetails authenticate2(String username, String password) {
+            if (!username.equals(password)) {
+                throw new BadCredentialsException(username);
+            }
+            return loadUserByUsername2(username);
+        }
+
+        @Override
+        public UserDetails loadUserByUsername2(String username) {
+            lookups.incrementAndGet();
+            return new org.springframework.security.core.userdetails.User(username, "",
+                    true, true, true, true,
+                    Collections.singletonList(AUTHENTICATED_AUTHORITY2));
+        }
+
+        @Override
+        public GroupDetails loadGroupByGroupname2(String groupname, boolean fetchMembers) {
+            throw new UsernameNotFoundException(groupname);
         }
     }
 

@@ -12,8 +12,9 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Unit tests (no Jenkins). Matrix rows T-SEC-04 (path codec hardening, RT-12 extension)
- * and T-SEC-03 (FOLDER scope boundary, prefix misjudgment prevention).
+ * Unit tests (no Jenkins). Matrix rows T-SEC-04 (path codec hardening, RT-12 extension),
+ * T-SEC-03 (FOLDER scope boundary, prefix misjudgment prevention) and T-SEC-16
+ * (empty scope full name matches nothing — DECISIONS P-10 / security-02 S-13a).
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
  */
@@ -95,5 +96,30 @@ public class PathCodecTest {
         assertFalse("JOB scope is exact match only", job.includes("team/batch/job10"));
         assertFalse(job.includes("team/batch"));
         assertFalse(job.includes("team/batch/job1/sub"));
+    }
+
+    /**
+     * T-SEC-16 (SPEC item 8 / DECISIONS P-10, security-02 S-13a): a scope whose full name is
+     * empty is not "the Jenkins root", it is nothing. For BOTH scope types
+     * {@code includes(anything)} must be false — including the empty full name itself — so that
+     * a scope rebuilt by XStream from a store file written before the rule existed (or edited by
+     * hand) can never confer instance-wide CREATE/CONFIGURE/DELETE.
+     */
+    @Test
+    public void t_sec_16_emptyScopeNameMatchesNothing() {
+        String[] candidates = {
+            "", "batch-x", "team", "team/batch", "team/batch/job1", "/", "a/b/c/d",
+        };
+        for (GrantScope.Type type : GrantScope.Type.values()) {
+            // The model object itself is constructible with an empty name (XStream rebuilds
+            // persisted scopes without any constructor anyway), so the fail-closed guard has to
+            // live in includes() — that is what this row pins.
+            GrantScope empty = new GrantScope(type, "");
+            for (String fullName : candidates) {
+                assertFalse("an empty " + type + " scope must include nothing, but it claimed to "
+                        + "include \"" + fullName + "\" (P-10: root-scope grants are not supported)",
+                        empty.includes(fullName));
+            }
+        }
     }
 }
