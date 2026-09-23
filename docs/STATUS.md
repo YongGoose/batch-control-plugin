@@ -13,6 +13,12 @@
 
 ---
 
+## 2026-09-23 — HANDOFF checkpoint (Phase 4 nearly done; security-02 pending)
+- Done since last entry: security-01 (BLOCKER 0 / HIGH 1 / MEDIUM 4 / LOW 6) → all routable findings fixed (S-01 P-09 visibility model, S-03, S-05 incl. SpotBugs restructure, S-06, S-07, S-10, S-11) + SecurityRegressionTest (7 methods, T-SEC-08..14; matrix now 134 rows) + jenkins-security-scan workflow. Final verify at `6f37f2d`: 155/155 tests, SpotBugs 0.
+- NOT done: security-02 re-review (the Phase 4 closing gate check) — the reviewer agent was killed by an API session limit before starting. Everything else queued behind it: Phase 5 E2E, overall cross-review, Phase 6, Phase 7.
+- Handoff artifacts: docs/HANDOFF.md (environment, position, next steps), GitHub issues #1..#7 (remaining work, human decisions), draft PR with the continuation plan. All branches pushed to origin.
+- Deferred by pending human decisions: S-02, S-04/P-06, T-SEC-07 (P-03), P-09 ratification, P-01..P-08.
+
 ## 2026-09-21 (afternoon) — Phase 3 CLOSED → Phase 4 started
 - S4 result: tests f87d8f0 + impl f49dbad + review fixes (resolve() requires ACKNOWLEDGED; dead HistoryService/CsvSupport deleted; FileStore month bucketing unified on BatchClock zone) + new XssEscapingTest (T-RT-10). spec-review-S4 = PASS WITH NOTES, BLOCKER 0.
 - Final verify: 148/148 tests green, SpotBugs 0 (9m12s).
