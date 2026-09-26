@@ -76,14 +76,19 @@ public class OwnerScenarioConfigChangeTest {
                 .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST)
                         .everywhere().to(REQUESTER));
 
+        // The job is created BEFORE run control is switched on, on purpose: D-31 gives every job
+        // created under run control an approvalRequired=true property, and this scenario needs a
+        // job whose runs are not gated (what it measures is the change record and which run picks
+        // the change up). Creating it first also keeps its own setup out of the change history, so
+        // the only CONFIGURE record on config-x is the administrator's edit below.
+        job = j.createFreeStyleProject("config-x");
+        job.addProperty(new ParametersDefinitionProperty(
+                new StringParameterDefinition("DATE", START_CONFIG)));
+
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(true);
         cfg.setChangeControlEnabled(true);
         cfg.save();
-
-        job = j.createFreeStyleProject("config-x");
-        job.addProperty(new ParametersDefinitionProperty(
-                new StringParameterDefinition("DATE", START_CONFIG)));
     }
 
     /**

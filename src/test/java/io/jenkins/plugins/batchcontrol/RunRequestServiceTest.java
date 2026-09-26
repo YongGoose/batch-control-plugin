@@ -31,6 +31,7 @@ import org.junit.function.ThrowingRunnable;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -69,8 +70,10 @@ public class RunRequestServiceTest {
         job = j.createFreeStyleProject("batch-x");
         job.addProperty(new ParametersDefinitionProperty(
                 new StringParameterDefinition("DATE", "2000-01-01")));
-        property = new BatchControlJobProperty(true);
-        job.addProperty(property);
+        // run control is already on, so D-31 attached a property when the job was created:
+        // install this one as the job's only one, otherwise the rows that tighten it later
+        // (T-05-06 sets jobApprovers on it) would mutate a property nobody reads.
+        property = setBatchControl(job, new BatchControlJobProperty(true));
     }
 
     // ---------------------------------------------------------------- SPEC 3

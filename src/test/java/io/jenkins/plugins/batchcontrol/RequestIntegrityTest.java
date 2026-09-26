@@ -33,6 +33,7 @@ import org.junit.function.ThrowingRunnable;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -74,7 +75,9 @@ public class RequestIntegrityTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList()); // empty == unset == block all
-        protectedJob.addProperty(property);
+        // run control is already on, so D-31 gave the job a property at creation; install this
+        // one as the only one or blockUpstream would be shadowed (see BatchControlFixtures)
+        setBatchControl(protectedJob, property);
 
         WorkflowJob caller = j.createProject(WorkflowJob.class, "caller-a");
         caller.setDefinition(new CpsFlowDefinition("build job: 'protected-b', wait: false", true));

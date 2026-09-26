@@ -38,6 +38,8 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestExtension;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -97,7 +99,10 @@ public class OwnerScenarioLiveToggleTest {
      */
     @Test
     public void t_os_05_enablingApprovalRequiredDoesNotDisturbTheRunningBuild() throws Exception {
-        FreeStyleProject job = j.createFreeStyleProject("live-x");
+        // The scenario starts from a job the control is NOT yet on for, which is what the
+        // administrator switches on mid-build. Run control is globally on, so D-31 attaches the
+        // property at creation and it has to be stripped to reach that starting state.
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("live-x"));
         String gate = "t-os-05";
         job.getBuildersList().add(new GatedBuilder(gate));
 
@@ -112,7 +117,7 @@ public class OwnerScenarioLiveToggleTest {
         assertTrue("test precondition: build #1 must be in flight", inFlight.isBuilding());
 
         // the administrator turns run control on for this job, mid-build
-        job.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(job, new BatchControlJobProperty(true));
         assertTrue("turning the control on must not abort the running build", inFlight.isBuilding());
 
         GatedBuilder.release(gate);
@@ -141,7 +146,9 @@ public class OwnerScenarioLiveToggleTest {
         FreeStyleProject job = j.createFreeStyleProject("live-timer-x");
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(false);
-        job.addProperty(property);
+        // must be the job's only property (D-31 already attached one at creation), because the
+        // test tightens blockTimer on this very instance further down
+        setBatchControl(job, property);
         String gate = "t-os-06";
         job.getBuildersList().add(new GatedBuilder(gate));
 
@@ -175,7 +182,9 @@ public class OwnerScenarioLiveToggleTest {
      */
     @Test
     public void t_os_07_repeatedManualRunsPassUntilTheControlIsSwitchedOn() throws Exception {
-        FreeStyleProject job = j.createFreeStyleProject("repeat-x");
+        // S-4 starts from an uncontrolled job: D-31's creation-time property is stripped so that
+        // the three runs below really are "before the switch"
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("repeat-x"));
 
         for (int number = 1; number <= 3; number++) {
             Page response = postBuild(REQUESTER, job);
@@ -194,7 +203,7 @@ public class OwnerScenarioLiveToggleTest {
         assertEquals("all three consecutive runs must exist", 3, job.getBuilds().size());
 
         // the administrator switches the control on
-        job.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(job, new BatchControlJobProperty(true));
 
         Page blocked = postBuild(REQUESTER, job);
         assertTrue("the first run after the switch must be blocked, got HTTP "
@@ -212,7 +221,9 @@ public class OwnerScenarioLiveToggleTest {
     public void t_os_08_repeatedTimerRunsPassUntilBlockTimerIsSwitchedOn() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("repeat-timer-x");
         BatchControlJobProperty property = new BatchControlJobProperty(true);
-        job.addProperty(property);
+        // the timer block is switched on this instance further down, so it must be the one the
+        // plugin reads and not sit behind D-31's creation-time property
+        setBatchControl(job, property);
 
         for (int number = 1; number <= 3; number++) {
             Future<FreeStyleBuild> firing = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());

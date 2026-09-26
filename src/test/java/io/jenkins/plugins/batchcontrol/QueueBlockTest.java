@@ -38,6 +38,8 @@ import hudson.cli.CLICommandInvoker;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -50,6 +52,12 @@ import static org.junit.Assert.assertTrue;
  *
  * Blocking assertion baseline (matrix header): queue empty + getNextBuildNumber() unchanged
  * + no build after waitUntilNoActivity().
+ *
+ * Fixture note (D-31): run control is on before the jobs are created, so every job here is
+ * born with a BatchControlJobProperty already attached. Job settings therefore go in through
+ * {@link BatchControlFixtures#setBatchControl} and "not controlled" through
+ * {@link BatchControlFixtures#uncontrolled} — a bare addProperty would be shadowed by the
+ * default one.
  *
  * Written from docs/SPEC.md, docs/TEST-MATRIX.md and docs/POC-RESULTS.md only (no src/main knowledge).
  */
@@ -108,10 +116,10 @@ public class QueueBlockTest {
     /** T-06-04: Pipeline Replay of an approval-required job does not enter the queue. */
     @Test
     public void t_06_04_pipelineReplayIsBlocked() throws Exception {
-        WorkflowJob pipeline = j.createProject(WorkflowJob.class, "pipe");
+        WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
         j.buildAndAssertSuccess(pipeline); // first run happens before the job becomes protected
-        pipeline.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(pipeline, new BatchControlJobProperty(true));
 
         ReplayAction replay = pipeline.getBuildByNumber(1).getAction(ReplayAction.class);
         assertNotNull("a completed pipeline build must expose the replay action", replay);
@@ -127,7 +135,7 @@ public class QueueBlockTest {
     public void t_06_05_upstreamBuildStepBlockedWhenBlockUpstream() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -153,7 +161,7 @@ public class QueueBlockTest {
     public void t_06_07_timerCauseBlockedWhenBlockTimer() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         // an unattended cause is refused quietly: scheduleBuild2 returns null, nothing is thrown
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
@@ -237,7 +245,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -255,7 +263,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob other = j.createProject(WorkflowJob.class, "z");
         other.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -269,7 +277,9 @@ public class QueueBlockTest {
     /** T-06-16: a job without approvalRequired is unaffected by run control. */
     @Test
     public void t_06_16_nonApprovalJobUnaffected() throws Exception {
-        FreeStyleProject free = j.createFreeStyleProject("free-x");
+        // D-31 attaches approvalRequired=true at creation while run control is on; this row is
+        // about a job that carries no batch-control property at all, so strip it back to that.
+        FreeStyleProject free = uncontrolled(j.createFreeStyleProject("free-x"));
         JenkinsRule.WebClient wc = j.createWebClient();
         wc.getPage(new WebRequest(wc.createCrumbedUrl(free.getUrl() + "build"), HttpMethod.POST));
         j.waitUntilNoActivity();
@@ -282,7 +292,7 @@ public class QueueBlockTest {
     // ---------------------------------------------------------------- helpers
 
     private void protect(FreeStyleProject target) throws Exception {
-        target.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(target, new BatchControlJobProperty(true));
     }
 
     /** Matrix common blocking baseline. */

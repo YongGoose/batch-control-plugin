@@ -42,6 +42,8 @@ import org.junit.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -78,10 +80,12 @@ public class RunRecordListenerTest {
     /** T-10-01: Freestyle and Pipeline completions are both recorded with an accurate causeType. */
     @Test
     public void t_10_01_freestyleAndPipelineAreBothRecorded() throws Exception {
-        FreeStyleProject freestyle = j.createFreeStyleProject("fs-x");
+        // This row measures the recorder, not the queue gate: both jobs stay out of run control
+        // (D-31 would otherwise make them approval-required at creation and block the USER cause).
+        FreeStyleProject freestyle = uncontrolled(j.createFreeStyleProject("fs-x"));
         j.assertBuildStatusSuccess(freestyle.scheduleBuild2(0, userCause("u1")));
 
-        WorkflowJob pipeline = j.createProject(WorkflowJob.class, "pipe-x");
+        WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe-x"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'record me'", true));
         j.assertBuildStatusSuccess(pipeline.scheduleBuild2(0, new CauseAction(userCause("u1"))));
         j.waitUntilNoActivity();
@@ -129,7 +133,9 @@ public class RunRecordListenerTest {
     /** T-10-03: causes classify as USER / TIMER / UPSTREAM / SCM / OTHER / APPROVED_REQUEST. */
     @Test
     public void t_10_03_causeTypesAreClassified() throws Exception {
-        FreeStyleProject target = j.createFreeStyleProject("cause-x");
+        // the first five causes must reach the recorder unblocked, so the job starts outside run
+        // control (D-31 attaches approvalRequired=true at creation while run control is on)
+        FreeStyleProject target = uncontrolled(j.createFreeStyleProject("cause-x"));
 
         // #1 USER
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, userCause("u1")));
@@ -146,7 +152,7 @@ public class RunRecordListenerTest {
         // #5 OTHER (a cause outside every known classification)
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, new SyntheticCause()));
         // #6 APPROVED_REQUEST (protect the job only now, so the earlier causes were unaffected)
-        target.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(target, new BatchControlJobProperty(true));
         RunRequest request;
         try (ACLContext ignored = as("u1")) {
             request = RunRequestService.get().create(target, new LinkedHashMap<>(),
@@ -172,7 +178,7 @@ public class RunRecordListenerTest {
     @Test
     public void t_10_04_approvedRequestRunLinksRecordAndRequest() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("appr-x");
-        job.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(job, new BatchControlJobProperty(true));
 
         RunRequest request;
         try (ACLContext ignored = as("u1")) {
