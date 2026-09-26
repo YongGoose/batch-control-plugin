@@ -27,10 +27,11 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>CONFIGURE records (with the unified diff) come from {@link ConfigSnapshotListener}; this
  * listener seeds and relocates the diff baseline snapshots around lifecycle events.
  *
- * <p>D-17: when run control is on and a job is created by a user inside an active grant window,
- * the job automatically gets {@code approvalRequired=true} so a permission window can never be
- * used to plant an approval-free execution path. The internal property save is suppressed from
- * recording (only the CREATE record remains, no recursion).
+ * <p>D-31 (widening D-17): while run control is on, every newly created job gets
+ * {@code approvalRequired=true}, independently of the creator and of the creation path. D-17 only
+ * covered jobs created inside an active grant window, which left every job an administrator
+ * created in the ordinary course of work uncontrolled. The internal property save is suppressed
+ * from recording (only the CREATE record remains, no recursion).
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -40,12 +41,14 @@ public class ItemChangeListener extends ItemListener {
 
     @Override
     public void onCreated(Item item) {
+        // D-31 hangs off the run-control switch alone, so it is applied before the recording
+        // gate (which also answers to the change-control switch, D-13).
+        applyApprovalRequiredDefault(item);
         if (!ChangeRecording.isActive()) {
             return;
         }
         String user = ChangeRecording.currentUser();
         String fullName = item.getFullName();
-        forceApprovalRequiredIfCreatedUnderGrant(item, user, fullName);
         seedSnapshot(item);
         ChangeRecord record = ChangeRecord.create(ChangeType.CREATE, fullName, user, null);
         record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.CREATE));
@@ -98,48 +101,60 @@ public class ItemChangeListener extends ItemListener {
         FileStore.get().appendChangeRecord(record);
     }
 
-    // ---------------------------------------------------------------- D-17
+    // ---------------------------------------------------------------- D-31 (widens D-17)
 
     /**
-     * D-17: run control on + the creator holds an active grant covering the new item → the job
-     * defaults to {@code approvalRequired=true}. The property save is a plugin-internal write:
-     * it is suppressed from CONFIGURE recording (guards against listener recursion through the
-     * save fired by {@code addProperty}); the snapshot seeded afterwards already contains it.
+     * D-31: run control on + the new item is a job → the job starts with
+     * {@code approvalRequired=true}. No creator and no creation path is exempt, which is why this
+     * sits on {@link ItemListener#onCreated}: every creation entry point core offers (the New Item
+     * form, a {@code createItem} config.xml POST, the CLI {@code create-job}, a job copy, a Job DSL
+     * or multibranch generation) ends in {@code ItemGroupMixIn}, which fires this event once per
+     * created item. D-17 (creation inside a grant window) is the subset that stays covered.
+     *
+     * <p>An {@code approvalRequired=false} supplied in the creation payload does not win: the
+     * default is what SPEC item 8 pins, and letting the payload opt out would reopen the hole
+     * through the easiest path while leaving only a CREATE record behind. Opting out is a
+     * subsequent configuration change, which is itself change-controlled and recorded (P-13).
+     *
+     * <p>The property save is a plugin-internal write: it is suppressed from CONFIGURE recording
+     * (which also guards against listener recursion through the save fired by
+     * {@code addProperty}); the snapshot seeded afterwards already contains it.
      */
-    private static void forceApprovalRequiredIfCreatedUnderGrant(Item item, String user, String fullName) {
+    private static void applyApprovalRequiredDefault(Item item) {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
             return;
         }
         if (!(item instanceof Job)) {
             return;
         }
-        if (ChangeRecording.activeGrantIdFor(user, fullName, null) == null) {
-            return;
-        }
         Job<?, ?> job = (Job<?, ?>) item;
+        String fullName = job.getFullName();
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
         if (existing != null && existing.isApprovalRequired()) {
             return;
         }
         ChangeRecording.beginSuppression();
         try {
+            BatchControlJobProperty applied = existing == null
+                    ? new BatchControlJobProperty(true)
+                    : existing.withApprovalRequired(true);
             if (existing != null) {
                 job.removeProperty(BatchControlJobProperty.class);
             }
-            addApprovalRequiredProperty(job);
-            LOGGER.info(() -> "Job '" + fullName + "' was created by '" + user
-                    + "' inside an active grant window; approvalRequired=true applied (D-17)");
+            addProperty(job, applied);
+            LOGGER.info(() -> "New job '" + fullName
+                    + "' starts with approvalRequired=true while run control is on (D-31)");
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to apply approvalRequired=true to job '"
-                    + fullName + "' created inside a grant window (D-17)", e);
+            LOGGER.log(Level.WARNING, "Failed to apply the approvalRequired=true default to the "
+                    + "newly created job '" + fullName + "' (D-31)", e);
         } finally {
             ChangeRecording.endSuppression();
         }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void addApprovalRequiredProperty(Job job) throws IOException {
-        job.addProperty(new BatchControlJobProperty(true));
+    private static void addProperty(Job job, BatchControlJobProperty property) throws IOException {
+        job.addProperty(property);
     }
 
     // ---------------------------------------------------------------- snapshots
