@@ -108,7 +108,10 @@ from scripts.
     line per attempt, and a cron that never fired logs nothing at all. The
     **change history** is the third: the job has a `CREATE` record and no
     subsequent `CONFIGURE` record clearing the switches, which is the positive
-    evidence that nothing has unlocked it since.
+    evidence that nothing has unlocked it since. The same three steps are in the
+    product as the inline help of `Block cron (timer) triggers`
+    (`help-blockTimer`), which is where an operator whose cron did not fire looks
+    first; the other trigger and run-control help texts point at it.
 
     This is not theoretical. The seed jobs in this repository's own e2e
     environment stopped building silently the first time the approval default
