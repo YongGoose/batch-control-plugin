@@ -4,24 +4,37 @@
     <li>job creation, configuration, deletion, rename and move are recorded in the change
       history, with a diff of <code>config.xml</code> for configuration changes (this recording is
       also enabled by <b>Enable run control</b>);</li>
-    <li>deleting a job is refused unless the user holds an active permission window that covers
-      it;</li>
+    <li>a user who does not hold the standing permission to create or configure a job can ask for
+      a temporary permission window instead. A window <b>adds</b> <code>Item/Create</code>,
+      <code>Item/Configure</code> or <code>Item/Delete</code> on its scope to whatever the user
+      already has, for as long as it lasts; it never takes anything away, and it imposes nothing
+      on someone who already holds the permission standing;</li>
+    <li>deleting a job is the one exception to that: while this switch is on, deletion needs an
+      active <code>DELETE</code> window even for a user whose standing permissions would allow it
+      (administrators are not vetoed);</li>
     <li>an administrative monitor reports accounts that hold standing Create, Configure or Delete
       permissions outside the permission-window flow;</li>
-    <li>each job's sidebar offers <b>Request Change Permission</b>, which opens the grant screen
-      with that job filled in.</li>
+    <li>the <b>Grants</b> screen is open, and each job's sidebar offers <b>Request Change
+      Permission</b>, which opens the window request form with that job filled in.</li>
   </ul>
   <p>
-    This switch does <b>not</b> decide whether creating or configuring a job needs a permission
-    window. That is decided by the authorization strategy: select <b>Batch Control (wrapping)</b>
-    in <i>Configure Global Security</i> and it grants time-limited Item Create, Configure and
-    Delete permissions from approved windows. Without that strategy, an approved window confers
-    nothing.
+    A window confers its permissions only when <b>both</b> this switch is on <b>and</b> the
+    <b>Batch Control (wrapping)</b> authorization strategy is selected under
+    <i>Manage Jenkins &#8594; Security &#8594; Authorization</i>. Selecting that strategy is the step
+    most easily missed: without it, windows get approved and then have no effect at all.
   </p>
   <p>
-    Because permission windows live in the authorization strategy rather than in this switch,
-    requesting and approving a window still works while this switch is off, and turning it off
-    does not revoke windows that are already active. Turning it off does stop the delete veto and
-    the administrative monitor.
+    <b>Turning this switch off is a kill switch, and it is abrupt.</b> While it is off no window
+    confers anything, so every permission decision is the delegate strategy's alone, exactly as
+    before the plugin was installed. Turning it off also <b>revokes every window that is open at
+    that moment</b>, writing one revocation record per closure naming the account that flipped it,
+    so anyone part-way through a change loses the permission to finish and needs a new window once
+    the control is back on. No new window can be requested or approved while it is off either, and
+    the Grants screen is closed, so nothing is left to take effect unreviewed when it is turned
+    back on.
+  </p>
+  <p>
+    Nothing is removed from the audit trail. The Change Records and History screens keep showing
+    the windows that existed and the changes made under them whether this switch is on or off.
   </p>
 </div>
