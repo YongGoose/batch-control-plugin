@@ -6,7 +6,7 @@ hosting process.
 | | |
 |---|---|
 | Verification date | **2026-09-26** (all URLs below fetched on this date) |
-| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement; see *Applied changes* below |
+| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement, then `CONTRIBUTING.md` (G3 follow-up / §4 recommendation 2 / first half of Q8); see *Applied changes* below |
 | Repository under review | `https://github.com/YongGoose/batch-control-plugin` (public, not a fork, default branch `main` — verified via GitHub API on 2026-09-26) |
 | Branch inspected | `handoff/phase-4-5-continuation` |
 | Requirements checked | **65** |
@@ -25,6 +25,12 @@ hosting process.
 > was replaced with plugin documentation, so PASS 54 → 55 and FAIL 5 → 4. The
 > four remaining FAIL rows are all in the CD block (D1, D4, D5, D6) and exist
 > only if form field 6 is answered `Yes` — see **G10**.
+
+> **No count change (CONTRIBUTING pass, 2026-09-26).** `CONTRIBUTING.md` now
+> exists, which clears §4 recommendation 2 and the relocation half of **Q8**.
+> The header totals are unchanged on purpose: `CONTRIBUTING.md` is a
+> *recommendation* from the documentation guide, not one of the 65 checklist rows,
+> so no row's verdict moves.
 
 > **Verification note.** No Maven build was run while preparing this document
 > (a concurrent full build was in progress). Every row whose verdict depends on
@@ -47,6 +53,7 @@ items were deliberately **not** touched — see G10.
 | G8 | `.github/dependabot.yml` created — `maven` weekly, `github-actions` monthly | `.github/dependabot.yml:1-11` |
 | G9 | plugin BOM `7046.v43536164769c` → `7093.v37de7b_4a_8a_4f` | `pom.xml:51` |
 | G3 | `README.md` replaced — the Korean development-kit guide is gone, replaced by English plugin documentation (problem statement, the two controls, a blocked/not-blocked table, requirements, installation, four-step configuration, screen guide, 29 known limitations, roadmap, contributing, security reporting, license) | `README.md:1-576` |
+| G3 follow-up / §4 rec. 2 / Q8 (first half) | `CONTRIBUTING.md` created — the contributor material G3 removed, rewritten in English for contributors rather than transcribed: build/test with expected results, repository layout, document system + identifier glossary, test conventions, `e2e/`, known pitfalls, PR rules, and one context section on the agent orchestration | `CONTRIBUTING.md` |
 
 **Not done, by instruction:** G10 (all CD files and the `changelist` value — the
 Yes/No decision is made immediately before submission).
@@ -385,26 +392,56 @@ landing page:
   `docs/SPEC.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md` and
   `e2e/README.md`.
 
-**Still open (one follow-up, owner decision Q8).** The development-kit text that
-used to be `README.md:1-46` was **not** relocated in this pass — it was only
-removed from `README.md`, and the previous version is in git history. Recommended
-destination, in order of preference:
+**Follow-up — RESOLVED 2026-09-26 as `CONTRIBUTING.md`.** The contributor text
+that used to be `README.md:1-46` was removed from `README.md` by the G3 pass and
+survived only in git history (`git show 64725de^:README.md`). Option 1 below was
+taken: **`CONTRIBUTING.md` now exists at the repository root**, which also clears
+§4 recommendation 2.
 
 1. **`CONTRIBUTING.md`** at the repository root, since `docs/HOSTING-READINESS.md`
    §4 recommendation 2 already wants that file to exist and the documentation
    guide lists it as recommended. The kit content — how the phases run, which
    agent owns which path, what a human must do at each gate — *is* the
    contribution process for this repository. The README's *Contributing* section
-   would then link to it.
-2. **`docs/DEV-KIT.md`**, the destination already named in Q8, if the owner would
+   would then link to it. **← chosen.**
+2. ~~**`docs/DEV-KIT.md`**, the destination already named in Q8, if the owner would
    rather keep `CONTRIBUTING.md` short and conventional (build, test, PR
-   expectations) and leave the multi-agent method as a separate document.
+   expectations) and leave the multi-agent method as a separate document.~~
+   Not taken; no separate dev-kit document exists.
 
-Either way this is a `docs/`-or-root write outside the README, so it is recorded
-as a request rather than applied: **요청: `CONTRIBUTING.md` (or `docs/DEV-KIT.md`)
-— carry over the development-kit content removed from `README.md` (see
-`git show HEAD:README.md` before this commit).** Whether `.claude/` ships in the
-hosted repository at all is the second half of Q8 and remains open.
+What `CONTRIBUTING.md` contains, and how it differs from the old README text: it
+was **rewritten for contributors, not transcribed**, and translated to English.
+Sections: build and test (JDK 21 / Maven 3.9.16, the four commands, and what a
+healthy run looks like — about 195 tests, 0 failures, `BugInstance size is 0`,
+with the count flagged as moving while the JUnit 5 migration is in flight),
+repository layout, the document system plus a glossary of the identifier prefixes
+(`D-nn`, `P-nn`, `T-05-02`, `T-CFG`, `T-SEC`, `T-RT`, `T-OS`, `T-UI`, `T-E2E`,
+`RT-nn`, `S-nn`, S1..S4, "falsifiability guard"), the test conventions (matrix row
+first, derive from SPEC not from `src/main`, failing test first, never loosen an
+assertion, always add a false-positive guard — citing note 42 and the two rows
+that passed while measuring nothing), the `e2e/` environment and `e2e/scripts/`,
+the pitfalls from `docs/HANDOFF.md` §6 and `docs/TEST-MATRIX.md` notes 41/42, PR
+conventions and the gate, and finally one short section placing the agent
+orchestration as context rather than as a requirement for contributors — where
+`.claude/` is mentioned in a single line.
+
+Deliberately **not** carried over from the old README, because it is stale rather
+than merely verbose: the "development kit — copy this into an empty directory and
+run `claude`" framing (the repository is a plugin now, not a starter kit), the
+"paste the Phase 0 prompt" bootstrap, the per-phase "what a human must do" list
+(Phases 1–4 are closed), the `phase-N-*` branch instructions (those branches are
+history), and the per-agent write-scope table (`CLAUDE.md` is authoritative and
+the README copy was already out of date). The document index was not copied
+either — it omitted `HANDOFF.md`, `HOSTING-READINESS.md` and `docs/reports/` and
+still called the test matrix an "initial seed".
+
+**Still open: the second half of Q8** — whether `.claude/` ships in the hosted
+repository at all. `CONTRIBUTING.md` assumes it does (it points at the directory
+for context); if the owner decides to strip it, that one paragraph needs a small
+edit. Also outstanding, and recorded as a request rather than applied because
+`README.md` was finished in the G3 pass: **요청: `README.md` — make the
+*Contributing* section link to `CONTRIBUTING.md`** (it currently repeats the
+build commands inline and does not mention the file).
 
 ### G4 — `<developers>` must be removed from `pom.xml` *(REQUIRED, B6)* — RESOLVED
 
@@ -647,8 +684,13 @@ migration is on the critical path.
    Releases or create a CHANGELOG file". Not a bot requirement. With CD, GitHub
    Releases are generated, so a `CHANGELOG.md` is optional — but a
    `Keep a Changelog` file starting at `Unreleased` costs nothing.
-2. **`CONTRIBUTING.md` and a pull-request template** are listed as recommended
-   by the documentation guide. Absent today.
+2. ~~**`CONTRIBUTING.md` and a pull-request template** are listed as recommended
+   by the documentation guide. Absent today.~~ **`CONTRIBUTING.md` DONE
+   2026-09-26** — created at the repository root (build/test with expected
+   results, repository layout, document system and glossary, test conventions,
+   `e2e/`, known pitfalls, PR rules); see the G3 follow-up. A **pull-request
+   template** under `.github/` is still absent — still recommended, still not
+   enforced.
 3. **Prefer `<version>${changelist}</version>`** over `${revision}${changelist}`
    to clear the D3 warning, if CD is enabled.
 4. **GitHub topics** — the documentation guide suggests applying topics for
@@ -685,7 +727,7 @@ Q7, Q8. Q5 is the one that gates work — it decides whether G10 exists.
 | **Q5** | Field 6: answer `Yes` or `No` to automated release via GitHub Actions? | `Yes` is labelled "recommended" but adds the four REQUIRED items in G10. `No` is switchable later. |
 | **Q6** | Should the maintainer email in the request differ from `dev.yongjunh@gmail.com`? | Security reports are routed to release-permission holders; the address must be one that is actually monitored. |
 | **Q7** | Has the plugin been piloted on a real in-house Jenkins? If so, may it be mentioned (anonymously) in the Description? | `docs/HOSTING-CHECKLIST.md:55` asks for it; it materially helps human review, but disclosing internal usage is the owner's call. Phase 5 in `docs/WORKFLOW.md` is the pilot, and `docs/STATUS.md` should be consulted for whether it has happened. |
-| **Q8** | Where should the development-kit README content move — `CONTRIBUTING.md` (recommended, see G3) or `docs/DEV-KIT.md` — and should the `.claude/` directory ship in the hosted repository at all? | The fork carries everything. A reviewer will see the agent definitions. Not a rule violation, but a presentation choice. **Now time-sensitive:** as of the 2026-09-26 G3 pass that content no longer exists anywhere in the working tree, only in git history. |
+| **Q8** (half answered) | ~~Where should the development-kit README content move — `CONTRIBUTING.md` (recommended, see G3) or `docs/DEV-KIT.md`~~ — and should the `.claude/` directory ship in the hosted repository at all? | **First half settled 2026-09-26:** the content was rewritten for contributors into **`CONTRIBUTING.md`** at the repository root, so it is no longer only in git history and the time-sensitivity is gone. **Second half still open:** the fork carries everything, so a reviewer will see the agent definitions in `.claude/`. Not a rule violation, but a presentation choice. `CONTRIBUTING.md` §8 currently points at `.claude/` for context; if the directory is stripped, that paragraph needs one edit. |
 
 ---
 
@@ -798,8 +840,10 @@ batch-control-plugin
 1. ~~Resolve G1, G2, G4, G5, G6, G7, G8, G9.~~ **Done 2026-09-26.** G10 remains,
    and only applies if field 6 = `Yes` (Q5).
 2. ~~Resolve G3 (README replacement — separate work item).~~ **Done 2026-09-26.**
-   One follow-up remains: relocate the development-kit content to
-   `CONTRIBUTING.md` or `docs/DEV-KIT.md` (Q8).
+   ~~One follow-up remains: relocate the development-kit content to
+   `CONTRIBUTING.md` or `docs/DEV-KIT.md` (Q8).~~ **Follow-up done 2026-09-26** —
+   `CONTRIBUTING.md` created. Two small items left: link it from the README's
+   *Contributing* section, and the `.claude/` half of Q8.
 3. **Migrate `src/test/**` to JUnit 5** — required by the
    `ban-junit4-imports.skip=false` property added in step 1. See **R1**; this is
    the largest remaining code task and it is on the critical path.
@@ -866,6 +910,8 @@ State these as unverified rather than as requirements:
   to have — it is what Jenkins shows on the Plugin Manager page).
 - **`CHANGELOG.md`, `CONTRIBUTING.md`, PR template, GitHub topics.**
   Recommended by the documentation guide, not enforced. Listed as non-blocking.
+  (`CONTRIBUTING.md` exists as of 2026-09-26; the other three are still absent —
+  still non-blocking.)
 - **Baseline recommendation text.** The choosing-a-baseline page was read on
   2026-09-26 and listed 2.541.3 / 2.555.3 as currently recommended with 2.568.1
   as the newer alternative; it also stated the update centre minimum as 2.516
