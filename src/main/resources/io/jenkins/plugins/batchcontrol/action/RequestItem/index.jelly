@@ -100,6 +100,39 @@
               </j:forEach>
             </tbody>
           </table>
+
+          <!-- Size control, below the table so the runs stay the first thing read. A plain GET
+               form: changing how many rows are shown never changes state. The four offered sizes
+               are the only ones the server honours (RequestItem#getRecentRunLimit), so editing
+               ?runs= by hand cannot make this page read more build history than the largest one. -->
+          <div style="margin-top: 0.75rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+            <span class="jenkins-description" style="margin: 0;">
+              <j:choose>
+                <j:when test="${it.recentRunsTruncated}">
+                  Showing the ${it.recentRunCount} most recent of this job's runs.
+                </j:when>
+                <j:otherwise>
+                  Showing all ${it.recentRunCount} run(s) this job has.
+                </j:otherwise>
+              </j:choose>
+            </span>
+            <form method="get" action="." style="display: flex; gap: 0.5rem; align-items: center;">
+              <label for="runs">Runs to show:</label>
+              <select id="runs" name="runs" class="jenkins-select__input">
+                <j:forEach var="n" items="${it.recentRunLimitOptions}">
+                  <j:choose>
+                    <j:when test="${n == it.recentRunLimit}">
+                      <option value="${n}" selected="selected">${n}</option>
+                    </j:when>
+                    <j:otherwise>
+                      <option value="${n}">${n}</option>
+                    </j:otherwise>
+                  </j:choose>
+                </j:forEach>
+              </select>
+              <button type="submit" class="jenkins-button">Apply</button>
+            </form>
+          </div>
         </j:otherwise>
       </j:choose>
 
@@ -140,6 +173,18 @@
             <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
           </f:bottomButtonBar>
         </f:form>
+      </j:if>
+
+      <!-- UX-10: approving redirects here, but the APPROVED -> EXECUTED transition and the build
+           number are written by the execution listener afterwards, so this page is one refresh
+           behind. Say so in plain text: no meta refresh and no script, deliberately. Shown only
+           while the request is APPROVED with no run recorded yet, never for EXECUTED, REJECTED,
+           CANCELLED, EXPIRED or INVALIDATED. -->
+      <j:if test="${it.awaitingExecution}">
+        <div class="jenkins-alert jenkins-alert-info" style="margin-top: 1rem;">
+          This request is approved and the run starts shortly. Reload this page to see the status
+          change to EXECUTED and the build number appear.
+        </div>
       </j:if>
 
       <j:if test="${it.canChangeApprover}">

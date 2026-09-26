@@ -24,6 +24,7 @@ import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -43,13 +44,26 @@ import org.springframework.security.core.Authentication;
 @Restricted(NoExternalUse.class)
 public class RequestItem implements ModelObject {
 
-    /** How many recent runs of the target job the decision screen shows (T-E2E-05). */
-    private static final int RECENT_RUN_LIMIT = 5;
+    /** How many recent runs of the target job the decision screen shows by default (T-E2E-05). */
+    private static final int DEFAULT_RECENT_RUN_LIMIT = 5;
+
+    /**
+     * The only sizes the recent-run table will ever load, smallest first. This is an allow-list
+     * rather than a range: loading build history costs I/O on the controller, so the largest entry
+     * is a hard server-side cap that no query parameter can exceed.
+     */
+    private static final List<Integer> RECENT_RUN_LIMIT_OPTIONS = List.of(5, 10, 20, 50);
 
     private final RunRequest request;
 
     /** Per-request cache: the Jelly asks for the list more than once. */
     private List<RecentRun> recentRuns;
+
+    /** Whether the job has more runs than {@link #getRecentRunLimit()} showed. */
+    private boolean recentRunsTruncated;
+
+    /** Per-request cache of the resolved {@code runs} query parameter. */
+    private Integer recentRunLimit;
 
     RequestItem(RunRequest request) {
         this.request = request;
@@ -120,28 +134,91 @@ public class RequestItem implements ModelObject {
 
     /**
      * The most recent runs of the requested job, newest first, so an approver can see how the
-     * job behaved last time without opening a second tab (T-E2E-05).
+     * job behaved last time without opening a second tab (T-E2E-05). At most
+     * {@link #getRecentRunLimit()} rows.
      *
      * <p>P-09: the job is resolved through the permission-aware {@link #findJob()}, so a caller
      * who may see the request but not the job — and a request whose job has been deleted — gets
-     * an empty list; the run history of an invisible job is never disclosed. The view
-     * distinguishes the two cases through {@link #getJobUrl()}.
+     * an empty list; the run history of an invisible job is never disclosed. The {@code runs}
+     * query parameter only changes how many rows this list holds, never whether the job is
+     * resolved, so it cannot be used to step around that check. The view distinguishes the two
+     * cases through {@link #getJobUrl()}.
      */
     public List<RecentRun> getRecentRuns() {
         if (recentRuns == null) {
+            int limit = getRecentRunLimit();
             List<RecentRun> rows = new ArrayList<>();
+            boolean truncated = false;
             Job<?, ?> job = findJob();
             if (job != null) {
                 for (Run<?, ?> run : job.getBuilds()) {
-                    if (rows.size() >= RECENT_RUN_LIMIT) {
+                    if (rows.size() >= limit) {
+                        // One build past the limit was touched only to learn that more exist.
+                        truncated = true;
                         break;
                     }
                     rows.add(new RecentRun(run));
                 }
             }
+            recentRunsTruncated = truncated;
             recentRuns = rows;
         }
         return recentRuns;
+    }
+
+    /**
+     * How many recent runs this rendering shows, from the {@code runs} query parameter
+     * ({@code ?runs=20}) and defaulting to {@value #DEFAULT_RECENT_RUN_LIMIT}.
+     *
+     * <p>The value is matched against {@link #RECENT_RUN_LIMIT_OPTIONS} rather than clamped, so
+     * anything else — a value above the cap such as {@code ?runs=100000}, a negative number, a
+     * non-multiple such as {@code 7}, or text — silently falls back to the default instead of
+     * producing an error page. That makes the largest option the enforced upper bound on how much
+     * build history one page load may read, whatever the caller types in the URL.
+     */
+    public int getRecentRunLimit() {
+        if (recentRunLimit == null) {
+            recentRunLimit = resolveRecentRunLimit();
+        }
+        return recentRunLimit;
+    }
+
+    /** How many recent-run rows were actually found (at most {@link #getRecentRunLimit()}). */
+    public int getRecentRunCount() {
+        return getRecentRuns().size();
+    }
+
+    /** The sizes offered by the selector below the recent-run table. */
+    public List<Integer> getRecentRunLimitOptions() {
+        return RECENT_RUN_LIMIT_OPTIONS;
+    }
+
+    /**
+     * Whether the job has more runs than were shown, so the view can tell "these are all of them"
+     * apart from "this is the newest page of a longer history". Call after
+     * {@link #getRecentRuns()}.
+     */
+    public boolean isRecentRunsTruncated() {
+        getRecentRuns();
+        return recentRunsTruncated;
+    }
+
+    private static int resolveRecentRunLimit() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null) {
+            return DEFAULT_RECENT_RUN_LIMIT;
+        }
+        String raw = req.getParameter("runs");
+        if (raw == null) {
+            return DEFAULT_RECENT_RUN_LIMIT;
+        }
+        int requested;
+        try {
+            requested = Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return DEFAULT_RECENT_RUN_LIMIT;
+        }
+        return RECENT_RUN_LIMIT_OPTIONS.contains(requested) ? requested : DEFAULT_RECENT_RUN_LIMIT;
     }
 
     /** Approver candidates for the change-approver form (global list ∩ job restriction). */
@@ -151,6 +228,18 @@ public class RequestItem implements ModelObject {
 
     public boolean isPending() {
         return request.getStatus() == RequestStatus.PENDING;
+    }
+
+    /**
+     * Whether the request is approved but its build has not been recorded yet (UX-10).
+     *
+     * <p>Approving redirects back to this read-only page, and the APPROVED → EXECUTED transition
+     * plus the run id are written later by the execution listener, so the page the approver lands
+     * on is one refresh behind. The view uses this to say so. It turns false as soon as the status
+     * moves on (EXECUTED, EXPIRED, INVALIDATED) and is false for PENDING, REJECTED and CANCELLED.
+     */
+    public boolean isAwaitingExecution() {
+        return request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null;
     }
 
     /** Whether the current user is the requester (view gating only; the service re-checks). */
