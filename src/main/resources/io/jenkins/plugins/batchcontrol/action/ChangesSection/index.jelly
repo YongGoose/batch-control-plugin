@@ -59,9 +59,18 @@
                   <td>
                     ${r.detail}
                     <j:if test="${r.diff != null}">
-                      <!-- Escaped by default: diffs contain XML from config.xml files. -->
+                      <!-- U-07: the size of the change is always visible, so no click is needed to
+                           learn what a row is about; the body stays collapsed because a page holds
+                           up to 50 records and a config.xml diff runs to hundreds of lines.
+                           Escaped by default: diffs contain XML from config.xml files. -->
+                      <j:set var="summary" value="${it.diffSummary(r.diff)}"/>
                       <details>
-                        <summary>Show diff</summary>
+                        <summary>
+                          <j:choose>
+                            <j:when test="${summary != ''}">Diff (${summary})</j:when>
+                            <j:otherwise>Diff</j:otherwise>
+                          </j:choose>
+                        </summary>
                         <pre style="overflow-x: auto;">${r.diff}</pre>
                       </details>
                     </j:if>

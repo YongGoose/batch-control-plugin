@@ -10,13 +10,28 @@ import org.kohsuke.stapler.StaplerResponse2;
 /**
  * Minimal CSV emitter for the audit export endpoints (SPEC item 12).
  *
- * <p>Security (D-18): any cell whose value starts with {@code =}, {@code +}, {@code -} or
- * {@code @} is prefixed with a single quote so spreadsheet applications never interpret it as a
- * formula, and standard CSV quoting is applied (cells containing comma, quote or line breaks are
- * wrapped in double quotes with inner quotes doubled). Permission checks are the caller's job.
+ * <p>Two independent transformations are applied to every cell, in this order, and they must not
+ * be confused with each other:
+ *
+ * <ol>
+ *   <li><b>Formula-injection sanitisation (D-18, S-22).</b> A cell whose first non-whitespace
+ *       character is {@code =}, {@code +}, {@code -} or {@code @} is prefixed with a single quote,
+ *       so no spreadsheet application evaluates it. The prefix is the <em>only</em> defence
+ *       here.</li>
+ *   <li><b>RFC 4180 quoting.</b> A cell containing a comma, a double quote or a line break is
+ *       wrapped in double quotes with inner quotes doubled. This is a <em>delimiter</em> concern
+ *       and is <b>not</b> a formula defence: a spreadsheet strips the quotes before looking at the
+ *       value, so a quoted-but-unprefixed {@code \r=1+1} is still evaluated. Sanitisation
+ *       therefore runs first, which also puts the prefix inside the quotes where it belongs.</li>
+ * </ol>
+ *
+ * <p>Permission checks are the caller's job.
  */
 @Restricted(NoExternalUse.class)
 public final class CsvWriter {
+
+    /** Characters a spreadsheet treats as the start of a formula. */
+    private static final String FORMULA_STARTERS = "=+-@";
 
     private final PrintWriter out;
 
@@ -49,21 +64,58 @@ public final class CsvWriter {
     }
 
     /**
-     * Encodes one cell: formula-injection sanitization first (D-18), then CSV quoting.
+     * Encodes one cell: formula-injection sanitisation first (D-18, S-22), then CSV quoting.
      * Package-private for direct unit testing.
      */
     static String encode(@CheckForNull Object value) {
         String s = value == null ? "" : String.valueOf(value);
-        if (!s.isEmpty()) {
-            char first = s.charAt(0);
-            if (first == '=' || first == '+' || first == '-' || first == '@') {
-                s = "'" + s;
-            }
+        if (startsFormula(s)) {
+            s = "'" + s;
         }
         if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0
                 || s.indexOf('\r') >= 0) {
             s = '"' + s.replace("\"", "\"\"") + '"';
         }
         return s;
+    }
+
+    /**
+     * Whether a spreadsheet would read this cell as a formula.
+     *
+     * <p>S-22: the test is on the first <b>non-whitespace</b> character, not the first character.
+     * Leading whitespace does not stop Excel or Google Sheets evaluating what follows it, and a
+     * leading TAB or CR is the vector that actually reaches these exports:
+     *
+     * <ul>
+     *   <li>{@code decisionComment} is not trimmed anywhere on its path to {@code requests.csv} —
+     *       {@code action/RequestItem} passes the approver's raw {@code @QueryParameter} through
+     *       and {@code policy/RunRequestService} only tests {@code trim().isEmpty()} before
+     *       storing the original — so a {@code BatchControl/Approve} holder controls this cell's
+     *       leading bytes exactly.</li>
+     *   <li>a job full name may begin with a <b>space</b>: {@code Jenkins.checkGoodName} rejects
+     *       ISO control codes and its own unsafe-character set (which does contain {@code @}) but
+     *       not a leading space, and it does not reject {@code =}, {@code +} or {@code -} either.
+     *       That reaches {@code jobFullName} in three exports and {@code target} in
+     *       {@code changes.csv}.</li>
+     *   <li>{@code reason} is trimmed today, but only by its one UI caller
+     *       ({@code action/JobRequestAction}) rather than by the service that stores it, so the
+     *       defence would not survive a second entry point.</li>
+     * </ul>
+     *
+     * <p>The prefix is added in front of the whitespace rather than replacing it: these are audit
+     * exports, so the stored value is preserved byte for byte and only made inert.
+     *
+     * @return true when the first non-whitespace character is one of {@value #FORMULA_STARTERS};
+     *         false for an empty or all-whitespace cell
+     */
+    private static boolean startsFormula(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.isWhitespace(c)) {
+                continue;
+            }
+            return FORMULA_STARTERS.indexOf(c) >= 0;
+        }
+        return false;
     }
 }

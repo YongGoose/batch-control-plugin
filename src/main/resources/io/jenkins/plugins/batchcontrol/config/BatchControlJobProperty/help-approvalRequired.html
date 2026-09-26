@@ -1,3 +1,15 @@
 <div>
-  If checked, this job can only be run through an approved run request while run control is enabled.
+  If checked — and while <b>Enable run control</b> is on globally — a person cannot start this job
+  directly. The build button, <code>/build</code>, <code>/buildWithParameters</code>, the CLI
+  <code>build</code> command and Pipeline Replay are all refused unless an approved run request is
+  being used; the request screen is on this job's sidebar as <b>Request Run</b>.
+  <p>
+    Automatic triggers still pass by default, so checking this does not stop a scheduled job:
+    cron (timer) runs pass unless <b>Block cron (timer) triggers</b> below is checked,
+    upstream-triggered runs pass unless <b>Block upstream triggers</b> is checked (and then only
+    the jobs listed in <b>Allowed upstream jobs</b> pass), and SCM-triggered runs pass.
+  </p>
+  <p>
+    A build that is already running is never interrupted; refusal happens when a run is queued.
+  </p>
 </div>

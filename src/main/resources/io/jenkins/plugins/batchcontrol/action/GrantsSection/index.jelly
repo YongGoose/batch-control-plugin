@@ -120,15 +120,25 @@
 
       <j:if test="${it.canRequest}">
         <h2>New Grant Request</h2>
+        <!-- U-01: arriving from a job's "Request Change Permission" entry prefills the scope and
+             pre-selects Configure. Both values come from the resolved model object, never from
+             the raw query string, and are escaped by the Jelly default like every other value. -->
+        <j:if test="${it.prefilled}">
+          <p class="jenkins-description">
+            Prefilled for <strong>${it.prefillScopeFullName}</strong>. Check the actions you need,
+            say why, and pick an approver.
+          </p>
+        </j:if>
         <f:form method="post" action="create" name="createGrantRequest">
           <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
             <select name="scopeType" class="jenkins-select__input">
-              <option value="JOB">Job (exact full name)</option>
-              <option value="FOLDER">Folder (the folder and everything below it)</option>
+              <option value="JOB" selected="${it.prefillScopeType == 'JOB' ? 'true' : null}">Job (exact full name)</option>
+              <option value="FOLDER" selected="${it.prefillScopeType == 'FOLDER' ? 'true' : null}">Folder (the folder and everything below it)</option>
             </select>
           </f:entry>
           <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
-            <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"/>
+            <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
+                   value="${it.prefillScopeFullName}"/>
           </f:entry>
           <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
             <div class="jenkins-checkbox-help-wrapper">
@@ -139,7 +149,8 @@
             </div>
             <div class="jenkins-checkbox-help-wrapper">
               <span class="jenkins-checkbox">
-                <input type="checkbox" name="actions" value="CONFIGURE" id="grant-action-configure"/>
+                <input type="checkbox" name="actions" value="CONFIGURE" id="grant-action-configure"
+                       checked="${it.prefilled ? 'true' : null}"/>
                 <label for="grant-action-configure" class="attach-previous">Configure</label>
               </span>
             </div>

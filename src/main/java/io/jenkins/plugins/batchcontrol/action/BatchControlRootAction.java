@@ -71,6 +71,22 @@ public class BatchControlRootAction implements RootAction {
         return new GrantsSection();
     }
 
+    /**
+     * Whether the landing page offers the Grants screen (P-15).
+     *
+     * <p>{@link GrantsSection#getTarget()} refuses the whole subtree while change control is off,
+     * so the two must agree or the landing page advertises a link that explains why it does not
+     * work. The URL stays routable — the refusal is what tells a user with an old bookmark which
+     * switch changed — but it is not offered.
+     *
+     * <p>Only this entry point is conditional. Change Records, Dashboard, Incidents and History
+     * stay where they are with the switch off, because they are the audit trail and the switch
+     * governs whether windows confer anything, not what history may be read.
+     */
+    public boolean isGrantsAvailable() {
+        return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
+    }
+
     /** Stapler: serves {@code /batch-control/changes/...}. */
     public ChangesSection getChanges() {
         return new ChangesSection();
