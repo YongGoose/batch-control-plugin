@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
@@ -43,6 +44,11 @@ import org.kohsuke.stapler.StaplerResponse2;
  * run records, incidents, change records and run requests, a monthly aggregate JSON endpoint,
  * and CSV exports.
  *
+ * <p>Blocked approval-marker re-use attempts (D-30) are an exception to the one-table-per-kind
+ * layout: they are shown on every tab as an alert above the selected table, because they produce
+ * no run record and so would otherwise be invisible on the default {@code runs} tab. See
+ * {@link #getMarkerReuseItems()}.
+ *
  * <p>URL space (fixed contract, asserted by tests):
  * <ul>
  *   <li>{@code /batch-control/history/} — filter form + one selectable table
@@ -66,12 +72,16 @@ public class HistorySection implements ModelObject, StaplerProxy {
     /** Page size for every table. */
     public static final int PAGE_SIZE = 50;
 
+    /** How many blocked marker re-use attempts the always-visible alert lists at most. */
+    public static final int REUSE_ALERT_LIMIT = 10;
+
     private static final List<String> KINDS = List.of("runs", "incidents", "changes", "requests");
 
     private FilterParser.Filter filter;
     private List<RunRecord> runs;
     private List<Incident> incidents;
     private List<ChangeRecord> changes;
+    private List<ChangeRecord> markerReuse;
     private List<RunRequest> requests;
 
     @Override
@@ -304,6 +314,58 @@ public class HistorySection implements ModelObject, StaplerProxy {
             changes = matched;
         }
         return changes;
+    }
+
+    /**
+     * The blocked approval-marker re-use records matching the filter, newest first — the whole
+     * set, independent of {@link #getKind()} (D-30).
+     *
+     * <p>A blocked re-use produces no {@link RunRecord}, so on the default {@code runs} tab the
+     * attempt would otherwise be invisible and an operator would have to guess that it is worth
+     * switching to the {@code changes} tab. D-30 exists because such an attempt was only in the
+     * log where nobody saw it; hiding it behind a tab repeats that. The index view therefore
+     * renders these rows as an alert above the selected table on every tab.
+     *
+     * <p>The period, job and user filters are not re-implemented here: this narrows the already
+     * filtered and sorted {@link #getChangeItems()} by type, so the alert always describes the
+     * same window as the table below it (which is what makes {@code ?user=u2} a query for "what
+     * did this account attempt").
+     */
+    public List<ChangeRecord> getMarkerReuseItems() {
+        if (markerReuse == null) {
+            List<ChangeRecord> matched = new ArrayList<>();
+            for (ChangeRecord c : getChangeItems()) {
+                if (c.getType() == ChangeType.MARKER_REUSE_BLOCKED) {
+                    matched.add(c);
+                }
+            }
+            markerReuse = matched;
+        }
+        return markerReuse;
+    }
+
+    /** How many blocked re-use attempts match the filter. */
+    public int getMarkerReuseCount() {
+        return getMarkerReuseItems().size();
+    }
+
+    /**
+     * The re-use rows the alert actually lists: the newest {@link #REUSE_ALERT_LIMIT} of
+     * {@link #getMarkerReuseItems()}. The alert sits above the selected table, so it must stay a
+     * signal rather than become a second unbounded table when an automation retries in a loop;
+     * {@link #getMarkerReuseOverflow()} says how many rows were left out and the Changes tab
+     * (and {@code changes.csv}) has all of them.
+     */
+    public List<ChangeRecord> getMarkerReuseAlertItems() {
+        List<ChangeRecord> all = getMarkerReuseItems();
+        return all.size() <= REUSE_ALERT_LIMIT
+                ? all
+                : new ArrayList<>(all.subList(0, REUSE_ALERT_LIMIT));
+    }
+
+    /** How many matching re-use records the alert does not list; 0 when it lists them all. */
+    public int getMarkerReuseOverflow() {
+        return Math.max(0, getMarkerReuseItems().size() - REUSE_ALERT_LIMIT);
     }
 
     /** All run requests matching the filter (by creation time), newest first. */

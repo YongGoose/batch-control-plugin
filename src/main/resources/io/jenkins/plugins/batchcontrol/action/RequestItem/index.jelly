@@ -82,6 +82,8 @@
           <p>The job is not available: it has been deleted, or you may not view it.</p>
         </j:when>
         <j:when test="${empty(it.recentRuns)}">
+          <!-- No size control here on purpose: with no rows to size, a "Runs to show" selector
+               would only offer to re-render the same empty screen. -->
           <p>This job has no runs yet.</p>
         </j:when>
         <j:otherwise>
@@ -130,7 +132,7 @@
                   </j:choose>
                 </j:forEach>
               </select>
-              <button type="submit" class="jenkins-button">Apply</button>
+              <button type="submit" class="jenkins-button">Show</button>
             </form>
           </div>
         </j:otherwise>
