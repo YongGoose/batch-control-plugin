@@ -28,12 +28,14 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>CONFIGURE records (with the unified diff) come from {@link ConfigSnapshotListener}; this
  * listener seeds and relocates the diff baseline snapshots around lifecycle events.
  *
- * <p>D-31 (widening D-17): while run control is on, every newly created job gets
- * {@code approvalRequired=true}, independently of the creator and of the creation path. D-17 only
- * covered jobs created inside an active grant window, which left every job an administrator
- * created in the ordinary course of work uncontrolled. The internal property save is suppressed
- * from recording (only the CREATE record remains, no recursion). D-32 carves out the one class of
- * job that cannot honour that default — a child a container computes for itself.
+ * <p>D-31 (widening D-17), extended by D-34: while run control is on, every newly created job
+ * starts <em>locked</em> — {@code approvalRequired=true}, {@code blockTimer=true},
+ * {@code blockUpstream=true} — independently of the creator and of the creation path, so the act
+ * of creating a job starts nothing. D-17 only covered jobs created inside an active grant window,
+ * which left every job an administrator created in the ordinary course of work uncontrolled, and
+ * D-31 only covered the human cause. The internal property save is suppressed from recording (only
+ * the CREATE record remains, no recursion). D-32 carves out the one class of job that cannot honour
+ * that default — a child a container computes for itself.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -43,9 +45,9 @@ public class ItemChangeListener extends ItemListener {
 
     @Override
     public void onCreated(Item item) {
-        // D-31 hangs off the run-control switch alone, so it is applied before the recording
-        // gate (which also answers to the change-control switch, D-13).
-        applyApprovalRequiredDefault(item);
+        // D-31/D-34 hang off the run-control switch alone, so the default is applied before the
+        // recording gate (which also answers to the change-control switch, D-13).
+        applyActivationLockDefault(item);
         if (!ChangeRecording.isActive()) {
             return;
         }
@@ -103,22 +105,33 @@ public class ItemChangeListener extends ItemListener {
         FileStore.get().appendChangeRecord(record);
     }
 
-    // ---------------------------------------------------------------- D-31 (widens D-17)
+    // ---------------------------------------------------------------- D-31/D-34 (widen D-17)
 
     /**
-     * D-31: run control on + the new item is a job → the job starts with
-     * {@code approvalRequired=true}. No creator and no creation path is exempt, which is why this
-     * sits on {@link ItemListener#onCreated}: every creation entry point core offers (the New Item
-     * form, a {@code createItem} config.xml POST, the CLI {@code create-job}, a job copy, a Job DSL
+     * D-31 + D-34: run control on + the new item is a job → the job starts <em>locked</em>, with
+     * {@code approvalRequired}, {@code blockTimer} and {@code blockUpstream} all on and no upstream
+     * allow list. No creator and no creation path is exempt, which is why this sits on
+     * {@link ItemListener#onCreated}: every creation entry point core offers (the New Item form, a
+     * {@code createItem} config.xml POST, the CLI {@code create-job}, a job copy, a Job DSL
      * generation) ends in {@code ItemGroupMixIn}, which fires this event once per created item.
      * D-17 (creation inside a grant window) is the subset that stays covered. A child computed by
      * its container reaches this method through a different door — {@code ChildObserver#created} —
      * and is the one case D-32 turns away.
      *
-     * <p>An {@code approvalRequired=false} supplied in the creation payload does not win: the
-     * default is what SPEC item 8 pins, and letting the payload opt out would reopen the hole
-     * through the easiest path while leaving only a CREATE record behind. Opting out is a
-     * subsequent configuration change, which is itself change-controlled and recorded (P-13).
+     * <p>Why all three switches and not just {@code approvalRequired}: that switch refuses human
+     * causes only (SPEC item 6, D-25), so a job created with a cron — inside a grant window or
+     * not — used to start running immediately and keep running after the window closed, which is
+     * the hole D-17 was written to close. D-34 therefore separates creating a job from operating
+     * it: bringing the job into service means turning a switch off in its configuration, and that
+     * change is itself change-controlled and recorded (SPEC items 8 and 9).
+     *
+     * <p>A value supplied in the creation payload does not win for any of the three switches, nor
+     * for {@code allowedUpstreamJobs}: the default is what SPEC item 8 pins, and letting the
+     * payload opt out would reopen the hole through the easiest path (a {@code config.xml} POST, a
+     * CLI create, a Job DSL seed, a copy source) while leaving only a CREATE record behind. Opting
+     * out is a subsequent configuration change, which is recorded and — while change control is
+     * on — gated (P-13 for {@code approvalRequired}, P-14 for the two new switches and the allow
+     * list). {@code jobApprovers} is the one setting carried over, because it can only narrow.
      *
      * <p>The property save is a plugin-internal write: it is suppressed from CONFIGURE recording
      * (which also guards against listener recursion through the save fired by
@@ -127,7 +140,7 @@ public class ItemChangeListener extends ItemListener {
      * <p>D-32 is the single exemption: a job a container computes for itself (see
      * {@link #isComputedChild}).
      */
-    private static void applyApprovalRequiredDefault(Item item) {
+    private static void applyActivationLockDefault(Item item) {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
             return;
         }
@@ -138,19 +151,19 @@ public class ItemChangeListener extends ItemListener {
         String fullName = job.getFullName();
         if (isComputedChild(job)) {
             LOGGER.fine(() -> "Job '" + fullName + "' is a computed child of '"
-                    + job.getParent().getFullName() + "'; the approvalRequired=true default does "
+                    + job.getParent().getFullName() + "'; the new-job activation lock does "
                     + "not apply to it (D-32). Its runs are still recorded.");
             return;
         }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
-        if (existing != null && existing.isApprovalRequired()) {
+        if (existing != null && existing.isActivationLocked()) {
             return;
         }
         boolean previouslySuppressed = ChangeRecording.beginSuppression();
         try {
             BatchControlJobProperty applied = existing == null
-                    ? new BatchControlJobProperty(true)
-                    : existing.withApprovalRequired(true);
+                    ? BatchControlJobProperty.activationLocked()
+                    : existing.withActivationLock();
             if (existing != null) {
                 job.removeProperty(BatchControlJobProperty.class);
             }
@@ -171,18 +184,19 @@ public class ItemChangeListener extends ItemListener {
                 }
                 throw e;
             }
-            LOGGER.info(() -> "New job '" + fullName
-                    + "' starts with approvalRequired=true while run control is on (D-31)");
+            LOGGER.info(() -> "New job '" + fullName + "' starts locked while run control is on: "
+                    + "approvalRequired, blockTimer and blockUpstream are all on, so creating the "
+                    + "job has not put it into service (D-31, D-34)");
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to apply the approvalRequired=true default to the "
-                    + "newly created job '" + fullName + "' (D-31)", e);
+            LOGGER.log(Level.WARNING, "Failed to apply the new-job activation lock to the "
+                    + "newly created job '" + fullName + "' (D-31, D-34)", e);
         } finally {
             ChangeRecording.endSuppression(previouslySuppressed);
         }
     }
 
     /**
-     * Puts {@code existing} back after the D-31 rebuild removed it and failed to add the
+     * Puts {@code existing} back after the D-31/D-34 rebuild removed it and failed to add the
      * replacement (S-20). Still inside the suppressed window, so the restore is not recorded as a
      * user CONFIGURE change.
      *
@@ -195,15 +209,15 @@ public class ItemChangeListener extends ItemListener {
                                                   String fullName, IOException failure) {
         try {
             addProperty(job, existing);
-            LOGGER.log(Level.WARNING, () -> "Applying the approvalRequired=true default to '"
+            LOGGER.log(Level.WARNING, () -> "Applying the new-job activation lock to '"
                     + fullName + "' failed; the job's previous batch-control property was restored,"
-                    + " so its existing controls stay in force (D-31, S-20)");
+                    + " so its existing controls stay in force (D-31, D-34, S-20)");
         } catch (IOException restoreFailure) {
             failure.addSuppressed(restoreFailure);
             LOGGER.log(Level.SEVERE, () -> "Job '" + fullName + "' was left with no batch-control"
-                    + " property: applying the approvalRequired=true default failed and restoring"
+                    + " property: applying the new-job activation lock failed and restoring"
                     + " the previous property failed as well. The job is not run-controlled until"
-                    + " its configuration is saved again (D-31, S-20)");
+                    + " its configuration is saved again (D-31, D-34, S-20)");
         }
     }
 
@@ -214,7 +228,8 @@ public class ItemChangeListener extends ItemListener {
 
     /**
      * D-32: is this item a child a container generates and regenerates on its own? Such a child is
-     * exempt from the D-31 default, because the two things D-31 relies on do not hold for it: it
+     * exempt from the D-31/D-34 default (D-32 survives D-34 unchanged — the switches could never be
+     * turned off again), because the two things the default relies on do not hold for it: it
      * has no configuration screen, so the documented way out ("edit the job, and the edit is
      * recorded") does not exist; and the container rebuilds the child's configuration on every
      * recomputation, so the property is not guaranteed to survive — the control would blink on and
