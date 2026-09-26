@@ -146,7 +146,7 @@ public class ItemChangeListener extends ItemListener {
         if (existing != null && existing.isApprovalRequired()) {
             return;
         }
-        ChangeRecording.beginSuppression();
+        boolean previouslySuppressed = ChangeRecording.beginSuppression();
         try {
             BatchControlJobProperty applied = existing == null
                     ? new BatchControlJobProperty(true)
@@ -154,14 +154,56 @@ public class ItemChangeListener extends ItemListener {
             if (existing != null) {
                 job.removeProperty(BatchControlJobProperty.class);
             }
-            addProperty(job, applied);
+            try {
+                addProperty(job, applied);
+            } catch (IOException e) {
+                // S-20, fail closed. Core's removeProperty and addProperty each call save()
+                // (hudson/model/Job#removeProperty, #addProperty), so the rebuild is two
+                // persisted steps with a window between them. If the second fails the job is left
+                // with NO BatchControlJobProperty at all — losing not just approvalRequired but
+                // blockTimer, blockUpstream, allowedUpstreamJobs and jobApprovers, i.e. every
+                // control over the unattended trigger paths — and the failure is only a WARNING,
+                // so the job would go on running uncontrolled and unnoticed. Put the property the
+                // job already had back before reporting, so the worst outcome of a failed rebuild
+                // is the controls the creator supplied rather than none.
+                if (existing != null) {
+                    restoreAfterFailedRebuild(job, existing, fullName, e);
+                }
+                throw e;
+            }
             LOGGER.info(() -> "New job '" + fullName
                     + "' starts with approvalRequired=true while run control is on (D-31)");
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Failed to apply the approvalRequired=true default to the "
                     + "newly created job '" + fullName + "' (D-31)", e);
         } finally {
-            ChangeRecording.endSuppression();
+            ChangeRecording.endSuppression(previouslySuppressed);
+        }
+    }
+
+    /**
+     * Puts {@code existing} back after the D-31 rebuild removed it and failed to add the
+     * replacement (S-20). Still inside the suppressed window, so the restore is not recorded as a
+     * user CONFIGURE change.
+     *
+     * <p>If the restore itself fails there is nothing further to try — both writes go through the
+     * same {@code save()} — so it is attached to the original failure as a suppressed exception
+     * rather than replacing it: the operator needs to read "the default could not be applied"
+     * first and "and the job now has no property" second.
+     */
+    private static void restoreAfterFailedRebuild(Job<?, ?> job, BatchControlJobProperty existing,
+                                                  String fullName, IOException failure) {
+        try {
+            addProperty(job, existing);
+            LOGGER.log(Level.WARNING, () -> "Applying the approvalRequired=true default to '"
+                    + fullName + "' failed; the job's previous batch-control property was restored,"
+                    + " so its existing controls stay in force (D-31, S-20)");
+        } catch (IOException restoreFailure) {
+            failure.addSuppressed(restoreFailure);
+            LOGGER.log(Level.SEVERE, () -> "Job '" + fullName + "' was left with no batch-control"
+                    + " property: applying the approvalRequired=true default failed and restoring"
+                    + " the previous property failed as well. The job is not run-controlled until"
+                    + " its configuration is saved again (D-31, S-20)");
         }
     }
 
