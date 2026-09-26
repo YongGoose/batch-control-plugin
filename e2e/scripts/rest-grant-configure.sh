@@ -53,7 +53,11 @@ status=$(bc_get requester "$OUT_DIR/grant-configure-inside.html" "/job/$SCOPE/co
 echo "--- GET /job/$SCOPE/configure as requester INSIDE the window -> HTTP $status (expected 200)"
 
 bc_get admin "$OUT_DIR/grant-config.xml" "/job/$SCOPE/config.xml" > /dev/null
-sed -i "s#<description>[^<]*</description>#<description>Changed by requester under grant $GRANT_ID</description>#" "$OUT_DIR/grant-config.xml"
+# Only the FIRST <description> - the job's own. An unanchored substitution also
+# overwrites every parameter description, which silently degrades the very
+# screens the browser pass has to judge (it happened once; admin had to restore
+# batch-daily's job and parameter descriptions by hand).
+sed -i "0,/<description>[^<]*<\/description>/s#<description>[^<]*</description>#<description>Changed by requester under grant $GRANT_ID</description>#" "$OUT_DIR/grant-config.xml"
 status=$(bc_post requester "$OUT_DIR/grant-save-inside.html" "/job/$SCOPE/config.xml" \
         -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/grant-config.xml")
 echo "--- POST /job/$SCOPE/config.xml as requester INSIDE the window -> HTTP $status (expected 200)"
@@ -74,7 +78,7 @@ fi
 status=$(bc_get requester "$OUT_DIR/grant-configure-expired.html" "/job/$SCOPE/configure")
 echo "--- GET /job/$SCOPE/configure as requester AFTER expiry -> HTTP $status (expected 403)"
 
-sed -i "s#<description>[^<]*</description>#<description>Attempted after expiry</description>#" "$OUT_DIR/grant-config.xml"
+sed -i "0,/<description>[^<]*<\/description>/s#<description>[^<]*</description>#<description>Attempted after expiry</description>#" "$OUT_DIR/grant-config.xml"
 status=$(bc_post requester "$OUT_DIR/grant-save-expired.html" "/job/$SCOPE/config.xml" \
         -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/grant-config.xml")
 echo "--- POST /job/$SCOPE/config.xml as requester AFTER expiry -> HTTP $status (expected 403)"

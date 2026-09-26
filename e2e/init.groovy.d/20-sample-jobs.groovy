@@ -29,11 +29,15 @@ def requireApproval = { boolean value -> propertyClass.getConstructor(boolean).n
 
 if (jenkins.getItemByFullName('batch-daily') == null) {
     def job = jenkins.createProject(FreeStyleProject, 'batch-daily')
-    job.setDescription('E2E sample: parameterized daily batch. Approval required.')
+    // These descriptions are what an approver reads on the decision screen, so
+    // they are written the way a real job would word them rather than as
+    // placeholders.
+    job.setDescription('Daily batch job for the nightly data load.')
     job.addProperty(new ParametersDefinitionProperty(
             new StringParameterDefinition('DATE', new java.text.SimpleDateFormat('yyyy-MM-dd').format(new Date()),
-                    'Business date to process (YYYY-MM-DD)'),
-            new ChoiceParameterDefinition('MODE', ['full', 'partial'] as String[], 'Run mode')))
+                    'Target business date (YYYY-MM-DD).'),
+            new ChoiceParameterDefinition('MODE', ['full', 'partial'] as String[],
+                    'full = reload everything, partial = deltas only.')))
     job.addProperty(requireApproval(true))
     job.getBuildersList().add(new Shell('echo "batch-daily DATE=$DATE MODE=$MODE"\nsleep 2\necho done'))
     job.save()
