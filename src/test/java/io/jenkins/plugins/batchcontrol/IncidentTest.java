@@ -48,6 +48,8 @@ import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestBuilder;
 import org.jvnet.hudson.test.UnstableBuilder;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -91,7 +93,10 @@ public class IncidentTest {
     /** T-11-01: a cron-caused FAILURE opens an incident (cause never matters) with a bounded logTail. */
     @Test
     public void t_11_01_cronFailureOpensIncidentWithLogTail() throws Exception {
-        FreeStyleProject job = j.createFreeStyleProject("cron-fail");
+        // D-34 (matrix notes 42, 46): a job created while run control is on starts locked out of
+        // its own timer, so this row states the job's state instead of inheriting it. Incident
+        // creation is independent of run control, so the job is simply taken out of it.
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("cron-fail"));
         job.getBuildersList().add(new FailureBuilder());
         // matrix note 4: cron firing reproduced by a TimerTriggerCause schedule
         j.assertBuildStatus(Result.FAILURE,
@@ -115,7 +120,10 @@ public class IncidentTest {
         FreeStyleProject job = j.createFreeStyleProject("rerun-x");
         job.addProperty(new ParametersDefinitionProperty(
                 new StringParameterDefinition("DATE", "2000-01-01")));
-        job.addProperty(new BatchControlJobProperty(true));
+        // setBatchControl, not addProperty: the job must be approval-required for the rerun path
+        // while its timer stays open, and after D-34 the created job carries blockTimer=true
+        // (matrix notes 42, 46)
+        setBatchControl(job, new BatchControlJobProperty(true));
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),
@@ -229,7 +237,8 @@ public class IncidentTest {
         FreeStyleProject job = j.createFreeStyleProject("link-x");
         job.addProperty(new ParametersDefinitionProperty(
                 new StringParameterDefinition("DATE", "2000-01-01")));
-        job.addProperty(new BatchControlJobProperty(true));
+        // see t_11_02: a stated property, so the fixture's timer firing survives D-34
+        setBatchControl(job, new BatchControlJobProperty(true));
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),
