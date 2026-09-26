@@ -15,14 +15,14 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsSessionRule;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * SPEC item 4 (durable store, independent from builds). Matrix rows T-04-01 and T-04-03,
@@ -35,12 +35,12 @@ public class StoreDurabilityTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T10:00:00Z");
 
-    @Rule
-    public JenkinsSessionRule session = new JenkinsSessionRule();
+    @RegisterExtension
+    final JenkinsSessionExtension session = new JenkinsSessionExtension();
 
     private String requestId;
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -56,9 +56,8 @@ public class StoreDurabilityTest {
             parameters.put("MODE", "FULL");
             RunRequest request = RunRequest.create("area/batch-job", parameters,
                     "monthly close run", "u1", "a1");
-            assertEquals("a freshly created request must start PENDING",
-                    RequestStatus.PENDING, request.getStatus());
-            assertEquals("createdAt must come from BatchClock", T0, request.getCreatedAt());
+            assertEquals(RequestStatus.PENDING, request.getStatus(), "a freshly created request must start PENDING");
+            assertEquals(T0, request.getCreatedAt(), "createdAt must come from BatchClock");
 
             FileStore.get().saveRunRequest(request);
             requestId = request.getId();
@@ -66,7 +65,7 @@ public class StoreDurabilityTest {
         });
         session.then(r -> {
             RunRequest reloaded = FileStore.get().loadRunRequest(requestId);
-            assertNotNull("a PENDING request must be recovered after restart", reloaded);
+            assertNotNull(reloaded, "a PENDING request must be recovered after restart");
             assertEquals(RequestStatus.PENDING, reloaded.getStatus());
             assertEquals("area/batch-job", reloaded.getJobFullName());
             assertEquals("monthly close run", reloaded.getReason());
@@ -100,21 +99,20 @@ public class StoreDurabilityTest {
             FileStore.get().appendRunRecord(record);
 
             build.delete(); // retention-policy equivalent
-            assertNull("the build itself is gone", p.getBuildByNumber(1));
+            assertNull(p.getBuildByNumber(1), "the build itself is gone");
 
             YearMonth month = YearMonth.from(startedAt.atZone(ZoneId.systemDefault()));
             RunRecord reloaded = FileStore.get().listRunRecords(month).stream()
                     .filter(rec -> "nightly#1".equals(rec.getRunId()))
                     .findFirst().orElse(null);
-            assertNotNull("the RunRecord must remain readable after the build is deleted", reloaded);
+            assertNotNull(reloaded, "the RunRecord must remain readable after the build is deleted");
             assertEquals("nightly", reloaded.getJobFullName());
             assertEquals("SUCCESS", reloaded.getResult());
             assertEquals(request.getId(), reloaded.getRunRequestId());
             assertEquals("2026-09-01", reloaded.getParameters().get("DATE"));
 
             RunRequest relatedRequest = FileStore.get().loadRunRequest(request.getId());
-            assertNotNull("the related request must remain readable after the build is deleted",
-                    relatedRequest);
+            assertNotNull(relatedRequest, "the related request must remain readable after the build is deleted");
         });
     }
 }

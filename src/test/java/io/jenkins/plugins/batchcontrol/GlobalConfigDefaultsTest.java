@@ -3,13 +3,13 @@ package io.jenkins.plugins.batchcontrol;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import java.util.Arrays;
 import java.util.Collections;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsSessionRule;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC section 5 (global configuration keys and defaults). Matrix rows T-CFG-01 .. T-CFG-03.
@@ -18,24 +18,24 @@ import static org.junit.Assert.assertTrue;
  */
 public class GlobalConfigDefaultsTest {
 
-    @Rule
-    public JenkinsSessionRule session = new JenkinsSessionRule();
+    @RegisterExtension
+    final JenkinsSessionExtension session = new JenkinsSessionExtension();
 
     /** T-CFG-01: fresh install (nothing ever saved) -> every default matches the SPEC section 5 table. */
     @Test
     public void t_cfg_01_freshInstallHasSpecSection5Defaults() throws Throwable {
         session.then(r -> {
             BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
-            assertFalse("runControlEnabled default", cfg.isRunControlEnabled());
-            assertFalse("changeControlEnabled default", cfg.isChangeControlEnabled());
-            assertEquals("approvers default", Collections.emptyList(), cfg.getApprovers());
-            assertTrue("allowAdminSelfApproval default", cfg.isAllowAdminSelfApproval());
-            assertEquals("pendingTimeoutHours default", 72, cfg.getPendingTimeoutHours());
-            assertEquals("approvedRunTimeoutMinutes default", 60, cfg.getApprovedRunTimeoutMinutes());
-            assertEquals("grantDurationOptions default", Arrays.asList(15, 30, 60), cfg.getGrantDurationOptions());
-            assertEquals("maxGrantMinutes default", 240, cfg.getMaxGrantMinutes());
-            assertEquals("incidentResults default", Arrays.asList("FAILURE", "UNSTABLE"), cfg.getIncidentResults());
-            assertEquals("retentionMonths default", 24, cfg.getRetentionMonths());
+            assertFalse(cfg.isRunControlEnabled(), "runControlEnabled default");
+            assertFalse(cfg.isChangeControlEnabled(), "changeControlEnabled default");
+            assertEquals(Collections.emptyList(), cfg.getApprovers(), "approvers default");
+            assertTrue(cfg.isAllowAdminSelfApproval(), "allowAdminSelfApproval default");
+            assertEquals(72, cfg.getPendingTimeoutHours(), "pendingTimeoutHours default");
+            assertEquals(60, cfg.getApprovedRunTimeoutMinutes(), "approvedRunTimeoutMinutes default");
+            assertEquals(Arrays.asList(15, 30, 60), cfg.getGrantDurationOptions(), "grantDurationOptions default");
+            assertEquals(240, cfg.getMaxGrantMinutes(), "maxGrantMinutes default");
+            assertEquals(Arrays.asList("FAILURE", "UNSTABLE"), cfg.getIncidentResults(), "incidentResults default");
+            assertEquals(24, cfg.getRetentionMonths(), "retentionMonths default");
         });
     }
 
@@ -87,8 +87,7 @@ public class GlobalConfigDefaultsTest {
             }
             cfg.save();
 
-            assertEquals("an invalid value must never be stored; the previous value is kept",
-                    72, BatchControlGlobalConfiguration.get().getPendingTimeoutHours());
+            assertEquals(72, BatchControlGlobalConfiguration.get().getPendingTimeoutHours(), "an invalid value must never be stored; the previous value is kept");
         });
     }
 }
