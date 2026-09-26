@@ -1,8 +1,8 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import hudson.Util;
 import hudson.model.Failure;
+import hudson.model.Item;
 import hudson.model.ModelObject;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -12,7 +12,6 @@ import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -237,23 +236,71 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /**
      * Jelly helper: how much of a grant window is left ({@code 12 min 30 sec}), so the user does
-     * not have to subtract the absolute expiry time from the current time (UX-11). Read through
-     * {@link BatchClock} like every other time read in the plugin.
+     * not have to subtract the absolute expiry time from the current time (UX-11).
      *
      * @return the remaining span, or {@code "expired"} once the window has closed (a grant can
      *         still be listed for the moment between expiry and the sweeper run)
      */
     public String remaining(@CheckForNull Instant expiresAt) {
-        if (expiresAt == null) {
-            return "";
-        }
-        long millis = expiresAt.toEpochMilli() - BatchClock.now().toEpochMilli();
-        return millis <= 0 ? "expired" : Util.getTimeSpanString(millis);
+        return Dates.until(expiresAt);
     }
 
     /** Jelly helper: {@code 1 minute} / {@code 15 minutes} for the duration select (UX-12). */
     public String minutesLabel(int minutes) {
         return minutes == 1 ? "1 minute" : minutes + " minutes";
+    }
+
+    // ------------------------------------------------------- new-request prefill (U-01)
+
+    /**
+     * Scope type the new-request form starts on, from {@code ?scopeType=}; {@code JOB} otherwise.
+     *
+     * <p>The value is matched against {@link GrantScope.Type} and anything else falls back to
+     * {@code JOB}, so a hand-edited query string cannot put an unknown string into the form.
+     */
+    public String getPrefillScopeType() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("scopeType");
+        if (raw != null) {
+            try {
+                return GrantScope.Type.valueOf(raw.trim()).name();
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the default.
+            }
+        }
+        return GrantScope.Type.JOB.name();
+    }
+
+    /**
+     * Full name the new-request form starts with, from {@code ?scopeFullName=} — how
+     * {@link JobGrantRequestAction} hands the job over, so a user who arrives from a job page
+     * does not have to retype its path (U-01).
+     *
+     * <p>The parameter is <em>resolved</em>, never echoed: the name is looked up through
+     * {@link Visibility#findVisibleItem} and what the form receives is the model object's own
+     * {@code getFullName()}. An item that does not exist, or that the caller cannot see, yields
+     * an empty field, so this cannot be used to reflect arbitrary text into the page or to probe
+     * for names — it renders exactly what a caller could already read from the item's own URL.
+     *
+     * @return the canonical full name, or an empty string when there is nothing to prefill
+     */
+    public String getPrefillScopeFullName() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("scopeFullName");
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        Item item = Visibility.findVisibleItem(raw.trim());
+        return item == null ? "" : item.getFullName();
+    }
+
+    /**
+     * Whether the form was opened for a specific item, in which case CONFIGURE starts checked:
+     * the only entry point that prefills is the job sidebar's "Request Change Permission", and
+     * the user who followed it is trying to change that job's configuration.
+     */
+    public boolean isPrefilled() {
+        return !getPrefillScopeFullName().isEmpty();
     }
 
     /** Jelly helper: comma-joined action list ("CREATE, CONFIGURE"). */

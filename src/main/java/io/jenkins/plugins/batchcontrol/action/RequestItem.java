@@ -14,6 +14,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -340,10 +341,20 @@ public class RequestItem implements ModelObject {
         }
     }
 
+    /**
+     * The request's target job, or null when it is gone or invisible to the caller.
+     *
+     * <p>S-16: this goes through {@link Visibility#findVisibleJob} rather than calling
+     * {@code getItemByFullName} directly. That lookup does not report an invisible job by
+     * returning null — with {@code Item/Discover} and without {@code Item/Read} it throws
+     * {@code AccessDeniedException}, which Jelly's expression evaluator swallows into a blank
+     * value, so this page used to answer HTTP 200 with the job link, the recent-run table and
+     * the approver dropdown all silently missing. The helper restores the null-means-invisible
+     * contract the callers below assume.
+     */
     @CheckForNull
     private Job<?, ?> findJob() {
-        // getItemByFullName is permission-aware: returns null when the job is gone or invisible.
-        return Jenkins.get().getItemByFullName(request.getJobFullName(), Job.class);
+        return Visibility.findVisibleJob(request.getJobFullName());
     }
 
     /**
