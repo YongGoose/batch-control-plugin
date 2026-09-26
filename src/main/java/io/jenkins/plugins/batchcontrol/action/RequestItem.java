@@ -4,6 +4,8 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
 import hudson.model.Job;
 import hudson.model.ModelObject;
+import hudson.model.Result;
+import hudson.model.Run;
 import hudson.security.ACL;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -11,10 +13,12 @@ import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -39,7 +43,13 @@ import org.springframework.security.core.Authentication;
 @Restricted(NoExternalUse.class)
 public class RequestItem implements ModelObject {
 
+    /** How many recent runs of the target job the decision screen shows (T-E2E-05). */
+    private static final int RECENT_RUN_LIMIT = 5;
+
     private final RunRequest request;
+
+    /** Per-request cache: the Jelly asks for the list more than once. */
+    private List<RecentRun> recentRuns;
 
     RequestItem(RunRequest request) {
         this.request = request;
@@ -70,6 +80,68 @@ public class RequestItem implements ModelObject {
     public String getJobUrl() {
         Job<?, ?> job = findJob();
         return job == null ? null : job.getUrl();
+    }
+
+    /**
+     * Root-relative URL of the build this request produced.
+     *
+     * @return null when the request produced no run, when the stored id is not of the form
+     *         {@code jobFullName#number}, when the build has since been deleted, or when the
+     *         job is not visible to the caller (P-09). The view then renders the stored id as
+     *         plain text instead of a dead link.
+     */
+    @CheckForNull
+    public String getExecutedRunUrl() {
+        String runId = request.getExecutedRunId();
+        if (runId == null) {
+            return null;
+        }
+        int hash = runId.lastIndexOf('#');
+        if (hash <= 0 || hash == runId.length() - 1) {
+            return null;
+        }
+        // Only link inside the request's own job: the id is stored data, not a routing input.
+        if (!runId.substring(0, hash).equals(request.getJobFullName())) {
+            return null;
+        }
+        int number;
+        try {
+            number = Integer.parseInt(runId.substring(hash + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        Job<?, ?> job = findJob();
+        if (job == null) {
+            return null;
+        }
+        Run<?, ?> run = job.getBuildByNumber(number);
+        return run == null ? null : run.getUrl();
+    }
+
+    /**
+     * The most recent runs of the requested job, newest first, so an approver can see how the
+     * job behaved last time without opening a second tab (T-E2E-05).
+     *
+     * <p>P-09: the job is resolved through the permission-aware {@link #findJob()}, so a caller
+     * who may see the request but not the job — and a request whose job has been deleted — gets
+     * an empty list; the run history of an invisible job is never disclosed. The view
+     * distinguishes the two cases through {@link #getJobUrl()}.
+     */
+    public List<RecentRun> getRecentRuns() {
+        if (recentRuns == null) {
+            List<RecentRun> rows = new ArrayList<>();
+            Job<?, ?> job = findJob();
+            if (job != null) {
+                for (Run<?, ?> run : job.getBuilds()) {
+                    if (rows.size() >= RECENT_RUN_LIMIT) {
+                        break;
+                    }
+                    rows.add(new RecentRun(run));
+                }
+            }
+            recentRuns = rows;
+        }
+        return recentRuns;
     }
 
     /** Approver candidates for the change-approver form (global list ∩ job restriction). */
@@ -183,5 +255,53 @@ public class RequestItem implements ModelObject {
     private Job<?, ?> findJob() {
         // getItemByFullName is permission-aware: returns null when the job is gone or invisible.
         return Jenkins.get().getItemByFullName(request.getJobFullName(), Job.class);
+    }
+
+    /**
+     * One row of the recent-run table. Everything is read off the {@link Run} at construction
+     * time so the view never holds a live model object; all fields are plain text rendered
+     * through Jelly's default escaping.
+     */
+    @Restricted(NoExternalUse.class)
+    public static final class RecentRun {
+
+        private final int number;
+        private final String url;
+        private final String result;
+        private final String started;
+        private final String duration;
+
+        RecentRun(Run<?, ?> run) {
+            this.number = run.getNumber();
+            this.url = run.getUrl();
+            // One read: getResult() is @CheckForNull and is null while the build is running.
+            Result runResult = run.getResult();
+            this.result = run.isBuilding()
+                    ? "IN PROGRESS"
+                    : runResult == null ? "UNKNOWN" : runResult.toString();
+            this.started = Dates.format(Instant.ofEpochMilli(run.getStartTimeInMillis()));
+            this.duration = run.isBuilding() ? "" : RunLinks.formatDuration(run.getDuration());
+        }
+
+        public int getNumber() {
+            return number;
+        }
+
+        /** Root-relative build URL ({@code job/a/12/}). */
+        public String getUrl() {
+            return url;
+        }
+
+        public String getResult() {
+            return result;
+        }
+
+        public String getStarted() {
+            return started;
+        }
+
+        public String getDuration() {
+            return duration;
+        }
     }
 }

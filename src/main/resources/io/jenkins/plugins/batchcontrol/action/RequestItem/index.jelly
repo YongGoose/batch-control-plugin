@@ -34,7 +34,17 @@
             <tr><th style="text-align: left;">Self-approved</th><td>Yes</td></tr>
           </j:if>
           <j:if test="${it.request.executedRunId != null}">
-            <tr><th style="text-align: left;">Executed run</th><td>${it.request.executedRunId}</td></tr>
+            <tr>
+              <th style="text-align: left;">Executed run</th>
+              <td>
+                <j:choose>
+                  <j:when test="${it.executedRunUrl != null}">
+                    <a href="${rootURL}/${it.executedRunUrl}">${it.request.executedRunId}</a>
+                  </j:when>
+                  <j:otherwise>${it.request.executedRunId}</j:otherwise>
+                </j:choose>
+              </td>
+            </tr>
           </j:if>
         </tbody>
       </table>
@@ -57,6 +67,35 @@
                 <tr>
                   <td>${p.key}</td>
                   <td style="white-space: pre-wrap;">${p.value}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+        </j:otherwise>
+      </j:choose>
+
+      <!-- T-E2E-05: the approver decides on one screen. The rows come from the permission-aware
+           job lookup (P-09), so a job that is deleted or invisible to this user shows no runs. -->
+      <h2>Recent Runs of This Job</h2>
+      <j:choose>
+        <j:when test="${it.jobUrl == null}">
+          <p>The job is not available: it has been deleted, or you may not view it.</p>
+        </j:when>
+        <j:when test="${empty(it.recentRuns)}">
+          <p>This job has no runs yet.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr><th>Build</th><th>Result</th><th>Started</th><th>Duration</th></tr>
+            </thead>
+            <tbody>
+              <j:forEach var="r" items="${it.recentRuns}">
+                <tr>
+                  <td><a href="${rootURL}/${r.url}">#${r.number}</a></td>
+                  <td>${r.result}</td>
+                  <td>${r.started}</td>
+                  <td>${r.duration}</td>
                 </tr>
               </j:forEach>
             </tbody>

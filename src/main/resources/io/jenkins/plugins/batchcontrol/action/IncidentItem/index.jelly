@@ -130,8 +130,12 @@
 
       <j:if test="${it.canComment}">
         <h2>Add Comment</h2>
-        <f:form method="post" action="comment" name="comment">
-          <f:entry title="Comment">
+        <!-- The form name must differ from the control name it contains: with both called
+             "comment" the entry rendered without its label and the textarea collapsed
+             (e2e-01, incident-detail-open.jpg). Same shape as the Acknowledge form above. -->
+        <f:form method="post" action="comment" name="addComment">
+          <f:entry title="Comment (required)"
+                   description="The comment is appended to the incident history; the status does not change.">
             <f:textarea name="comment" value=""/>
           </f:entry>
           <f:bottomButtonBar>
