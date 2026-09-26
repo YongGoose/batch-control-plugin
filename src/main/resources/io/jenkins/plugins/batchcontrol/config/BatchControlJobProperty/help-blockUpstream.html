@@ -1,3 +1,31 @@
 <div>
-  If checked, builds triggered by upstream jobs are blocked unless the upstream job is listed below; by default they pass through.
+  If checked, builds triggered by upstream jobs are blocked unless the upstream job is listed below;
+  by default they pass through.
+  <p>
+    <b>A job created while run control is on does not start at that default.</b> Every newly
+    created job starts locked — <b>Require approval to run</b>, <b>Block cron (timer) triggers</b>
+    and <b>Block upstream triggers</b> all on and <b>Allowed upstream jobs</b> empty — whoever
+    created it and however. Creating a job therefore does not put it into service. Bringing it into
+    service means turning a switch off here, and that change is recorded and, with change control
+    on, needs a permission window. Jobs that already existed when run control was turned on are
+    untouched.
+  </p>
+  <p>
+    A value supplied when the job was created does not survive the lock: a
+    <code>blockUpstream=false</code> in a <code>config.xml</code> POST, a CLI
+    <code>create-job</code>, a Job DSL seed or the job this one was copied from is overwritten, and
+    the allowed-upstream list is emptied rather than carried over. The list is emptied because while
+    <b>Block upstream triggers</b> is on it is precisely the set of upstream jobs <b>exempt</b> from
+    the block, so honouring a supplied one would leave the upstream door open and make the lock
+    cosmetic. The case that makes it concrete is name squatting: an existing pipeline runs
+    <code>build job: 'X'</code> where <code>X</code> does not exist yet, and whoever may create
+    items creates <code>X</code> with the calling pipeline in its exempt list — the pipeline's next
+    run would then execute their job with no approval and no window.
+  </p>
+  <p>
+    A blocked upstream run is refused quietly, because the trigger has nobody to show a message to,
+    although the upstream job surfaces the failure. If a chain stopped working unexpectedly, this
+    screen is the first thing to check, and the controller log carries one "Blocked
+    upstream-triggered run of job" line per refusal.
+  </p>
 </div>
