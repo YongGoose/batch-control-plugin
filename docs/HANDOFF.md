@@ -43,10 +43,10 @@ The main session does not write code. It picks the phase, delegates, checks gate
 
 | prefix | meaning | where |
 |---|---|---|
-| `D-01`..`D-23` | **settled** design decisions, with rationale and rejected alternatives | `docs/DECISIONS.md` |
-| `P-01`..`P-10` | **proposals** awaiting a human ruling (some already implemented as defaults) | same file, proposals section, and issue #4 |
+| `D-01`..`D-33` | **settled** design decisions, with rationale and rejected alternatives | `docs/DECISIONS.md` |
+| `P-01`..`P-13` | **proposals** awaiting a human ruling (some already implemented as defaults) | same file, proposals section, and issue #4 |
 | `S-01`..`S-13` | security review findings | `docs/reports/security-01.md`, `security-02.md` |
-| `T-05-02`, `T-SEC-07`, `T-RT-14`, `T-E2E-03` | test matrix rows — by SPEC item, security, red-team origin, browser layer | `docs/TEST-MATRIX.md` |
+| `T-05-02`, `T-SEC-07`, `T-RT-14`, `T-OS-03`, `T-UI-06`, `T-E2E-03` | test matrix rows — by SPEC item, security, red-team origin, owner scenario, screen contract, browser layer | `docs/TEST-MATRIX.md` |
 | `RT-01`..`RT-20` | red-team attack scenarios | `docs/reports/red-team-01.md` |
 | S1..S4 | the four implementation slices (foundation, run control, change control, operations) | `docs/WORKFLOW.md` Phase 3 |
 
@@ -72,7 +72,12 @@ mvn -ntp -q test -Dtest=ClassName   # one class — 30 s to 3 min
 mvn hpi:run                    # local Jenkins at http://localhost:8080/jenkins
 ```
 
-Expected at `4550d00`: **159 tests, 0 failures, SpotBugs `BugInstance size is 0`, BUILD SUCCESS**. If you get anything else, stop and find out why before writing code.
+Expect **0 failures, SpotBugs `BugInstance size is 0`, BUILD SUCCESS**. The test count moves as
+rows are added — it was 159 at `4550d00` and 195 after the Phase 5 work; take 0 failures as the
+signal, not the integer. If you get anything else, stop and find out why before writing code.
+
+`CONTRIBUTING.md` carries the fuller version of this section: per-class commands, the repository
+layout, the test conventions, and the pitfalls below.
 
 Pinned versions live in `pom.xml`: parent `org.jenkins-ci.plugins:plugin:6.2236.v12dd4c483242`, `jenkins.version 2.568.3`, BOM `bom-2.568.x:7046.v43536164769c`.
 
@@ -109,6 +114,16 @@ Gate: all e2e P0 rows pass.
 ## 6. Things that cost us time — do not rediscover them
 
 - **Never run two Maven builds at once.** Agents sharing `target/` deadlock on Windows file locks (`patch-modules`). Serialize mvn across agents.
+- **A red `RunRequestServiceTest.t_03_05` is usually not a regression.** On Windows the JenkinsRule
+  teardown intermittently fails to delete its temp directory (`DirectoryNotEmptyException`, inside
+  `JenkinsRule.after()`); the test body passed. Re-run that class alone before chasing it —
+  TEST-MATRIX note 41.
+- **Jelly is compiled at runtime, not by `mvn verify`.** A screen change can compile clean and still
+  break in the browser, so bring the plugin up (`mvn hpi:run`, or the e2e container) and look at it.
+- **With run control on, a newly created job already carries a batch-control property (D-31).**
+  `Job.addProperty` appends and `Job.getProperty` returns the first, so a fixture that creates the
+  job and then adds its own property silently measures the default instead. Two tests passed for
+  months that way — TEST-MATRIX note 42. `BatchControlFixtures.setBatchControl` now asserts against it.
 - **Long-running agents hit session limits.** Two were killed mid-task. Work committed to disk survived; in-memory context did not. Commit early, and when resuming an agent tell it what already landed — a resumed agent will otherwise repeat stale claims about its own earlier state.
 - **`AsyncPeriodicWork.doRun()` is `public final`** and spawns a thread, so tests cannot drive it synchronously. Retention uses plain `PeriodicWork` for that reason.
 - **`@Initializer(after = COMPLETED)` stalls the init graph** (JENKINS-37759). Startup recovery runs at `JOB_CONFIG_ADAPTED` and coordinates with `queue.xml` under `Queue.withLock`.

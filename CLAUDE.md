@@ -34,7 +34,9 @@
 | `docs/reports/security-*.md` | security-reviewer |
 | `docs/reports/red-team-*.md` | red-team |
 | `docs/reports/spec-review-*.md` | spec-guardian |
-| `pom.xml`, `README.md`, `Jenkinsfile`, `CHANGELOG.md`, `LICENSE`, `docs/HOSTING-REQUEST.md` | release-manager |
+| `src/main/webapp/help/**` | ui-dev |
+| `pom.xml`, `README.md`, `CONTRIBUTING.md`, `Jenkinsfile`, `CHANGELOG.md`, `LICENSE`, `.github/**`, `docs/HOSTING-REQUEST.md`, `docs/HOSTING-READINESS.md` | release-manager |
+| `docs/HANDOFF.md` | 메인 세션 |
 
 자기 소유가 아닌 경로를 고쳐야 하면 고치지 말고 산출물 보고서에 "요청: <경로> <내용>"으로 적는다. 메인 세션이 소유 에이전트에게 전달한다.
 
