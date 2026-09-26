@@ -6,19 +6,45 @@ hosting process.
 | | |
 |---|---|
 | Verification date | **2026-09-26** (all URLs below fetched on this date) |
+| Last updated | **2026-09-26** — preparation pass applied, see *Applied changes* below |
 | Repository under review | `https://github.com/YongGoose/batch-control-plugin` (public, not a fork, default branch `main` — verified via GitHub API on 2026-09-26) |
 | Branch inspected | `handoff/phase-4-5-continuation` |
-| Requirements checked | **60** |
-| PASS | **36** |
-| FAIL | **18** |
+| Requirements checked | **65** |
+| PASS | **54** |
+| FAIL | **5** |
 | WARNING | **1** |
-| UNKNOWN | **4** |
-| INFO | **1** |
+| UNKNOWN | **3** |
+| INFO | **2** |
+
+> **Count correction (2026-09-26).** The first revision of this header said
+> "60 requirements / 36 PASS / 1 INFO". The checklist in section 2 actually has
+> 65 rows (A 8, B 23, C 17, D 8, E 9) and two INFO rows (D8, E9), so the header
+> totals were wrong. The numbers above are recounted from the table.
 
 > **Verification note.** No Maven build was run while preparing this document
 > (a concurrent full build was in progress). Every row whose verdict depends on
 > a build is marked `UNKNOWN — build verification required`, never assumed to
 > pass.
+
+### Applied changes (preparation pass, 2026-09-26)
+
+Owner-approved writes to `pom.xml`, `Jenkinsfile` and new files. CD-related
+items were deliberately **not** touched — see G10.
+
+| Gap | Change | Where |
+|---|---|---|
+| G1 | `LICENSE` created — full MIT text, `Copyright (c) 2026 Yongjun Hong` | `LICENSE:1-21` |
+| G2 | windows configuration `jdk: 17` → `jdk: 21` | `Jenkinsfile:5` |
+| G4 | `<developers>` block deleted | `pom.xml` (was `:27-33`) |
+| G5 | `<url>` and all three `<scm>` URLs rewritten to the literal jenkinsci form; `gitHubRepo` property removed | `pom.xml:18`, `:27-32`, properties |
+| G6 | five enforcement properties added | `pom.xml:39-43` |
+| G7 | `.github/CODEOWNERS` created | `.github/CODEOWNERS:1` |
+| G8 | `.github/dependabot.yml` created — `maven` weekly, `github-actions` monthly | `.github/dependabot.yml:1-11` |
+| G9 | plugin BOM `7046.v43536164769c` → `7093.v37de7b_4a_8a_4f` | `pom.xml:51` |
+
+**Not done, by instruction:** G3 (README — separate work item) and G10 (all CD
+files and the `changelist` value — the Yes/No decision is made immediately
+before submission).
 
 ---
 
@@ -111,7 +137,7 @@ Live registry values checked on 2026-09-26:
 | Artifact | Latest released | Our value | Note |
 |---|---|---|---|
 | `org.jenkins-ci.plugins:plugin` | `6.2236.v12dd4c483242` (`lastUpdated 20260916122448`) | `6.2236.v12dd4c483242` | up to date |
-| `io.jenkins.tools.bom:bom-2.568.x` | `7093.v37de7b_4a_8a_4f` (`lastUpdated 20260925171701`) | `7046.v43536164769c` | **behind** |
+| `io.jenkins.tools.bom:bom-2.568.x` | `7093.v37de7b_4a_8a_4f` (`lastUpdated 20260925171701`) | `7093.v37de7b_4a_8a_4f` | up to date (bumped 2026-09-26; metadata re-fetched the same day and `<latest>` = `<release>` = this value) |
 
 Sources: `https://repo.jenkins-ci.org/artifactory/public/org/jenkins-ci/plugins/plugin/maven-metadata.xml`,
 `https://repo.jenkins-ci.org/artifactory/public/io/jenkins/tools/bom/bom-2.568.x/maven-metadata.xml`
@@ -149,37 +175,37 @@ listed in section 1 and section 6.
 | B3 | Property `jenkins.baseline` must be defined | RPU `MavenVerifier.checkProperties` | PASS | `pom.xml:46` = `2.568` | — |
 | B4 | `jenkins.version` ≥ `2.541.3` | RPU `Requirements.LOWEST_JENKINS_VERSION` | PASS | `pom.xml:47` = `${jenkins.baseline}.3` → `2.568.3` | — |
 | B5 | `<licenses>` block present | RPU `MavenVerifier.checkLicenses` | PASS | `pom.xml:20-25` (MIT) | — |
-| B6 | `<developers>` must be **removed** — "This information is fetched from this repository on the update site." | RPU `MavenVerifier.checkDevelopersTag` | **FAIL** | `pom.xml:27-33` | Delete the whole `<developers>` block |
-| B7 | `<url>` must equal `https://github.com/jenkinsci/${project.artifactId}-plugin` | RPU `MavenVerifier.checkUrl` | **FAIL** | `pom.xml:18` is `https://github.com/${gitHubRepo}`, and `pom.xml:45` sets `gitHubRepo` = `YongGoose/batch-control-plugin` | Replace with the literal jenkinsci form |
-| B8 | `<scm><connection>` must be HTTPS | RPU `MavenVerifier.checkSoftwareConfigurationManagementField` | PASS | `pom.xml:36` | — |
-| B9 | `<scm><developerConnection>` present | same | PASS | `pom.xml:37` | — |
-| B10 | `<scm><url>` present | same | PASS | `pom.xml:39` | — |
-| B11 | `<scm><tag>` present | same | PASS | `pom.xml:38` = `${scmTag}` | — |
-| B12 | SCM URLs should point at the jenkinsci repository — the bot's own sample is `scm:git:https://github.com/jenkinsci/${project.artifactId}-plugin.git` | RPU `MavenVerifier` SCM message text (sample only; presence/scheme is what is enforced) | **FAIL** | `pom.xml:36-39` resolve to `YongGoose/...` via `pom.xml:45` | Drop the `gitHubRepo` property and use the jenkinsci form everywhere |
-| B13 | `<repository>`/`<pluginRepository>` for repo.jenkins-ci.org must use `https://` | RPU `MavenVerifier.checkRepositories` / `checkPluginRepositories` | PASS | `pom.xml:114-126` | — |
-| B14 | Properties `java.level`, `maven.compiler.source/target/release` must be absent | RPU `MavenVerifier.checkProperties` | PASS | absent from `pom.xml:42-48` | — |
-| B15 | Property `hpi.strictBundledArtifacts` = `true` | RPU `MavenVerifier.checkProperties` | **FAIL** | not in `pom.xml:42-48` | Add it |
-| B16 | Property `ban-commons-lang-2.skip` = `false` | same | **FAIL** | not present | Add it |
-| B17 | Property `ban-deprecated-stapler.skip` = `false` | same | **FAIL** | not present | Add it |
-| B18 | Property `ban-junit4-imports.skip` = `false` | same | **FAIL** | not present | Add it |
-| B19 | Property `banObsoleteDependencyOverrides.skip` = `false` | same | **FAIL** | not present | Add it |
-| B20 | Plugin BOM imported and its `artifactId` in sync with the baseline (`bom-<baseline>.x`) | RPU `MavenVerifier.checkDependencyManagement` | PASS | `pom.xml:54` = `bom-${jenkins.baseline}.x` → `bom-2.568.x` | — |
-| B21 | BOM version must equal the latest released BOM for that line | same | **FAIL** | `pom.xml:55` = `7046.v43536164769c`; latest on 2026-09-26 = `7093.v37de7b_4a_8a_4f` | Bump, and re-check on submission day |
-| B22 | No explicit `<version>` on dependencies the BOM manages | same | PASS | `pom.xml:62-112` — no dependency declares a version | — |
-| B23 | No banned third-party dependency in `compile` scope (must use the API plugin instead) | RPU `MavenVerifier.checkDependencies` + `banned-dependencies.lst` | PASS | compile deps are only `structs` (`pom.xml:63-66`) and `cloudbees-folder` (`pom.xml:67-70`); neither is in the banned list | — |
+| B6 | `<developers>` must be **removed** — "This information is fetched from this repository on the update site." | RPU `MavenVerifier.checkDevelopersTag` | PASS | block deleted 2026-09-26; `grep -c developer pom.xml` now matches only `<developerConnection>` | — |
+| B7 | `<url>` must equal `https://github.com/jenkinsci/${project.artifactId}-plugin` | RPU `MavenVerifier.checkUrl` | PASS | `pom.xml:18` = `https://github.com/jenkinsci/${project.artifactId}-plugin`, literal jenkinsci form | — |
+| B8 | `<scm><connection>` must be HTTPS | RPU `MavenVerifier.checkSoftwareConfigurationManagementField` | PASS | `pom.xml:28` | — |
+| B9 | `<scm><developerConnection>` present | same | PASS | `pom.xml:29` | — |
+| B10 | `<scm><url>` present | same | PASS | `pom.xml:31` | — |
+| B11 | `<scm><tag>` present | same | PASS | `pom.xml:30` = `${scmTag}` | — |
+| B12 | SCM URLs should point at the jenkinsci repository — the bot's own sample is `scm:git:https://github.com/jenkinsci/${project.artifactId}-plugin.git` | RPU `MavenVerifier` SCM message text (sample only; presence/scheme is what is enforced) | PASS | `pom.xml:28-31` now use the jenkinsci form verbatim; the `gitHubRepo` property is gone (`grep -rn gitHubRepo` over the repo: 0 hits) | — |
+| B13 | `<repository>`/`<pluginRepository>` for repo.jenkins-ci.org must use `https://` | RPU `MavenVerifier.checkRepositories` / `checkPluginRepositories` | PASS | `pom.xml:110-122` | — |
+| B14 | Properties `java.level`, `maven.compiler.source/target/release` must be absent | RPU `MavenVerifier.checkProperties` | PASS | absent from `pom.xml:34-44` | — |
+| B15 | Property `hpi.strictBundledArtifacts` = `true` | RPU `MavenVerifier.checkProperties` | PASS (bot) / see **R1** | `pom.xml:39` | Build verification required |
+| B16 | Property `ban-commons-lang-2.skip` = `false` | same | PASS | `pom.xml:40`; static scan found **0** commons-lang 2 references (see **R1**) | — |
+| B17 | Property `ban-deprecated-stapler.skip` = `false` | same | PASS | `pom.xml:41`; static scan found **0** v1 Stapler references (see **R1**) | — |
+| B18 | Property `ban-junit4-imports.skip` = `false` | same | PASS (bot) / **will break the build** | `pom.xml:42`; **239 JUnit 4 references in 34 of 34 test files** (see **R1**) | JUnit 5 migration owned by test-author |
+| B19 | Property `banObsoleteDependencyOverrides.skip` = `false` | same | PASS | `pom.xml:43`; no dependency declares a version, so there is nothing to override (see **R1**) | — |
+| B20 | Plugin BOM imported and its `artifactId` in sync with the baseline (`bom-<baseline>.x`) | RPU `MavenVerifier.checkDependencyManagement` | PASS | `pom.xml:50` = `bom-${jenkins.baseline}.x` → `bom-2.568.x` | — |
+| B21 | BOM version must equal the latest released BOM for that line | same | PASS | `pom.xml:51` = `7093.v37de7b_4a_8a_4f`, which was `<latest>` and `<release>` in the live `maven-metadata.xml` on 2026-09-26 | Re-check on submission day — moving target |
+| B22 | No explicit `<version>` on dependencies the BOM manages | same | PASS | `pom.xml:58-108` — no dependency declares a version | — |
+| B23 | No banned third-party dependency in `compile` scope (must use the API plugin instead) | RPU `MavenVerifier.checkDependencies` + `banned-dependencies.lst` | PASS | compile deps are only `structs` (`pom.xml:59-62`) and `cloudbees-folder` (`pom.xml:63-66`); neither is in the banned list | — |
 
 ### C. Required repository files
 
 | # | Requirement | Source | Status | Evidence | Action |
 |---|---|---|---|---|---|
 | C1 | `Jenkinsfile` exists, contains exactly one `buildPlugin(...)` call, parameterized, with a `configurations` list where every entry has `platform` and `jdk` | RPU `RequiredFilesVerifier.validateJenkinsFile` | PASS (structure) | `Jenkinsfile:1-7` | — |
-| C2 | Every `jdk` value must be in `[21, 25]` | RPU `Requirements.ALLOWED_JDK_VERSIONS` | **FAIL** | `Jenkinsfile:5` uses `jdk: 17` for the windows configuration | Change 17 → 21 (or 25) |
+| C2 | Every `jdk` value must be in `[21, 25]` | RPU `Requirements.ALLOWED_JDK_VERSIONS` | PASS | `Jenkinsfile:4-5` — both configurations now `jdk: 21` | — |
 | C3 | `.gitignore` must exclude `target` | RPU `RequiredFilesVerifier.checkGitignore` | PASS | `.gitignore:1` = `target/` | — |
 | C4 | `.gitignore` must exclude `work` | same | PASS | `.gitignore:2` = `work/` | — |
 | C5 | `.github/workflows/jenkins-security-scan.yml` (or `.yaml`) must exist | RPU `RequiredFilesVerifier.checkSecurityScan` | PASS | `.github/workflows/jenkins-security-scan.yml:1-22`, pinned to `jenkins-infra/jenkins-security-scan@da7438f…` (v2) | — |
-| C6 | `.github/CODEOWNERS` must exist and contain the exact line `* @jenkinsci/<new-repo-name>-developers` | RPU `RequiredFilesVerifier.checkCodeOwners` | **FAIL** | `.github/` contains only `workflows/` — no CODEOWNERS | Create `.github/CODEOWNERS` with `* @jenkinsci/batch-control-plugin-developers` |
-| C7 | A dependency-update bot config must exist: one of `.github/dependabot.yml(.yaml)`, `renovate.json`, `.github/renovate.json`, `.github/workflows/updatecli.yml(.yaml)` | RPU `RequiredFilesVerifier.checkDependencyBot` | **FAIL** | none of the six paths exists | Add `.github/dependabot.yml` (or the archetype's `.github/renovate.json`) |
-| C8 | A license file must exist in the repository and be detectable by GitHub | RPU `GitHubVerifier.checkLicense` | **FAIL** | no `LICENSE`/`COPYING`/`NOTICE` in the repo root; GitHub API returns `"license": null` for the repo (checked 2026-09-26) | Add `LICENSE` with the full MIT text |
+| C6 | `.github/CODEOWNERS` must exist and contain the exact line `* @jenkinsci/<new-repo-name>-developers` | RPU `RequiredFilesVerifier.checkCodeOwners` | PASS | `.github/CODEOWNERS:1` = `* @jenkinsci/batch-control-plugin-developers` | — |
+| C7 | A dependency-update bot config must exist: one of `.github/dependabot.yml(.yaml)`, `renovate.json`, `.github/renovate.json`, `.github/workflows/updatecli.yml(.yaml)` | RPU `RequiredFilesVerifier.checkDependencyBot` | PASS | `.github/dependabot.yml:1-11` — `maven` weekly + `github-actions` monthly | — |
+| C8 | A license file must exist in the repository and be detectable by GitHub | RPU `GitHubVerifier.checkLicense` | PASS (pending push) | `LICENSE:1-21`, full MIT text, `Copyright (c) 2026 Yongjun Hong`, matching the MIT declaration at `pom.xml:20-25` | GitHub's `license` field only populates after the commit is pushed — re-check the API response before submitting |
 | C9 | A README must exist and be detectable by GitHub | RPU `GitHubVerifier.checkReadme` | PASS | `README.md` exists | — |
 | C10 | README must be usable plugin documentation — reviewed by a human, not the bot ("README content") | Hosting Checker message text; <https://www.jenkins.io/doc/developer/publishing/documentation/> | **FAIL** | `README.md:1-46` is the Claude Code development-kit guide, in Korean, listing agent definitions and phase prompts. No what/why, no installation, no configuration, no usage. Independently found by e2e testing: `docs/reports/e2e-01.md:418-421` | Replace — see gap **G3** |
 | C11 | `src/main/resources/index.jelly` should describe the plugin | `docs/HOSTING-CHECKLIST.md:17`; archetype convention (no automated check found in RPU — **source not confirmed as a bot requirement**) | PASS | `src/main/resources/index.jelly:1-8`, English, `escape-by-default='true'` | — |
@@ -194,12 +220,12 @@ listed in section 1 and section 6.
 
 | # | Requirement | Source | Status | Evidence | Action |
 |---|---|---|---|---|---|
-| D1 | Property `changelist` must be exactly `999999-SNAPSHOT` | RPU `MavenVerifier.checkAutomaticReleasesSettings`; <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | **FAIL** | `pom.xml:44` = `-SNAPSHOT` | Set to `999999-SNAPSHOT` |
+| D1 | Property `changelist` must be exactly `999999-SNAPSHOT` | RPU `MavenVerifier.checkAutomaticReleasesSettings`; <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | **FAIL** (deliberately unchanged) | `pom.xml:36` = `-SNAPSHOT` | Set to `999999-SNAPSHOT` only if Q5 = `Yes` |
 | D2 | `<version>` must contain `${changelist}` | same | PASS | `pom.xml:13` = `${revision}${changelist}` | — |
 | D3 | `${revision}${changelist}` as the version is discouraged | RPU, severity WARNING | **WARN** | `pom.xml:13` | Prefer `${changelist}` (fully automated) or `${revision}.${changelist}` per the CD doc |
-| D4 | `.mvn/extensions.xml` must exist | RPU `RequiredFilesVerifier.checkFilesForCD` | **FAIL** | no `.mvn/` directory | Copy from `jenkinsci/archetypes/common-files/.mvn/extensions.xml` |
-| D5 | `.mvn/maven.config` must exist and contain the line `-Dchangelist.format=%d.v%s` | same | **FAIL** | no `.mvn/` directory | Copy the archetype file; CD doc also lists `-Pmight-produce-incrementals` |
-| D6 | `.github/workflows/cd.yaml` (or `.yml`) must exist | same | **FAIL** | `.github/workflows/` contains only the security scan | `curl … https://raw.githubusercontent.com/jenkinsci/.github/master/workflow-templates/cd.yaml` |
+| D4 | `.mvn/extensions.xml` must exist | RPU `RequiredFilesVerifier.checkFilesForCD` | **FAIL** (deliberately unchanged) | no `.mvn/` directory | Copy from `jenkinsci/archetypes/common-files/.mvn/extensions.xml`, only if Q5 = `Yes` |
+| D5 | `.mvn/maven.config` must exist and contain the line `-Dchangelist.format=%d.v%s` | same | **FAIL** (deliberately unchanged) | no `.mvn/` directory | Copy the archetype file, only if Q5 = `Yes`; CD doc also lists `-Pmight-produce-incrementals` |
+| D6 | `.github/workflows/cd.yaml` (or `.yml`) must exist | same | **FAIL** (deliberately unchanged) | `.github/workflows/` contains only the security scan | `curl … https://raw.githubusercontent.com/jenkinsci/.github/master/workflow-templates/cd.yaml`, only if Q5 = `Yes` |
 | D7 | `.github/release-drafter.y*ml` and `.github/workflows/release-drafter.y*ml` must **not** exist | same | PASS | neither exists | — |
 | D8 | After hosting, a PR to repository-permissions-updater must add `cd: enabled: true` to `permissions/plugin-batch-control.yml`, then `MAVEN_TOKEN` / `MAVEN_USERNAME` appear as repository secrets | <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | INFO (post-approval) | n/a | Part of step E in `docs/HOSTING-CHECKLIST.md` |
 
@@ -209,8 +235,8 @@ listed in section 1 and section 6.
 |---|---|---|---|---|---|
 | E1 | Description must explain "how it's different from other components that may be considered similar to this one" | Issue template field 3 | **UNKNOWN** | Material exists (`docs/DECISIONS.md:7` D-01, `:9` D-02) but no submission text has been reviewed by the owner | Use the section 6 draft, owner to confirm |
 | E2 | GitHub users to have commit permission | Issue template field 4 | **UNKNOWN** | Owner data | Owner supplies |
-| E3 | Jenkins project (accounts.jenkins.io) users with release permission must have signed into Jira **and** Artifactory | Issue template field 5; RPU `JenkinsProjectUserVerifier` | **UNKNOWN** | Owner data; not verifiable from the repository | Owner creates/confirms the account and logs into both (bot reports re-sync hourly) |
-| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **UNKNOWN — build verification required** | Not run (concurrent build in progress) | Run `mvn -q clean verify` before submitting |
+| E3 | Jenkins project (accounts.jenkins.io) users with release permission must have signed into Jira **and** Artifactory | Issue template field 5; RPU `JenkinsProjectUserVerifier` | PASS (owner-confirmed 2026-09-26) | Owner states the accounts.jenkins.io account is created and needs no further verification | The literal username string for field 5 is still owner-supplied when the form is filled |
+| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **UNKNOWN — build verification required**, and expected red | Not run (concurrent build in progress). `ban-junit4-imports.skip=false` was added this pass and the whole test suite is JUnit 4 — see **R1** | Migrate the tests to JUnit 5, then run `mvn -q clean verify` |
 | E5 | No Korean strings in code or resources | `CLAUDE.md:45`; `docs/HOSTING-CHECKLIST.md:45` | PASS | Unicode Hangul scan over `src/`: 0 matching files | — |
 | E6 | No hardcoded credentials | `docs/HOSTING-CHECKLIST.md:28`; Jenkins security docs | PASS | grep for `password =`/`secret =`/`apiKey`/`token =` string literals over `src/main/java`: 0 hits | — |
 | E7 | No unexpected outbound network calls | Jenkins security review practice | PASS | grep over `src/main/java` for `HttpURLConnection`, `HttpClient`, `openStream`, `okhttp`, `Socket(`, `java.net.URL`: the only match is `import java.net.URLEncoder` in `src/main/java/io/jenkins/plugins/batchcontrol/ui/FilterParser.java:6`, which is string encoding, not I/O | — |
@@ -224,7 +250,23 @@ listed in section 1 and section 6.
 Ordered by how hard they block. G1–G8 are `REQUIRED` bot findings: the hosting
 request cannot be approved while any of them stands.
 
-### G1 — No license file in the repository *(REQUIRED, C8)*
+**Status after the 2026-09-26 preparation pass:**
+
+| Gap | Status |
+|---|---|
+| G1 license file | **RESOLVED** |
+| G2 Jenkinsfile JDK | **RESOLVED** |
+| G3 README | **OPEN** — separate work item, not in scope of this pass |
+| G4 `<developers>` | **RESOLVED** |
+| G5 `<url>` / SCM | **RESOLVED** |
+| G6 five POM properties | **RESOLVED for the bot check**, but it opened a new build blocker — see **R1** |
+| G7 CODEOWNERS | **RESOLVED** |
+| G8 dependency bot | **RESOLVED** |
+| G9 BOM version | **RESOLVED** as of 2026-09-26; re-check on submission day |
+| G10 CD block | **DEFERRED** by owner decision — nothing applied |
+| G11 build health | **OPEN** and now expected to fail — see **R1** |
+
+### G1 — No license file in the repository *(REQUIRED, C8)* — RESOLVED
 
 The bot calls `repo.getLicense()`; GitHub currently reports `"license": null`.
 The Jenkins project also states plainly that the license must be declared "both
@@ -236,8 +278,13 @@ recommends MIT.
 - **Where:** `/LICENSE`.
 - **Why it is more than paperwork:** `pom.xml:20-25` already claims MIT, so
   today the repository advertises a license it does not carry.
+- **Done 2026-09-26.** `LICENSE:1-21` carries the full MIT text with
+  `Copyright (c) 2026 Yongjun Hong` (personal, owner-confirmed — **Q2** closed).
+  The first line reads `MIT License`, which is what GitHub's license detection
+  keys on. One residual: the API's `license` field stays `null` until the commit
+  is pushed, so C8 only truly clears after the push.
 
-### G2 — Jenkinsfile uses a disallowed JDK *(REQUIRED, C2)*
+### G2 — Jenkinsfile uses a disallowed JDK *(REQUIRED, C2)* — RESOLVED
 
 `Requirements.ALLOWED_JDK_VERSIONS` is `List.of(21, 25)`. `Jenkinsfile:5`
 requests `jdk: 17`, which produces:
@@ -247,8 +294,11 @@ requests `jdk: 17`, which produces:
 - **What:** change the windows configuration from `jdk: 17` to `jdk: 21`, so both
   rows read 21 (optionally add a `jdk: 25` row).
 - **Where:** `Jenkinsfile:5`.
+- **Done 2026-09-26.** `Jenkinsfile:5` now reads `[platform: 'windows', jdk: 21]`;
+  `Jenkinsfile:4` was already 21. No `jdk: 25` row was added (recommendation 7
+  stays open).
 
-### G3 — README is the development-kit document, not plugin documentation *(human review, C10)*
+### G3 — README is the development-kit document, not plugin documentation *(human review, C10)* — OPEN
 
 `README.md:1-46` is titled "batch-control-plugin 개발 키트" and documents the
 Claude Code agent kit: which files the kit contains, how to copy it into an empty
@@ -295,15 +345,18 @@ After hosting, this file becomes the plugin's landing page on plugins.jenkins.io
   (for example `docs/DEV-KIT.md`) rather than be deleted, since it documents the
   working method.
 
-### G4 — `<developers>` must be removed from `pom.xml` *(REQUIRED, B6)*
+### G4 — `<developers>` must be removed from `pom.xml` *(REQUIRED, B6)* — RESOLVED
 
 Message: "Please remove the `developers` tag from your pom.xml. This information
 is fetched from this repository on the update site."
 
 - **What:** delete `pom.xml:27-33` entirely. Maintainer identity comes from the
   release permissions in repository-permissions-updater, not the POM.
+- **Done 2026-09-26.** Block deleted. The maintainer name and address
+  (`Yongjun Hong` / `dev.yongjunh@gmail.com`) now live only in the hosting
+  request and in `LICENSE`, which is where the process expects them.
 
-### G5 — `<url>` and the SCM URLs point at the personal repository *(REQUIRED, B7; also B12)*
+### G5 — `<url>` and the SCM URLs point at the personal repository *(REQUIRED, B7; also B12)* — RESOLVED
 
 `MavenVerifier.checkUrl` interpolates `<url>` and requires it to equal exactly
 `https://github.com/jenkinsci/<artifactId>-plugin`. Ours resolves to
@@ -321,8 +374,13 @@ property at `pom.xml:45`.
 - **Note:** the URLs will be wrong for the *current* repository until the fork
   into jenkinsci happens. That is expected — the bot checks the destination
   form, not the origin.
+- **Done 2026-09-26.** All four URLs use the literal
+  `jenkinsci/${project.artifactId}-plugin` form (`pom.xml:18`, `:28`, `:29`,
+  `:31`); `<tag>` is unchanged at `${scmTag}` (`pom.xml:30`). The `gitHubRepo`
+  property was deleted and `grep -rn gitHubRepo` over the whole repository now
+  returns nothing, so no other file depended on it.
 
-### G6 — Five required POM properties are missing *(REQUIRED, B15–B19)*
+### G6 — Five required POM properties are missing *(REQUIRED, B15–B19)* — RESOLVED (and see R1)
 
 `MavenVerifier.checkProperties` requires all five, each with an exact value:
 
@@ -340,16 +398,22 @@ property at `pom.xml:45`.
   or `javax.servlet` classes, commons-lang 2, or JUnit 4 imports. This must be
   verified with a build — **build verification required** — and any failure is
   a code change owned by core-dev / test-author, not by this document.
+- **Done 2026-09-26.** All five are present with the exact required values at
+  `pom.xml:39-43`. The caution above turned out to be justified for exactly one
+  of the three `ban-*` switches — see **R1**.
 
-### G7 — `.github/CODEOWNERS` is missing *(REQUIRED, C6)*
+### G7 — `.github/CODEOWNERS` is missing *(REQUIRED, C6)* — RESOLVED
 
 - **What:** create `.github/CODEOWNERS` containing the exact line
   `* @jenkinsci/batch-control-plugin-developers`.
 - **Note:** that GitHub team does not exist yet — it is created when the
   repository is forked into jenkinsci. The bot only string-matches the line, so
   adding it before approval is correct.
+- **Done 2026-09-26.** `.github/CODEOWNERS:1`, single line, no trailing comment.
+  Until the fork happens GitHub will show the team as unrecognised in its
+  CODEOWNERS linter — expected, and not a hosting finding.
 
-### G8 — No dependency-update bot configuration *(REQUIRED, C7)*
+### G8 — No dependency-update bot configuration *(REQUIRED, C7)* — RESOLVED
 
 - **What:** add one of `.github/dependabot.yml`, `.github/dependabot.yaml`,
   `renovate.json`, `.github/renovate.json`,
@@ -357,8 +421,21 @@ property at `pom.xml:45`.
   `.github/renovate.json`. If CD is enabled, the CD documentation additionally
   asks for a `github-actions` ecosystem entry with a monthly schedule in
   `.github/dependabot.yml`.
+- **Done 2026-09-26.** `.github/dependabot.yml:1-11`, with both ecosystems:
+  - `maven`, `interval: weekly`, `open-pull-requests-limit: 5` — weekly is the
+    usual cadence for Jenkins plugins that use dependabot rather than renovate,
+    and matches how often the plugin BOM releases (the B21 check compares
+    against `<latest>` at review time, so a slower cadence would let that row go
+    red on its own).
+  - `github-actions`, `interval: monthly` — this is the cadence the Jenkins CD
+    documentation names for the `github-actions` ecosystem, so choosing it now
+    means the file needs no edit if Q5 is later answered `Yes`.
 
-### G9 — Plugin BOM is behind the latest release *(REQUIRED, B21)*
+  Dependabot only starts raising PRs once the file is on the default branch, so
+  nothing happens until after the push and, for the jenkinsci copy, after the
+  fork.
+
+### G9 — Plugin BOM is behind the latest release *(REQUIRED, B21)* — RESOLVED
 
 `pom.xml:55` pins `7046.v43536164769c`; the latest `bom-2.568.x` on 2026-09-26 is
 `7093.v37de7b_4a_8a_4f`.
@@ -368,8 +445,17 @@ property at `pom.xml:45`.
   again without any change on our side.
 - **Caution:** a BOM bump changes resolved dependency versions — **build
   verification required**.
+- **Done 2026-09-26.** `pom.xml:51` = `7093.v37de7b_4a_8a_4f`. The version was
+  re-verified at apply time, not copied from the earlier draft: a fresh fetch of
+  `https://repo.jenkins-ci.org/releases/io/jenkins/tools/bom/bom-2.568.x/maven-metadata.xml`
+  reported `<latest>` = `<release>` = `7093.v37de7b_4a_8a_4f`,
+  `lastUpdated 20260925171701`, and it is the last entry in `<versions>`. Picking
+  `<release>` (not merely `<latest>`) is deliberate — the bot compares against a
+  released BOM, and for this line the two agree.
+- **Still outstanding:** the bump changes resolved versions for every managed
+  dependency, so it is one of the two reasons E4 must be re-run.
 
-### G10 — CD block, only if field 6 is answered `Yes` *(REQUIRED, D1/D4/D5/D6)*
+### G10 — CD block, only if field 6 is answered `Yes` *(REQUIRED, D1/D4/D5/D6)* — DEFERRED
 
 If the owner answers `Yes` (the template calls it "recommended"), four more
 REQUIRED findings appear today: `changelist` is `-SNAPSHOT` instead of
@@ -381,13 +467,116 @@ warning (D3).
 - **Decision required — Q5.** Answering `No` removes all of G10 from the
   first review; CD can be enabled later by a follow-up PR to
   repository-permissions-updater.
+- **Deliberately not applied 2026-09-26.** By owner instruction, nothing in this
+  block was touched: `changelist` stays `-SNAPSHOT` (`pom.xml:36`), and no
+  `.mvn/extensions.xml`, `.mvn/maven.config` or `.github/workflows/cd.yaml` was
+  created. Applying them before the Yes/No decision would only have to be
+  reverted if the answer is `No`. The one CD-adjacent choice already made is the
+  monthly `github-actions` dependabot entry in G8, which is harmless either way.
 
-### G11 — Build health unverified *(E4)*
+### G11 — Build health unverified *(E4)* — OPEN, now expected to fail
 
 `mvn clean verify` was deliberately not run for this report. The hosting team
 does read the ci.jenkins.io build, and G6/G9 both risk breaking it. Run
 `mvn -q clean verify` on the final pre-submission tree and treat a red build as
 blocking.
+
+**Update 2026-09-26.** No build was run in this pass either (a concurrent build
+was in progress; running a second Maven process would have contended on
+`target\patch-modules` on Windows). The G6 properties were applied without a
+build, and the static scan in **R1** shows that one of them — JUnit 4 imports —
+*will* fail. So E4 is not merely unverified, it is expected red until the test
+suite is migrated. Two independent reasons to re-run: the enforcement switches
+(**R1**) and the BOM bump (G9).
+
+---
+
+## 3a. R1 — Build-breakage register for the five enforcement properties
+
+Static scan over `src/` on 2026-09-26, done because no Maven build could be run.
+This is a source-level scan, so it bounds the problem but does not replace the
+enforcer output — a rule may also fire on transitive bytecode that grep cannot
+see.
+
+| Property | Static scan verdict | Evidence |
+|---|---|---|
+| `ban-junit4-imports.skip=false` | **WILL FAIL THE BUILD** | **239 references to `org.junit.*` (non-Jupiter) across 34 files — that is 34 of 34 files under `src/test`.** Zero files import `org.junit.jupiter`. |
+| `ban-deprecated-stapler.skip=false` | Expected to pass | **0** references to v1 `StaplerRequest` / `StaplerResponse`; the code uses `StaplerRequest2` (13) and `StaplerResponse2` (12) throughout, and the single current-request lookup is already the v2 form — `src/main/java/io/jenkins/plugins/batchcontrol/action/HistorySection.java:220` calls `Stapler.getCurrentRequest2()`. **0** hits for `Stapler.getCurrentRequest()` / `getCurrentResponse()`. |
+| `ban-commons-lang-2.skip=false` | Expected to pass | **0** references to `org.apache.commons.lang.` (excluding `lang3`) anywhere under `src/`. |
+| `banObsoleteDependencyOverrides.skip=false` | Expected to pass | No dependency in `pom.xml:58-108` declares a `<version>`, so there is no override for the rule to object to. |
+| `hpi.strictBundledArtifacts=true` | Expected to pass | Compile-scope dependencies are only `structs` and `cloudbees-folder`, both Jenkins plugins, so nothing should be bundled into the HPI's `WEB-INF/lib`. Cross-checks E8: `src/` contains no jars, minified JS or vendored sources. |
+
+### R1 detail — the JUnit 4 blocker
+
+Which JUnit 4 symbols are in use, by occurrence count:
+
+| Symbol | Count | JUnit 5 replacement |
+|---|---|---|
+| `org.junit.Test` | 33 | `org.junit.jupiter.api.Test` |
+| `org.junit.Rule` | 32 | no direct equivalent — see below |
+| `org.junit.Assert.assertTrue` | 32 | `org.junit.jupiter.api.Assertions.assertTrue` |
+| `org.junit.Assert.assertEquals` | 31 | `Assertions.assertEquals` (argument order differs for the message overload) |
+| `org.junit.Before` | 26 | `org.junit.jupiter.api.BeforeEach` |
+| `org.junit.Assert.assertNotNull` | 25 | `Assertions.assertNotNull` |
+| `org.junit.Assert.assertFalse` | 21 | `Assertions.assertFalse` |
+| `org.junit.Assert.assertNull` | 16 | `Assertions.assertNull` |
+| `org.junit.After` | 9 | `org.junit.jupiter.api.AfterEach` |
+| `org.junit.function.ThrowingRunnable` | 8 | `org.junit.jupiter.api.function.Executable` |
+| `org.junit.Assert.assertNotEquals` | 3 | `Assertions.assertNotEquals` |
+| `org.junit.Assert.assertThrows` | 2 | `Assertions.assertThrows` |
+| `org.junit.Assert.assertSame` | 1 | `Assertions.assertSame` |
+
+`org.junit.Rule` is the hard part, not the assertions. The 32 `@Rule` fields are
+JenkinsRule-based:
+
+- `org.jvnet.hudson.test.JenkinsRule` — **30** references. The JUnit 5 form is
+  `org.jvnet.hudson.test.junit.jupiter.WithJenkins` plus a `JenkinsRule`
+  parameter injected into each test method, which changes every method
+  signature in those files.
+- `org.jvnet.hudson.test.JenkinsSessionRule` — **4** references in exactly four
+  files: `GlobalConfigDefaultsTest`, `GrantRestartTest`, `RestartRecoveryTest`,
+  `StoreDurabilityTest` — the restart/persistence tests. These need
+  `JenkinsSessionExtension`, and the session-body lambdas need rewriting.
+- Supporting test helpers that are not themselves JUnit 4 and can stay:
+  `MockAuthorizationStrategy` (23), `FailureBuilder` (3), `UnstableBuilder` (2),
+  `TestExtension` (2), `TestBuilder` (1).
+
+Per-file reference counts (all under
+`src/test/java/io/jenkins/plugins/batchcontrol/`), heaviest first:
+
+```
+10  GrantServiceTest.java
+ 9  SecurityRegressionTest.java, OwnerScenarioRejectionTest.java, IncidentTest.java
+ 8  RunRequestWebTest.java, RequestIntegrityTest.java, NewJobApprovalDefaultTest.java,
+    MarkerReuseAuditTest.java, HistoryWebTest.java, GrantConfigureAccessTest.java,
+    ExpiryAndCancelTest.java, ChangeRecordTest.java, ApprovalScreenRecentRunsTest.java
+ 7  RunRequestServiceTest.java, RestartRecoveryTest.java, RequestConcurrencyTest.java,
+    QueueBlockTest.java, OwnerScenarioLiveToggleTest.java, OwnerScenarioConfigChangeTest.java,
+    OwnerScenarioApproverDelegationTest.java, OwnerScenarioApprovalTraceTest.java,
+    NewJobAutomationSafetyTest.java, GrantWindowAbuseTest.java, GlobalSwitchTest.java
+ 6  store/PathCodecTest.java, StoreDurabilityTest.java, RunRecordListenerTest.java,
+    GrantWebTest.java, GrantRestartTest.java, GrantMonitorsTest.java
+ 5  XssEscapingTest.java, PermissionsTest.java, GlobalConfigDefaultsTest.java
+ 2  BatchControlFixtures.java
+```
+
+`BatchControlFixtures.java` is currently untracked (new in this branch) and also
+JUnit 4; whoever migrates should not miss it because it does not appear in a
+diff against `HEAD`.
+
+Exactly two of the 34 files contain no `org.junit.Rule` and can be migrated
+mechanically: `store/PathCodecTest.java` (a plain unit test) and
+`BatchControlFixtures.java` (a shared helper). The other 32 need the
+`JenkinsRule`/`JenkinsSessionRule` conversion, which rewrites method signatures.
+
+**Ownership.** `src/test/**` belongs to test-author. **Request** recorded in the
+report for this pass; this document does not change test sources.
+
+**If the migration cannot be scheduled before submission,** the only
+alternatives are to accept a red ci.jenkins.io build (the hosting team reads it
+— effectively blocking), or to remove `ban-junit4-imports.skip` from the POM and
+accept the REQUIRED B18 bot finding. Neither is acceptable for approval, so the
+migration is on the critical path.
 
 ---
 
@@ -422,12 +611,16 @@ blocking.
 
 ## 5. Open questions for the owner
 
+**Q2** (license) and **Q4** (accounts.jenkins.io account) were answered by the
+owner on 2026-09-26 and are struck through below. Six remain: Q1, Q3, Q5, Q6,
+Q7, Q8. Q5 is the one that gates work — it decides whether G10 exists.
+
 | # | Question | Why it must be a human decision |
 |---|---|---|
 | **Q1** | Confirm the final plugin id and display name: `batch-control` / `Batch Control`, repository `batch-control-plugin`. | "The ID cannot be changed after the first release; Jenkins would consider it a different plugin." All naming checks (A1–A8) currently pass with these values, but the decision is irreversible. |
-| **Q2** | License: keep MIT? And the exact copyright line for `LICENSE` — year and holder name (personal name, or an employer if this was written on company time). | `pom.xml:20-25` already says MIT. The holder string cannot be guessed, and an employer may own the copyright. |
+| ~~**Q2**~~ | ~~License: keep MIT? And the exact copyright line for `LICENSE`.~~ **RESOLVED 2026-09-26** — owner confirmed **MIT**, holder **`Yongjun Hong`** (personal, not an employer), year **2026**. Applied at `LICENSE:1-3`, consistent with `pom.xml:20-25`. | — |
 | **Q3** | GitHub accounts to receive commit permission (field 4). Is `@YongGoose` the only one? | Owner data. |
-| **Q4** | The accounts.jenkins.io username(s) for release permission (field 5) — and confirmation that each has signed into both <https://issues.jenkins.io> and <https://repo.jenkins-ci.org/>. Note: the template says these "must NOT be mentioned" (no `@`), and the Jenkins account name is independent of the GitHub handle. | The bot fails the request if any listed user has not logged into Jira and Artifactory. Re-sync is hourly, so this should be done days before submitting. |
+| ~~**Q4**~~ | ~~The accounts.jenkins.io account for release permission, and confirmation it has signed into Jira and Artifactory.~~ **RESOLVED 2026-09-26** — owner confirmed the accounts.jenkins.io account is created and needs no separate verification (E3 → PASS). The literal username string still has to be typed into field 5 at submission time, without an `@`, and it is independent of the GitHub handle. | — |
 | **Q5** | Field 6: answer `Yes` or `No` to automated release via GitHub Actions? | `Yes` is labelled "recommended" but adds the four REQUIRED items in G10. `No` is switchable later. |
 | **Q6** | Should the maintainer email in the request differ from `dev.yongjunh@gmail.com`? | Security reports are routed to release-permission holders; the address must be one that is actually monitored. |
 | **Q7** | Has the plugin been piloted on a real in-house Jenkins? If so, may it be mentioned (anonymously) in the Description? | `docs/HOSTING-CHECKLIST.md:55` asks for it; it materially helps human review, but disclosing internal usage is the owner's call. Phase 5 in `docs/WORKFLOW.md` is the pilot, and `docs/STATUS.md` should be consulted for whether it has happened. |
@@ -541,21 +734,28 @@ batch-control-plugin
 
 ### 6.7 Pre-submission sequence
 
-1. Resolve G1, G2, G4, G5, G6, G7, G8, G9 (and G10 if field 6 = `Yes`).
+1. ~~Resolve G1, G2, G4, G5, G6, G7, G8, G9.~~ **Done 2026-09-26.** G10 remains,
+   and only applies if field 6 = `Yes` (Q5).
 2. Resolve G3 (README replacement — separate work item).
-3. Re-check the live latest `bom-2.568.x` version and the latest parent POM
+3. **Migrate `src/test/**` to JUnit 5** — required by the
+   `ban-junit4-imports.skip=false` property added in step 1. See **R1**; this is
+   the largest remaining code task and it is on the critical path.
+4. Re-check the live latest `bom-2.568.x` version and the latest parent POM
    version on the submission day.
-4. Confirm the accounts.jenkins.io user(s) have logged into Jira and
-   Artifactory (allow an hour for the hourly re-sync).
-5. Run `mvn -q clean verify` — green, SpotBugs clean (G11).
-6. Push everything to the default branch of
+5. ~~Confirm the accounts.jenkins.io user(s) have logged into Jira and
+   Artifactory.~~ **Owner-confirmed 2026-09-26** (Q4).
+6. Run `mvn -q clean verify` — green, SpotBugs clean (G11). Expected red until
+   step 3 is done.
+7. Push everything to the default branch of
    `https://github.com/YongGoose/batch-control-plugin`. The bot reads the
    repository's default branch, so nothing may be left on a feature branch.
-7. Open the hosting request issue.
-8. Read the bot comment. If it reports findings, fix and comment
+   Two checks only become true after this push: GitHub's license detection (C8)
+   and dependabot activation (C7).
+8. Open the hosting request issue.
+9. Read the bot comment. If it reports findings, fix and comment
    `/hosting re-check`.
-9. After approval: accept the jenkinsci invitation, delete the original
-   repository, then follow section E of `docs/HOSTING-CHECKLIST.md`.
+10. After approval: accept the jenkinsci invitation, delete the original
+    repository, then follow section E of `docs/HOSTING-CHECKLIST.md`.
 
 ---
 
