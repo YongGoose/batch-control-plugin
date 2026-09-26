@@ -117,8 +117,7 @@ entry you can look up.
 | `docs/DECISIONS.md` | every design decision, with the alternatives that were rejected | maintainer |
 | `docs/ARCHITECTURE.md` | extension points used, package layout, storage format, state machines, known constraints (§7) | maintainer |
 | `docs/TEST-MATRIX.md` | every test row: given/when/then, priority, layer, owning test class — plus a long `비고` (notes) section recording the traps found while writing them | test author |
-| `docs/STATUS.md` | progress log, newest entry on top | maintainer |
-| `docs/HANDOFF.md` | how to pick the project up on a fresh machine | maintainer |
+| `docs/STATUS.md` | progress log, newest entry on top — read the top entry to see where the project stands | maintainer |
 | `docs/HOSTING-READINESS.md`, `docs/HOSTING-CHECKLIST.md` | the jenkinsci hosting requirements and the current verdict per requirement | maintainer |
 | `docs/WORKFLOW.md` | the phase plan the project was built along | maintainer |
 
@@ -268,8 +267,10 @@ judgement call for the maintainer.
 
 ## 6. Pitfalls that have already cost time
 
-Collected so nobody rediscovers them. The full list is `docs/HANDOFF.md` §6 and
-the notes section of `docs/TEST-MATRIX.md`.
+Collected here so nobody rediscovers them — this list is the canonical one. Each
+trap that came out of a specific repair is also written up at length in the notes
+(`비고`) section of `docs/TEST-MATRIX.md`, which is where to go for the full story
+behind any of them.
 
 - **Never run two Maven builds against this checkout at once.** They share
   `target/` and deadlock on Windows file locks (`patch-modules`). Serialise your

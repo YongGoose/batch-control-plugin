@@ -421,7 +421,9 @@ repository layout, the document system plus a glossary of the identifier prefixe
 first, derive from SPEC not from `src/main`, failing test first, never loosen an
 assertion, always add a false-positive guard — citing note 42 and the two rows
 that passed while measuring nothing), the `e2e/` environment and `e2e/scripts/`,
-the pitfalls from `docs/HANDOFF.md` §6 and `docs/TEST-MATRIX.md` notes 41/42, PR
+the pitfalls (§6 — now the canonical list, with `docs/TEST-MATRIX.md` notes 41/42
+behind two of them; it absorbed what used to be `docs/HANDOFF.md` §6, which is why
+that file could be deleted on 2026-09-26), PR
 conventions and the gate, and finally one short section placing the agent
 orchestration as context rather than as a requirement for contributors — where
 `.claude/` is mentioned in a single line.
@@ -433,8 +435,8 @@ run `claude`" framing (the repository is a plugin now, not a starter kit), the
 (Phases 1–4 are closed), the `phase-N-*` branch instructions (those branches are
 history), and the per-agent write-scope table (`CLAUDE.md` is authoritative and
 the README copy was already out of date). The document index was not copied
-either — it omitted `HANDOFF.md`, `HOSTING-READINESS.md` and `docs/reports/` and
-still called the test matrix an "initial seed".
+either — it omitted `HOSTING-READINESS.md` and `docs/reports/` and still called
+the test matrix an "initial seed".
 
 **Still open: the second half of Q8** — whether `.claude/` ships in the hosted
 repository at all. `CONTRIBUTING.md` assumes it does (it points at the directory
