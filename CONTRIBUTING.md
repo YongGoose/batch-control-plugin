@@ -154,11 +154,22 @@ integration 161 / e2e 9. P0 means release-blocking.
 ### Language
 
 Everything written from 2026-09-20 onward is **English**: code, comments, commit
-messages, documents, reports, issues and pull requests. The older core documents
-(`SPEC.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `TEST-MATRIX.md`, `WORKFLOW.md`,
-`STATUS.md`) are still in Korean and are deliberately not being translated
-retroactively; newer sections inside them are English, so those files are mixed.
-Please write anything new in English even when the file around it is Korean.
+messages, documents, reports, issues and pull requests. The older record documents
+(`SPEC.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `TEST-MATRIX.md`, `STATUS.md`) are
+still in Korean and are deliberately not being translated retroactively; newer
+sections inside them are English, so those files are mixed. Please write anything
+new in English even when the file around it is Korean.
+
+The files that are *tools* rather than records — `CLAUDE.md`, `docs/WORKFLOW.md`
+and the agent definitions in `.claude/agents/` — were translated to English on
+2026-09-26 so that a fork is usable without Korean.
+
+`README.ko.md` is a Korean translation of `README.md`, and **`README.md` is the
+canonical version**: if the two disagree, the English one is right. A pull request
+that changes `README.md` is *not* expected to update `README.ko.md` in the same
+change — the translation is refreshed from the English page in a separate pass, and
+its header says which date it corresponds to. Never describe behaviour only in the
+Korean page.
 
 ---
 
@@ -371,8 +382,9 @@ That is context, not a requirement: **you do not need to work that way to
 contribute here.** It is worth a paragraph only because the process left visible
 marks on the repository, and they are easier to read once you know where they
 came from — the ownership tables, the phase and gate language in `STATUS.md` and
-`WORKFLOW.md`, the `요청:` ("request") lines in the reports where one role needed
-a change in another's files, and above all the separation in §4 between the
+`WORKFLOW.md`, the "request" lines in the reports (`요청:` in the older Korean
+ones) where one role needed a change in another's files, and above all the
+separation in §4 between the
 people who wrote the tests and the people who wrote the code. The two
 conventions that are genuinely load-bearing — the spec is the arbiter, and tests
 are derived from the spec rather than from the implementation — are the ones to

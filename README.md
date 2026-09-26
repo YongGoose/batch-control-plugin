@@ -1,3 +1,5 @@
+*This page is the canonical version. 한국어: [`README.ko.md`](README.ko.md).*
+
 # Batch Control
 
 Run approval, just-in-time change permissions, and an append-only audit history
