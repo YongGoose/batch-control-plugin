@@ -83,16 +83,33 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         return changeControlEnabled;
     }
 
+    /**
+     * S-15: turning change control off is a kill switch, not just a stop on new windows. Setting
+     * the field false makes {@code security.GrantAwareACL} stop consulting grants immediately, and
+     * the revocation below closes the windows that are already open, so they cannot come back to
+     * life when the switch is turned on again.
+     *
+     * <p>The accepted cost, and the owner's deliberate choice: every change that is underway inside
+     * a permission window right now is cut off with no warning. A switch that instead left windows
+     * quietly conferring {@code Item/Configure} for up to {@code maxGrantMinutes} afterwards was
+     * judged the worse of the two, so long as the cut is recorded — which
+     * {@code GrantService#revokeAllActive} does, one {@code GRANT_REVOKE} record per closed window.
+     */
     public void setChangeControlEnabled(boolean changeControlEnabled) {
         if (this.changeControlEnabled == changeControlEnabled) {
             return;
         }
         boolean previous = this.changeControlEnabled;
         this.changeControlEnabled = changeControlEnabled;
+        // Written before the revocations, so the audit history reads in causal order: the switch
+        // went off, and then these windows were closed.
         recordToggle("changeControlEnabled", previous, changeControlEnabled);
         // S-05: the standing-permission warning caches its expensive scan; a toggle must show
         // the fresh state on the next admin page render, not after the TTL.
         io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
+        if (!changeControlEnabled) {
+            io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
+        }
     }
 
     private static void recordToggle(String key, boolean previous, boolean current) {
