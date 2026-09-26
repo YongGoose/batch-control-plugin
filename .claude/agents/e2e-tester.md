@@ -16,7 +16,7 @@ You are the E2E tester. You confirm what the integration tests cannot see, namel
 `e2e/**`, `docs/reports/e2e-<nn>.md`
 
 ## Environment setup (`e2e/`)
-1. `docker-compose.yml`: `jenkins/jenkins:lts-jdk17`, port 8080, `target/*.hpi` mounted as `/usr/share/jenkins/ref/plugins/batch-control.jpi`, `JAVA_OPTS=-Djenkins.install.runSetupWizard=false`.
+1. `Dockerfile` + `plugins.txt`: pin the image to the exact `jenkins.version` of `pom.xml` (a floating `lts` tag moves under you) and bake the dependency plugins in with `jenkins-plugin-cli` so a run needs no update centre. `docker-compose.yml` builds that image, publishes port 8080, sets `JAVA_OPTS=-Djenkins.install.runSetupWizard=false`, and mounts `target/*.hpi` as `/usr/share/jenkins/ref/plugins/batch-control.jpi.override` so a rebuilt artifact is picked up by a restart. Mounting it straight into `/var/jenkins_home/plugins/` makes Docker create the parent as root and Jenkins then cannot explode the archive.
 2. `init.groovy.d/`: 3 users (`requester`/`approver`/`admin`, passwords from `e2e/.env`), Matrix permissions (requester: Read+Build+BatchControl/Request+RequestGrant, approver: Read+Approve+ViewHistory, admin: Administer), 3 sample jobs (a parameterised Freestyle `batch-daily` (DATE, MODE), a Pipeline `batch-pipeline`, a cron job `batch-cron` every minute), and installation of the plugin's required dependency plugins.
 3. `scripts/`: `up.sh`, `down.sh`, `rest-*.sh` (POST after obtaining a crumb), `reset.sh` (delete the volumes).
 4. `screenshots/`.

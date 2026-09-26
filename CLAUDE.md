@@ -33,12 +33,12 @@ at the same time, but never run two agents that write to the same path at the sa
 | `src/main/java/io/jenkins/plugins/batchcontrol/{model,store,policy,security,queue,listener,config,ops}/**` | core-dev |
 | `src/main/java/io/jenkins/plugins/batchcontrol/{action,ui}/**`, `src/main/resources/**` | ui-dev |
 | `src/test/**`, `docs/TEST-MATRIX.md` | test-author |
-| `e2e/**`, `docs/reports/e2e-*.md` | e2e-tester |
+| `e2e/**` (including `e2e/README.md`), `docs/reports/e2e-*.md` | e2e-tester |
 | `docs/reports/security-*.md` | security-reviewer |
 | `docs/reports/red-team-*.md` | red-team |
 | `docs/reports/spec-review-*.md` | spec-guardian |
 | `src/main/webapp/help/**` | ui-dev |
-| `pom.xml`, `README.md`, `CONTRIBUTING.md`, `Jenkinsfile`, `CHANGELOG.md`, `LICENSE`, `.github/**`, `docs/HOSTING-REQUEST.md`, `docs/HOSTING-READINESS.md` | release-manager |
+| `pom.xml`, `README.md`, `CONTRIBUTING.md`, `Jenkinsfile`, `CHANGELOG.md`, `LICENSE`, `.github/**`, `docs/HOSTING-REQUEST.md`, `docs/HOSTING-READINESS.md`, `README.ko.md`, `docs/LIMITATIONS.md` | release-manager |
 
 If you need a change in a path you do not own, do not make it: write it in your
 deliverable report as `Request: <path> <what>`. The main session passes it to the
@@ -46,7 +46,7 @@ owning agent.
 
 ## Code conventions
 
-- Java 17, Maven. The parent POM is the latest version of `org.jenkins-ci.plugins:plugin`, and `jenkins.version` is the latest LTS line supported by the plugin BOM.
+- Java 21, Maven. The parent POM is the latest version of `org.jenkins-ci.plugins:plugin`, and `jenkins.version` is the latest LTS line supported by the plugin BOM. The jenkinsci hosting checker accepts only JDK 21 and 25, so the `Jenkinsfile` builds on 21.
 - `groupId`: `io.jenkins.plugins`, `artifactId`: `batch-control`, package: `io.jenkins.plugins.batchcontrol`.
 - All deliverables are written in English: code, comments, commit messages, README, design documents (docs/), reports, GitHub issues and PRs (human instruction 2026-09-20 — Jenkins targets a global audience). Existing Korean documents are not translated retroactively (only when the human gives a separate instruction). Conversation with the user is in Korean.
 - Every Stapler web method (`do*`) that changes state has `@RequirePOST` plus a permission check as its first two lines. No exceptions.
