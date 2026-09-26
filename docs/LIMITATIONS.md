@@ -19,7 +19,8 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
    instance, is not recognised as person-initiated and therefore **passes** the
    approval gate. The pass is logged. This is the same default-open posture as
    the timer and upstream policies: verify how your own trigger plugins behave
-   before relying on the gate.
+   before relying on the gate. Core's own build token is the sharpest case of
+   this, and it is a defect rather than a posture: see item 32.
 3. **cron, upstream and SCM triggers pass by default**, and anything installed
    during a permission window keeps firing after that window closes. Expiry
    removes the *permission*, not the automation that was configured with it.
@@ -72,6 +73,13 @@ from scripts.
     `approvalRequired=false` in the creation payload is overwritten. Turning the
     control off afterwards means editing the job, which is itself a recorded
     change; that recorded path is the intended way out.
+
+    The default sets that one field and no other. `blockTimer` and
+    `blockUpstream` are left off, so a job created with a cron trigger already on
+    it runs on schedule from the start, approved by nobody; and a job created
+    inside a `CREATE` permission window goes on running on that schedule after the
+    window has expired. Expiry removes the permission to configure, not the
+    automation that was configured with it (item 3).
 
     A Job DSL or JCasC definition that pins `approvalRequired: false` is not
     idempotent against a *fresh* creation: the first seed run creates the job
@@ -160,14 +168,18 @@ from scripts.
     windows and the re-request link are on the Grants screen instead, and the
     remaining time is shown there so you can renew before expiry.
     **Configuration you were editing is not restored**, because restoring it would
-    mean storing a change that was just judged unauthorised.
+    mean storing a change that was just judged unauthorised. The page says only
+    "missing the Job/Configure permission" and is identical to the one a user who
+    never had a window sees, so it names neither windows nor where to ask for one
+    and does not distinguish the two situations (item 35).
 28. **Monthly summary edge cases** (current behaviour, not yet ratified): an
     `ACKNOWLEDGED` incident is counted in neither the open nor the resolved
     column, and a request that was approved and then expired or was invalidated
     is counted in neither the approved nor the rejected column.
 29. **The Grants section is visible even with change control off**, because the
-    authorization strategy is deliberately independent of the switch. The Role
-    Strategy notice likewise appears with both switches off.
+    authorization strategy is deliberately independent of the switch, and so is
+    everything else about permission windows (item 33). The Role Strategy notice
+    likewise appears with both switches off.
 30. **A request does not follow its job.** If the target job is renamed or moved
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
@@ -179,6 +191,82 @@ from scripts.
     accumulate until the pending timeout clears them. Likewise nothing limits the
     rate of configuration changes, so a burst of saves inside a window produces a
     burst of diff and snapshot writes against a single store lock.
+
+## Verified defects, not yet fixed
+
+Each item below was reproduced on a running Jenkins 2.568.3 with the plugin built
+from the current code, so this is observed behaviour and not suspicion. They are
+here for the same reason as everything else in this file: otherwise they are
+discovered in production. Fixes are in progress for several of them; where the
+correct behaviour is a decision rather than a bug, that is said.
+
+32. **A build token gets past the run-control gate.** On a job with "Trigger
+    builds remotely" configured, `POST build?token=…` and
+    `buildWithParameters?token=…` are admitted and the build runs with no
+    approval, while the same request without the token is refused. The token makes
+    Jenkins attribute the submission to `Cause$RemoteCause` rather than to a user,
+    and an unrecognised cause passes (item 2). The caller has to be authenticated,
+    because the CSRF crumb stops an anonymous one, but needs no `Item/Build`, as
+    core's token check returns before the permission check. The run is recorded
+    with `causeType=OTHER` and **no** blocked-attempt record is written, so the
+    bypass leaves no trace in the history. Until the fix lands, treat a build token
+    and run control as mutually exclusive on the same job.
+33. **The change-control switch does not govern permission windows.** With change
+    control off, a window is still requested, approved and honoured end to end, and
+    a window that is already active goes on conferring its permissions, so turning
+    the switch off revokes nothing. The switch gates the delete veto and the
+    "standing change permissions" monitor, and (with run control) recording.
+    Whether it should be a real kill switch for windows or whether the
+    documentation should simply say what it does is an open question that has not
+    been decided yet.
+34. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
+    resolved the way Jenkins resolves any permission, by walking `impliedBy`, so
+    every permission that declares itself implied by a granted action is answered
+    too. Enumerated over the installed permissions of the reference environment, a
+    `CONFIGURE` window also confers `Item/ExtendedRead` (reading `config.xml`),
+    `Credentials/UseItem` and `Run/Replay`; the last two come from the
+    `credentials` and `workflow-cps` plugins, so the set is a property of what is
+    installed and another plugin can extend it. Scope is never widened, and no
+    chain reaches `Overall/Administer` or any `BatchControl/*` permission. This is
+    the same set a standing matrix entry for `Item/Configure` confers; the
+    difference is provenance, since a window is approved by a non-administrator who
+    is shown only the word `CONFIGURE`. `Run/Replay` is the one worth naming: the
+    queue gate still refuses a replay of a job that requires approval, so it is not
+    a run-gate bypass there, but on a job without run control a window holder can
+    replay a build with a modified Pipeline script.
+35. **A user refused a configuration change is not told how to proceed.** The
+    refusal is core's own 403 (item 27), the job sidebar offers no entry for
+    requesting a permission window the way it offers "Request Run" for a run, and
+    nothing in the refusal names the Grants screen. A user who does not already
+    know the `/batch-control/grants/` URL has no path from the refusal to the
+    request. Deleting is the exception: the plugin's veto message names the grant to
+    request.
+36. **`Item/Discover` without `Item/Read` empties the request screens.** For a
+    caller who holds `Item/Discover` but not `Item/Read` on a job that appears in
+    the lists, core throws rather than returning null when the job is looked up;
+    Jelly swallows the exception and renders the expression as empty. The result is
+    HTTP 200 with **no rows at all**, a malformed `Page 1 ( requests)` footer, and
+    the caller's own request missing from their own list. It fails closed, so it is
+    not a disclosure, but the screens are unusable and the container log collects a
+    stack trace per failed expression. `Item/Discover` on `authenticated` is
+    ordinary matrix-auth configuration, so the precondition is not exotic.
+37. **CSV formula neutralisation misses whitespace-prefixed formulas.** A cell is
+    prefixed only when its **first** character is `=`, `+`, `-` or `@`, so a value
+    beginning with a tab, a carriage return or a space followed by `=` reaches the
+    file unprefixed; RFC 4180 quoting is not a defence, since the parser strips the
+    quotes first. The reachable cell is the approver's `decisionComment`, which is
+    not trimmed, and the actor therefore has to hold `BatchControl/Approve`. A
+    reason, by contrast, is trimmed, and a job name cannot begin with a control
+    character.
+38. **Two sidebar entries on a protected job both read "Request Run."** One is the
+    plugin's request form; the other is Jenkins' own build entry with its label
+    replaced, and it leads to the ordinary build path and the "approval required"
+    page.
+39. **An out-of-range build parameter answers HTTP 500.** Submitting a run request
+    whose parameter value is not one of a choice parameter's choices produces the
+    generic "Oops!" page and an uncaught exception in the log, where the intended
+    answer is a 400 naming the problem. No bypass, and the browser gets no stack
+    trace.
 
 ## Out of scope by design
 
