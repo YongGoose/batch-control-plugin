@@ -19,11 +19,15 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
    instance, is not recognised as person-initiated and therefore **passes** the
    approval gate. The pass is logged. This is the same default-open posture as
    the timer and upstream policies: verify how your own trigger plugins behave
-   before relying on the gate. Core's own build token is the sharpest case of
-   this, and it is a defect rather than a posture: see item 32.
-3. **cron, upstream and SCM triggers pass by default**, and anything installed
-   during a permission window keeps firing after that window closes. Expiry
-   removes the *permission*, not the automation that was configured with it.
+   before relying on the gate. Core's own build token is *not* in this category:
+   the `RemoteCause` that a `?token=` submission carries is classified, refused
+   quietly and written to the audit history as a blocked attempt.
+3. **cron, upstream and SCM triggers pass by default** on a job that already
+   exists, and anything installed during a permission window keeps firing after
+   that window closes. Expiry removes the *permission*, not the automation that
+   was configured with it. A job **created** while run control is on is the
+   exception: it starts with cron and upstream blocked (item 13), so this applies
+   to it only once somebody has unlocked it.
 4. **A blocked job called from a Pipeline `build` step fails its caller.** When
    a protected job is refused at queue entry, the upstream job ends as `FAILURE`.
    This happens even with `wait: false`; it is Jenkins' behaviour, not a choice
@@ -67,32 +71,51 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 Read this section before enabling run control on an instance that generates jobs
 from scripts.
 
-13. **While run control is on, every newly created job starts with
-    `approvalRequired=true`**, whatever the creation path (UI, REST, CLI, Job
-    DSL, a seed job) and whoever the creator is. An explicit
-    `approvalRequired=false` in the creation payload is overwritten. Turning the
-    control off afterwards means editing the job, which is itself a recorded
-    change; that recorded path is the intended way out.
+13. **While run control is on, every newly created job starts locked**, whatever
+    the creation path (UI, REST, CLI, Job DSL, a seed job, a copy) and whoever the
+    creator is: `approvalRequired=true`, `blockTimer=true`, `blockUpstream=true`
+    and an empty `allowedUpstreamJobs`. No cause can start the job until somebody
+    turns a switch off in its configuration, which is itself a recorded change and,
+    with change control on, needs a permission window. Creating a job and putting
+    it into service are deliberately two separate acts.
 
-    The default sets that one field and no other. `blockTimer` and
-    `blockUpstream` are left off, so a job created with a cron trigger already on
-    it runs on schedule from the start, approved by nobody; and a job created
-    inside a `CREATE` permission window goes on running on that schedule after the
-    window has expired. Expiry removes the permission to configure, not the
-    automation that was configured with it (item 3).
+    **Values in the creation payload do not survive the lock.** An
+    `approvalRequired=false`, a `blockTimer=false`, a `blockUpstream=false` or an
+    `allowedUpstreamJobs` list supplied in a `config.xml` POST, a CLI
+    `create-job`, a Job DSL seed or the job being copied from is discarded. Only
+    `jobApprovers` is carried over, because it can only ever *narrow* who may
+    approve. The allow list is emptied rather than kept because with
+    `blockUpstream=true` that list is precisely the set of upstream jobs **exempt**
+    from the block, so honouring a supplied one would leave the upstream door open
+    and make the lock cosmetic. The case that makes this concrete is name
+    squatting: an existing pipeline runs `build job: 'X'` where `X` does not exist
+    yet, and whoever may create items creates `X` with the calling pipeline in its
+    exempt list; the pipeline's next run would then execute their job with no
+    approval and no window.
 
-    A Job DSL or JCasC definition that pins `approvalRequired: false` is not
-    idempotent against a *fresh* creation: the first seed run creates the job
-    controlled, and only a second run, an update rather than a creation, clears
-    it. A generated job that must run unattended needs that second pass, and the
-    pass is recorded.
+    **The consequence is silent, and this is the part to plan for.** A Job DSL or
+    JCasC definition that pins `blockTimer: false` (or an allow list) *appears to
+    be ignored* on a fresh creation: the seed run creates the job locked, and only
+    a later seed run, which is an update rather than a creation, restores the
+    pinned values. So a generated nightly job does not run its first night, and
+    because an unattended refusal is silent by contract, a locked job looks exactly
+    like a job whose cron never fires.
+
+    Three things tell those two cases apart. The job's **configuration screen** is
+    the first: if `Block cron (timer) triggers` is checked on a job whose Job DSL
+    definition says otherwise, the lock is the reason. The **controller log** is
+    the second: a refused timer run logs one "Blocked timer-triggered run of job"
+    line per attempt, and a cron that never fired logs nothing at all. The
+    **change history** is the third: the job has a `CREATE` record and no
+    subsequent `CONFIGURE` record clearing the switches, which is the positive
+    evidence that nothing has unlocked it since.
 
     This is not theoretical. The seed jobs in this repository's own e2e
-    environment stopped building silently the first time this default landed,
-    including the ones whose whole purpose was to run unattended, and the fix was
-    to make the seed script clear the property right after creating them. Note
-    that automatic builds are not what breaks: timer, upstream and SCM causes
-    still pass. What stops is anything a person has to press.
+    environment stopped building silently the first time the approval default
+    landed, including the ones whose whole purpose was to run unattended, and the
+    fix was to make the seed script clear the property right after creating them.
+    A generated job that must run unattended needs that second pass, and the pass
+    is recorded.
 
 14. **Branch jobs generated by a multibranch project are exempt** from that
     default. They have no configuration screen, so there would be no way to turn
@@ -169,17 +192,20 @@ from scripts.
     remaining time is shown there so you can renew before expiry.
     **Configuration you were editing is not restored**, because restoring it would
     mean storing a change that was just judged unauthorised. The page says only
-    "missing the Job/Configure permission" and is identical to the one a user who
-    never had a window sees, so it names neither windows nor where to ask for one
-    and does not distinguish the two situations (item 35).
+    "missing the Job/Configure permission", so it names neither windows nor where
+    to ask for one, and it is identical to the page a user who never had a window
+    sees: the two situations cannot be told apart from the refusal itself. What
+    stands in for it is the **Request Change Permission** entry on the job's own
+    sidebar, which is reachable before the refusal rather than after it.
 28. **Monthly summary edge cases** (current behaviour, not yet ratified): an
     `ACKNOWLEDGED` incident is counted in neither the open nor the resolved
     column, and a request that was approved and then expired or was invalidated
     is counted in neither the approved nor the rejected column.
-29. **The Grants section is visible even with change control off**, because the
-    authorization strategy is deliberately independent of the switch, and so is
-    everything else about permission windows (item 33). The Role Strategy notice
-    likewise appears with both switches off.
+29. **The Grants screens keep working with change control off**, and a window may
+    still be requested and approved there. It confers nothing while the switch is
+    off, and it is not closed by the switch either, so turning change control back
+    on makes it live for the rest of its duration (item 33). The Role Strategy
+    notice likewise appears with both switches off.
 30. **A request does not follow its job.** If the target job is renamed or moved
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
@@ -192,34 +218,13 @@ from scripts.
     rate of configuration changes, so a burst of saves inside a window produces a
     burst of diff and snapshot writes against a single store lock.
 
-## Verified defects, not yet fixed
+## Before you switch either control on
 
-Each item below was reproduced on a running Jenkins 2.568.3 with the plugin built
-from the current code, so this is observed behaviour and not suspicion. They are
-here for the same reason as everything else in this file: otherwise they are
-discovered in production. Fixes are in progress for several of them; where the
-correct behaviour is a decision rather than a bug, that is said.
+Two consequences of the design that are easy to meet unprepared. Both were
+observed on a running Jenkins 2.568.3, and neither is a defect: they are what the
+code does on purpose.
 
-32. **A build token gets past the run-control gate.** On a job with "Trigger
-    builds remotely" configured, `POST build?token=…` and
-    `buildWithParameters?token=…` are admitted and the build runs with no
-    approval, while the same request without the token is refused. The token makes
-    Jenkins attribute the submission to `Cause$RemoteCause` rather than to a user,
-    and an unrecognised cause passes (item 2). The caller has to be authenticated,
-    because the CSRF crumb stops an anonymous one, but needs no `Item/Build`, as
-    core's token check returns before the permission check. The run is recorded
-    with `causeType=OTHER` and **no** blocked-attempt record is written, so the
-    bypass leaves no trace in the history. Until the fix lands, treat a build token
-    and run control as mutually exclusive on the same job.
-33. **The change-control switch does not govern permission windows.** With change
-    control off, a window is still requested, approved and honoured end to end, and
-    a window that is already active goes on conferring its permissions, so turning
-    the switch off revokes nothing. The switch gates the delete veto and the
-    "standing change permissions" monitor, and (with run control) recording.
-    Whether it should be a real kill switch for windows or whether the
-    documentation should simply say what it does is an open question that has not
-    been decided yet.
-34. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
+32. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
     resolved the way Jenkins resolves any permission, by walking `impliedBy`, so
     every permission that declares itself implied by a granted action is answered
     too. Enumerated over the installed permissions of the reference environment, a
@@ -234,39 +239,18 @@ correct behaviour is a decision rather than a bug, that is said.
     queue gate still refuses a replay of a job that requires approval, so it is not
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
-35. **A user refused a configuration change is not told how to proceed.** The
-    refusal is core's own 403 (item 27), the job sidebar offers no entry for
-    requesting a permission window the way it offers "Request Run" for a run, and
-    nothing in the refusal names the Grants screen. A user who does not already
-    know the `/batch-control/grants/` URL has no path from the refusal to the
-    request. Deleting is the exception: the plugin's veto message names the grant to
-    request.
-36. **`Item/Discover` without `Item/Read` empties the request screens.** For a
-    caller who holds `Item/Discover` but not `Item/Read` on a job that appears in
-    the lists, core throws rather than returning null when the job is looked up;
-    Jelly swallows the exception and renders the expression as empty. The result is
-    HTTP 200 with **no rows at all**, a malformed `Page 1 ( requests)` footer, and
-    the caller's own request missing from their own list. It fails closed, so it is
-    not a disclosure, but the screens are unusable and the container log collects a
-    stack trace per failed expression. `Item/Discover` on `authenticated` is
-    ordinary matrix-auth configuration, so the precondition is not exotic.
-37. **CSV formula neutralisation misses whitespace-prefixed formulas.** A cell is
-    prefixed only when its **first** character is `=`, `+`, `-` or `@`, so a value
-    beginning with a tab, a carriage return or a space followed by `=` reaches the
-    file unprefixed; RFC 4180 quoting is not a defence, since the parser strips the
-    quotes first. The reachable cell is the approver's `decisionComment`, which is
-    not trimmed, and the actor therefore has to hold `BatchControl/Approve`. A
-    reason, by contrast, is trimmed, and a job name cannot begin with a control
-    character.
-38. **Two sidebar entries on a protected job both read "Request Run."** One is the
-    plugin's request form; the other is Jenkins' own build entry with its label
-    replaced, and it leads to the ordinary build path and the "approval required"
-    page.
-39. **An out-of-range build parameter answers HTTP 500.** Submitting a run request
-    whose parameter value is not one of a choice parameter's choices produces the
-    generic "Oops!" page and an uncaught exception in the log, where the intended
-    answer is a 400 naming the problem. No bypass, and the browser gets no stack
-    trace.
+33. **Turning change control off cuts off work in progress, and turning it back on
+    is not the mirror image.** The switch is a kill switch: while it is off no
+    window confers anything, and flipping it off revokes every window open at that
+    moment, one `GRANT_REVOKE` record per closure naming the account that flipped
+    it. Whoever is part-way through a change loses the permission to finish it with
+    no warning, and the only way back is a new request once the control is on
+    again. That is the deliberate trade against a switch that would leave windows
+    quietly conferring `Item/Configure` for up to `maxGrantMinutes` (default 240)
+    after the control was supposedly off. The asymmetry: a window requested and
+    approved *while* the switch was off is not open at flip time, so nothing
+    revokes it, and turning change control back on makes it live for the remainder
+    of its duration (item 29).
 
 ## Out of scope by design
 

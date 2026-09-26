@@ -38,9 +38,13 @@ plugin queues the build with the stored parameters. No path edits parameters
 after approval, and the approval is consumed by a single queue submission, so it
 cannot be replayed, re-queued or rebuilt; the attempt is blocked and recorded.
 
-**Change control** governs changing a job. A user who needs to create, configure
-or delete one requests a permission window: a scope (one job, or a folder), some
-combination of `CREATE`, `CONFIGURE` and `DELETE`, a duration and a reason. Once
+**Change control** governs changing a job. A user who does *not* hold the standing
+permission to create, configure or delete one asks for a permission window
+instead: a scope (one job, or a folder), some combination of `CREATE`,
+`CONFIGURE` and `DELETE`, a duration and a reason. A window **adds** those
+permissions to whatever the user already has, for as long as it lasts; it never
+takes anything away and it imposes nothing on someone who holds the permission
+standing, which is what the "standing change permissions" monitor is for. Once
 it is approved they do the work under their own account, with every usual Jenkins
 safeguard still in place. What the approver decides is *who* may change *what*, and
 *for how long*; it is not an approval of the change itself, which does not exist
@@ -56,22 +60,12 @@ changes, decisions and failures are recorded.
 ## What run control stops, and what it does not
 
 Run control intercepts builds at queue entry and decides on the *cause* Jenkins
-attached to the submission. Refused: "Build Now", a `build` or
-`buildWithParameters` REST call made as a logged-in user, `jenkins-cli build`,
-and Pipeline Replay. Admitted: an approved run request (once), cron and other
-timer triggers, builds triggered by an upstream job, SCM triggers, and any build
-whose cause the plugin does not recognise.
-
-> **Known gap in this code: a build token gets past the gate.** On a job that has
-> "Trigger builds remotely" configured, `build?token=…` and
-> `buildWithParameters?token=…` are admitted and the build runs with no approval.
-> The token makes Jenkins attribute the submission to `Cause$RemoteCause` rather
-> than to a user, and an unrecognised cause passes. The caller has to be
-> authenticated, because the CSRF crumb stops an anonymous one, but needs no
-> `Item/Build`, because core checks the token before it checks the permission.
-> This was reproduced on a running instance (finding S-14, issue #12) and a fix is
-> in progress. Until it lands, do not leave a build token on a job you are
-> protecting with run control.
+attached to the submission. Refused: "Build Now", the `build` and
+`buildWithParameters` REST endpoints, `jenkins-cli build`, Pipeline Replay, and a
+submission carrying a build token, which Jenkins attributes to no user at all.
+Admitted: an approved run request (once), cron and other timer triggers, builds
+triggered by an upstream job, SCM triggers, and any build whose cause the plugin
+does not recognise.
 
 Two consequences follow, and they are worth stating plainly.
 
@@ -93,10 +87,13 @@ build that is already running, not a global switch, not a job property, not a
 configuration change, and not a permission window expiring mid-build.
 
 A person refused at "Build Now", at a REST `build` call or at the CLI gets an
-"approval required" page or CLI message linking to the request form. Pipeline
-Replay is the exception: that path has no channel for such a message, so the
-submission is dropped and only the log says why. Automation refused by one of the
-per-job options is likewise turned away quietly and logged.
+"approval required" page or CLI message linking to the request form. Two refusals
+are silent instead, because neither caller has a screen to read them: Pipeline
+Replay, whose UI offers no channel for the message, and a build-token submission,
+whose caller is a script reading an HTTP status. Both are logged, and the token
+case is also written to the audit history as a blocked attempt, so a refusal nobody
+saw is still answerable afterwards. Automation refused by one of the per-job
+options is likewise turned away quietly and logged.
 
 ## Requirements
 
@@ -131,7 +128,7 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 | Field | Default | Meaning |
 |---|---|---|
 | Enable run control | off | The approval gate at queue entry |
-| Enable change control | off | The delete veto and the standing-permission monitor, **not** the permission windows (see below) |
+| Enable change control | off | Permission windows, the delete veto and the standing-permission monitor |
 | Approvers | empty | The user IDs allowed to be designated as an approver |
 | Allow administrators to approve their own requests | on | When off, separation of duties applies to administrators too |
 | Pending request timeout (hours) | 72 | A pending request expires after this |
@@ -145,15 +142,18 @@ A request cannot be created unless its designated approver is on the Approvers
 list, and `BatchControl/Approve` is checked on them again at the moment they
 decide.
 
-**What the change-control switch governs, in this code.** It gates the delete veto
-and the "standing change permissions" administrative monitor, and nothing else.
-Permission windows do not consult it: with change control off a window can still
-be requested, approved and used, and a window that is already active goes on
-conferring its permissions, so switching the control off revokes nothing. What
-does turn windows off is not selecting the wrapping authorization strategy below.
-Whether the switch ought to govern windows as well has not been decided yet; the
-behaviour described here is what the code does today (finding S-15, reproduced on
-a running instance).
+**Turning change control off is a kill switch, and it is abrupt.** While the switch
+is off no window confers anything, so every permission decision is the delegate
+strategy's alone, exactly as before the plugin was installed. Flipping it off also
+*revokes* every window that is open at that moment, writing one revocation record
+per closure naming the account that flipped it. Anyone in the middle of a change
+loses the permission to finish it, with no warning and no way back but a new
+request. That is the deliberate trade: the alternative was a switch that leaves
+windows quietly conferring `Item/Configure` for up to the maximum grant duration
+after the control was supposedly turned off. Two things the switch does not do:
+the Grants screens keep working while it is off, and a window requested and
+approved during that time is not caught by the revocation, so turning the switch
+back on brings that window to life for the rest of its duration.
 
 ### 2. Select the wrapping authorization strategy
 
@@ -173,7 +173,8 @@ project is built against, a `CONFIGURE` window additionally confers
 `Item/ExtendedRead`, `Credentials/UseItem` and `Run/Replay`, which is worth
 knowing before approving one ([Limitations](#limitations)). An administrative
 monitor warns if change control is on without this strategy. Run control and
-recording do not need it, and the windows do not need the change-control switch.
+recording do not need it. A window confers its permissions only when both this
+strategy is selected *and* change control is on.
 
 > **Do not save the wrapping strategy without a delegate.** It fails closed,
 > denies every permission to everyone including administrators, and the only way
@@ -202,12 +203,19 @@ A **Batch Control** section appears in the job configuration, with inline help o
 each field: `Require approval to run`, the two trigger overrides described above
 with their `Allowed upstream jobs` list, and an optional job-level approver list
 that narrows the global one. While run control is on, **every newly created job
-starts with "Require approval to run" enabled**, whoever created it and however.
-That default sets only that one field: the two trigger overrides stay off, so a
-new job created with a cron trigger on it still runs on schedule with nobody
-approving anything. If your instance generates jobs from scripts, read
-[the automation note](docs/LIMITATIONS.md#automation-and-generated-jobs) before
-turning run control on.
+starts locked**: `Require approval to run`, `Block cron (timer) triggers` and
+`Block upstream triggers` all on and the allowed-upstream list empty, whoever
+created it and however. Creating a job therefore does not put it into service.
+Bringing it into service means turning a switch off in its configuration, and that
+change is recorded and, with change control on, needs a permission window.
+
+Values in the creation payload do not survive the lock. An `approvalRequired=false`,
+a `blockTimer=false` or an allowed-upstream list in a `config.xml` POST, a CLI
+`create-job`, a Job DSL seed or a copied job is overwritten; only the job-level
+approver list is carried over, because it can only narrow who may approve. If your
+instance generates jobs from scripts this will bite on the first run, silently, so
+read [the automation note](docs/LIMITATIONS.md#automation-and-generated-jobs)
+before turning run control on.
 
 A working reference configuration, with a Dockerfile, plugin list, security
 bootstrap and global settings, lives under [`e2e/`](e2e/). It exists to run the
@@ -221,14 +229,15 @@ section by section, so a user sees only what they can act on.
 
 **Run Requests** carries each request's stored parameters, reason, requester,
 approver, status and decision history, and is where the approver decides. On a
-protected job the plugin adds a **Request Run** entry to the job's sidebar that
-opens the same form with the job's parameters, and it also relabels Jenkins' own
-build entry to "Request Run", so the label appears twice; the relabelled core
-entry still takes the ordinary build path and ends on the "approval required"
-page. **Grants** shows pending window requests, the time left on an active window,
-the history of expired ones and a link to request another; there is no job-level
-sidebar entry for it, so the way in is the Batch Control section of the left
-sidebar. **Run Dashboard** lists every build in the instance with its
+protected job the sidebar carries **Request Run**, which opens the same form with
+the job's parameters, while Jenkins' own build entry is relabelled **Direct Build
+(needs approval)** so that the two cannot be mistaken for each other: following the
+core entry reaches the queue with no approval and is refused. **Request Change
+Permission** sits alongside them while change control is on, for a user who does
+not already hold `Item/Configure` on the job, and opens the window request form
+with that job filled in. **Grants** shows pending window requests, the time left on
+an active window, the history of expired ones and a link to request another.
+**Run Dashboard** lists every build in the instance with its
 cause (`USER`, `TIMER`, `UPSTREAM`, `APPROVED_REQUEST`, `SCM`, `OTHER`), user,
 parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
@@ -237,8 +246,8 @@ a rerun request with the original parameters prefilled; the lifecycle runs `OPEN
 → `ACKNOWLEDGED` → `RESOLVED`, one way only, each transition carrying a user, a
 timestamp and a comment. **History** filters runs, incidents, change records and
 requests by period, job, user, result and status, exports each as CSV, prefixing
-any cell that begins with `=`, `+`, `-` or `@` so that a spreadsheet does not
-evaluate it, and gives a monthly summary.
+any cell whose first non-whitespace character is `=`, `+`, `-` or `@` so that a
+spreadsheet does not evaluate it, and gives a monthly summary.
 **Change Records** is the create / configure / delete / rename / move trail,
 recorded whatever path the change came through (UI, REST, CLI, Job DSL), with a
 unified diff and the window the change was made under, or an explicit note where
@@ -257,24 +266,22 @@ What follows is the part that changes decisions. The complete list is in
 Control permission, so the plugin records what administrators do rather than
 trying to stop them.
 
-**A build token is currently a hole in run control.** A job with "Trigger builds
-remotely" configured can be started through its token with no approval and no
-blocked-attempt record, as described under
-[what run control stops](#what-run-control-stops-and-what-it-does-not). A fix is in
-progress; until then clear the token on any job you protect.
+**Turning change control off cuts off work in progress.** The switch revokes every
+open permission window the moment it goes off, so a user part-way through a change
+loses the permission to finish and has to request a new window once the control is
+back on. The revocation is recorded per window. It is also not symmetrical: a
+window approved while the switch was off survives the next flip and becomes live
+when change control is turned back on.
 
-**The change-control switch is not a kill switch.** It gates the delete veto and
-the administrative monitor only. Permission windows are requested, approved and
-honoured while it is off, and switching it off does not revoke a window that is
-already active. Which of the two behaviours is the intended one is still open.
-
-**A refused configuration change says nothing about permission windows.** Opening
-or saving a job configuration without an active window produces Jenkins' stock 403,
-"missing the Job/Configure permission", with no hint that windows exist or where to
-request one, and a user who never had a window sees the same page as one whose
-window has just expired. Deleting is the exception: the plugin's own veto names the
-grant to request. Everything else lives on the Grants screen, which is therefore a
-screen to visit before the 403 rather than after it.
+**A refused configuration change still shows Jenkins' own 403.** Opening or saving
+a job configuration without an active window produces the stock "missing the
+Job/Configure permission" page. The plugin deliberately does not intercept it, so
+that page says nothing about permission windows, and a user who never had a window
+sees exactly what a user whose window has just expired sees. What the plugin does
+instead is put **Request Change Permission** on the job's sidebar, before the 403
+rather than after it, and keep the remaining time, the expiry history and the
+re-request link on the Grants screen. Deleting is the exception: the plugin's own
+veto message names the grant to request.
 
 **A `CONFIGURE` window confers whatever Jenkins implies from `Item/Configure`.**
 On the plugin set this project is built against that means `Item/ExtendedRead`
@@ -301,14 +308,17 @@ including administrators, recoverable only by editing
 step that hits the gate ends the upstream job as `FAILURE`, even with
 `wait: false`. That is Jenkins' behaviour, not a choice made here.
 
-**Plan for the new-job default before enabling run control.** Every job created
-while run control is on starts controlled, and an explicit
-`approvalRequired=false` in the creation payload is overwritten, so a Job DSL or
-JCasC definition that pins it is not idempotent against a fresh creation and
-needs a second pass. The seed jobs in this repository's own e2e environment
-stopped building the first time this landed. Automatic builds are not what
-breaks, since timer, upstream and SCM causes still pass; what stops is anything a
-person has to press.
+**Plan for the new-job lock before enabling run control, because it fails
+silently.** Every job created while run control is on starts with approval
+required and both trigger overrides on, and any value the creation payload supplied
+for those is overwritten, so a Job DSL or JCasC definition that pins
+`blockTimer: false` is not idempotent against a fresh creation and appears simply to
+be ignored. A generated nightly job therefore does not run its first night, and
+because an unattended refusal is silent by contract, that looks exactly like a cron
+that never fired. The job's own configuration screen is what tells the two apart:
+if `Block cron (timer) triggers` is checked, the lock is why. The controller log
+also carries one "blocked timer-triggered run" line per refusal. The seed jobs in
+this repository's own e2e environment stopped building the first time this landed.
 
 **Secrets survive only as far as detection reaches.** A stored incident log tail
 masks the build's own sensitive parameter values and Jenkins `Secret` plaintexts
@@ -333,12 +343,14 @@ and controlling changes to Pipeline scripts kept in Git.
 The Pipeline `input` step gates a point *inside* a run that has already started,
 works for Pipeline jobs only, and leaves its record in the build. Batch Control
 gates the *start* of a run, for any job type, and keeps the record independently
-of build retention. Audit-trail style plugins record what happened, with no
-notion of a request, a designated approver, a decision, or a permission that
-expires; here the audit history is a by-product of a control plane. And matrix
-and role-based authorization assign standing permissions, where Batch Control
-wraps whichever of them you configured and adds permissions that exist only
-inside an approved window.
+of build retention. Audit Trail, AuditFlow and Job Configuration History record
+what happened, and they do it well: Job Configuration History keeps configuration
+diffs with the user who made them, and AuditFlow adds a searchable store and an
+export. What none of them puts in front of the record is a control plane: a
+request, a designated approver, a decision, and a permission that ends by itself.
+And matrix and role-based authorization decide a permission by who you are rather
+than for how long, where Batch Control wraps whichever of them you configured and
+adds permissions that exist only inside an approved window.
 
 ## Roadmap
 
