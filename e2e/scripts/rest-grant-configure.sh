@@ -8,6 +8,10 @@
 #
 # The 1-minute duration is offered by init.groovy.d/10-batch-control-config.groovy
 # precisely so this scenario does not have to wait out the 15-minute default.
+#
+# Any grant that is already active is revoked first (step 0a), and the job's own
+# description is restored at the end (step 8), so the run is repeatable and leaves
+# the environment as it found it.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
@@ -19,7 +23,21 @@ bc_login requester
 bc_login approver
 bc_login admin
 
-# --- 0. baseline: without a grant the requester may not configure the job
+# --- 0a. revoke any grant that is already active.
+#
+# Without this the expiry half of the scenario is meaningless: a longer grant left
+# over from another run (or arranged for a browser pass) keeps Item/Configure alive
+# after this scenario's 1-minute window closes, and the "refused after expiry"
+# assertion would fail for the wrong reason. Revoking needs BatchControl/Manage,
+# hence admin.
+bc_get admin "$OUT_DIR/grant-active-before.html" "/batch-control/grants/" > /dev/null
+for active in $(grep -o 'active/[0-9]\{8\}-[0-9]\{6\}-[a-z0-9]\{6\}/revoke' \
+        "$OUT_DIR/grant-active-before.html" | sort -u); do
+  status=$(bc_post admin "$OUT_DIR/grant-revoke.html" "/batch-control/grants/$active")
+  echo "--- POST /batch-control/grants/$active (admin, clearing a pre-existing grant) -> HTTP $status"
+done
+
+# --- 0b. baseline: without a grant the requester may not configure the job
 status=$(bc_get requester "$OUT_DIR/grant-configure-before.html" "/job/$SCOPE/configure")
 echo "--- GET /job/$SCOPE/configure as requester BEFORE any grant -> HTTP $status (expected 403)"
 
@@ -53,6 +71,12 @@ status=$(bc_get requester "$OUT_DIR/grant-configure-inside.html" "/job/$SCOPE/co
 echo "--- GET /job/$SCOPE/configure as requester INSIDE the window -> HTTP $status (expected 200)"
 
 bc_get admin "$OUT_DIR/grant-config.xml" "/job/$SCOPE/config.xml" > /dev/null
+cp "$OUT_DIR/grant-config.xml" "$OUT_DIR/grant-config-before.xml"   # for step 8
+echo "--- the configure screen inside the window carries the form:"
+for needle in 'action="configSubmit"' 'name="config"' 'Require approval to run'; do
+  if grep -q -- "$needle" "$OUT_DIR/grant-configure-inside.html"; then r=YES; else r=NO; fi
+  printf '    %-28s %s\n' "$needle" "$r"
+done
 # Only the FIRST <description> - the job's own. An unanchored substitution also
 # overwrites every parameter description, which silently degrades the very
 # screens the browser pass has to judge (it happened once; admin had to restore
@@ -102,3 +126,12 @@ done
 status=$(bc_get admin "$OUT_DIR/grant-changes.csv" "/batch-control/history/changes.csv")
 echo "--- GET /batch-control/history/changes.csv (admin) -> HTTP $status"
 grep "$GRANT_ID" "$OUT_DIR/grant-changes.csv" | head -3 || echo "  no change record carries the grant id"
+
+# --- 8. leave the job as it was found: the scenario's proof-of-save rewrote the
+#        job description, and a polluted description misrepresents the job on
+#        every screen a browser pass looks at afterwards.
+status=$(bc_post admin "$OUT_DIR/grant-restore.html" "/job/$SCOPE/config.xml" \
+        -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/grant-config-before.xml")
+echo "--- POST /job/$SCOPE/config.xml (admin, restoring the original description) -> HTTP $status"
+bc_get admin "$OUT_DIR/grant-config-restored.xml" "/job/$SCOPE/config.xml" > /dev/null
+echo "description restored to: $(grep -o '<description>[^<]*</description>' "$OUT_DIR/grant-config-restored.xml" | head -1)"

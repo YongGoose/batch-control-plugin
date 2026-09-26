@@ -70,3 +70,29 @@ approver list.
 every POST) and `bc_script`, which runs Groovy on the admin script console. The
 script console is used only to read or arrange state that has no HTTP surface,
 never to perform the behaviour under test.
+
+## Scenario scripts added for e2e-02
+
+| Script | Rows |
+|---|---|
+| `rest-marker-reuse.sh` | D-30 - a blocked approval-marker re-use is refused and audited |
+| `rest-new-job-default.sh` | D-31/D-32 - every newly created job starts approval-required |
+| `rest-incident-flow.sh` | the incident lifecycle: auto-registration -> ACKNOWLEDGED -> comment -> RESOLVED |
+| `rest-monitor-misconfig.sh` | `ConfigureWithoutGrantMonitor` really fires (breaks the configuration on purpose, then restores it) |
+| `rest-screens-v2.sh` | the screens that changed after e2e-01: recent-run table and its `?runs=` allow-list, executed-run link, approved-but-not-run notice, global-config label, grant remaining time |
+
+Extra helper: `executors.sh <count>` sets the controller's executor count; with 0
+an approved run stays queued, which is the only way to hold a request in
+APPROVED-but-not-yet-run long enough to look at its notice.
+
+Two things to know before changing the seed:
+
+* While run control is on, **D-31 gives every newly created job
+  `approvalRequired=true`, including the jobs this seed creates.** `batch-cron` and
+  `batch-failing` must run unattended, so `20-sample-jobs.groovy` removes the
+  property from them right after creation. Without that they simply never build,
+  and nothing in the log looks wrong.
+* `rest-grant-configure.sh` revokes every active grant before it starts (otherwise
+  a longer grant keeps the permission alive past its own 1-minute window and the
+  expiry assertion fails for the wrong reason) and restores the job description it
+  rewrites.

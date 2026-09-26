@@ -8,6 +8,15 @@
  *  batch-cron     Freestyle on a one-minute timer, NOT approval required, so it
  *                 keeps feeding the run dashboard with TIMER-caused records
  *                 (T-10-06 paging needs volume).
+ *  batch-failing  Freestyle that always fails, NOT approval required, so the
+ *                 incident lifecycle (auto-registration -> ACKNOWLEDGED ->
+ *                 comment -> RESOLVED) can be exercised on demand.
+ *
+ * Note on D-31: while run control is on, EVERY newly created job gets
+ * approvalRequired=true, including the ones created here - the listener fires on
+ * the programmatic path too. The two jobs that must run unattended therefore opt
+ * out explicitly right after creation (uncontrol()); without that, batch-cron
+ * stops producing dashboard volume and batch-failing can never fail on demand.
  */
 import hudson.model.Cause
 import hudson.model.ChoiceParameterDefinition
@@ -24,6 +33,18 @@ def log = java.util.logging.Logger.getLogger('batch-control-e2e')
 
 def propertyClass = uber.loadClass('io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty')
 def requireApproval = { boolean value -> propertyClass.getConstructor(boolean).newInstance(value) }
+
+/*
+ * Removes the approvalRequired default D-31 applies at creation time. Only for the
+ * jobs whose whole purpose is to run without a request.
+ */
+def uncontrol = { job ->
+    if (job.getProperty(propertyClass) != null) {
+        job.removeProperty(propertyClass)
+        job.save()
+        log.info("e2e: removed the D-31 approvalRequired default from '${job.fullName}'")
+    }
+}
 
 // ---------------------------------------------------------------- batch-daily
 
@@ -86,5 +107,17 @@ if (jenkins.getItemByFullName('batch-cron') == null) {
     // has bound them to a job. Without this the job sits at "builds: []"
     // forever and the dashboard gets no TIMER-caused records.
     timer.start(job, true)
+    uncontrol(job)
     log.info('e2e: created job batch-cron')
+}
+
+// ---------------------------------------------------------------- batch-failing
+
+if (jenkins.getItemByFullName('batch-failing') == null) {
+    def job = jenkins.createProject(FreeStyleProject, 'batch-failing')
+    job.setDescription('E2E sample: always fails, so an incident is registered automatically.')
+    job.getBuildersList().add(new Shell('echo "batch-failing: simulating a broken upstream feed"; exit 1'))
+    job.save()
+    uncontrol(job)
+    log.info('e2e: created job batch-failing')
 }
