@@ -39,12 +39,7 @@
     <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
-    <!-- TEMPORARY: the jenkinsci hosting checker requires this to be false, but the suite is
-         still JUnit 4 (239 imports across all 34 test classes, including 30 JenkinsRule and
-         4 JenkinsSessionRule usages). Leaving it false stops the build at generate-test-sources,
-         so no test can run at all. Flip it back to false together with the JUnit 5 migration,
-         before opening the hosting request. Tracked in docs/HOSTING-READINESS.md section 3a. -->
-    <ban-junit4-imports.skip>true</ban-junit4-imports.skip>
+    <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
     <banObsoleteDependencyOverrides.skip>false</banObsoleteDependencyOverrides.skip>
   </properties>
 
