@@ -6,7 +6,7 @@ hosting process.
 | | |
 |---|---|
 | Verification date | **2026-09-26** (all URLs below fetched on this date) |
-| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement, then `CONTRIBUTING.md` (G3 follow-up / §4 recommendation 2 / first half of Q8); see *Applied changes* below |
+| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement, then `CONTRIBUTING.md` + the README link + `.github/PULL_REQUEST_TEMPLATE.md` (G3 follow-up / §4 recommendation 2 / first half of Q8); see *Applied changes* below |
 | Repository under review | `https://github.com/YongGoose/batch-control-plugin` (public, not a fork, default branch `main` — verified via GitHub API on 2026-09-26) |
 | Branch inspected | `handoff/phase-4-5-continuation` |
 | Requirements checked | **65** |
@@ -54,6 +54,7 @@ items were deliberately **not** touched — see G10.
 | G9 | plugin BOM `7046.v43536164769c` → `7093.v37de7b_4a_8a_4f` | `pom.xml:51` |
 | G3 | `README.md` replaced — the Korean development-kit guide is gone, replaced by English plugin documentation (problem statement, the two controls, a blocked/not-blocked table, requirements, installation, four-step configuration, screen guide, 29 known limitations, roadmap, contributing, security reporting, license) | `README.md:1-576` |
 | G3 follow-up / §4 rec. 2 / Q8 (first half) | `CONTRIBUTING.md` created — the contributor material G3 removed, rewritten in English for contributors rather than transcribed: build/test with expected results, repository layout, document system + identifier glossary, test conventions, `e2e/`, known pitfalls, PR rules, and one context section on the agent orchestration | `CONTRIBUTING.md` |
+| §4 rec. 2 (rest) | README *Contributing* section rewritten to link `CONTRIBUTING.md`, keeping only `mvn clean verify` + `mvn hpi:run`; `.github/PULL_REQUEST_TEMPLATE.md` created with the five checks from `CONTRIBUTING.md` §7 plus the issue and contract anchor | `README.md` *Contributing*, `.github/PULL_REQUEST_TEMPLATE.md` |
 
 **Not done, by instruction:** G10 (all CD files and the `changelist` value — the
 Yes/No decision is made immediately before submission).
@@ -438,10 +439,14 @@ still called the test matrix an "initial seed".
 **Still open: the second half of Q8** — whether `.claude/` ships in the hosted
 repository at all. `CONTRIBUTING.md` assumes it does (it points at the directory
 for context); if the owner decides to strip it, that one paragraph needs a small
-edit. Also outstanding, and recorded as a request rather than applied because
-`README.md` was finished in the G3 pass: **요청: `README.md` — make the
-*Contributing* section link to `CONTRIBUTING.md`** (it currently repeats the
-build commands inline and does not mention the file).
+edit. The README link is **done (2026-09-26, owner-approved follow-up)**: `README.md`'s
+*Contributing* section now points at `CONTRIBUTING.md` as the guide and keeps only
+`mvn clean verify` and `mvn hpi:run` — the two commands someone who has just
+cloned the repository runs to see whether it builds. Everything else that used to
+be inline there (single-class runs, expected figures, environment, `e2e/`, PR
+expectations) is in `CONTRIBUTING.md` and reached by link, so the two files cannot
+drift apart. `.github/PULL_REQUEST_TEMPLATE.md` was added in the same pass
+(§4 recommendation 2).
 
 ### G4 — `<developers>` must be removed from `pom.xml` *(REQUIRED, B6)* — RESOLVED
 
@@ -685,12 +690,17 @@ migration is on the critical path.
    Releases are generated, so a `CHANGELOG.md` is optional — but a
    `Keep a Changelog` file starting at `Unreleased` costs nothing.
 2. ~~**`CONTRIBUTING.md` and a pull-request template** are listed as recommended
-   by the documentation guide. Absent today.~~ **`CONTRIBUTING.md` DONE
-   2026-09-26** — created at the repository root (build/test with expected
-   results, repository layout, document system and glossary, test conventions,
-   `e2e/`, known pitfalls, PR rules); see the G3 follow-up. A **pull-request
-   template** under `.github/` is still absent — still recommended, still not
-   enforced.
+   by the documentation guide. Absent today.~~ **DONE 2026-09-26.** Both exist:
+   `CONTRIBUTING.md` at the repository root (build/test with expected results,
+   repository layout, document system and glossary, test conventions, `e2e/`,
+   known pitfalls, PR rules — see the G3 follow-up), and
+   `.github/PULL_REQUEST_TEMPLATE.md`, which carries the five checks from
+   `CONTRIBUTING.md` §7 (verify green + SpotBugs 0, spec-first for a behaviour
+   change, matrix row + failing-test-first + false-positive guard for new
+   behaviour, a real browser look at any `src/main/resources/**` change since
+   Jelly compiles only at runtime, and no security disclosure in a public PR)
+   plus the issue and contract anchor. `README.md`'s *Contributing* section now
+   links to `CONTRIBUTING.md` and keeps only the two commands a fresh clone needs.
 3. **Prefer `<version>${changelist}</version>`** over `${revision}${changelist}`
    to clear the D3 warning, if CD is enabled.
 4. **GitHub topics** — the documentation guide suggests applying topics for
@@ -910,8 +920,9 @@ State these as unverified rather than as requirements:
   to have — it is what Jenkins shows on the Plugin Manager page).
 - **`CHANGELOG.md`, `CONTRIBUTING.md`, PR template, GitHub topics.**
   Recommended by the documentation guide, not enforced. Listed as non-blocking.
-  (`CONTRIBUTING.md` exists as of 2026-09-26; the other three are still absent —
-  still non-blocking.)
+  (`CONTRIBUTING.md` and `.github/PULL_REQUEST_TEMPLATE.md` exist as of
+  2026-09-26; `CHANGELOG.md` and the GitHub topics are still absent — still
+  non-blocking.)
 - **Baseline recommendation text.** The choosing-a-baseline page was read on
   2026-09-26 and listed 2.541.3 / 2.555.3 as currently recommended with 2.568.1
   as the newer alternative; it also stated the update centre minimum as 2.516

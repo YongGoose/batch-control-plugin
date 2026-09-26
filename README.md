@@ -532,8 +532,14 @@ Not in this release, and deliberately so:
 
 ## Contributing
 
-Issues and pull requests are welcome. Two things are worth knowing before
-opening one:
+Issues and pull requests are welcome. **[`CONTRIBUTING.md`](CONTRIBUTING.md) is
+the guide** — it covers the build, the repository layout, the identifier
+vocabulary the documents and commit messages use, the test conventions, the
+end-to-end environment, and the pitfalls that have already cost this project
+time. Please read it before your first change; a couple of the conventions are
+unusual.
+
+Two things are worth knowing even before that:
 
 - `docs/SPEC.md` is the functional contract. If the code and the spec disagree,
   the code is wrong. A change in behaviour is a change to the spec first, and
@@ -543,15 +549,17 @@ opening one:
 - `docs/ARCHITECTURE.md` describes the extension points, the package layout and
   the on-disk storage format.
 
-Build and test:
+To confirm a fresh clone builds (JDK 21, Maven 3.9.16 or newer; about ten
+minutes):
 
 ```sh
-mvn clean verify                  # compile, tests, SpotBugs
-mvn test -Dtest=ClassName         # one test class
-mvn hpi:run                       # local Jenkins at http://localhost:8080/jenkins
+mvn clean verify   # compile, full test suite, SpotBugs — must end with 0 failures and 0 bugs
+mvn hpi:run        # local Jenkins at http://localhost:8080/jenkins
 ```
 
-`e2e/README.md` describes the Docker-based end-to-end environment.
+Anything beyond that — running one class, the expected test count, the
+environment setup, the Docker-based end-to-end environment in `e2e/`, and what a
+pull request needs — is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Reporting security vulnerabilities
 

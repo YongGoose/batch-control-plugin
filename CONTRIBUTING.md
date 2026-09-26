@@ -312,10 +312,14 @@ the notes section of `docs/TEST-MATRIX.md`.
 
 - **Conventional Commits** for every commit: `feat:`, `fix:`, `test:`, `docs:`,
   `chore:`, `ci:`.
-- **Reference the issue** your change belongs to, and the spec item, decision or
-  matrix row it touches (`SPEC §8`, `D-31`, `T-06-11`). A change with no such
-  anchor is hard to review here, because the reviewer's first question is always
-  "which contract does this implement".
+- **Reference the issue** your change belongs to — `fix #<n>`, or `[no-issue]`
+  when there genuinely is none — and name the spec item, decision or matrix row
+  it touches (`SPEC §8`, `D-31`, `T-06-11`). A change with no such anchor is hard
+  to review here, because the reviewer's first question is always "which contract
+  does this implement".
+- `.github/PULL_REQUEST_TEMPLATE.md` asks for exactly these things and nothing
+  else; if a line does not apply to your change, delete it rather than ticking
+  it.
 - **The gate is the whole suite green and SpotBugs reporting zero.** Please run
   `mvn -ntp clean verify` yourself before opening the PR; ci.jenkins.io builds
   both Linux and Windows on JDK 21.
