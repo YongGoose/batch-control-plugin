@@ -188,7 +188,7 @@ public class RequestItem implements ModelObject {
         return getRecentRuns().size();
     }
 
-    /** The sizes offered by the selector below the recent-run table. */
+    /** The sizes offered by the {@code ?runs=} links below the recent-run table. */
     public List<Integer> getRecentRunLimitOptions() {
         return RECENT_RUN_LIMIT_OPTIONS;
     }
