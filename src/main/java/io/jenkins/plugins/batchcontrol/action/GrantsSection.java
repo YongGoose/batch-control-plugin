@@ -50,13 +50,38 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * <p>No state transition logic lives here; everything is delegated to
  * {@link GrantRequestService} and {@link GrantService}. Viewing requires one of the plugin
  * permissions (requesters see their requests, approvers their inbox, managers the active
- * grants), enforced for the whole subtree by {@link #getTarget()}.
+ * grants), and the whole subtree additionally closes while change control is off — both enforced
+ * by {@link #getTarget()}.
+ *
+ * <p>The switch closes this screen and nothing else. It must never reach the audit trail: the
+ * Change Records and History screens keep showing the windows that existed and the changes made
+ * under them, because a switch flip that retroactively hid audit records would be a worse defect
+ * than the one the gate fixes.
  */
 @Restricted(NoExternalUse.class)
 public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Page size for both the request list and the active grant list. */
     public static final int PAGE_SIZE = 50;
+
+    /**
+     * What a caller is told when they reach this screen while change control is off (P-15).
+     *
+     * <p>It names the switch and where it lives on purpose. The alternative — 404 or a bare 403 —
+     * is the U-01 failure recreated one screen along: a user following a link they were given
+     * yesterday would have no way to tell which of "I lost a permission", "the screen moved" and
+     * "an administrator turned something off" had happened. The closing sentence exists because
+     * the switch going off revokes every open window, so the natural next question is whether the
+     * record of them survived; it does.
+     */
+    private static final String CHANGE_CONTROL_OFF_MESSAGE =
+            "Change control is off, so this instance is not using permission windows and the "
+            + "Grants screen is closed. While the switch is off a window confers nothing, and a "
+            + "window approved now would take effect unreviewed the moment it was turned back on, "
+            + "so no window can be requested or approved either. An administrator can turn it on "
+            + "with \"Enable change control\" in the Batch Control section of Manage Jenkins > "
+            + "System. Nothing has been deleted from the audit trail: windows that existed, and "
+            + "the changes made under them, are still on the Change Records and History screens.";
 
     /** Lazily computed, per-request cached sorted snapshot of grant requests. */
     private List<GrantRequest> sortedRequests;
@@ -72,6 +97,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                 BatchControlPermissions.REQUEST_GRANT,
                 BatchControlPermissions.APPROVE,
                 BatchControlPermissions.MANAGE);
+        // P-15 / SPEC item 1: with change control off, no change-control UI may appear. This whole
+        // subtree is change-control UI, so it closes with the switch. GrantRequestService refuses
+        // create and approve independently — this is the screen half of the same gate, not a
+        // replacement for it, and the permission check above stays first so only a caller who
+        // would otherwise be let in learns which switch is off.
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            throw new Failure(CHANGE_CONTROL_OFF_MESSAGE);
+        }
         return this;
     }
 
