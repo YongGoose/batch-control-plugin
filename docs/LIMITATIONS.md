@@ -201,11 +201,14 @@ from scripts.
     `ACKNOWLEDGED` incident is counted in neither the open nor the resolved
     column, and a request that was approved and then expired or was invalidated
     is counted in neither the approved nor the rejected column.
-29. **The Grants screens keep working with change control off**, and a window may
-    still be requested and approved there. It confers nothing while the switch is
-    off, and it is not closed by the switch either, so turning change control back
-    on makes it live for the rest of its duration (item 33). The Role Strategy
-    notice likewise appears with both switches off.
+29. **With change control off the Grants screen is closed**, its links are gone from
+    the Batch Control landing page, and requesting or approving a window is refused
+    with a message that says why, plus a `GRANT_REQUEST_BLOCKED` record. The URL
+    itself still answers, deliberately, so that an old bookmark reaches that
+    explanation rather than a dead link. Nothing about the audit trail is gated this
+    way: the history, dashboard, incident and change-record screens show the same
+    content whichever way the switch is set. The Role Strategy notice likewise
+    appears with both switches off.
 30. **A request does not follow its job.** If the target job is renamed or moved
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
@@ -239,18 +242,17 @@ code does on purpose.
     queue gate still refuses a replay of a job that requires approval, so it is not
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
-33. **Turning change control off cuts off work in progress, and turning it back on
-    is not the mirror image.** The switch is a kill switch: while it is off no
-    window confers anything, and flipping it off revokes every window open at that
-    moment, one `GRANT_REVOKE` record per closure naming the account that flipped
-    it. Whoever is part-way through a change loses the permission to finish it with
-    no warning, and the only way back is a new request once the control is on
-    again. That is the deliberate trade against a switch that would leave windows
-    quietly conferring `Item/Configure` for up to `maxGrantMinutes` (default 240)
-    after the control was supposedly off. The asymmetry: a window requested and
-    approved *while* the switch was off is not open at flip time, so nothing
-    revokes it, and turning change control back on makes it live for the remainder
-    of its duration (item 29).
+33. **Turning change control off cuts off work in progress.** The switch is a kill
+    switch: while it is off no window confers anything, and flipping it off revokes
+    every window open at that moment, one `GRANT_REVOKE` record per closure naming
+    the account that flipped it. Whoever is part-way through a change loses the
+    permission to finish it with no warning, and the only way back is a new request
+    once the control is on again. That is the deliberate trade against a switch that
+    would leave windows quietly conferring `Item/Configure` for up to
+    `maxGrantMinutes` (default 240) after the control was supposedly off. The off
+    period accumulates nothing that could take effect later, because a window can
+    neither be requested nor approved during it (item 29), and it removes nothing
+    from the audit history of the windows that did exist.
 
 ## Out of scope by design
 

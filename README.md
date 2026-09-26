@@ -44,7 +44,10 @@ instead: a scope (one job, or a folder), some combination of `CREATE`,
 `CONFIGURE` and `DELETE`, a duration and a reason. A window **adds** those
 permissions to whatever the user already has, for as long as it lasts; it never
 takes anything away and it imposes nothing on someone who holds the permission
-standing, which is what the "standing change permissions" monitor is for. Once
+standing, which is what the "standing change permissions" monitor is for. Deleting
+is the one exception: while change control is on, deleting a job needs an active
+`DELETE` window even from a user whose standing permissions would allow it, and
+only administrators are not vetoed. Once
 it is approved they do the work under their own account, with every usual Jenkins
 safeguard still in place. What the approver decides is *who* may change *what*, and
 *for how long*; it is not an approval of the change itself, which does not exist
@@ -150,10 +153,14 @@ per closure naming the account that flipped it. Anyone in the middle of a change
 loses the permission to finish it, with no warning and no way back but a new
 request. That is the deliberate trade: the alternative was a switch that leaves
 windows quietly conferring `Item/Configure` for up to the maximum grant duration
-after the control was supposedly turned off. Two things the switch does not do:
-the Grants screens keep working while it is off, and a window requested and
-approved during that time is not caught by the revocation, so turning the switch
-back on brings that window to life for the rest of its duration.
+after the control was supposedly turned off. Nothing accumulates while the switch
+is off, either: a window cannot be requested or approved, both refusals explain
+themselves and are recorded, and the Grants screen is closed, so there is no state
+waiting to take effect when change control is switched back on. That URL still
+answers, deliberately, so that somebody following an old bookmark reads what
+changed instead of meeting a dead link. The audit trail is untouched throughout:
+History and Change Records go on showing the windows that did exist and the changes
+made under them whichever way the switch is set.
 
 ### 2. Select the wrapping authorization strategy
 
@@ -269,9 +276,9 @@ trying to stop them.
 **Turning change control off cuts off work in progress.** The switch revokes every
 open permission window the moment it goes off, so a user part-way through a change
 loses the permission to finish and has to request a new window once the control is
-back on. The revocation is recorded per window. It is also not symmetrical: a
-window approved while the switch was off survives the next flip and becomes live
-when change control is turned back on.
+back on. Each revocation is recorded. Nothing carries over the off period, since a
+window cannot be requested or approved while the switch is off, and nothing is
+removed from the audit history either.
 
 **A refused configuration change still shows Jenkins' own 403.** Opening or saving
 a job configuration without an active window produces the stock "missing the
