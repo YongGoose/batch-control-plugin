@@ -25,6 +25,8 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.html.HtmlAnchor;
+import org.htmlunit.html.HtmlPage;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -33,6 +35,7 @@ import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -43,7 +46,8 @@ import static org.junit.Assert.assertTrue;
  * and then matched against the allowed list; anything else falls back to the default of 5 without
  * an error page), T-UI-03 (the window is not a way
  * around the P-09 visibility model), T-UI-04 (a deleted target job still renders, with no run
- * history) and T-UI-05 (the post-approval notice is bound to APPROVED + not yet executed).
+ * history), T-UI-05 (the post-approval notice is bound to APPROVED + not yet executed) and
+ * T-UI-06 (following the window control puts no crumb in the URL — ui-dev e98d211).
  *
  * IMPORTANT — provenance: unlike every other row in the matrix, T-UI-* is NOT derived from a
  * SPEC acceptance criterion. docs/SPEC.md says nothing about a recent-run table on the approval
@@ -78,6 +82,15 @@ public class ApprovalScreenRecentRunsTest {
 
     /** The window sizes ui-dev's contract allows. */
     private static final List<String> ALLOWED = Arrays.asList("5", "10", "20", "50");
+
+    /**
+     * The id ui-dev put on the post-approval notice element as a stable test hook (reported for
+     * {@code RequestItem/index.jelly}); it is rendered only while the request is APPROVED and not
+     * yet executed. Asserting the hook lets the row measure the notice itself rather than only the
+     * state it hangs off, without pinning wording SPEC does not define. Lower-case, so it never
+     * collides with the {@code APPROVED} status text the same rows assert on.
+     */
+    private static final String APPROVED_NOTICE = "batch-control-approved-notice";
 
     /**
      * Values that are not on the allowed list even after trimming, and must therefore silently
@@ -248,11 +261,13 @@ public class ApprovalScreenRecentRunsTest {
     }
 
     /**
-     * T-UI-05: the post-approval notice is bound to "APPROVED and not executed yet". SPEC pins
-     * no wording for it (matrix note 40), so the row asserts the state it is keyed on: the
-     * approved-but-unexecuted request renders APPROVED with no run attached; the executed one
-     * renders EXECUTED and links its run; and a REJECTED or CANCELLED request never renders
-     * the approved state at all.
+     * T-UI-05: the post-approval notice is bound to "APPROVED and not executed yet". SPEC pins no
+     * wording for it (matrix note 40), so the row measures the notice through the stable id
+     * ui-dev exposes for it ({@link #APPROVED_NOTICE}) plus the state it is keyed on: the notice is
+     * present exactly once — on the approved-but-unexecuted screen, which renders APPROVED with no
+     * run attached — and absent from the executed screen (which renders EXECUTED and links its
+     * run), from the REJECTED one and from the CANCELLED one, neither of which may render the
+     * approved state at all.
      */
     @Test
     public void t_ui_05_approvedStateIsBoundToTheUnexecutedRequest() throws Exception {
@@ -269,6 +284,9 @@ public class ApprovalScreenRecentRunsTest {
         String approvedHtml = detail(READING_APPROVER, approved.getId(), null).getContentAsString();
         assertTrue("the approved, not yet executed request must render its APPROVED state",
                 approvedHtml.contains("APPROVED"));
+        assertTrue("the post-approval notice must be rendered while the request is approved and "
+                        + "not yet executed",
+                approvedHtml.contains(APPROVED_NOTICE));
         assertNoRunDisclosed("an approved but unexecuted request", NOTICE_JOB, approvedHtml);
         j.jenkins.doCancelQuietDown();
 
@@ -284,6 +302,8 @@ public class ApprovalScreenRecentRunsTest {
                 executedHtml.contains("EXECUTED"));
         assertTrue("an executed request must point at the run it produced",
                 showsRun(executedHtml, NOTICE_JOB, 1));
+        assertFalse("the post-approval notice must be gone once the approval has executed",
+                executedHtml.contains(APPROVED_NOTICE));
 
         // (3) REJECTED and (4) CANCELLED: the approved state must not be rendered at all
         RunRequest rejected = createNoticeRequest("notice: rejected");
@@ -293,6 +313,8 @@ public class ApprovalScreenRecentRunsTest {
                 rejectedHtml.contains("REJECTED"));
         assertFalse("a rejected request must not render the approved state",
                 rejectedHtml.contains("APPROVED"));
+        assertFalse("a rejected request must not render the post-approval notice",
+                rejectedHtml.contains(APPROVED_NOTICE));
 
         RunRequest cancelled = createNoticeRequest("notice: cancelled");
         cancelAs(REQUESTER, cancelled.getId());
@@ -302,6 +324,63 @@ public class ApprovalScreenRecentRunsTest {
                 cancelledHtml.contains("CANCELLED"));
         assertFalse("a cancelled request must not render the approved state",
                 cancelledHtml.contains("APPROVED"));
+        assertFalse("a cancelled request must not render the post-approval notice",
+                cancelledHtml.contains(APPROVED_NOTICE));
+    }
+
+    /**
+     * T-UI-06 (regression, ui-dev {@code e98d211}): following the recent-run size control must not
+     * put a crumb in the address bar.
+     *
+     * While that control was a {@code <form>}, Jenkins core's own JavaScript added a crumb to every
+     * form on the page, so choosing a size produced
+     * {@code ?runs=20&Jenkins-Crumb=41855d…&json=%7B…%7D} — observed in a browser against a real
+     * Jenkins. Core offers no opt-out, so the only fix was to stop using a form: the control is now
+     * a group of links. A crumb in a GET query is a CSRF token written into browser history, proxy
+     * logs and {@code Referer} headers, which is why this is pinned rather than left to review.
+     *
+     * The row does not depend on HtmlUnit reproducing core's injection: a reverted implementation
+     * has no per-size links at all, so step (1) fails first and the regression is caught either
+     * way.
+     */
+    @Test
+    public void t_ui_06_runsControlNavigatesWithoutACrumbInTheUrl() throws Exception {
+        RunRequest request = createRequest(READING_APPROVER, "runs-control crumb regression");
+        HtmlPage page = detailPage(READING_APPROVER, request.getId());
+
+        // (1) the control offers a plain link per allowed size - being a link, and not a form, is
+        // exactly what keeps core's crumb injection away from it
+        for (String allowed : ALLOWED) {
+            assertNotNull("the recent-run control must offer a plain link for runs=" + allowed
+                            + "; a <form> would be given a crumb by core's JavaScript",
+                    runsAnchor(page, allowed));
+        }
+
+        // (2) following it really works - a dead link would satisfy the URL checks below
+        HtmlPage after = runsAnchor(page, "10").click();
+        WebResponse response = after.getWebResponse();
+        assertEquals("following the runs control must render the screen",
+                200, response.getStatusCode());
+        assertWindowIn("after following the runs=10 link", response.getContentAsString(), 10);
+
+        // (3) and the address it landed on carries the chosen size and nothing else
+        String url = after.getUrl().toString();
+        assertTrue("the chosen window size must be in the query: " + url, url.contains("runs=10"));
+        assertFalse("a crumb must never reach the query string of a read-only screen: " + url,
+                url.contains("Jenkins-Crumb"));
+        assertFalse("no form payload may reach the query string: " + url, url.contains("json="));
+
+        // (4) the active size stays visible on the screen, which is what the removed <select>'s
+        // selected option used to convey: exactly one link is marked current (ui-dev renders
+        // aria-current="true"), and it is the one just followed
+        assertNotEquals("the active window size must be marked as current on its own link",
+                "", runsAnchor(after, "10").getAttribute("aria-current"));
+        for (String other : ALLOWED) {
+            if (!"10".equals(other)) {
+                assertEquals("only the active window size may be marked current, not runs=" + other,
+                        "", runsAnchor(after, other).getAttribute("aria-current"));
+            }
+        }
     }
 
     // ---------------------------------------------------------------- assertions
@@ -343,6 +422,21 @@ public class ApprovalScreenRecentRunsTest {
                             + "must not be listed",
                     showsRun(html, JOB, BUILDS - shown));
         }
+    }
+
+    /**
+     * The recent-run control's link for one window size, or {@code null} when the page renders no
+     * such link. Matched on the query only, never on a DOM shape, and anchored at the end so that
+     * {@code runs=10} cannot be satisfied by {@code runs=100000}.
+     */
+    private static HtmlAnchor runsAnchor(HtmlPage page, String size) {
+        Pattern query = Pattern.compile("[?&]runs=" + Pattern.quote(size) + "$");
+        for (HtmlAnchor anchor : page.getAnchors()) {
+            if (query.matcher(anchor.getHrefAttribute()).find()) {
+                return anchor;
+            }
+        }
+        return null;
     }
 
     /** No run of the named job may be referenced by the page. */
@@ -405,6 +499,12 @@ public class ApprovalScreenRecentRunsTest {
         try (ACLContext ignored = as(userId)) {
             RunRequestService.get().cancel(requestId);
         }
+    }
+
+    /** The request detail screen as a live page, for the rows that follow its controls. */
+    private HtmlPage detailPage(String userId, String requestId) throws Exception {
+        return client(userId).getPage(
+                new URL(j.getURL(), "batch-control/requests/" + requestId + "/"));
     }
 
     private WebResponse detail(String userId, String requestId, String runsValue)
