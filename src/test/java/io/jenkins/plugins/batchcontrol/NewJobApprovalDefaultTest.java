@@ -36,16 +36,16 @@ import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8, D-31: while run control is enabled, every newly created job starts with
@@ -68,6 +68,7 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md (items 6, 8, D-17, D-31), docs/DECISIONS.md and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class NewJobApprovalDefaultTest {
 
     private static final Instant T0 = Instant.parse("2026-09-26T00:00:00Z");
@@ -77,13 +78,13 @@ public class NewJobApprovalDefaultTest {
                     + "<description>created for the D-31 default</description>"
                     + "<builders/><publishers/><buildWrappers/></project>";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
         GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
@@ -107,7 +108,7 @@ public class NewJobApprovalDefaultTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -125,7 +126,7 @@ public class NewJobApprovalDefaultTest {
                 new NameValuePair("name", "ui-new"),
                 new NameValuePair("mode", FreeStyleProject.class.getName())));
         int code = admin.getPage(create).getWebResponse().getStatusCode();
-        assertTrue("the administrator must be able to create a job, got HTTP " + code, code < 400);
+        assertTrue(code < 400, "the administrator must be able to create a job, got HTTP " + code);
 
         FreeStyleProject created = job("ui-new");
         assertApprovalRequiredByDefault(created,
@@ -140,8 +141,7 @@ public class NewJobApprovalDefaultTest {
     @Test
     public void t_08_20_restConfigXmlCreationDefaultsToApprovalRequired() throws Exception {
         JenkinsRule.WebClient admin = webClient().login("admin");
-        assertTrue("the REST creation must succeed",
-                createFromXml(admin, "", "rest-new", MINIMAL_FREESTYLE_XML) < 400);
+        assertTrue(createFromXml(admin, "", "rest-new", MINIMAL_FREESTYLE_XML) < 400, "the REST creation must succeed");
 
         FreeStyleProject created = job("rest-new");
         assertApprovalRequiredByDefault(created, "a REST createItem with a config.xml body");
@@ -159,7 +159,7 @@ public class NewJobApprovalDefaultTest {
                 .withStdin(new ByteArrayInputStream(
                         MINIMAL_FREESTYLE_XML.getBytes(StandardCharsets.UTF_8)))
                 .invokeWithArgs("cli-new");
-        assertEquals("create-job must succeed: " + result.stderr(), 0, result.returnCode());
+        assertEquals(0, result.returnCode(), "create-job must succeed: " + result.stderr());
 
         FreeStyleProject created = job("cli-new");
         assertApprovalRequiredByDefault(created, "a CLI create-job");
@@ -185,7 +185,7 @@ public class NewJobApprovalDefaultTest {
                 new NameValuePair("mode", "copy"),
                 new NameValuePair("from", "copy-source")));
         int code = admin.getPage(copy).getWebResponse().getStatusCode();
-        assertTrue("copying the job must succeed, got HTTP " + code, code < 400);
+        assertTrue(code < 400, "copying the job must succeed, got HTTP " + code);
 
         FreeStyleProject created = job("copy-new");
         assertApprovalRequiredByDefault(created, "a copy of an uncontrolled job");
@@ -233,14 +233,12 @@ public class NewJobApprovalDefaultTest {
         team.createProject(Folder.class, "batch");
 
         JenkinsRule.WebClient admin = webClient().login("admin");
-        assertTrue("the administrator must be able to create inside the folder",
-                createFromXml(admin, "job/team/job/batch/", "admin-made", MINIMAL_FREESTYLE_XML) < 400);
+        assertTrue(createFromXml(admin, "job/team/job/batch/", "admin-made", MINIMAL_FREESTYLE_XML) < 400, "the administrator must be able to create inside the folder");
 
         grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
                 Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30);
         JenkinsRule.WebClient u1 = webClient().login("u1");
-        assertTrue("u1 must be able to create inside the granted folder",
-                createFromXml(u1, "job/team/job/batch/", "user-made", MINIMAL_FREESTYLE_XML) < 400);
+        assertTrue(createFromXml(u1, "job/team/job/batch/", "user-made", MINIMAL_FREESTYLE_XML) < 400, "u1 must be able to create inside the granted folder");
 
         FreeStyleProject byAdmin = job("team/batch/admin-made");
         FreeStyleProject byUser = job("team/batch/user-made");
@@ -248,8 +246,7 @@ public class NewJobApprovalDefaultTest {
                 "a plain user's creation inside an active grant window (D-17)");
         assertApprovalRequiredByDefault(byAdmin,
                 "an administrator's creation outside any grant window (D-31)");
-        assertEquals("D-31: the default must not depend on who created the job",
-                approvalRequired(byUser), approvalRequired(byAdmin));
+        assertEquals(approvalRequired(byUser), approvalRequired(byAdmin), "D-31: the default must not depend on who created the job");
         assertHumanRunBlocked(byAdmin);
     }
 
@@ -269,8 +266,7 @@ public class NewJobApprovalDefaultTest {
                 new NameValuePair("name", "off-ui"),
                 new NameValuePair("mode", FreeStyleProject.class.getName())));
         assertTrue(admin.getPage(uiCreate).getWebResponse().getStatusCode() < 400);
-        assertTrue("the REST creation must succeed",
-                createFromXml(admin, "", "off-rest", MINIMAL_FREESTYLE_XML) < 400);
+        assertTrue(createFromXml(admin, "", "off-rest", MINIMAL_FREESTYLE_XML) < 400, "the REST creation must succeed");
 
         FreeStyleProject viaUi = job("off-ui");
         FreeStyleProject viaRest = job("off-rest");
@@ -297,7 +293,7 @@ public class NewJobApprovalDefaultTest {
 
     private FreeStyleProject job(String fullName) {
         FreeStyleProject found = j.jenkins.getItemByFullName(fullName, FreeStyleProject.class);
-        assertNotNull("the job " + fullName + " must have been created", found);
+        assertNotNull(found, "the job " + fullName + " must have been created");
         return found;
     }
 
@@ -320,39 +316,35 @@ public class NewJobApprovalDefaultTest {
     /** SPEC 8 / D-31: the stored default on a job created while run control is on. */
     private void assertApprovalRequiredByDefault(Job<?, ?> target, String path) {
         BatchControlJobProperty property = target.getProperty(BatchControlJobProperty.class);
-        assertNotNull("D-31: a job created by " + path + " while run control is on must carry "
-                + "the plugin job property", property);
-        assertTrue("D-31: approvalRequired must default to true for a job created by " + path,
-                property.isApprovalRequired());
+        assertNotNull(property, "D-31: a job created by " + path + " while run control is on must carry "
+                + "the plugin job property");
+        assertTrue(property.isApprovalRequired(), "D-31: approvalRequired must default to true for a job created by " + path);
     }
 
     private void assertNotControlled(Job<?, ?> target, String message) {
-        assertFalse(message, approvalRequired(target));
+        assertFalse(approvalRequired(target), message);
     }
 
     /** The behavioural half of the default: a human pressing Build needs an approved request. */
     private void assertHumanRunBlocked(Job<?, ?> target) throws Exception {
         int nextBuildNumberBefore = target.getNextBuildNumber();
         Page response = postBuild("u1", target);
-        assertTrue("a manual run of a newly created, controlled job must be refused, got HTTP "
-                        + response.getWebResponse().getStatusCode(),
-                response.getWebResponse().getStatusCode() >= 400);
+        assertTrue(response.getWebResponse().getStatusCode() >= 400, "a manual run of a newly created, controlled job must be refused, got HTTP "
+                        + response.getWebResponse().getStatusCode());
 
         // matrix common blocking baseline
-        assertEquals("the queue must stay empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
         j.waitUntilNoActivity();
-        assertEquals("nextBuildNumber must not move",
-                nextBuildNumberBefore, target.getNextBuildNumber());
-        assertTrue("no build may have run", target.getBuilds().isEmpty());
+        assertEquals(nextBuildNumberBefore, target.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertTrue(target.getBuilds().isEmpty(), "no build may have run");
     }
 
     private void assertHumanRunAllowed(Job<?, ?> target) throws Exception {
         Page response = postBuild("u1", target);
-        assertTrue("with run control off a manual run must be admitted, got HTTP "
-                        + response.getWebResponse().getStatusCode(),
-                response.getWebResponse().getStatusCode() < 400);
+        assertTrue(response.getWebResponse().getStatusCode() < 400, "with run control off a manual run must be admitted, got HTTP "
+                        + response.getWebResponse().getStatusCode());
         j.waitUntilNoActivity();
-        assertNotNull("the manual run must have produced build #1", target.getBuildByNumber(1));
+        assertNotNull(target.getBuildByNumber(1), "the manual run must have produced build #1");
     }
 
     private Page postBuild(String userId, Job<?, ?> target) throws Exception {

@@ -27,18 +27,18 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Regression cover for the approval screen's "recent runs" window, requested by ui-dev for
@@ -63,6 +63,7 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md, docs/TEST-MATRIX.md and the ui-dev endpoint contract only
  * (no src/main knowledge).
  */
+@WithJenkins
 public class ApprovalScreenRecentRunsTest {
 
     private static final String JOB = "batch-x";
@@ -111,8 +112,7 @@ public class ApprovalScreenRecentRunsTest {
      */
     private static final List<String> PADDED_ALLOWED = Arrays.asList("10 ", " 10", " 20 ", " 50");
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private final Map<String, JenkinsRule.WebClient> clients = new HashMap<>();
 
@@ -120,8 +120,9 @@ public class ApprovalScreenRecentRunsTest {
     private FreeStyleProject noticeJob;
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -145,8 +146,7 @@ public class ApprovalScreenRecentRunsTest {
         for (int i = 0; i < BUILDS; i++) {
             j.buildAndAssertSuccess(job);
         }
-        assertEquals("fixture: the job must have " + BUILDS + " runs to page through",
-                BUILDS, job.getBuilds().size());
+        assertEquals(BUILDS, job.getBuilds().size(), "fixture: the job must have " + BUILDS + " runs to page through");
 
         noticeJob = j.createFreeStyleProject(NOTICE_JOB);
 
@@ -220,20 +220,17 @@ public class ApprovalScreenRecentRunsTest {
         // fixture control: with Item/Read the widest window really does list the oldest run
         String controlHtml = detail(READING_APPROVER, readableRequest.getId(), "50")
                 .getContentAsString();
-        assertTrue("fixture control: an approver holding Item/Read must see the job's runs, "
-                        + "otherwise this row cannot measure the visibility gate",
-                showsRun(controlHtml, JOB, BUILDS) && showsRun(controlHtml, JOB, 1));
+        assertTrue(showsRun(controlHtml, JOB, BUILDS) && showsRun(controlHtml, JOB, 1), "fixture control: an approver holding Item/Read must see the job's runs, "
+                        + "otherwise this row cannot measure the visibility gate");
 
         // fixture control: P-09 still lets the designated approver open the request itself
-        assertEquals("P-09: the designated approver must be able to open the request detail",
-                200, detail(BLIND_APPROVER, blindRequest.getId(), null).getStatusCode());
+        assertEquals(200, detail(BLIND_APPROVER, blindRequest.getId(), null).getStatusCode(), "P-09: the designated approver must be able to open the request detail");
 
         for (String value : concat(concat(ALLOWED, PADDED_ALLOWED), UNSUPPORTED)) {
             String label = "runs=[" + value + "] as an approver without Item/Read";
             WebResponse response = detail(BLIND_APPROVER, blindRequest.getId(), value);
             int code = response.getStatusCode();
-            assertTrue(label + " must answer 200, 403 or 404, got " + code,
-                    code == 200 || code == 403 || code == 404);
+            assertTrue(code == 200 || code == 403 || code == 404, label + " must answer 200, 403 or 404, got " + code);
             assertNoRunDisclosed(label, JOB, response.getContentAsString());
         }
     }
@@ -246,16 +243,14 @@ public class ApprovalScreenRecentRunsTest {
     public void t_ui_04_deletedJobShowsNoRunHistoryForAnyRunsValue() throws Exception {
         RunRequest request = createRequest(READING_APPROVER, "deleted job window probe");
         job.delete();
-        assertNull("fixture: the target job must be gone",
-                j.jenkins.getItemByFullName(JOB, FreeStyleProject.class));
+        assertNull(j.jenkins.getItemByFullName(JOB, FreeStyleProject.class), "fixture: the target job must be gone");
 
         for (String value : concat(ALLOWED, UNSUPPORTED)) {
             String label = "runs=[" + value + "] with the target job deleted";
             WebResponse response = detail(READING_APPROVER, request.getId(), value);
-            assertTrue(label + " must not fail the screen, got HTTP " + response.getStatusCode(),
-                    response.getStatusCode() < 500);
+            assertTrue(response.getStatusCode() < 500, label + " must not fail the screen, got HTTP " + response.getStatusCode());
             String html = response.getContentAsString();
-            assertFalse(label + " must not render a stack trace", html.contains("Stack Trace"));
+            assertFalse(html.contains("Stack Trace"), label + " must not render a stack trace");
             assertNoRunDisclosed(label, JOB, html);
         }
     }
@@ -278,15 +273,12 @@ public class ApprovalScreenRecentRunsTest {
         j.jenkins.getQueue().clear();
         RunRequest reloadedApproved = RunRequestService.get().load(approved.getId());
         assertEquals(RequestStatus.APPROVED, reloadedApproved.getStatus());
-        assertNull("fixture: the approved request must not have executed yet",
-                reloadedApproved.getExecutedRunId());
+        assertNull(reloadedApproved.getExecutedRunId(), "fixture: the approved request must not have executed yet");
 
         String approvedHtml = detail(READING_APPROVER, approved.getId(), null).getContentAsString();
-        assertTrue("the approved, not yet executed request must render its APPROVED state",
-                approvedHtml.contains("APPROVED"));
-        assertTrue("the post-approval notice must be rendered while the request is approved and "
-                        + "not yet executed",
-                approvedHtml.contains(APPROVED_NOTICE));
+        assertTrue(approvedHtml.contains("APPROVED"), "the approved, not yet executed request must render its APPROVED state");
+        assertTrue(approvedHtml.contains(APPROVED_NOTICE), "the post-approval notice must be rendered while the request is approved and "
+                        + "not yet executed");
         assertNoRunDisclosed("an approved but unexecuted request", NOTICE_JOB, approvedHtml);
         j.jenkins.doCancelQuietDown();
 
@@ -295,37 +287,27 @@ public class ApprovalScreenRecentRunsTest {
         approveAs(READING_APPROVER, executed.getId(), "notice-executed-comment");
         j.waitUntilNoActivity();
         RunRequest reloadedExecuted = RunRequestService.get().load(executed.getId());
-        assertNotNull("fixture: the approved request must have executed",
-                reloadedExecuted.getExecutedRunId());
+        assertNotNull(reloadedExecuted.getExecutedRunId(), "fixture: the approved request must have executed");
         String executedHtml = detail(READING_APPROVER, executed.getId(), "50").getContentAsString();
-        assertTrue("an executed request must render its EXECUTED state",
-                executedHtml.contains("EXECUTED"));
-        assertTrue("an executed request must point at the run it produced",
-                showsRun(executedHtml, NOTICE_JOB, 1));
-        assertFalse("the post-approval notice must be gone once the approval has executed",
-                executedHtml.contains(APPROVED_NOTICE));
+        assertTrue(executedHtml.contains("EXECUTED"), "an executed request must render its EXECUTED state");
+        assertTrue(showsRun(executedHtml, NOTICE_JOB, 1), "an executed request must point at the run it produced");
+        assertFalse(executedHtml.contains(APPROVED_NOTICE), "the post-approval notice must be gone once the approval has executed");
 
         // (3) REJECTED and (4) CANCELLED: the approved state must not be rendered at all
         RunRequest rejected = createNoticeRequest("notice: rejected");
         rejectAs(READING_APPROVER, rejected.getId(), "notice-rejected-comment");
         String rejectedHtml = detail(READING_APPROVER, rejected.getId(), null).getContentAsString();
-        assertTrue("a rejected request must render its REJECTED state",
-                rejectedHtml.contains("REJECTED"));
-        assertFalse("a rejected request must not render the approved state",
-                rejectedHtml.contains("APPROVED"));
-        assertFalse("a rejected request must not render the post-approval notice",
-                rejectedHtml.contains(APPROVED_NOTICE));
+        assertTrue(rejectedHtml.contains("REJECTED"), "a rejected request must render its REJECTED state");
+        assertFalse(rejectedHtml.contains("APPROVED"), "a rejected request must not render the approved state");
+        assertFalse(rejectedHtml.contains(APPROVED_NOTICE), "a rejected request must not render the post-approval notice");
 
         RunRequest cancelled = createNoticeRequest("notice: cancelled");
         cancelAs(REQUESTER, cancelled.getId());
         String cancelledHtml = detail(READING_APPROVER, cancelled.getId(), null)
                 .getContentAsString();
-        assertTrue("a cancelled request must render its CANCELLED state",
-                cancelledHtml.contains("CANCELLED"));
-        assertFalse("a cancelled request must not render the approved state",
-                cancelledHtml.contains("APPROVED"));
-        assertFalse("a cancelled request must not render the post-approval notice",
-                cancelledHtml.contains(APPROVED_NOTICE));
+        assertTrue(cancelledHtml.contains("CANCELLED"), "a cancelled request must render its CANCELLED state");
+        assertFalse(cancelledHtml.contains("APPROVED"), "a cancelled request must not render the approved state");
+        assertFalse(cancelledHtml.contains(APPROVED_NOTICE), "a cancelled request must not render the post-approval notice");
     }
 
     /**
@@ -351,34 +333,29 @@ public class ApprovalScreenRecentRunsTest {
         // (1) the control offers a plain link per allowed size - being a link, and not a form, is
         // exactly what keeps core's crumb injection away from it
         for (String allowed : ALLOWED) {
-            assertNotNull("the recent-run control must offer a plain link for runs=" + allowed
-                            + "; a <form> would be given a crumb by core's JavaScript",
-                    runsAnchor(page, allowed));
+            assertNotNull(runsAnchor(page, allowed), "the recent-run control must offer a plain link for runs=" + allowed
+                            + "; a <form> would be given a crumb by core's JavaScript");
         }
 
         // (2) following it really works - a dead link would satisfy the URL checks below
         HtmlPage after = runsAnchor(page, "10").click();
         WebResponse response = after.getWebResponse();
-        assertEquals("following the runs control must render the screen",
-                200, response.getStatusCode());
+        assertEquals(200, response.getStatusCode(), "following the runs control must render the screen");
         assertWindowIn("after following the runs=10 link", response.getContentAsString(), 10);
 
         // (3) and the address it landed on carries the chosen size and nothing else
         String url = after.getUrl().toString();
-        assertTrue("the chosen window size must be in the query: " + url, url.contains("runs=10"));
-        assertFalse("a crumb must never reach the query string of a read-only screen: " + url,
-                url.contains("Jenkins-Crumb"));
-        assertFalse("no form payload may reach the query string: " + url, url.contains("json="));
+        assertTrue(url.contains("runs=10"), "the chosen window size must be in the query: " + url);
+        assertFalse(url.contains("Jenkins-Crumb"), "a crumb must never reach the query string of a read-only screen: " + url);
+        assertFalse(url.contains("json="), "no form payload may reach the query string: " + url);
 
         // (4) the active size stays visible on the screen, which is what the removed <select>'s
         // selected option used to convey: exactly one link is marked current (ui-dev renders
         // aria-current="true"), and it is the one just followed
-        assertNotEquals("the active window size must be marked as current on its own link",
-                "", runsAnchor(after, "10").getAttribute("aria-current"));
+        assertNotEquals("", runsAnchor(after, "10").getAttribute("aria-current"), "the active window size must be marked as current on its own link");
         for (String other : ALLOWED) {
             if (!"10".equals(other)) {
-                assertEquals("only the active window size may be marked current, not runs=" + other,
-                        "", runsAnchor(after, other).getAttribute("aria-current"));
+                assertEquals("", runsAnchor(after, other).getAttribute("aria-current"), "only the active window size may be marked current, not runs=" + other);
             }
         }
     }
@@ -389,7 +366,7 @@ public class ApprovalScreenRecentRunsTest {
     private void assertWindow(String label, String requestId, String runsValue, int expected)
             throws Exception {
         WebResponse response = detail(READING_APPROVER, requestId, runsValue);
-        assertEquals(label + " must render", 200, response.getStatusCode());
+        assertEquals(200, response.getStatusCode(), label + " must render");
         assertWindowIn(label, response.getContentAsString(), expected);
     }
 
@@ -399,11 +376,10 @@ public class ApprovalScreenRecentRunsTest {
      * on to assert the window.
      */
     private static String assertRendersWithoutParseFailure(String label, WebResponse response) {
-        assertEquals(label + " must not produce an error page", 200, response.getStatusCode());
+        assertEquals(200, response.getStatusCode(), label + " must not produce an error page");
         String html = response.getContentAsString();
-        assertFalse(label + " must not leak a parse failure into the page",
-                html.contains("NumberFormatException"));
-        assertFalse(label + " must not render a stack trace", html.contains("Stack Trace"));
+        assertFalse(html.contains("NumberFormatException"), label + " must not leak a parse failure into the page");
+        assertFalse(html.contains("Stack Trace"), label + " must not render a stack trace");
         return html;
     }
 
@@ -414,13 +390,11 @@ public class ApprovalScreenRecentRunsTest {
     private void assertWindowIn(String label, String html, int expected) {
         int shown = Math.min(expected, BUILDS);
         for (int number = BUILDS; number > BUILDS - shown; number--) {
-            assertTrue(label + ": run #" + number + " is inside the window and must be listed",
-                    showsRun(html, JOB, number));
+            assertTrue(showsRun(html, JOB, number), label + ": run #" + number + " is inside the window and must be listed");
         }
         if (shown < BUILDS) {
-            assertFalse(label + ": run #" + (BUILDS - shown) + " is outside the window and "
-                            + "must not be listed",
-                    showsRun(html, JOB, BUILDS - shown));
+            assertFalse(showsRun(html, JOB, BUILDS - shown), label + ": run #" + (BUILDS - shown) + " is outside the window and "
+                            + "must not be listed");
         }
     }
 
@@ -442,8 +416,7 @@ public class ApprovalScreenRecentRunsTest {
     /** No run of the named job may be referenced by the page. */
     private void assertNoRunDisclosed(String label, String jobName, String html) {
         for (int number = 1; number <= BUILDS; number++) {
-            assertFalse(label + " must not disclose run #" + number + " of " + jobName,
-                    showsRun(html, jobName, number));
+            assertFalse(showsRun(html, jobName, number), label + " must not disclose run #" + number + " of " + jobName);
         }
     }
 

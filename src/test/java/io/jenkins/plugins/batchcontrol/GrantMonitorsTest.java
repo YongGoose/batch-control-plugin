@@ -10,14 +10,14 @@ import io.jenkins.plugins.batchcontrol.ops.RoleStrategyNoticeMonitor;
 import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8 administrative monitors. Matrix rows T-08-06 (warning when a user holds direct
@@ -29,13 +29,14 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class GrantMonitorsTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
     }
 
@@ -47,8 +48,8 @@ public class GrantMonitorsTest {
     @Test
     public void t_08_06_configureWithoutGrantMonitorActivation() throws Exception {
         AdministrativeMonitor monitor = AdministrativeMonitor.all().get(ConfigureWithoutGrantMonitor.class);
-        assertNotNull("the configure-without-grant monitor must be registered", monitor);
-        assertTrue("the monitor must be enabled by default", monitor.isEnabled());
+        assertNotNull(monitor, "the configure-without-grant monitor must be registered");
+        assertTrue(monitor.isEnabled(), "the monitor must be enabled by default");
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(true);
@@ -58,8 +59,7 @@ public class GrantMonitorsTest {
         GlobalMatrixAuthorizationStrategy adminOnly = new GlobalMatrixAuthorizationStrategy();
         adminOnly.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(adminOnly));
-        assertFalse("only the admin holds Configure: the monitor must stay quiet",
-                monitor.isActivated());
+        assertFalse(monitor.isActivated(), "only the admin holds Configure: the monitor must stay quiet");
 
         // a non-admin with direct Item/Configure appears -> warning
         GlobalMatrixAuthorizationStrategy withDirectConfigure = new GlobalMatrixAuthorizationStrategy();
@@ -68,33 +68,31 @@ public class GrantMonitorsTest {
         withDirectConfigure.add(Item.READ, PermissionEntry.user("u3"));
         withDirectConfigure.add(Item.CONFIGURE, PermissionEntry.user("u3"));
         j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(withDirectConfigure));
-        assertTrue("a non-admin holding direct Item/Configure while change control is on "
-                + "must activate the warning monitor", monitor.isActivated());
+        assertTrue(monitor.isActivated(), "a non-admin holding direct Item/Configure while change control is on "
+                + "must activate the warning monitor");
 
         // change control off -> the warning is not relevant and must disappear
         cfg.setChangeControlEnabled(false);
         cfg.save();
-        assertFalse("with change control off the monitor must stay quiet", monitor.isActivated());
+        assertFalse(monitor.isActivated(), "with change control off the monitor must stay quiet");
     }
 
     /** T-08-08: Role Strategy as the global authorization strategy activates the unsupported-JIT notice. */
     @Test
     public void t_08_08_roleStrategyNoticeMonitorActivation() throws Exception {
         AdministrativeMonitor monitor = AdministrativeMonitor.all().get(RoleStrategyNoticeMonitor.class);
-        assertNotNull("the Role Strategy notice monitor must be registered", monitor);
+        assertNotNull(monitor, "the Role Strategy notice monitor must be registered");
         assertTrue(monitor.isEnabled());
 
         // matrix strategy selected -> quiet
         GlobalMatrixAuthorizationStrategy matrix = new GlobalMatrixAuthorizationStrategy();
         matrix.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         j.jenkins.setAuthorizationStrategy(matrix);
-        assertFalse("a matrix strategy must not trigger the Role Strategy notice",
-                monitor.isActivated());
+        assertFalse(monitor.isActivated(), "a matrix strategy must not trigger the Role Strategy notice");
 
         // Role Strategy selected -> the JIT-unsupported notice must show
         j.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy());
-        assertTrue("selecting Role Strategy as the global strategy must activate the notice "
-                + "(JIT change control is unsupported there, ARCHITECTURE section 7)",
-                monitor.isActivated());
+        assertTrue(monitor.isActivated(), "selecting Role Strategy as the global strategy must activate the notice "
+                + "(JIT change control is unsupported there, ARCHITECTURE section 7)");
     }
 }

@@ -32,16 +32,16 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8, the human-facing half of a change window: "승인되면 그 시간 동안 본인 계정으로 직접
@@ -62,19 +62,20 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class GrantConfigureAccessTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T00:00:00Z");
     private static final int WINDOW_MINUTES = 30;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject jobX; // the grant's scope
     private FreeStyleProject jobY; // outside the grant's scope
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
         GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
@@ -103,7 +104,7 @@ public class GrantConfigureAccessTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -115,23 +116,20 @@ public class GrantConfigureAccessTest {
     @Test
     public void t_08_14_configureScreenOpensInsideWindow() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("before the grant the configure screen must be denied (Item/Read only)",
-                403, status(get(wc, jobX.getUrl() + "configure")));
+        assertEquals(403, status(get(wc, jobX.getUrl() + "configure")), "before the grant the configure screen must be denied (Item/Read only)");
 
         grantConfigureOnJobX();
 
         Page page = get(wc, jobX.getUrl() + "configure");
-        assertEquals("with an active CONFIGURE grant the requester must be able to OPEN the "
-                + "configure screen of the scoped job", 200, status(page));
-        assertTrue("the configure screen must be an HTML page, got " + page.getClass().getSimpleName(),
-                page instanceof HtmlPage);
+        assertEquals(200, status(page), "with an active CONFIGURE grant the requester must be able to OPEN the "
+                + "configure screen of the scoped job");
+        assertTrue(page instanceof HtmlPage, "the configure screen must be an HTML page, got " + page.getClass().getSimpleName());
 
         HtmlPage html = (HtmlPage) page;
         HtmlForm configForm = configForm(html);
-        assertNotNull("the configure screen must render the item config form (action configSubmit); "
-                + "forms on the page: " + formActions(html), configForm);
-        assertNotNull("the config form must carry the job's own fields",
-                configForm.getTextAreaByName("description"));
+        assertNotNull(configForm, "the configure screen must render the item config form (action configSubmit); "
+                + "forms on the page: " + formActions(html));
+        assertNotNull(configForm.getTextAreaByName("description"), "the config form must carry the job's own fields");
     }
 
     /**
@@ -141,17 +139,14 @@ public class GrantConfigureAccessTest {
     @Test
     public void t_08_15_configXmlIsReadableInsideWindow() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("before the grant the config XML must be denied (Item/Read only)",
-                403, status(get(wc, jobX.getUrl() + "config.xml")));
+        assertEquals(403, status(get(wc, jobX.getUrl() + "config.xml")), "before the grant the config XML must be denied (Item/Read only)");
 
         grantConfigureOnJobX();
 
         Page page = get(wc, jobX.getUrl() + "config.xml");
-        assertEquals("with an active CONFIGURE grant the requester must be able to READ config.xml",
-                200, status(page));
+        assertEquals(200, status(page), "with an active CONFIGURE grant the requester must be able to READ config.xml");
         String body = page.getWebResponse().getContentAsString();
-        assertTrue("the response must be the job's configuration XML, got: " + excerpt(body),
-                body.contains("<project") && body.contains("base-x"));
+        assertTrue(body.contains("<project") && body.contains("base-x"), "the response must be the job's configuration XML, got: " + excerpt(body));
     }
 
     /**
@@ -162,24 +157,20 @@ public class GrantConfigureAccessTest {
      */
     @Test
     public void t_08_16_grantReportsPermissionsImpliedByConfigure() throws Exception {
-        assertFalse("before the grant u1 must not hold EXTENDED_READ",
-                hasPermissionAs("u1", jobX, Item.EXTENDED_READ));
+        assertFalse(hasPermissionAs("u1", jobX, Item.EXTENDED_READ), "before the grant u1 must not hold EXTENDED_READ");
 
         // Control: core really does derive EXTENDED_READ from a plain Item/Configure. If this
         // fixture assertion ever fails, this row can no longer measure anything and says so
         // loudly instead of passing silently.
-        assertTrue("fixture: a holder of a direct Item/Configure must also hold EXTENDED_READ "
-                + "(core treats it as implied by CONFIGURE)",
-                hasPermissionAs("c1", jobX, Item.EXTENDED_READ));
+        assertTrue(hasPermissionAs("c1", jobX, Item.EXTENDED_READ), "fixture: a holder of a direct Item/Configure must also hold EXTENDED_READ "
+                + "(core treats it as implied by CONFIGURE)");
 
         grantConfigureOnJobX();
 
-        assertTrue("an active CONFIGURE grant must confer Item/Configure on the scoped job",
-                hasPermissionAs("u1", jobX, Item.CONFIGURE));
-        assertTrue("an active CONFIGURE grant must also report Item/EXTENDED_READ, which core "
+        assertTrue(hasPermissionAs("u1", jobX, Item.CONFIGURE), "an active CONFIGURE grant must confer Item/Configure on the scoped job");
+        assertTrue(hasPermissionAs("u1", jobX, Item.EXTENDED_READ), "an active CONFIGURE grant must also report Item/EXTENDED_READ, which core "
                 + "leaves disabled and treats as implied by Item/CONFIGURE — without it the "
-                + "requester cannot open or read the configuration they are allowed to save",
-                hasPermissionAs("u1", jobX, Item.EXTENDED_READ));
+                + "requester cannot open or read the configuration they are allowed to save");
     }
 
     /**
@@ -192,23 +183,18 @@ public class GrantConfigureAccessTest {
         grantConfigureOnJobX();
 
         JenkinsRule.WebClient inside = webClient().login("u1");
-        assertEquals("fixture: the window must be open before it is closed",
-                200, status(get(inside, jobX.getUrl() + "configure")));
+        assertEquals(200, status(get(inside, jobX.getUrl() + "configure")), "fixture: the window must be open before it is closed");
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(WINDOW_MINUTES + 1)), ZoneOffset.UTC));
 
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("past the expiry the configure screen must be denied again",
-                403, status(get(wc, jobX.getUrl() + "configure")));
-        assertEquals("past the expiry config.xml must be denied again",
-                403, status(get(wc, jobX.getUrl() + "config.xml")));
-        assertFalse("past the expiry Item/EXTENDED_READ must be false again (no permanent leak "
-                + "through the implication handling)",
-                hasPermissionAs("u1", jobX, Item.EXTENDED_READ));
-        assertFalse("past the expiry Item/Configure must be false again",
-                hasPermissionAs("u1", jobX, Item.CONFIGURE));
+        assertEquals(403, status(get(wc, jobX.getUrl() + "configure")), "past the expiry the configure screen must be denied again");
+        assertEquals(403, status(get(wc, jobX.getUrl() + "config.xml")), "past the expiry config.xml must be denied again");
+        assertFalse(hasPermissionAs("u1", jobX, Item.EXTENDED_READ), "past the expiry Item/EXTENDED_READ must be false again (no permanent leak "
+                + "through the implication handling)");
+        assertFalse(hasPermissionAs("u1", jobX, Item.CONFIGURE), "past the expiry Item/Configure must be false again");
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
-        assertEquals("the job must be untouched", "base-x", jobX.getDescription());
+        assertEquals("base-x", jobX.getDescription(), "the job must be untouched");
     }
 
     /**
@@ -223,26 +209,20 @@ public class GrantConfigureAccessTest {
         JenkinsRule.WebClient wc = webClient().login("u1");
 
         // scope boundary: the grant names batch-x only
-        assertEquals("a JOB-scoped grant must not open another job's configure screen",
-                403, status(get(wc, jobY.getUrl() + "configure")));
-        assertEquals("a JOB-scoped grant must not open another job's config XML",
-                403, status(get(wc, jobY.getUrl() + "config.xml")));
-        assertFalse("EXTENDED_READ must not leak to a job outside the scope",
-                hasPermissionAs("u1", jobY, Item.EXTENDED_READ));
-        assertFalse("Item/Configure must not leak to a job outside the scope",
-                hasPermissionAs("u1", jobY, Item.CONFIGURE));
+        assertEquals(403, status(get(wc, jobY.getUrl() + "configure")), "a JOB-scoped grant must not open another job's configure screen");
+        assertEquals(403, status(get(wc, jobY.getUrl() + "config.xml")), "a JOB-scoped grant must not open another job's config XML");
+        assertFalse(hasPermissionAs("u1", jobY, Item.EXTENDED_READ), "EXTENDED_READ must not leak to a job outside the scope");
+        assertFalse(hasPermissionAs("u1", jobY, Item.CONFIGURE), "Item/Configure must not leak to a job outside the scope");
 
         // action boundary: the grant carries CONFIGURE only
-        assertFalse("a CONFIGURE-only grant must not report Item/Delete",
-                hasPermissionAs("u1", jobX, Item.DELETE));
+        assertFalse(hasPermissionAs("u1", jobX, Item.DELETE), "a CONFIGURE-only grant must not report Item/Delete");
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.DELETE));
         Page deletePage = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl(jobX.getUrl() + "doDelete"), HttpMethod.POST));
-        assertTrue("a CONFIGURE-only grant must not open the delete path, got HTTP "
-                + status(deletePage), status(deletePage) >= 400);
-        assertNotNull("the job must survive the denied delete",
-                j.jenkins.getItemByFullName("batch-x"));
-        assertEquals("job Y must be untouched", "base-y", jobY.getDescription());
+        assertTrue(status(deletePage) >= 400, "a CONFIGURE-only grant must not open the delete path, got HTTP "
+                + status(deletePage));
+        assertNotNull(j.jenkins.getItemByFullName("batch-x"), "the job must survive the denied delete");
+        assertEquals("base-y", jobY.getDescription(), "job Y must be untouched");
     }
 
     /**
@@ -256,14 +236,12 @@ public class GrantConfigureAccessTest {
         JenkinsRule.WebClient wc = webClient().login("c1");
 
         Page screen = get(wc, jobX.getUrl() + "configure");
-        assertEquals("a direct Item/Configure holder must be able to open the configure screen",
-                200, status(screen));
-        assertNotNull("the configure screen must render the item config form; forms on the page: "
-                + formActions((HtmlPage) screen), configForm((HtmlPage) screen));
+        assertEquals(200, status(screen), "a direct Item/Configure holder must be able to open the configure screen");
+        assertNotNull(configForm((HtmlPage) screen), "the configure screen must render the item config form; forms on the page: "
+                + formActions((HtmlPage) screen));
 
         Page xml = get(wc, jobX.getUrl() + "config.xml");
-        assertEquals("a direct Item/Configure holder must be able to read config.xml",
-                200, status(xml));
+        assertEquals(200, status(xml), "a direct Item/Configure holder must be able to read config.xml");
         assertTrue(xml.getWebResponse().getContentAsString().contains("base-x"));
     }
 
@@ -295,9 +273,8 @@ public class GrantConfigureAccessTest {
         try (ACLContext ignored = as("a1")) {
             grant = GrantRequestService.get().approve(request.getId(), "ok");
         }
-        assertNotNull("the approval must produce a grant", grant);
-        assertTrue("fixture: the grant must be active for CONFIGURE on the scoped job",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
+        assertNotNull(grant, "the approval must produce a grant");
+        assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "fixture: the grant must be active for CONFIGURE on the scoped job");
         return grant;
     }
 

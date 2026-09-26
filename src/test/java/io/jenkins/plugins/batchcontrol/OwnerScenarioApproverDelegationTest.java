@@ -15,16 +15,16 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Owner scenario S-6 — "when the designated approver is away, can the request be handed to
@@ -47,6 +47,7 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class OwnerScenarioApproverDelegationTest {
 
     private static final String REQUESTER = "u1";
@@ -55,13 +56,13 @@ public class OwnerScenarioApproverDelegationTest {
     private static final String UNRELATED_APPROVER = "a3";
     private static final String ADMIN = "admin";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -104,17 +105,13 @@ public class OwnerScenarioApproverDelegationTest {
                 () -> approveAs(STAND_IN_APPROVER, request.getId(), "a1 is away, taking over"));
 
         RunRequest afterRefusals = RunRequestService.get().load(request.getId());
-        assertEquals("the request must stay PENDING after every undesignated attempt",
-                RequestStatus.PENDING, afterRefusals.getStatus());
-        assertEquals("the designated approver must be unchanged",
-                DESIGNATED_APPROVER, afterRefusals.getApprover());
-        assertTrue("no approver change may be recorded from a refused decision",
-                afterRefusals.getApproverChanges() == null
-                        || afterRefusals.getApproverChanges().isEmpty());
-        assertEquals("the queue must be empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(RequestStatus.PENDING, afterRefusals.getStatus(), "the request must stay PENDING after every undesignated attempt");
+        assertEquals(DESIGNATED_APPROVER, afterRefusals.getApprover(), "the designated approver must be unchanged");
+        assertTrue(afterRefusals.getApproverChanges() == null
+                        || afterRefusals.getApproverChanges().isEmpty(), "no approver change may be recorded from a refused decision");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must be empty");
         j.waitUntilNoActivity();
-        assertTrue("no build may run from an undesignated approver's decision",
-                job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "no build may run from an undesignated approver's decision");
         assertEquals(1, job.getNextBuildNumber());
 
         // fixture control: the hand-over the owner asked about does work (SPEC item 3)
@@ -124,17 +121,16 @@ public class OwnerScenarioApproverDelegationTest {
         List<RunRequest.ApproverChange> changes =
                 RunRequestService.get().load(request.getId()).getApproverChanges();
         assertNotNull(changes);
-        assertEquals("the hand-over must be recorded once", 1, changes.size());
+        assertEquals(1, changes.size(), "the hand-over must be recorded once");
         assertEquals(DESIGNATED_APPROVER, changes.get(0).getFrom());
         assertEquals(STAND_IN_APPROVER, changes.get(0).getTo());
         assertEquals(REQUESTER, changes.get(0).getBy());
 
         approveAs(STAND_IN_APPROVER, request.getId(), "covering for a1");
         RequestStatus decided = RunRequestService.get().load(request.getId()).getStatus();
-        assertTrue("the newly designated approver's decision must go through",
-                decided == RequestStatus.APPROVED || decided == RequestStatus.EXECUTED);
+        assertTrue(decided == RequestStatus.APPROVED || decided == RequestStatus.EXECUTED, "the newly designated approver's decision must go through");
         j.waitUntilNoActivity();
-        assertEquals("the approved run must execute exactly once", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approved run must execute exactly once");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -156,15 +152,15 @@ public class OwnerScenarioApproverDelegationTest {
     }
 
     /** Authorization/state refusals: the exact runtime exception type is not pinned by SPEC. */
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) { // IllegalArgumentException, hudson.model.Failure, ...
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }

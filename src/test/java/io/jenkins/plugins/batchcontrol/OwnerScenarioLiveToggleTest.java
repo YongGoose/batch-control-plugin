@@ -31,19 +31,19 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestExtension;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Owner scenarios S-3 and S-4 — turning a control on while work is already running, and the
@@ -68,16 +68,17 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class OwnerScenarioLiveToggleTest {
 
     private static final String ADMIN = "admin";
     private static final String REQUESTER = "u1";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -110,30 +111,28 @@ public class OwnerScenarioLiveToggleTest {
         try (ACLContext ignored = as(REQUESTER)) {
             running = job.scheduleBuild2(0, new Cause.UserIdCause());
         }
-        assertNotNull("the manual run must be allowed while the control is still off", running);
+        assertNotNull(running, "the manual run must be allowed while the control is still off");
         GatedBuilder.awaitStarted(gate);
         FreeStyleBuild inFlight = job.getBuildByNumber(1);
         assertNotNull(inFlight);
-        assertTrue("test precondition: build #1 must be in flight", inFlight.isBuilding());
+        assertTrue(inFlight.isBuilding(), "test precondition: build #1 must be in flight");
 
         // the administrator turns run control on for this job, mid-build
         setBatchControl(job, new BatchControlJobProperty(true));
-        assertTrue("turning the control on must not abort the running build", inFlight.isBuilding());
+        assertTrue(inFlight.isBuilding(), "turning the control on must not abort the running build");
 
         GatedBuilder.release(gate);
         j.assertBuildStatusSuccess(running); // the in-flight build completes normally
         RunRecord record = record("live-x#1");
-        assertNotNull("the completed run must still be recorded", record);
+        assertNotNull(record, "the completed run must still be recorded");
         assertEquals("SUCCESS", record.getResult());
 
         // from now on an unapproved manual run is blocked
         Page blocked = postBuild(REQUESTER, job);
-        assertTrue("the next unapproved manual run must be refused, got HTTP "
-                        + blocked.getWebResponse().getStatusCode(),
-                blocked.getWebResponse().getStatusCode() >= 400);
+        assertTrue(blocked.getWebResponse().getStatusCode() >= 400, "the next unapproved manual run must be refused, got HTTP "
+                        + blocked.getWebResponse().getStatusCode());
         assertBlocked(job, 2);
-        assertEquals("no build may have been added after the control was switched on",
-                1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "no build may have been added after the control was switched on");
     }
 
     /**
@@ -153,24 +152,23 @@ public class OwnerScenarioLiveToggleTest {
         job.getBuildersList().add(new GatedBuilder(gate));
 
         Future<FreeStyleBuild> running = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNotNull("a timer cause passes by default, so the scheduled run must start", running);
+        assertNotNull(running, "a timer cause passes by default, so the scheduled run must start");
         GatedBuilder.awaitStarted(gate);
         FreeStyleBuild inFlight = job.getBuildByNumber(1);
         assertNotNull(inFlight);
-        assertTrue("test precondition: build #1 must be in flight", inFlight.isBuilding());
+        assertTrue(inFlight.isBuilding(), "test precondition: build #1 must be in flight");
 
         // the administrator tightens the timer policy while the batch is running
         property.setBlockTimer(true);
         job.save();
-        assertTrue("tightening the timer policy must not abort the running build",
-                inFlight.isBuilding());
+        assertTrue(inFlight.isBuilding(), "tightening the timer policy must not abort the running build");
 
         GatedBuilder.release(gate);
         j.assertBuildStatusSuccess(running);
 
         // the next cron firing is refused
         Future<FreeStyleBuild> refused = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNull("after blockTimer=true the next timer firing must be refused", refused);
+        assertNull(refused, "after blockTimer=true the next timer firing must be refused");
         assertBlocked(job, 2);
         assertEquals(1, job.getBuilds().size());
     }
@@ -188,29 +186,27 @@ public class OwnerScenarioLiveToggleTest {
 
         for (int number = 1; number <= 3; number++) {
             Page response = postBuild(REQUESTER, job);
-            assertTrue("run #" + number + " must not be blocked while approvalRequired is off, got HTTP "
-                            + response.getWebResponse().getStatusCode(),
-                    response.getWebResponse().getStatusCode() < 400);
+            assertTrue(response.getWebResponse().getStatusCode() < 400, "run #" + number + " must not be blocked while approvalRequired is off, got HTTP "
+                            + response.getWebResponse().getStatusCode());
             j.waitUntilNoActivity();
 
             FreeStyleBuild build = job.getBuildByNumber(number);
-            assertNotNull("run #" + number + " must have executed", build);
+            assertNotNull(build, "run #" + number + " must have executed");
             j.assertBuildStatusSuccess(build);
             RunRecord record = record("repeat-x#" + number);
-            assertNotNull("run #" + number + " must be recorded", record);
+            assertNotNull(record, "run #" + number + " must be recorded");
             assertEquals("SUCCESS", record.getResult());
         }
-        assertEquals("all three consecutive runs must exist", 3, job.getBuilds().size());
+        assertEquals(3, job.getBuilds().size(), "all three consecutive runs must exist");
 
         // the administrator switches the control on
         setBatchControl(job, new BatchControlJobProperty(true));
 
         Page blocked = postBuild(REQUESTER, job);
-        assertTrue("the first run after the switch must be blocked, got HTTP "
-                        + blocked.getWebResponse().getStatusCode(),
-                blocked.getWebResponse().getStatusCode() >= 400);
+        assertTrue(blocked.getWebResponse().getStatusCode() >= 400, "the first run after the switch must be blocked, got HTTP "
+                        + blocked.getWebResponse().getStatusCode());
         assertBlocked(job, 4);
-        assertEquals("no fourth build may exist", 3, job.getBuilds().size());
+        assertEquals(3, job.getBuilds().size(), "no fourth build may exist");
     }
 
     /**
@@ -227,11 +223,11 @@ public class OwnerScenarioLiveToggleTest {
 
         for (int number = 1; number <= 3; number++) {
             Future<FreeStyleBuild> firing = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-            assertNotNull("timer firing #" + number + " must pass while blockTimer is off", firing);
+            assertNotNull(firing, "timer firing #" + number + " must pass while blockTimer is off");
             j.assertBuildStatusSuccess(firing);
             j.waitUntilNoActivity();
             RunRecord record = record("repeat-timer-x#" + number);
-            assertNotNull("timer run #" + number + " must be recorded", record);
+            assertNotNull(record, "timer run #" + number + " must be recorded");
             assertEquals("SUCCESS", record.getResult());
         }
         assertEquals(3, job.getBuilds().size());
@@ -241,7 +237,7 @@ public class OwnerScenarioLiveToggleTest {
         job.save();
 
         Future<FreeStyleBuild> refused = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNull("the first timer firing after the switch must be refused", refused);
+        assertNull(refused, "the first timer firing after the switch must be refused");
         assertBlocked(job, 4);
         assertEquals(3, job.getBuilds().size());
     }
@@ -267,11 +263,10 @@ public class OwnerScenarioLiveToggleTest {
 
     /** Matrix common blocking baseline. */
     private void assertBlocked(Job<?, ?> target, int nextBuildNumberBefore) throws Exception {
-        assertEquals("the queue must stay empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
         j.waitUntilNoActivity();
-        assertEquals("nextBuildNumber must not move", nextBuildNumberBefore, target.getNextBuildNumber());
-        assertEquals("the queue must still be empty after settling",
-                0, j.jenkins.getQueue().getItems().length);
+        assertEquals(nextBuildNumberBefore, target.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must still be empty after settling");
     }
 
     /**
@@ -298,8 +293,7 @@ public class OwnerScenarioLiveToggleTest {
         }
 
         static void awaitStarted(String gateId) throws InterruptedException {
-            assertTrue("the gated build step must start within 60s",
-                    STARTED.get(gateId).await(60, TimeUnit.SECONDS));
+            assertTrue(STARTED.get(gateId).await(60, TimeUnit.SECONDS), "the gated build step must start within 60s");
         }
 
         static void release(String gateId) {

@@ -40,22 +40,22 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Phase 4 security-fix regressions, derived from docs/reports/security-01.md and
@@ -77,15 +77,16 @@ import static org.junit.Assert.assertTrue;
  * Written from the security report, DECISIONS P-09 and the coordinator contract only
  * (no src/main knowledge).
  */
+@WithJenkins
 public class SecurityRegressionTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(true);
@@ -122,23 +123,18 @@ public class SecurityRegressionTest {
         JenkinsRule.WebClient u2 = webClient("u2");
         WebResponse u2List = get(u2, "batch-control/requests/");
         assertEquals(200, u2List.getStatusCode());
-        assertFalse("the list must silently filter a request whose job u2 cannot read (S-01)",
-                u2List.getContentAsString().contains(id));
-        assertFalse("no reason text of a non-visible request may leak into u2's list (S-01)",
-                u2List.getContentAsString().contains("p09-confidential-reason"));
-        assertEquals("a non-visible detail URL must answer 404, same as nonexistent (P-09)",
-                404, get(u2, "batch-control/requests/" + id + "/").getStatusCode());
+        assertFalse(u2List.getContentAsString().contains(id), "the list must silently filter a request whose job u2 cannot read (S-01)");
+        assertFalse(u2List.getContentAsString().contains("p09-confidential-reason"), "no reason text of a non-visible request may leak into u2's list (S-01)");
+        assertEquals(404, get(u2, "batch-control/requests/" + id + "/").getStatusCode(), "a non-visible detail URL must answer 404, same as nonexistent (P-09)");
 
         // u3: Request holder WITH Item/Read on the job -> visible (P-09)
         JenkinsRule.WebClient u3 = webClient("u3");
-        assertTrue("Item/Read on the target job must make the request visible (P-09)",
-                get(u3, "batch-control/requests/").getContentAsString().contains(id));
+        assertTrue(get(u3, "batch-control/requests/").getContentAsString().contains(id), "Item/Read on the target job must make the request visible (P-09)");
         assertEquals(200, get(u3, "batch-control/requests/" + id + "/").getStatusCode());
 
         // designated approver -> visible even without Item/Read (P-09)
         JenkinsRule.WebClient a1 = webClient("a1");
-        assertTrue("the designated approver must see the request (P-09)",
-                get(a1, "batch-control/requests/").getContentAsString().contains(id));
+        assertTrue(get(a1, "batch-control/requests/").getContentAsString().contains(id), "the designated approver must see the request (P-09)");
         assertEquals(200, get(a1, "batch-control/requests/" + id + "/").getStatusCode());
 
         // MANAGE holder -> visible (P-09)
@@ -174,28 +170,25 @@ public class SecurityRegressionTest {
         String g2Page = get(g2, "batch-control/grants/").getContentAsString();
         assertEquals(200, get(g2, "batch-control/grants/").getStatusCode());
         for (String foreign : new String[] {r1.getId(), r3.getId(), gr1.getId(), gr3.getId()}) {
-            assertFalse("g2 must not see the foreign id " + foreign + " (S-01)",
-                    g2Page.contains(foreign));
+            assertFalse(g2Page.contains(foreign), "g2 must not see the foreign id " + foreign + " (S-01)");
         }
-        assertEquals("a foreign grant-request detail URL must answer 404 (P-09)",
-                404, get(g2, "batch-control/grants/" + r1.getId() + "/").getStatusCode());
+        assertEquals(404, get(g2, "batch-control/grants/" + r1.getId() + "/").getStatusCode(), "a foreign grant-request detail URL must answer 404 (P-09)");
 
         // g1: own request and own active grant only
         String g1Page = get(webClient("g1"), "batch-control/grants/").getContentAsString();
-        assertTrue("g1 must see their own grant request", g1Page.contains(r1.getId()));
-        assertFalse("g1 must not see g3's grant request (S-01)", g1Page.contains(r3.getId()));
-        assertFalse("the active-grant table must show own grants only for non-MANAGE (P-09)",
-                g1Page.contains(gr3.getId()));
+        assertTrue(g1Page.contains(r1.getId()), "g1 must see their own grant request");
+        assertFalse(g1Page.contains(r3.getId()), "g1 must not see g3's grant request (S-01)");
+        assertFalse(g1Page.contains(gr3.getId()), "the active-grant table must show own grants only for non-MANAGE (P-09)");
 
         // the designated approver sees both requests (assigned queue)
         String a1Page = get(webClient("a1"), "batch-control/grants/").getContentAsString();
-        assertTrue("the designated approver must see g1's request", a1Page.contains(r1.getId()));
-        assertTrue("the designated approver must see g3's request", a1Page.contains(r3.getId()));
+        assertTrue(a1Page.contains(r1.getId()), "the designated approver must see g1's request");
+        assertTrue(a1Page.contains(r3.getId()), "the designated approver must see g3's request");
 
         // MANAGE sees everything, active grants included
         String m1Page = get(webClient("m1"), "batch-control/grants/").getContentAsString();
         for (String anyId : new String[] {r1.getId(), r3.getId(), gr1.getId(), gr3.getId()}) {
-            assertTrue("MANAGE must see " + anyId, m1Page.contains(anyId));
+            assertTrue(m1Page.contains(anyId), "MANAGE must see " + anyId);
         }
     }
 
@@ -216,7 +209,7 @@ public class SecurityRegressionTest {
         Incident incident = IncidentService.get().list(YearMonth.now()).stream()
                 .filter(i -> "inc-job#1".equals(i.getRunId()))
                 .findFirst().orElse(null);
-        assertNotNull("fixture: the FAILURE must have opened an incident", incident);
+        assertNotNull(incident, "fixture: the FAILURE must have opened an incident");
         int requestsBefore = RunRequestService.get().list().size();
 
         JenkinsRule.WebClient vr = webClient("vr");
@@ -224,14 +217,11 @@ public class SecurityRegressionTest {
                 wcCrumbed(vr, "batch-control/incidents/" + incident.getId() + "/rerun"),
                 HttpMethod.POST);
         rerun.setRequestParameters(Collections.singletonList(new NameValuePair("approver", "a1")));
-        assertEquals("rerun without Item/Read on the incident's job must be 403 (S-06)",
-                403, vr.getPage(rerun).getWebResponse().getStatusCode());
+        assertEquals(403, vr.getPage(rerun).getWebResponse().getStatusCode(), "rerun without Item/Read on the incident's job must be 403 (S-06)");
 
         Incident reloaded = IncidentService.get().load(incident.getId());
-        assertTrue("no rerun request may have been linked to the incident",
-                reloaded.getRerunRequestIds() == null || reloaded.getRerunRequestIds().isEmpty());
-        assertEquals("no run request may have been created by the rejected rerun",
-                requestsBefore, RunRequestService.get().list().size());
+        assertTrue(reloaded.getRerunRequestIds() == null || reloaded.getRerunRequestIds().isEmpty(), "no rerun request may have been linked to the incident");
+        assertEquals(requestsBefore, RunRequestService.get().list().size(), "no run request may have been created by the rejected rerun");
     }
 
     /** T-SEC-11 (S-07): the per-job request form requires BatchControl/Request. */
@@ -245,10 +235,8 @@ public class SecurityRegressionTest {
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST)
                         .everywhere().to("u1"));
 
-        assertEquals("an Item/Read-only user must get 403 on the request form (S-07)",
-                403, get(webClient("ro"), "job/batch-x/batch-control/").getStatusCode());
-        assertEquals("a Request holder must still reach the form",
-                200, get(webClient("u1"), "job/batch-x/batch-control/").getStatusCode());
+        assertEquals(403, get(webClient("ro"), "job/batch-x/batch-control/").getStatusCode(), "an Item/Read-only user must get 403 on the request form (S-07)");
+        assertEquals(200, get(webClient("u1"), "job/batch-x/batch-control/").getStatusCode(), "a Request holder must still reach the form");
     }
 
     /**
@@ -279,16 +267,13 @@ public class SecurityRegressionTest {
                 new NameValuePair("reason", "direct submit without the Request permission"),
                 new NameValuePair("approver", "a1")));
 
-        assertEquals("a POST to the per-job submit endpoint without BatchControl/Request must be 403",
-                403, u1.getPage(submit).getWebResponse().getStatusCode());
+        assertEquals(403, u1.getPage(submit).getWebResponse().getStatusCode(), "a POST to the per-job submit endpoint without BatchControl/Request must be 403");
 
-        assertEquals("the rejected submit must not have created a run request",
-                requestsBefore, RunRequestService.get().list().size());
+        assertEquals(requestsBefore, RunRequestService.get().list().size(), "the rejected submit must not have created a run request");
         // the denial must not degrade into a silent no-op that still runs the job
         j.waitUntilNoActivity();
-        assertTrue("no build may have been started by the rejected submit", job.getBuilds().isEmpty());
-        assertEquals("the job's next build number must be unchanged",
-                nextBuildNumberBefore, job.getNextBuildNumber());
+        assertTrue(job.getBuilds().isEmpty(), "no build may have been started by the rejected submit");
+        assertEquals(nextBuildNumberBefore, job.getNextBuildNumber(), "the job's next build number must be unchanged");
     }
 
     /** T-SEC-12 (S-03): an empty scope full name is rejected for both JOB and FOLDER types. */
@@ -313,8 +298,7 @@ public class SecurityRegressionTest {
                         }
                     });
         }
-        assertTrue("no grant request may be stored after the rejected creations",
-                GrantRequestService.get().list().isEmpty());
+        assertTrue(GrantRequestService.get().list().isEmpty(), "no grant request may be stored after the rejected creations");
     }
 
     /** T-SEC-13 (S-11): the wrapper strategy refuses another wrapper as its delegate. */
@@ -322,9 +306,7 @@ public class SecurityRegressionTest {
     public void s_11_selfNestingWrapperStrategyIsRejected() {
         BatchControlAuthorizationStrategy inner =
                 new BatchControlAuthorizationStrategy(new MockAuthorizationStrategy());
-        assertThrows("nesting the wrapper inside itself must be rejected at construction (S-11)",
-                IllegalArgumentException.class,
-                () -> new BatchControlAuthorizationStrategy(inner));
+        assertThrows(IllegalArgumentException.class, () -> new BatchControlAuthorizationStrategy(inner), "nesting the wrapper inside itself must be rejected at construction (S-11)");
     }
 
     /**
@@ -361,40 +343,37 @@ public class SecurityRegressionTest {
         int beforeFirst = realm.lookups.get();
         boolean first = monitor.isActivated();
         int afterFirst = realm.lookups.get();
-        assertTrue("a non-admin with direct Item/Configure must activate the monitor", first);
-        assertTrue("fixture: the activation scan must consult the security realm at least once, "
+        assertTrue(first, "a non-admin with direct Item/Configure must activate the monitor");
+        assertTrue(afterFirst > beforeFirst, "fixture: the activation scan must consult the security realm at least once, "
                 + "otherwise this test cannot measure the S-05 cache (observed "
-                + (afterFirst - beforeFirst) + " lookups)", afterFirst > beforeFirst);
+                + (afterFirst - beforeFirst) + " lookups)");
 
         // 2. second render, nothing changed: same verdict AND no new realm lookup (cache hit).
         boolean second = monitor.isActivated();
-        assertEquals("back-to-back isActivated() calls must agree (S-05)", first, second);
-        assertEquals("the second isActivated() must be served from the cache: a /manage render "
+        assertEquals(first, second, "back-to-back isActivated() calls must agree (S-05)");
+        assertEquals(afterFirst, realm.lookups.get(), "the second isActivated() must be served from the cache: a /manage render "
                 + "must not repeat the security-realm lookups (S-05 — this is the LDAP page-load "
-                + "DoS the fix removed)", afterFirst, realm.lookups.get());
+                + "DoS the fix removed)");
 
         // 3. turning change control off must invalidate, and answer false.
         cfg.setChangeControlEnabled(false);
         cfg.save();
-        assertFalse("the cached activation must be invalidated by the change-control toggle "
-                + "(S-05)", monitor.isActivated());
+        assertFalse(monitor.isActivated(), "the cached activation must be invalidated by the change-control toggle "
+                + "(S-05)");
 
         // 4. turning it back on must invalidate again: the next call re-scans (new lookups)
         //    and the verdict is still correct.
         cfg.setChangeControlEnabled(true);
         cfg.save();
         int beforeReactivation = realm.lookups.get();
-        assertTrue("re-enabling change control must promptly re-activate the monitor (S-05)",
-                monitor.isActivated());
-        assertTrue("after the toggle the cache must have been invalidated, so the realm scan must "
-                + "run again instead of answering from the stale snapshot (S-05)",
-                realm.lookups.get() > beforeReactivation);
+        assertTrue(monitor.isActivated(), "re-enabling change control must promptly re-activate the monitor (S-05)");
+        assertTrue(realm.lookups.get() > beforeReactivation, "after the toggle the cache must have been invalidated, so the realm scan must "
+                + "run again instead of answering from the stale snapshot (S-05)");
 
         // 5. and the freshly recomputed result is cached again.
         int afterReactivation = realm.lookups.get();
         assertTrue(monitor.isActivated());
-        assertEquals("the recomputed result must be cached again (S-05)",
-                afterReactivation, realm.lookups.get());
+        assertEquals(afterReactivation, realm.lookups.get(), "the recomputed result must be cached again (S-05)");
     }
 
     /**
@@ -422,8 +401,7 @@ public class SecurityRegressionTest {
                     Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE, GrantAction.DELETE),
                     30, "persisted before the empty-scope rule existed", "g1", "a1");
             FileStore.get().saveGrantRequest(stored);
-            assertEquals("fixture: the request must really be in the store as PENDING",
-                    RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus());
+            assertEquals(RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus(), "fixture: the request must really be in the store as PENDING");
 
             assertRejectedAsInvalid("approving a stored " + type + " request whose scope name is "
                     + "empty must be refused (P-10: no instance-wide grants)", () -> {
@@ -432,16 +410,13 @@ public class SecurityRegressionTest {
                         }
                     });
 
-            assertEquals("the refused approval must leave the request PENDING",
-                    RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus());
-            assertTrue("no active grant may exist after the refused approval",
-                    GrantService.get().listActive().isEmpty());
+            assertEquals(RequestStatus.PENDING, GrantRequestService.get().load(stored.getId()).getStatus(), "the refused approval must leave the request PENDING");
+            assertTrue(GrantService.get().listActive().isEmpty(), "no active grant may exist after the refused approval");
             for (String anyJob : new String[] {"batch-x", "team/other"}) {
                 for (hudson.security.Permission action : new hudson.security.Permission[] {
                         Item.CREATE, Item.CONFIGURE, Item.DELETE}) {
-                    assertFalse("a " + type + ":\"\" request must never confer " + action.getId()
-                            + " on " + anyJob,
-                            GrantService.get().hasActiveGrant("g1", anyJob, action));
+                    assertFalse(GrantService.get().hasActiveGrant("g1", anyJob, action), "a " + type + ":\"\" request must never confer " + action.getId()
+                            + " on " + anyJob);
                 }
             }
         }
@@ -475,11 +450,9 @@ public class SecurityRegressionTest {
                     }
                 });
 
-        assertEquals("the refused approval must leave the request PENDING",
-                RequestStatus.PENDING, GrantRequestService.get().load(request.getId()).getStatus());
-        assertFalse("no grant may have been created by the refused approval",
-                GrantService.get().hasActiveGrant("g1", "batch-x", Item.CONFIGURE));
-        assertTrue("no active grant may exist at all", GrantService.get().listActive().isEmpty());
+        assertEquals(RequestStatus.PENDING, GrantRequestService.get().load(request.getId()).getStatus(), "the refused approval must leave the request PENDING");
+        assertFalse(GrantService.get().hasActiveGrant("g1", "batch-x", Item.CONFIGURE), "no grant may have been created by the refused approval");
+        assertTrue(GrantService.get().listActive().isEmpty(), "no active grant may exist at all");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -546,16 +519,16 @@ public class SecurityRegressionTest {
         }
     }
 
-    private static void assertRejectedAsInvalid(String message, ThrowingRunnable action) {
+    private static void assertRejectedAsInvalid(String message, Executable action) {
         boolean rejected = false;
         try {
-            action.run();
+            action.execute();
         } catch (IllegalArgumentException | hudson.model.Failure expected) {
             rejected = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - expected IllegalArgumentException or Failure, got "
                     + other, other);
         }
-        assertTrue(message, rejected);
+        assertTrue(rejected, message);
     }
 }

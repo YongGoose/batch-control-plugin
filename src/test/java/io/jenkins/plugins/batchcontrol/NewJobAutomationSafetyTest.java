@@ -24,16 +24,16 @@ import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The safety net of D-31: making every new job approval-required by default must not stop
@@ -58,6 +58,7 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md (items 6, 8, D-31), docs/DECISIONS.md and docs/TEST-MATRIX.md only
  * (no src/main knowledge).
  */
+@WithJenkins
 public class NewJobAutomationSafetyTest {
 
     private static final String MINIMAL_FREESTYLE_XML =
@@ -65,13 +66,13 @@ public class NewJobAutomationSafetyTest {
                     + "<description>generated job under run control</description>"
                     + "<builders/><publishers/><buildWrappers/></project>";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -98,11 +99,10 @@ public class NewJobAutomationSafetyTest {
         // matrix note 4: cron firing is reproduced by scheduling with a TimerTriggerCause
         Future<FreeStyleBuild> firing =
                 generated.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNotNull("SPEC 6: a timer cause must still pass on a newly created controlled job",
-                firing);
+        assertNotNull(firing, "SPEC 6: a timer cause must still pass on a newly created controlled job");
         j.assertBuildStatusSuccess(firing);
         j.waitUntilNoActivity();
-        assertEquals("the timer run must be the job's build #1", 1, generated.getBuilds().size());
+        assertEquals(1, generated.getBuilds().size(), "the timer run must be the job's build #1");
     }
 
     /**
@@ -124,8 +124,7 @@ public class NewJobAutomationSafetyTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild downstream = generated.getBuildByNumber(1);
-        assertNotNull("SPEC 6: an upstream cause must still pass on a newly created controlled job",
-                downstream);
+        assertNotNull(downstream, "SPEC 6: an upstream cause must still pass on a newly created controlled job");
         j.assertBuildStatusSuccess(downstream);
     }
 
@@ -139,11 +138,11 @@ public class NewJobAutomationSafetyTest {
 
         Future<FreeStyleBuild> polling = generated.scheduleBuild2(0,
                 new SCMTrigger.SCMTriggerCause("simulated polling detected changes"));
-        assertNotNull("SPEC 6: an SCM trigger cause must still pass on a newly created "
-                + "controlled job", polling);
+        assertNotNull(polling, "SPEC 6: an SCM trigger cause must still pass on a newly created "
+                + "controlled job");
         j.assertBuildStatusSuccess(polling);
         j.waitUntilNoActivity();
-        assertEquals("the SCM run must be the job's build #1", 1, generated.getBuilds().size());
+        assertEquals(1, generated.getBuilds().size(), "the SCM run must be the job's build #1");
     }
 
     /**
@@ -167,37 +166,32 @@ public class NewJobAutomationSafetyTest {
                 .login("u1");
         Page response = u1.getPage(new WebRequest(
                 u1.createCrumbedUrl(generated.getUrl() + "build"), HttpMethod.POST));
-        assertTrue("D-31: a person pressing Build on a new job must need an approved request, "
-                        + "got HTTP " + response.getWebResponse().getStatusCode(),
-                response.getWebResponse().getStatusCode() >= 400);
-        assertTrue("SPEC 6 forbids a silent failure: the refused POST must explain that an "
-                        + "approval is required",
-                response.getWebResponse().getContentAsString()
-                        .toLowerCase(Locale.ROOT).contains("approval"));
+        assertTrue(response.getWebResponse().getStatusCode() >= 400, "D-31: a person pressing Build on a new job must need an approved request, "
+                        + "got HTTP " + response.getWebResponse().getStatusCode());
+        assertTrue(response.getWebResponse().getContentAsString()
+                        .toLowerCase(Locale.ROOT).contains("approval"), "SPEC 6 forbids a silent failure: the refused POST must explain that an "
+                        + "approval is required");
 
         Failure guidance = null;
         try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
             Future<FreeStyleBuild> admitted = generated.scheduleBuild2(0, new Cause.UserIdCause());
-            assertNull("a user-caused submission must be refused at queue entry", admitted);
+            assertNull(admitted, "a user-caused submission must be refused at queue entry");
         } catch (Failure expectedGuidance) {
             guidance = expectedGuidance;
         }
-        assertNotNull("SPEC 6: a human-originated cause must be refused with guidance, so the "
-                + "queue decision raises Failure rather than dropping the submission silently",
-                guidance);
+        assertNotNull(guidance, "SPEC 6: a human-originated cause must be refused with guidance, so the "
+                + "queue decision raises Failure rather than dropping the submission silently");
         String message = guidance.getMessage();
-        assertNotNull("the guidance Failure must carry a message", message);
-        assertTrue("the guidance must state that an approval is required, got: " + message,
-                message.toLowerCase(Locale.ROOT).contains("approval"));
-        assertTrue("the guidance must point at the job's own run-request screen, got: " + message,
-                message.contains(generated.getUrl() + "batch-control"));
+        assertNotNull(message, "the guidance Failure must carry a message");
+        assertTrue(message.toLowerCase(Locale.ROOT).contains("approval"), "the guidance must state that an approval is required, got: " + message);
+        assertTrue(message.contains(generated.getUrl() + "batch-control"), "the guidance must point at the job's own run-request screen, got: " + message);
 
         // matrix common blocking baseline
-        assertEquals("the queue must stay empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
         j.waitUntilNoActivity();
-        assertEquals("nextBuildNumber must not move", 1, generated.getNextBuildNumber());
-        assertTrue("no build may have run", generated.getBuilds().isEmpty());
-        assertNull("neither human path may leave a build behind", generated.getLastBuild());
+        assertEquals(1, generated.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertTrue(generated.getBuilds().isEmpty(), "no build may have run");
+        assertNull(generated.getLastBuild(), "neither human path may leave a build behind");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -223,10 +217,10 @@ public class NewJobAutomationSafetyTest {
         create.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
         create.setRequestBody(MINIMAL_FREESTYLE_XML);
         int code = admin.getPage(create).getWebResponse().getStatusCode();
-        assertTrue("creating " + name + " must succeed, got HTTP " + code, code < 400);
+        assertTrue(code < 400, "creating " + name + " must succeed, got HTTP " + code);
 
         FreeStyleProject created = j.jenkins.getItemByFullName(name, FreeStyleProject.class);
-        assertNotNull("the job " + name + " must have been created", created);
+        assertNotNull(created, "the job " + name + " must have been created");
 
         BatchControlJobProperty property = created.getProperty(BatchControlJobProperty.class);
         if (property != null && !property.isApprovalRequired()) {
@@ -236,8 +230,7 @@ public class NewJobAutomationSafetyTest {
         if (property == null) {
             created.addProperty(new BatchControlJobProperty(true));
         }
-        assertTrue("fixture: " + name + " must be approval-required before a cause is fired",
-                isApprovalRequired(created));
+        assertTrue(isApprovalRequired(created), "fixture: " + name + " must be approval-required before a cause is fired");
         return created;
     }
 

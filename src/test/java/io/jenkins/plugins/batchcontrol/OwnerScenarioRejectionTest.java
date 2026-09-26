@@ -17,18 +17,18 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import jenkins.model.Jenkins;
 import org.htmlunit.html.HtmlPage;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Owner scenario S-1 — "what happens when a request is rejected".
@@ -46,6 +46,7 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class OwnerScenarioRejectionTest {
 
     private static final String REQUESTER = "u1";
@@ -58,14 +59,14 @@ public class OwnerScenarioRejectionTest {
     private static final String REASON = "month-end batch, closing figures";
     private static final String REJECTION_REASON = "rejected: month-end freeze, resubmit after 2026-10-02";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -99,25 +100,19 @@ public class OwnerScenarioRejectionTest {
         rejectAs(APPROVER, request.getId(), REJECTION_REASON);
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("the rejected request must end in REJECTED",
-                RequestStatus.REJECTED, reloaded.getStatus());
-        assertEquals("the mandatory rejection reason must be stored verbatim",
-                REJECTION_REASON, reloaded.getDecisionComment());
-        assertNotNull("the rejection must carry a decision timestamp", reloaded.getDecidedAt());
-        assertEquals("the deciding approver must stay recorded on the request",
-                APPROVER, reloaded.getApprover());
-        assertEquals("the requester must stay recorded on the request",
-                REQUESTER, reloaded.getRequester());
-        assertNull("a rejected request must never carry an executed run",
-                reloaded.getExecutedRunId());
+        assertEquals(RequestStatus.REJECTED, reloaded.getStatus(), "the rejected request must end in REJECTED");
+        assertEquals(REJECTION_REASON, reloaded.getDecisionComment(), "the mandatory rejection reason must be stored verbatim");
+        assertNotNull(reloaded.getDecidedAt(), "the rejection must carry a decision timestamp");
+        assertEquals(APPROVER, reloaded.getApprover(), "the deciding approver must stay recorded on the request");
+        assertEquals(REQUESTER, reloaded.getRequester(), "the requester must stay recorded on the request");
+        assertNull(reloaded.getExecutedRunId(), "a rejected request must never carry an executed run");
 
         assertNoBuildEverRan();
 
         // the decision survives in the (append-only) request history, not just in memory
-        assertTrue("the rejected request must remain listed in the request history",
-                RunRequestService.get().list().stream()
+        assertTrue(RunRequestService.get().list().stream()
                         .anyMatch(r -> request.getId().equals(r.getId())
-                                && r.getStatus() == RequestStatus.REJECTED));
+                                && r.getStatus() == RequestStatus.REJECTED), "the rejected request must remain listed in the request history");
     }
 
     /**
@@ -148,12 +143,9 @@ public class OwnerScenarioRejectionTest {
                 () -> changeApproverAs(REQUESTER, request.getId(), ALTERNATE_APPROVER));
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("the status must stay REJECTED through every revival attempt",
-                RequestStatus.REJECTED, reloaded.getStatus());
-        assertEquals("the original rejection reason must not be overwritten",
-                REJECTION_REASON, reloaded.getDecisionComment());
-        assertEquals("the recorded approver must not change",
-                APPROVER, reloaded.getApprover());
+        assertEquals(RequestStatus.REJECTED, reloaded.getStatus(), "the status must stay REJECTED through every revival attempt");
+        assertEquals(REJECTION_REASON, reloaded.getDecisionComment(), "the original rejection reason must not be overwritten");
+        assertEquals(APPROVER, reloaded.getApprover(), "the recorded approver must not change");
         assertNoBuildEverRan();
     }
 
@@ -171,18 +163,14 @@ public class OwnerScenarioRejectionTest {
         HtmlPage detail = detailPageAs(REQUESTER, request.getId());
         String html = detail.getWebResponse().getContentAsString();
 
-        assertTrue("the requester must see the rejection reason on the request detail screen",
-                html.contains(REJECTION_REASON));
-        assertTrue("the requester must see that the request is REJECTED",
-                html.contains("REJECTED"));
-        assertFalse("a rejected request must not offer an approve action any more",
-                html.contains(request.getId() + "/approve"));
+        assertTrue(html.contains(REJECTION_REASON), "the requester must see the rejection reason on the request detail screen");
+        assertTrue(html.contains("REJECTED"), "the requester must see that the request is REJECTED");
+        assertFalse(html.contains(request.getId() + "/approve"), "a rejected request must not offer an approve action any more");
 
         // the deciding approver sees the same terminal record
         String approverView = detailPageAs(APPROVER, request.getId())
                 .getWebResponse().getContentAsString();
-        assertTrue("the approver's view must show the stored rejection reason too",
-                approverView.contains(REJECTION_REASON));
+        assertTrue(approverView.contains(REJECTION_REASON), "the approver's view must show the stored rejection reason too");
         assertTrue(approverView.contains("REJECTED"));
     }
 
@@ -222,30 +210,28 @@ public class OwnerScenarioRejectionTest {
                 .withThrowExceptionOnFailingStatusCode(false)
                 .login(userId);
         HtmlPage page = wc.getPage(new URL(j.getURL(), "batch-control/requests/" + requestId + "/"));
-        assertEquals(userId + " must be able to read this request's detail screen",
-                200, page.getWebResponse().getStatusCode());
+        assertEquals(200, page.getWebResponse().getStatusCode(), userId + " must be able to read this request's detail screen");
         return page;
     }
 
     /** Matrix blocking baseline: empty queue, unmoved build number, no build at all. */
     private void assertNoBuildEverRan() throws Exception {
-        assertEquals("the queue must be empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must be empty");
         j.waitUntilNoActivity();
-        assertEquals("nextBuildNumber must not move for a rejected request",
-                1, job.getNextBuildNumber());
-        assertTrue("a rejected request must never start a build", job.getBuilds().isEmpty());
+        assertEquals(1, job.getNextBuildNumber(), "nextBuildNumber must not move for a rejected request");
+        assertTrue(job.getBuilds().isEmpty(), "a rejected request must never start a build");
     }
 
     /** Authorization/state refusals: the exact runtime exception type is not pinned by SPEC. */
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) { // IllegalArgumentException, hudson.model.Failure, ...
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }

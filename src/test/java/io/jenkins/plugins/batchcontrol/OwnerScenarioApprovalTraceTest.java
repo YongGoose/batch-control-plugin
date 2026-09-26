@@ -22,16 +22,16 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.concurrent.Future;
 import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Owner scenario S-2 — "is the run history tied back to the approval?".
@@ -51,19 +51,20 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class OwnerScenarioApprovalTraceTest {
 
     private static final String REQUESTER = "u1";
     private static final String APPROVER = "a1";
     private static final String ADMIN = "admin";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -94,72 +95,61 @@ public class OwnerScenarioApprovalTraceTest {
             request = RunRequestService.get().create(job, new LinkedHashMap<>(),
                     "month-end batch, closing figures", APPROVER);
         }
-        assertEquals("the request must be owned by the requester account",
-                REQUESTER, request.getRequester());
-        assertEquals("the request must be routed to the designated approver account",
-                APPROVER, request.getApprover());
+        assertEquals(REQUESTER, request.getRequester(), "the request must be owned by the requester account");
+        assertEquals(APPROVER, request.getApprover(), "the request must be routed to the designated approver account");
 
         try (ACLContext ignored = as(APPROVER)) {
             RunRequestService.get().approve(request.getId(), "parameters reviewed, go ahead");
         }
         j.waitUntilNoActivity();
-        assertEquals("the approval must have executed exactly one build", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approval must have executed exactly one build");
 
         // ---- the run identifies the request, the requester and the approver
         FreeStyleBuild approvedBuild = job.getBuildByNumber(1);
         assertNotNull(approvedBuild);
         ApprovedCause cause = approvedBuild.getCause(ApprovedCause.class);
-        assertNotNull("the approved run must carry the plugin's ApprovedCause", cause);
-        assertEquals("the cause must name the request", request.getId(), cause.getRequestId());
-        assertEquals("the cause must name the requester account", REQUESTER, cause.getRequester());
-        assertEquals("the cause must name the approver account (a different account)",
-                APPROVER, cause.getApprover());
+        assertNotNull(cause, "the approved run must carry the plugin's ApprovedCause");
+        assertEquals(request.getId(), cause.getRequestId(), "the cause must name the request");
+        assertEquals(REQUESTER, cause.getRequester(), "the cause must name the requester account");
+        assertEquals(APPROVER, cause.getApprover(), "the cause must name the approver account (a different account)");
 
         ApprovedRunAction action = approvedBuild.getAction(ApprovedRunAction.class);
-        assertNotNull("the approved run must carry the approved-run build Action", action);
-        assertEquals("the build Action must be bound to the same request",
-                request.getId(), action.getRequestId());
+        assertNotNull(action, "the approved run must carry the approved-run build Action");
+        assertEquals(request.getId(), action.getRequestId(), "the build Action must be bound to the same request");
 
         String buildPage = j.createWebClient().login(ADMIN)
                 .getPage(approvedBuild).getWebResponse().getContentAsString();
-        assertTrue("the build page must show the request id", buildPage.contains(request.getId()));
-        assertTrue("the build page must show the requester account", buildPage.contains(REQUESTER));
-        assertTrue("the build page must show the approver account", buildPage.contains(APPROVER));
+        assertTrue(buildPage.contains(request.getId()), "the build page must show the request id");
+        assertTrue(buildPage.contains(REQUESTER), "the build page must show the requester account");
+        assertTrue(buildPage.contains(APPROVER), "the build page must show the approver account");
 
         // ---- the run record and the request cross-reference each other
         RunRecord approvedRecord = record("batch-x#1");
-        assertNotNull("the approved run must be recorded", approvedRecord);
+        assertNotNull(approvedRecord, "the approved run must be recorded");
         assertEquals(CauseType.APPROVED_REQUEST, approvedRecord.getCauseType());
-        assertEquals("the record must point back at the approval request",
-                request.getId(), approvedRecord.getRunRequestId());
+        assertEquals(request.getId(), approvedRecord.getRunRequestId(), "the record must point back at the approval request");
         assertEquals("SUCCESS", approvedRecord.getResult());
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("the request must point at the run it executed",
-                "batch-x#1", reloaded.getExecutedRunId());
+        assertEquals("batch-x#1", reloaded.getExecutedRunId(), "the request must point at the run it executed");
 
         // ---- a run without any approval (timer firing, passes by default) is distinguishable
         Future<FreeStyleBuild> timerRun = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNotNull("a timer cause must pass by default even on an approval-required job", timerRun);
+        assertNotNull(timerRun, "a timer cause must pass by default even on an approval-required job");
         j.assertBuildStatusSuccess(timerRun);
         j.waitUntilNoActivity();
 
         FreeStyleBuild unapprovedBuild = job.getBuildByNumber(2);
         assertNotNull(unapprovedBuild);
-        assertNull("a run that had no approval must not carry an ApprovedCause",
-                unapprovedBuild.getCause(ApprovedCause.class));
-        assertNull("a run that had no approval must not carry the approved-run Action",
-                unapprovedBuild.getAction(ApprovedRunAction.class));
+        assertNull(unapprovedBuild.getCause(ApprovedCause.class), "a run that had no approval must not carry an ApprovedCause");
+        assertNull(unapprovedBuild.getAction(ApprovedRunAction.class), "a run that had no approval must not carry the approved-run Action");
 
         RunRecord unapprovedRecord = record("batch-x#2");
-        assertNotNull("the timer run must be recorded too", unapprovedRecord);
-        assertEquals("the timer run must be classified as TIMER, not APPROVED_REQUEST",
-                CauseType.TIMER, unapprovedRecord.getCauseType());
-        assertNull("a run without an approval must not reference any request",
-                unapprovedRecord.getRunRequestId());
+        assertNotNull(unapprovedRecord, "the timer run must be recorded too");
+        assertEquals(CauseType.TIMER, unapprovedRecord.getCauseType(), "the timer run must be classified as TIMER, not APPROVED_REQUEST");
+        assertNull(unapprovedRecord.getRunRequestId(), "a run without an approval must not reference any request");
 
-        assertEquals("the request must still point at its own run only",
-                "batch-x#1", RunRequestService.get().load(request.getId()).getExecutedRunId());
+        assertEquals("batch-x#1", RunRequestService.get().load(request.getId()).getExecutedRunId(), "the request must still point at its own run only");
     }
 
     // ---------------------------------------------------------------- helpers

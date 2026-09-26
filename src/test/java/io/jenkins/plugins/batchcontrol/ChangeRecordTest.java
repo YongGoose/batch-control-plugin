@@ -35,17 +35,17 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 9 (automatic change recording). Matrix rows T-09-01 .. T-09-11.
@@ -55,15 +55,16 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
  */
+@WithJenkins
 public class ChangeRecordTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         MockAuthorizationStrategy delegate = new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -91,16 +92,14 @@ public class ChangeRecordTest {
         assertEquals("after-ui-change", job.getDescription());
 
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "ui-job");
-        assertNotNull("a UI configure must leave a CONFIGURE record", record);
+        assertNotNull(record, "a UI configure must leave a CONFIGURE record");
         assertEquals("admin", record.getUser());
         assertNotNull(record.getAt());
         String diff = record.getDiff();
-        assertNotNull("a CONFIGURE record must carry a unified diff", diff);
-        assertTrue("the diff must be in unified format (hunk markers)", diff.contains("@@"));
-        assertTrue("the diff must contain the new value as an addition",
-                diff.contains("after-ui-change"));
-        assertTrue("the diff must contain the old value as a removal",
-                diff.contains("before-ui-change"));
+        assertNotNull(diff, "a CONFIGURE record must carry a unified diff");
+        assertTrue(diff.contains("@@"), "the diff must be in unified format (hunk markers)");
+        assertTrue(diff.contains("after-ui-change"), "the diff must contain the new value as an addition");
+        assertTrue(diff.contains("before-ui-change"), "the diff must contain the old value as a removal");
     }
 
     /** T-09-02: a REST config.xml POST leaves a CONFIGURE record. */
@@ -114,7 +113,7 @@ public class ChangeRecordTest {
         assertEquals("rest-after", job.getDescription());
 
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "rest-job");
-        assertNotNull("a REST config.xml POST must leave a CONFIGURE record", record);
+        assertNotNull(record, "a REST config.xml POST must leave a CONFIGURE record");
         assertEquals("admin", record.getUser());
         assertNotNull(record.getAt());
     }
@@ -134,8 +133,7 @@ public class ChangeRecordTest {
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "grant-job");
         assertNotNull(record);
         assertEquals("u1", record.getUser());
-        assertEquals("the change must be linked to the active grant it was made under",
-                grant.getId(), record.getGrantId());
+        assertEquals(grant.getId(), record.getGrantId(), "the change must be linked to the active grant it was made under");
     }
 
     /** T-09-04: a password/Secret default change never leaks a plaintext value; the diff shows the mask. */
@@ -150,25 +148,22 @@ public class ChangeRecordTest {
         String xml = job.getConfigFile().asString();
         String newXml = xml.replaceFirst("<defaultValue>[^<]*</defaultValue>",
                 "<defaultValue>NEW-PLAINTEXT-SECRET</defaultValue>");
-        assertFalse("test precondition: the swap must have changed the XML", newXml.equals(xml));
+        assertFalse(newXml.equals(xml), "test precondition: the swap must have changed the XML");
         assertEquals(200, postConfigXml("admin", job, newXml));
 
         List<ChangeRecord> records = records(ChangeType.CONFIGURE, "secret-job");
-        assertFalse("the secret change must be recorded", records.isEmpty());
+        assertFalse(records.isEmpty(), "the secret change must be recorded");
         for (ChangeRecord record : records) {
             String diff = record.getDiff();
             if (diff == null) {
                 continue;
             }
-            assertFalse("no diff may ever contain the old secret in plaintext",
-                    diff.contains("OLD-PLAINTEXT-SECRET"));
-            assertFalse("no diff may ever contain the new secret in plaintext",
-                    diff.contains("NEW-PLAINTEXT-SECRET"));
+            assertFalse(diff.contains("OLD-PLAINTEXT-SECRET"), "no diff may ever contain the old secret in plaintext");
+            assertFalse(diff.contains("NEW-PLAINTEXT-SECRET"), "no diff may ever contain the new secret in plaintext");
         }
         ChangeRecord last = records.get(records.size() - 1);
-        assertNotNull("the CONFIGURE record must carry a diff", last.getDiff());
-        assertTrue("the secret value must be masked as ******** in the diff",
-                last.getDiff().contains("********"));
+        assertNotNull(last.getDiff(), "the CONFIGURE record must carry a diff");
+        assertTrue(last.getDiff().contains("********"), "the secret value must be masked as ******** in the diff");
     }
 
     /** T-09-05: CLI update-job leaves a CONFIGURE record. */
@@ -182,11 +177,11 @@ public class ChangeRecordTest {
                 .asUser("admin")
                 .withStdin(new ByteArrayInputStream(newXml.getBytes(StandardCharsets.UTF_8)))
                 .invokeWithArgs("cli-job");
-        assertEquals("update-job must succeed: " + result.stderr(), 0, result.returnCode());
+        assertEquals(0, result.returnCode(), "update-job must succeed: " + result.stderr());
         assertEquals("cli-after", job.getDescription());
 
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "cli-job");
-        assertNotNull("a CLI update-job must leave a CONFIGURE record", record);
+        assertNotNull(record, "a CLI update-job must leave a CONFIGURE record");
         assertEquals("admin", record.getUser());
     }
 
@@ -209,7 +204,7 @@ public class ChangeRecordTest {
                 j.jenkins.getItemByFullName("dsl-target", FreeStyleProject.class).getDescription());
 
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "dsl-target");
-        assertNotNull("a Job DSL update must leave a CONFIGURE record", record);
+        assertNotNull(record, "a Job DSL update must leave a CONFIGURE record");
         assertNotNull(record.getAt());
     }
 
@@ -220,7 +215,7 @@ public class ChangeRecordTest {
             FreeStyleProject born = j.jenkins.createProject(FreeStyleProject.class, "born-job");
 
             ChangeRecord created = lastRecord(ChangeType.CREATE, "born-job");
-            assertNotNull("creating a job must leave a CREATE record", created);
+            assertNotNull(created, "creating a job must leave a CREATE record");
             assertEquals("admin", created.getUser());
             assertNotNull(created.getAt());
 
@@ -229,7 +224,7 @@ public class ChangeRecordTest {
         assertNull(j.jenkins.getItemByFullName("born-job"));
 
         ChangeRecord deleted = lastRecord(ChangeType.DELETE, "born-job");
-        assertNotNull("deleting a job must leave a DELETE record", deleted);
+        assertNotNull(deleted, "deleting a job must leave a DELETE record");
         assertEquals("admin", deleted.getUser());
         assertNotNull(deleted.getAt());
     }
@@ -244,21 +239,20 @@ public class ChangeRecordTest {
             job.renameTo("new-name-job");
         }
         ChangeRecord renamed = lastRecord(ChangeType.RENAME, null);
-        assertNotNull("renaming a job must leave a RENAME record", renamed);
+        assertNotNull(renamed, "renaming a job must leave a RENAME record");
         assertEquals("admin", renamed.getUser());
         String renameText = renamed.getTarget() + " " + renamed.getDetail();
-        assertTrue("the RENAME record must reference the old name", renameText.contains("old-name-job"));
-        assertTrue("the RENAME record must reference the new name", renameText.contains("new-name-job"));
+        assertTrue(renameText.contains("old-name-job"), "the RENAME record must reference the old name");
+        assertTrue(renameText.contains("new-name-job"), "the RENAME record must reference the new name");
 
         try (ACLContext ignored = as("admin")) {
             Items.move(job, folder);
         }
         assertNotNull(j.jenkins.getItemByFullName("dest-folder/new-name-job"));
         ChangeRecord moved = lastRecord(ChangeType.MOVE, null);
-        assertNotNull("moving a job must leave a MOVE record", moved);
+        assertNotNull(moved, "moving a job must leave a MOVE record");
         assertEquals("admin", moved.getUser());
-        assertTrue("the MOVE record must reference the new location",
-                (moved.getTarget() + " " + moved.getDetail()).contains("dest-folder/new-name-job"));
+        assertTrue((moved.getTarget() + " " + moved.getDetail()).contains("dest-folder/new-name-job"), "the MOVE record must reference the new location");
     }
 
     /** T-09-09: a change made without any active grant is stored with grantId=null. */
@@ -272,8 +266,8 @@ public class ChangeRecordTest {
 
         ChangeRecord record = lastRecord(ChangeType.CONFIGURE, "plain-job");
         assertNotNull(record);
-        assertNull("without an active grant the record must carry grantId=null so it can be "
-                + "queried as an ungranted change", record.getGrantId());
+        assertNull(record.getGrantId(), "without an active grant the record must carry grantId=null so it can be "
+                + "queried as an ungranted change");
     }
 
     /** T-09-10: recording stays active when only run control is on (records follow either switch). */
@@ -288,8 +282,7 @@ public class ChangeRecordTest {
         assertEquals(200, postConfigXml("admin", job,
                 describedXml(job, "runonly-before", "runonly-after")));
 
-        assertNotNull("recording must stay active while any switch is on",
-                lastRecord(ChangeType.CONFIGURE, "runonly-job"));
+        assertNotNull(lastRecord(ChangeType.CONFIGURE, "runonly-job"), "recording must stay active while any switch is on");
     }
 
     /** T-09-11: with both switches off no change record is written. */
@@ -305,10 +298,8 @@ public class ChangeRecordTest {
                 describedXml(job, "off-before", "off-after")));
         assertEquals("off-after", job.getDescription());
 
-        assertTrue("with both switches off no CONFIGURE record may be written",
-                records(ChangeType.CONFIGURE, "off-job").isEmpty());
-        assertTrue("with both switches off no CREATE record may be written either",
-                records(ChangeType.CREATE, "off-job").isEmpty());
+        assertTrue(records(ChangeType.CONFIGURE, "off-job").isEmpty(), "with both switches off no CONFIGURE record may be written");
+        assertTrue(records(ChangeType.CREATE, "off-job").isEmpty(), "with both switches off no CREATE record may be written either");
     }
 
     // ---------------------------------------------------------------- helpers

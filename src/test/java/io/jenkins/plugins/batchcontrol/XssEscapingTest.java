@@ -20,14 +20,14 @@ import jenkins.model.Jenkins;
 import org.htmlunit.CollectingAlertHandler;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlPage;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC section 6 output-escaping requirement (R-3, D-18). Matrix row T-RT-10:
@@ -41,18 +41,19 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class XssEscapingTest {
 
     private static final String SCRIPT_PAYLOAD = "<script>alert('xss-reason')</script>";
     private static final String IMG_PAYLOAD = "<img src=x onerror=alert('xss-param')>";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -102,9 +103,8 @@ public class XssEscapingTest {
         assertRenderedEscaped("request detail", detail, true);
         HtmlPage dashboard = page(wc, "batch-control/dashboard/");
         assertNoUnescapedPayload("dashboard", dashboard);
-        assertTrue("the dashboard must render the parameter value as escaped text",
-                dashboard.getWebResponse().getContentAsString()
-                        .contains("&lt;img src=x onerror=alert"));
+        assertTrue(dashboard.getWebResponse().getContentAsString()
+                        .contains("&lt;img src=x onerror=alert"), "the dashboard must render the parameter value as escaped text");
         assertNoInjectedElement("dashboard", dashboard);
 
         // the request list must at minimum never carry the payload unescaped
@@ -112,8 +112,8 @@ public class XssEscapingTest {
         assertNoUnescapedPayload("request list", list);
         assertNoInjectedElement("request list", list);
 
-        assertTrue("no injected script may have executed on any surface, but alerts fired: "
-                + alerts.getCollectedAlerts(), alerts.getCollectedAlerts().isEmpty());
+        assertTrue(alerts.getCollectedAlerts().isEmpty(), "no injected script may have executed on any surface, but alerts fired: "
+                + alerts.getCollectedAlerts());
     }
 
     // ---------------------------------------------------------------- helpers
@@ -124,9 +124,8 @@ public class XssEscapingTest {
 
     private HtmlPage page(JenkinsRule.WebClient wc, String relative) throws Exception {
         HtmlPage page = wc.getPage(new URL(j.getURL(), relative));
-        assertTrue(relative + " must render (2xx), got "
-                + page.getWebResponse().getStatusCode(),
-                page.getWebResponse().getStatusCode() < 300);
+        assertTrue(page.getWebResponse().getStatusCode() < 300, relative + " must render (2xx), got "
+                + page.getWebResponse().getStatusCode());
         return page;
     }
 
@@ -138,33 +137,27 @@ public class XssEscapingTest {
         if (expectReason) {
             // the opening '<' is what must be neutralized; Jelly's default escaping
             // leaves '>' raw, so both escaped variants are accepted
-            assertTrue(surface + " must render the reason as escaped text",
-                    html.contains("&lt;script&gt;alert") || html.contains("&lt;script>alert"));
+            assertTrue(html.contains("&lt;script&gt;alert") || html.contains("&lt;script>alert"), surface + " must render the reason as escaped text");
         }
-        assertTrue(surface + " must render the parameter value as escaped text",
-                html.contains("&lt;img src=x onerror=alert"));
+        assertTrue(html.contains("&lt;img src=x onerror=alert"), surface + " must render the parameter value as escaped text");
         assertNoInjectedElement(surface, page);
     }
 
     /** The raw HTML never contains the payloads with a live {@code <}. */
     private static void assertNoUnescapedPayload(String surface, HtmlPage page) {
         String html = page.getWebResponse().getContentAsString();
-        assertFalse(surface + " must not contain the unescaped script payload",
-                html.contains("<script>alert"));
-        assertFalse(surface + " must not contain the unescaped img payload",
-                html.contains("<img src=x onerror"));
+        assertFalse(html.contains("<script>alert"), surface + " must not contain the unescaped script payload");
+        assertFalse(html.contains("<img src=x onerror"), surface + " must not contain the unescaped img payload");
     }
 
     /** DOM-level check: no script element with the payload body, no img with src=x. */
     private static void assertNoInjectedElement(String surface, HtmlPage page) {
         for (DomElement script : page.getElementsByTagName("script")) {
             String body = script.getTextContent();
-            assertFalse(surface + " must not carry an injected script element",
-                    body != null && (body.contains("xss-reason") || body.contains("xss-param")));
+            assertFalse(body != null && (body.contains("xss-reason") || body.contains("xss-param")), surface + " must not carry an injected script element");
         }
         for (DomElement img : page.getElementsByTagName("img")) {
-            assertFalse(surface + " must not carry an injected img element",
-                    "x".equals(img.getAttribute("src")));
+            assertFalse("x".equals(img.getAttribute("src")), surface + " must not carry an injected img element");
         }
     }
 }

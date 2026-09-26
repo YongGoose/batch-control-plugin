@@ -31,17 +31,17 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * D-30 — where a blocked re-use of an approved-run marker is recorded.
@@ -76,6 +76,7 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md, docs/DECISIONS.md and docs/TEST-MATRIX.md only
  * (no src/main knowledge).
  */
+@WithJenkins
 public class MarkerReuseAuditTest {
 
     private static final String REQUESTER = "u1";
@@ -94,11 +95,11 @@ public class MarkerReuseAuditTest {
             ChangeType.MOVE, ChangeType.CONFIG_TOGGLE, ChangeType.RETENTION,
             ChangeType.GRANT_REVOKE);
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -133,16 +134,13 @@ public class MarkerReuseAuditTest {
         RunRequest request = createAs(REQUESTER, job);
         approveAs(APPROVER, request.getId());
         j.waitUntilNoActivity();
-        assertEquals("fixture: the approved submission must run exactly once",
-                1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "fixture: the approved submission must run exactly once");
 
         FreeStyleBuild approvedBuild = job.getBuildByNumber(1);
         ApprovedRunAction marker = approvedBuild.getAction(ApprovedRunAction.class);
-        assertNotNull("fixture: the executed run must carry the marker action", marker);
-        assertEquals("fixture: the marker must be bound to the request id",
-                request.getId(), marker.getRequestId());
-        assertTrue("fixture: no re-use record may exist before a re-use is attempted",
-                reuseRecords(request.getId()).isEmpty());
+        assertNotNull(marker, "fixture: the executed run must carry the marker action");
+        assertEquals(request.getId(), marker.getRequestId(), "fixture: the marker must be bound to the request id");
+        assertTrue(reuseRecords(request.getId()).isEmpty(), "fixture: no re-use record may exist before a re-use is attempted");
 
         // Two separate re-use attempts by two different accounts.
         // The refusal itself is T-RT-02's row; here it is only the precondition that makes the
@@ -154,56 +152,49 @@ public class MarkerReuseAuditTest {
                 "fixture: another user's revival of the consumed marker must be refused",
                 () -> job.scheduleBuild2(0, new Cause.UserIdCause(), marker)));
         j.waitUntilNoActivity();
-        assertEquals("fixture: no refused attempt may have produced a build",
-                1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "fixture: no refused attempt may have produced a build");
 
         List<ChangeRecord> records = reuseRecords(request.getId());
-        assertEquals("each blocked re-use attempt must leave one audit record of its own"
-                + " (D-30) - found " + describe(records), 2, records.size());
+        assertEquals(2, records.size(), "each blocked re-use attempt must leave one audit record of its own"
+                + " (D-30) - found " + describe(records));
 
         for (ChangeRecord record : records) {
             String text = textOf(record);
-            assertNotNull("the re-use record must carry its own id", record.getId());
-            assertNotNull("the re-use record must record when it happened", record.getAt());
-            assertTrue("the re-use record must name what was attempted - the consumed request"
-                    + " id (" + request.getId() + "): " + text, text.contains(request.getId()));
-            assertTrue("the re-use record must name the job the marker was replayed on: " + text,
-                    text.contains("reuse-x"));
-            assertFalse("the re-use record must be a record of its own kind, not one of the"
+            assertNotNull(record.getId(), "the re-use record must carry its own id");
+            assertNotNull(record.getAt(), "the re-use record must record when it happened");
+            assertTrue(text.contains(request.getId()), "the re-use record must name what was attempted - the consumed request"
+                    + " id (" + request.getId() + "): " + text);
+            assertTrue(text.contains("reuse-x"), "the re-use record must name the job the marker was replayed on: " + text);
+            assertFalse(SPEC_DEFINED_TYPES.contains(record.getType()), "the re-use record must be a record of its own kind, not one of the"
                     + " eight ChangeRecord types SPEC section 3 defines (was "
-                    + record.getType() + ")", SPEC_DEFINED_TYPES.contains(record.getType()));
+                    + record.getType() + ")");
         }
 
         List<String> actors = records.stream().map(ChangeRecord::getUser).collect(Collectors.toList());
-        assertTrue("the requester's own re-use attempt must be attributed to " + REQUESTER
-                + " but the records were attributed to " + actors, actors.contains(REQUESTER));
-        assertTrue("the other user's re-use attempt must be attributed to " + REUSER
+        assertTrue(actors.contains(REQUESTER), "the requester's own re-use attempt must be attributed to " + REQUESTER
+                + " but the records were attributed to " + actors);
+        assertTrue(actors.contains(REUSER), "the other user's re-use attempt must be attributed to " + REUSER
                 + " (the actor of the attempt, not the owner of the approval) but the records"
-                + " were attributed to " + actors, actors.contains(REUSER));
+                + " were attributed to " + actors);
 
         // CSV export: every attempt must be exported as its own row carrying request id and actor
         JenkinsRule.WebClient viewer = webClient(VIEWER);
         WebResponse csv = get(viewer, CHANGES_CSV);
-        assertEquals("the change export must be served to a ViewHistory holder",
-                200, csv.getStatusCode());
+        assertEquals(200, csv.getStatusCode(), "the change export must be served to a ViewHistory holder");
         List<String> exported = linesContaining(csv.getContentAsString(), request.getId());
-        assertEquals("both blocked re-use attempts must appear in changes.csv, one row each"
-                + " - matched rows: " + exported, 2, exported.size());
-        assertTrue("one exported re-use row must carry " + REQUESTER + " as a cell: " + exported,
-                exported.stream().anyMatch(line -> hasCell(line, REQUESTER)));
-        assertTrue("one exported re-use row must carry " + REUSER + " as a cell: " + exported,
-                exported.stream().anyMatch(line -> hasCell(line, REUSER)));
+        assertEquals(2, exported.size(), "both blocked re-use attempts must appear in changes.csv, one row each"
+                + " - matched rows: " + exported);
+        assertTrue(exported.stream().anyMatch(line -> hasCell(line, REQUESTER)), "one exported re-use row must carry " + REQUESTER + " as a cell: " + exported);
+        assertTrue(exported.stream().anyMatch(line -> hasCell(line, REUSER)), "one exported re-use row must carry " + REUSER + " as a cell: " + exported);
 
         // Dashboard: the attempt is queryable by the account that made it. u2 never requested,
         // approved or ran anything, so the request id can only reach a user=u2 view through the
         // re-use record itself.
         WebResponse byActor = get(viewer, HISTORY_SCREEN + "?user=" + REUSER);
-        assertEquals("the history screen must render for a ViewHistory holder",
-                200, byActor.getStatusCode());
-        assertTrue("the blocked re-use attempt must be findable on the dashboard by its actor"
+        assertEquals(200, byActor.getStatusCode(), "the history screen must render for a ViewHistory holder");
+        assertTrue(byActor.getContentAsString().contains(request.getId()), "the blocked re-use attempt must be findable on the dashboard by its actor"
                 + " (user=" + REUSER + "): the consumed request id " + request.getId()
-                + " is missing from the rendered screen",
-                byActor.getContentAsString().contains(request.getId()));
+                + " is missing from the rendered screen");
     }
 
     /**
@@ -220,30 +211,25 @@ public class MarkerReuseAuditTest {
         RunRequest request = createAs(REQUESTER, job);
         approveAs(APPROVER, request.getId());
         j.waitUntilNoActivity();
-        assertEquals("fixture: the approved request must have run once",
-                1, job.getBuilds().size());
-        assertNotNull("fixture: the run must be linked back to the request",
-                RunRequestService.get().load(request.getId()).getExecutedRunId());
+        assertEquals(1, job.getBuilds().size(), "fixture: the approved request must have run once");
+        assertNotNull(RunRequestService.get().load(request.getId()).getExecutedRunId(), "fixture: the run must be linked back to the request");
 
-        assertTrue("one approved submission must not be recorded as a marker re-use"
-                + " - found " + describe(reuseRecords(request.getId())),
-                reuseRecords(request.getId()).isEmpty());
+        assertTrue(reuseRecords(request.getId()).isEmpty(), "one approved submission must not be recorded as a marker re-use"
+                + " - found " + describe(reuseRecords(request.getId())));
         List<ChangeRecord> foreignTypes = FileStore.get().listChangeRecords(YearMonth.now())
                 .stream()
                 .filter(record -> !SPEC_DEFINED_TYPES.contains(record.getType()))
                 .collect(Collectors.toList());
-        assertTrue("no record of the re-use kind may exist at all after a clean run"
-                + " - found " + describe(foreignTypes), foreignTypes.isEmpty());
+        assertTrue(foreignTypes.isEmpty(), "no record of the re-use kind may exist at all after a clean run"
+                + " - found " + describe(foreignTypes));
 
         WebResponse csv = get(webClient(VIEWER), CHANGES_CSV);
         assertEquals(200, csv.getStatusCode());
         String body = csv.getContentAsString();
-        assertTrue("fixture control: the change export must not be empty - the job creation"
-                + " itself is recorded, so 'reuse-clean' must be exported",
-                body.contains("reuse-clean"));
-        assertFalse("a clean approved run must not export any row referring to the request as a"
-                + " blocked re-use: " + linesContaining(body, request.getId()),
-                body.contains(request.getId()));
+        assertTrue(body.contains("reuse-clean"), "fixture control: the change export must not be empty - the job creation"
+                + " itself is recorded, so 'reuse-clean' must be exported");
+        assertFalse(body.contains(request.getId()), "a clean approved run must not export any row referring to the request as a"
+                + " blocked re-use: " + linesContaining(body, request.getId()));
     }
 
     /**
@@ -260,9 +246,9 @@ public class MarkerReuseAuditTest {
         approveAs(APPROVER, request.getId());
         j.waitUntilNoActivity();
         FreeStyleBuild approvedBuild = job.getBuildByNumber(1);
-        assertNotNull("fixture: the approved request must have run once", approvedBuild);
+        assertNotNull(approvedBuild, "fixture: the approved request must have run once");
         ApprovedRunAction marker = approvedBuild.getAction(ApprovedRunAction.class);
-        assertNotNull("fixture: the executed run must carry the marker action", marker);
+        assertNotNull(marker, "fixture: the executed run must carry the marker action");
 
         as(NO_HISTORY, () -> assertScheduleRefused(
                 "fixture: the re-use attempt must be refused",
@@ -270,8 +256,8 @@ public class MarkerReuseAuditTest {
         j.waitUntilNoActivity();
 
         List<ChangeRecord> records = reuseRecords(request.getId());
-        assertEquals("fixture: the blocked attempt must have been recorded"
-                + " - found " + describe(records), 1, records.size());
+        assertEquals(1, records.size(), "fixture: the blocked attempt must have been recorded"
+                + " - found " + describe(records));
         String recordId = records.get(0).getId();
 
         JenkinsRule.WebClient blind = webClient(NO_HISTORY);
@@ -281,21 +267,17 @@ public class MarkerReuseAuditTest {
                 CHANGES_CSV,
                 CHANGES_CSV + "?user=" + NO_HISTORY}) {
             WebResponse response = get(blind, path);
-            assertEquals(path + " must be 403 without ViewHistory",
-                    403, response.getStatusCode());
+            assertEquals(403, response.getStatusCode(), path + " must be 403 without ViewHistory");
             String body = response.getContentAsString();
-            assertFalse(path + " must not disclose the consumed request id",
-                    body.contains(request.getId()));
-            assertFalse(path + " must not disclose the re-use record id",
-                    body.contains(recordId));
+            assertFalse(body.contains(request.getId()), path + " must not disclose the consumed request id");
+            assertFalse(body.contains(recordId), path + " must not disclose the re-use record id");
         }
 
         // control: with ViewHistory the very same record is readable, so the assertions above
         // measure the gate and not an absent record
         WebResponse allowed = get(webClient(VIEWER), CHANGES_CSV);
         assertEquals(200, allowed.getStatusCode());
-        assertTrue("control: a ViewHistory holder must see the re-use row",
-                allowed.getContentAsString().contains(request.getId()));
+        assertTrue(allowed.getContentAsString().contains(request.getId()), "control: a ViewHistory holder must see the re-use row");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -389,7 +371,7 @@ public class MarkerReuseAuditTest {
             throws Exception {
         try {
             Future<?> future = attempt.call();
-            assertNull(message, future);
+            assertNull(future, message);
         } catch (Failure expectedGuidance) {
             // throwing the guidance Failure is equally acceptable
         }

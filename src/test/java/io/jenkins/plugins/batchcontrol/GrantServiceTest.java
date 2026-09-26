@@ -35,18 +35,18 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8 (JIT temporary permission grants). Matrix rows T-08-01, T-08-02, T-08-03,
@@ -63,19 +63,20 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class GrantServiceTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T00:00:00Z");
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject jobX;
     private FreeStyleProject jobY;
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
         GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
@@ -104,7 +105,7 @@ public class GrantServiceTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -113,23 +114,18 @@ public class GrantServiceTest {
     @Test
     public void t_08_01_grantAllowsConfigureOnScopedJob() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("before the grant the delegate must deny (Item/Read only)",
-                403, postConfigXml(wc, jobX, "changed-before-grant"));
+        assertEquals(403, postConfigXml(wc, jobX, "changed-before-grant"), "before the grant the delegate must deny (Item/Read only)");
 
         Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
         assertNotNull(grant);
         assertEquals("u1", grant.getUser());
-        assertEquals("the grant must expire exactly durationMinutes after it was granted",
-                T0.plus(Duration.ofMinutes(30)), grant.getExpiresAt());
+        assertEquals(T0.plus(Duration.ofMinutes(30)), grant.getExpiresAt(), "the grant must expire exactly durationMinutes after it was granted");
         assertTrue(grant.isActiveAt(T0.plus(Duration.ofMinutes(29))));
-        assertFalse("isActiveAt must be false past the expiry instant",
-                grant.isActiveAt(T0.plus(Duration.ofMinutes(31))));
+        assertFalse(grant.isActiveAt(T0.plus(Duration.ofMinutes(31))), "isActiveAt must be false past the expiry instant");
 
-        assertEquals("with the active grant the config POST must succeed",
-                200, postConfigXml(wc, jobX, "changed-inside-window"));
-        assertEquals("the change must actually be saved",
-                "changed-inside-window", jobX.getDescription());
+        assertEquals(200, postConfigXml(wc, jobX, "changed-inside-window"), "with the active grant the config POST must succeed");
+        assertEquals("changed-inside-window", jobX.getDescription(), "the change must actually be saved");
     }
 
     /** T-08-02: the same grant gives no permission outside its scope (job Y stays 403). */
@@ -139,9 +135,8 @@ public class GrantServiceTest {
                 Arrays.asList(GrantAction.CONFIGURE), 30);
 
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("a JOB-scoped grant must never leak to another job",
-                403, postConfigXml(wc, jobY, "should-not-save"));
-        assertEquals("job Y must be untouched", "base", jobY.getDescription());
+        assertEquals(403, postConfigXml(wc, jobY, "should-not-save"), "a JOB-scoped grant must never leak to another job");
+        assertEquals("base", jobY.getDescription(), "job Y must be untouched");
     }
 
     /** T-08-03: past the expiry instant the very first permission check is denied (no timer involved). */
@@ -153,8 +148,7 @@ public class GrantServiceTest {
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
 
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("the first check after expiry must already deny (check-time comparison, no timer)",
-                403, postConfigXml(wc, jobX, "too-late"));
+        assertEquals(403, postConfigXml(wc, jobX, "too-late"), "the first check after expiry must already deny (check-time comparison, no timer)");
         assertEquals("base", jobX.getDescription());
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
     }
@@ -171,16 +165,14 @@ public class GrantServiceTest {
         }
 
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals("revocation must deny immediately, well before the expiry time",
-                403, postConfigXml(wc, jobX, "after-revoke"));
+        assertEquals(403, postConfigXml(wc, jobX, "after-revoke"), "revocation must deny immediately, well before the expiry time");
         assertEquals("base", jobX.getDescription());
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
-        assertTrue("the revoked grant must not be listed as active",
-                GrantService.get().listActive().stream().noneMatch(g -> g.getId().equals(grant.getId())));
+        assertTrue(GrantService.get().listActive().stream().noneMatch(g -> g.getId().equals(grant.getId())), "the revoked grant must not be listed as active");
 
         ChangeRecord record = lastRecord(ChangeType.GRANT_REVOKE);
-        assertNotNull("revocation must leave a ChangeRecord(GRANT_REVOKE)", record);
-        assertEquals("the record must carry the revoker", "m1", record.getUser());
+        assertNotNull(record, "revocation must leave a ChangeRecord(GRANT_REVOKE)");
+        assertEquals("m1", record.getUser(), "the record must carry the revoker");
         assertNotNull(record.getAt());
     }
 
@@ -205,8 +197,7 @@ public class GrantServiceTest {
                         Arrays.asList(GrantAction.CONFIGURE), -10, "negative duration", "a1");
             }
         });
-        assertTrue("no request may be stored after rejected creations",
-                GrantRequestService.get().list().isEmpty());
+        assertTrue(GrantRequestService.get().list().isEmpty(), "no request may be stored after rejected creations");
     }
 
     /** T-08-10: a CONFIGURE-only grant never covers DELETE; the un-granted action stays denied. */
@@ -218,11 +209,9 @@ public class GrantServiceTest {
         JenkinsRule.WebClient wc = webClient().login("u1");
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl(jobX.getUrl() + "doDelete"), HttpMethod.POST));
-        assertTrue("delete must stay denied for a CONFIGURE-only grant, got HTTP "
-                + page.getWebResponse().getStatusCode(),
-                page.getWebResponse().getStatusCode() >= 400);
-        assertNotNull("the job must survive the denied delete",
-                j.jenkins.getItemByFullName("batch-x"));
+        assertTrue(page.getWebResponse().getStatusCode() >= 400, "delete must stay denied for a CONFIGURE-only grant, got HTTP "
+                + page.getWebResponse().getStatusCode());
+        assertNotNull(j.jenkins.getItemByFullName("batch-x"), "the job must survive the denied delete");
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.DELETE));
     }
 
@@ -237,26 +226,22 @@ public class GrantServiceTest {
         JenkinsRule.WebClient wc = webClient().login("u2");
         Page vetoed = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl(jobY.getUrl() + "doDelete"), HttpMethod.POST));
-        assertTrue("without an active DELETE grant the delete must be vetoed even though the "
-                + "delegate grants Item/Delete, got HTTP " + vetoed.getWebResponse().getStatusCode(),
-                vetoed.getWebResponse().getStatusCode() >= 400);
-        assertNotNull("the job must survive the vetoed delete",
-                j.jenkins.getItemByFullName("batch-y"));
+        assertTrue(vetoed.getWebResponse().getStatusCode() >= 400, "without an active DELETE grant the delete must be vetoed even though the "
+                + "delegate grants Item/Delete, got HTTP " + vetoed.getWebResponse().getStatusCode());
+        assertNotNull(j.jenkins.getItemByFullName("batch-y"), "the job must survive the vetoed delete");
 
         // with an active DELETE grant the same user may delete
         grantTo("u2", new GrantScope(GrantScope.Type.JOB, "batch-y"),
                 Arrays.asList(GrantAction.DELETE), 30);
         wc.getPage(new WebRequest(wc.createCrumbedUrl(jobY.getUrl() + "doDelete"), HttpMethod.POST));
-        assertNull("with the DELETE grant the delete must pass",
-                j.jenkins.getItemByFullName("batch-y"));
+        assertNull(j.jenkins.getItemByFullName("batch-y"), "with the DELETE grant the delete must pass");
 
         // the admin is never vetoed (SPEC section 1: admin bypass is out of scope)
         FreeStyleProject adminTarget = j.createFreeStyleProject("admin-target");
         JenkinsRule.WebClient adminWc = webClient().login("admin");
         adminWc.getPage(new WebRequest(
                 adminWc.createCrumbedUrl(adminTarget.getUrl() + "doDelete"), HttpMethod.POST));
-        assertNull("the admin must be able to delete without any grant",
-                j.jenkins.getItemByFullName("admin-target"));
+        assertNull(j.jenkins.getItemByFullName("admin-target"), "the admin must be able to delete without any grant");
     }
 
     /** T-08-11: a FOLDER-scoped [CREATE, CONFIGURE] grant works inside the folder only. */
@@ -275,8 +260,7 @@ public class GrantServiceTest {
 
         // CREATE inside the folder (checked on the parent folder's ACL) must pass
         int createInside = postCreateItem(wc, "job/team/job/batch/", "new-inner");
-        assertTrue("creating a job inside the granted folder must succeed, got HTTP " + createInside,
-                createInside < 400);
+        assertTrue(createInside < 400, "creating a job inside the granted folder must succeed, got HTTP " + createInside);
         assertNotNull(j.jenkins.getItemByFullName("team/batch/new-inner"));
 
         // CONFIGURE inside the folder must pass
@@ -284,11 +268,9 @@ public class GrantServiceTest {
         assertEquals("changed-inside", inner.getDescription());
 
         // outside the folder scope: CREATE denied (sibling folder and root)
-        assertEquals("creating outside the folder scope must be denied",
-                403, postCreateItem(wc, "job/team/job/other/", "escape-job"));
+        assertEquals(403, postCreateItem(wc, "job/team/job/other/", "escape-job"), "creating outside the folder scope must be denied");
         assertNull(j.jenkins.getItemByFullName("team/other/escape-job"));
-        assertEquals("creating at the root must be denied",
-                403, postCreateItem(wc, "", "root-escape"));
+        assertEquals(403, postCreateItem(wc, "", "root-escape"), "creating at the root must be denied");
         assertNull(j.jenkins.getItemByFullName("root-escape"));
 
         // outside the folder scope: CONFIGURE denied
@@ -312,14 +294,12 @@ public class GrantServiceTest {
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofHours(2)), ZoneOffset.UTC));
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
 
-        assertEquals("a PENDING grant request past the timeout must become EXPIRED",
-                RequestStatus.EXPIRED, GrantRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.EXPIRED, GrantRequestService.get().load(request.getId()).getStatus(), "a PENDING grant request past the timeout must become EXPIRED");
         try (ACLContext ignored = as("a1")) {
             assertRejected("an expired grant request must not be approvable",
                     () -> GrantRequestService.get().approve(request.getId(), "too late"));
         }
-        assertFalse("no grant may exist for the expired request",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
+        assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "no grant may exist for the expired request");
     }
 
     /**
@@ -390,15 +370,15 @@ public class GrantServiceTest {
     }
 
     /** SPEC validation failures surface as IllegalArgumentException or hudson.model.Failure. */
-    private static void assertRejected(String message, ThrowingRunnable action) {
+    private static void assertRejected(String message, Executable action) {
         boolean rejected = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) {
             rejected = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, rejected);
+        assertTrue(rejected, message);
     }
 }

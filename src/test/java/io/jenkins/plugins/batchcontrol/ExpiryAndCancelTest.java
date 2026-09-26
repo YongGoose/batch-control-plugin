@@ -31,18 +31,18 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.springframework.security.core.Authentication;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 7 (request expiry and cancellation) plus the D-20 check-at-submit criterion.
@@ -54,18 +54,19 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class ExpiryAndCancelTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T00:00:00Z");
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -82,7 +83,7 @@ public class ExpiryAndCancelTest {
         job.addProperty(new BatchControlJobProperty(true));
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -101,8 +102,7 @@ public class ExpiryAndCancelTest {
         runExpiryWork();
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("a PENDING request past the timeout must become EXPIRED",
-                RequestStatus.EXPIRED, reloaded.getStatus());
+        assertEquals(RequestStatus.EXPIRED, reloaded.getStatus(), "a PENDING request past the timeout must become EXPIRED");
     }
 
     /** T-07-02: a user who is neither the requester nor a Manage holder gets 403 on cancel. */
@@ -116,11 +116,9 @@ public class ExpiryAndCancelTest {
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/requests/" + request.getId() + "/cancel"),
                 HttpMethod.POST));
-        assertEquals("cancel is restricted to the requester or a Manage holder",
-                403, page.getWebResponse().getStatusCode());
+        assertEquals(403, page.getWebResponse().getStatusCode(), "cancel is restricted to the requester or a Manage holder");
 
-        assertEquals("the request must stay PENDING",
-                RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus(), "the request must stay PENDING");
     }
 
     /** T-07-03: an APPROVED request that never reached the queue expires after approvedRunTimeoutMinutes. */
@@ -142,12 +140,11 @@ public class ExpiryAndCancelTest {
         runExpiryWork();
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("an APPROVED request not submitted within the timeout must become EXPIRED",
-                RequestStatus.EXPIRED, reloaded.getStatus());
+        assertEquals(RequestStatus.EXPIRED, reloaded.getStatus(), "an APPROVED request not submitted within the timeout must become EXPIRED");
 
         j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
-        assertTrue("an expired approval must never run", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "an expired approval must never run");
     }
 
     /** T-07-05: the requester cancels their own PENDING request. */
@@ -159,8 +156,7 @@ public class ExpiryAndCancelTest {
             RunRequestService.get().cancel(request.getId());
         }
 
-        assertEquals("the request must be CANCELLED and stay on record",
-                RequestStatus.CANCELLED, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.CANCELLED, RunRequestService.get().load(request.getId()).getStatus(), "the request must be CANCELLED and stay on record");
     }
 
     /** T-07-06: a Manage holder who is not the requester can cancel a PENDING request. */
@@ -189,8 +185,7 @@ public class ExpiryAndCancelTest {
                 RunRequestService.get().cancel(request.getId());
             }
         });
-        assertEquals("the refused cancel must not change the state",
-                RequestStatus.APPROVED, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(request.getId()).getStatus(), "the refused cancel must not change the state");
 
         j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
@@ -238,12 +233,11 @@ public class ExpiryAndCancelTest {
         }
 
         RunRequest reloaded = RunRequestService.get().load(requestId);
-        assertEquals("the expired request must converge to EXPIRED, never EXECUTED",
-                RequestStatus.EXPIRED, reloaded.getStatus());
-        assertNull("no run may be linked to the expired request", reloaded.getExecutedRunId());
+        assertEquals(RequestStatus.EXPIRED, reloaded.getStatus(), "the expired request must converge to EXPIRED, never EXECUTED");
+        assertNull(reloaded.getExecutedRunId(), "no run may be linked to the expired request");
 
         j.waitUntilNoActivity();
-        assertTrue("the expired approval must never have been submitted", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "the expired approval must never have been submitted");
         assertEquals(0, j.jenkins.getQueue().getItems().length);
     }
 
@@ -270,15 +264,15 @@ public class ExpiryAndCancelTest {
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
     }
 
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) {
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }

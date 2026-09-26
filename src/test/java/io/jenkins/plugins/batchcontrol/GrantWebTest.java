@@ -24,15 +24,15 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * HTTP surface of the grant screens. Matrix rows T-08-13 (grant request creation without
@@ -43,15 +43,16 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md, docs/TEST-MATRIX.md and the S3 endpoint contract only.
  */
+@WithJenkins
 public class GrantWebTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         MockAuthorizationStrategy delegate = new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -76,10 +77,8 @@ public class GrantWebTest {
         JenkinsRule.WebClient wc = webClient().login("u0");
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/grants/create"), HttpMethod.POST));
-        assertEquals("a user without RequestGrant must get 403 on grant request creation",
-                403, page.getWebResponse().getStatusCode());
-        assertTrue("no grant request may be stored after the rejected POST",
-                GrantRequestService.get().list().isEmpty());
+        assertEquals(403, page.getWebResponse().getStatusCode(), "a user without RequestGrant must get 403 on grant request creation");
+        assertTrue(GrantRequestService.get().list().isEmpty(), "no grant request may be stored after the rejected POST");
     }
 
     /** T-SEC-06 (remainder): GET on the revoke endpoint is rejected; the grant stays active. */
@@ -92,10 +91,9 @@ public class GrantWebTest {
                 new URL(j.getURL(), "batch-control/grants/active/" + grant.getId() + "/revoke"),
                 HttpMethod.GET));
         int code = page.getWebResponse().getStatusCode();
-        assertTrue("GET must never revoke; expected 405/rejected but got " + code, code >= 400);
+        assertTrue(code >= 400, "GET must never revoke; expected 405/rejected but got " + code);
 
-        assertTrue("the grant must still be active after the rejected GET",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
+        assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "the grant must still be active after the rejected GET");
         assertTrue(GrantService.get().listActive().stream()
                 .anyMatch(g -> g.getId().equals(grant.getId())));
     }
@@ -110,11 +108,9 @@ public class GrantWebTest {
             Page page = wc.getPage(new WebRequest(
                     wc.createCrumbedUrl("batch-control/grants/active/" + grant.getId() + "/revoke"),
                     HttpMethod.POST));
-            assertEquals(userId + " must not be able to revoke (MANAGE only)",
-                    403, page.getWebResponse().getStatusCode());
+            assertEquals(403, page.getWebResponse().getStatusCode(), userId + " must not be able to revoke (MANAGE only)");
         }
-        assertTrue("the grant must still be active",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
+        assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "the grant must still be active");
     }
 
     /** T-08-05 (web layer): a Manage holder's revoke POST works and leaves the GRANT_REVOKE record. */
@@ -126,16 +122,13 @@ public class GrantWebTest {
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/grants/active/" + grant.getId() + "/revoke"),
                 HttpMethod.POST));
-        assertTrue("the Manage holder's revoke POST must succeed, got HTTP "
-                + page.getWebResponse().getStatusCode(),
-                page.getWebResponse().getStatusCode() < 400);
+        assertTrue(page.getWebResponse().getStatusCode() < 400, "the Manage holder's revoke POST must succeed, got HTTP "
+                + page.getWebResponse().getStatusCode());
 
-        assertFalse("the grant must be inactive immediately after the revoke",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
-        assertTrue("revocation must leave a ChangeRecord(GRANT_REVOKE)",
-                FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "the grant must be inactive immediately after the revoke");
+        assertTrue(FileStore.get().listChangeRecords(YearMonth.now()).stream()
                         .anyMatch(rec -> rec.getType() == ChangeType.GRANT_REVOKE
-                                && "m1".equals(rec.getUser())));
+                                && "m1".equals(rec.getUser())), "revocation must leave a ChangeRecord(GRANT_REVOKE)");
     }
 
     /** The grants screen requires one of RequestGrant/Approve/Manage (StaplerProxy gate). */
@@ -146,13 +139,11 @@ public class GrantWebTest {
         for (String allowed : new String[] {"u1", "a1", "m1", "admin"}) {
             Page page = webClient().login(allowed).getPage(new WebRequest(
                     new URL(j.getURL(), "batch-control/grants/"), HttpMethod.GET));
-            assertEquals(allowed + " must be able to open the grants screen",
-                    200, page.getWebResponse().getStatusCode());
+            assertEquals(200, page.getWebResponse().getStatusCode(), allowed + " must be able to open the grants screen");
         }
         Page denied = webClient().login("u0").getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/grants/"), HttpMethod.GET));
-        assertEquals("a user with none of RequestGrant/Approve/Manage must get 403",
-                403, denied.getWebResponse().getStatusCode());
+        assertEquals(403, denied.getWebResponse().getStatusCode(), "a user with none of RequestGrant/Approve/Manage must get 403");
     }
 
     /** The approve endpoint of the contract works: POST by the designated approver creates the grant. */
@@ -164,14 +155,12 @@ public class GrantWebTest {
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/grants/" + request.getId() + "/approve"),
                 HttpMethod.POST));
-        assertTrue("the designated approver's POST must succeed, got HTTP "
-                + page.getWebResponse().getStatusCode(),
-                page.getWebResponse().getStatusCode() < 400);
+        assertTrue(page.getWebResponse().getStatusCode() < 400, "the designated approver's POST must succeed, got HTTP "
+                + page.getWebResponse().getStatusCode());
 
         assertEquals(RequestStatus.APPROVED,
                 GrantRequestService.get().load(request.getId()).getStatus());
-        assertTrue("approval must make the grant effective immediately",
-                GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
+        assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "approval must make the grant effective immediately");
     }
 
     /** The cancel endpoint of the contract works: the requester cancels their PENDING grant request. */
@@ -183,9 +172,8 @@ public class GrantWebTest {
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/grants/" + request.getId() + "/cancel"),
                 HttpMethod.POST));
-        assertTrue("the requester's cancel POST must succeed, got HTTP "
-                + page.getWebResponse().getStatusCode(),
-                page.getWebResponse().getStatusCode() < 400);
+        assertTrue(page.getWebResponse().getStatusCode() < 400, "the requester's cancel POST must succeed, got HTTP "
+                + page.getWebResponse().getStatusCode());
 
         assertEquals(RequestStatus.CANCELLED,
                 GrantRequestService.get().load(request.getId()).getStatus());

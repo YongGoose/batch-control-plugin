@@ -30,17 +30,17 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestExtension;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Owner scenario S-5 — "if the job configuration changes while a build is running, does the
@@ -56,6 +56,7 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class OwnerScenarioConfigChangeTest {
 
     private static final String ADMIN = "admin";
@@ -63,13 +64,13 @@ public class OwnerScenarioConfigChangeTest {
     private static final String START_CONFIG = "start-config";
     private static final String NEXT_CONFIG = "next-config";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
@@ -103,69 +104,61 @@ public class OwnerScenarioConfigChangeTest {
 
         // build #1 starts with the configuration as it stands now (DATE default = start-config)
         Page firstTrigger = postBuildWithParameters(REQUESTER);
-        assertTrue("the first run must be allowed, got HTTP "
-                        + firstTrigger.getWebResponse().getStatusCode(),
-                firstTrigger.getWebResponse().getStatusCode() < 400);
+        assertTrue(firstTrigger.getWebResponse().getStatusCode() < 400, "the first run must be allowed, got HTTP "
+                        + firstTrigger.getWebResponse().getStatusCode());
         PausingBuilder.awaitStarted(gate);
         FreeStyleBuild inFlight = job.getBuildByNumber(1);
-        assertNotNull("build #1 must have started", inFlight);
-        assertTrue("test precondition: build #1 must be in flight", inFlight.isBuilding());
-        assertEquals("build #1 must have started from the original configuration",
-                START_CONFIG, parameterOf(inFlight));
+        assertNotNull(inFlight, "build #1 must have started");
+        assertTrue(inFlight.isBuilding(), "test precondition: build #1 must be in flight");
+        assertEquals(START_CONFIG, parameterOf(inFlight), "build #1 must have started from the original configuration");
 
         // the administrator changes the job configuration while build #1 is still running
         String changedXml = job.getConfigFile().asString()
                 .replace("<defaultValue>" + START_CONFIG + "</defaultValue>",
                         "<defaultValue>" + NEXT_CONFIG + "</defaultValue>");
-        assertFalse("test precondition: the configuration text must really change",
-                changedXml.equals(job.getConfigFile().asString()));
-        assertEquals("the administrator's configuration change must be accepted",
-                200, postConfigXml(ADMIN, changedXml));
+        assertFalse(changedXml.equals(job.getConfigFile().asString()), "test precondition: the configuration text must really change");
+        assertEquals(200, postConfigXml(ADMIN, changedXml), "the administrator's configuration change must be accepted");
 
         // (1) the build in flight is untouched by the change and completes normally
-        assertTrue("changing the configuration must not abort the running build",
-                inFlight.isBuilding());
+        assertTrue(inFlight.isBuilding(), "changing the configuration must not abort the running build");
         PausingBuilder.release(gate);
         j.waitForCompletion(inFlight);
         j.assertBuildStatusSuccess(inFlight);
-        assertEquals("the finished build must still report the configuration it started with",
-                START_CONFIG, parameterOf(inFlight));
+        assertEquals(START_CONFIG, parameterOf(inFlight), "the finished build must still report the configuration it started with");
         RunRecord firstRecord = record("config-x#1");
-        assertNotNull("the completed run must be recorded", firstRecord);
+        assertNotNull(firstRecord, "the completed run must be recorded");
         assertEquals("SUCCESS", firstRecord.getResult());
 
         // (2) the change itself is recorded: who, when, what
         ChangeRecord change = lastConfigureRecord("config-x");
-        assertNotNull("the configuration change must be recorded while change control is on", change);
-        assertEquals("the change must name the administrator who made it", ADMIN, change.getUser());
-        assertNotNull("the change must carry a timestamp", change.getAt());
+        assertNotNull(change, "the configuration change must be recorded while change control is on");
+        assertEquals(ADMIN, change.getUser(), "the change must name the administrator who made it");
+        assertNotNull(change.getAt(), "the change must carry a timestamp");
         String diff = change.getDiff();
-        assertNotNull("a CONFIGURE record must carry a unified diff", diff);
-        assertTrue("the diff must be in unified format (hunk markers)", diff.contains("@@"));
-        assertTrue("the diff must show the removed old value", diff.contains(START_CONFIG));
-        assertTrue("the diff must show the added new value", diff.contains(NEXT_CONFIG));
+        assertNotNull(diff, "a CONFIGURE record must carry a unified diff");
+        assertTrue(diff.contains("@@"), "the diff must be in unified format (hunk markers)");
+        assertTrue(diff.contains(START_CONFIG), "the diff must show the removed old value");
+        assertTrue(diff.contains(NEXT_CONFIG), "the diff must show the added new value");
 
         // (3) the next run picks the change up
         Page secondTrigger = postBuildWithParameters(REQUESTER);
-        assertTrue("the next run must be allowed, got HTTP "
-                        + secondTrigger.getWebResponse().getStatusCode(),
-                secondTrigger.getWebResponse().getStatusCode() < 400);
+        assertTrue(secondTrigger.getWebResponse().getStatusCode() < 400, "the next run must be allowed, got HTTP "
+                        + secondTrigger.getWebResponse().getStatusCode());
         j.waitUntilNoActivity();
         FreeStyleBuild afterChange = job.getBuildByNumber(2);
-        assertNotNull("build #2 must have run", afterChange);
+        assertNotNull(afterChange, "build #2 must have run");
         j.assertBuildStatusSuccess(afterChange);
-        assertEquals("build #2 must use the changed configuration",
-                NEXT_CONFIG, parameterOf(afterChange));
-        assertNotNull("build #2 must be recorded too", record("config-x#2"));
+        assertEquals(NEXT_CONFIG, parameterOf(afterChange), "build #2 must use the changed configuration");
+        assertNotNull(record("config-x#2"), "build #2 must be recorded too");
     }
 
     // ---------------------------------------------------------------- helpers
 
     private static String parameterOf(FreeStyleBuild build) {
         ParametersAction parameters = build.getAction(ParametersAction.class);
-        assertNotNull("the build must carry its parameters", parameters);
+        assertNotNull(parameters, "the build must carry its parameters");
         StringParameterValue value = (StringParameterValue) parameters.getParameter("DATE");
-        assertNotNull("the DATE parameter must be present on the build", value);
+        assertNotNull(value, "the DATE parameter must be present on the build");
         return value.getValue();
     }
 
@@ -226,8 +219,7 @@ public class OwnerScenarioConfigChangeTest {
         }
 
         static void awaitStarted(String gateId) throws InterruptedException {
-            assertTrue("the paused build step must start within 60s",
-                    STARTED.get(gateId).await(60, TimeUnit.SECONDS));
+            assertTrue(STARTED.get(gateId).await(60, TimeUnit.SECONDS), "the paused build step must start within 60s");
         }
 
         static void release(String gateId) {
