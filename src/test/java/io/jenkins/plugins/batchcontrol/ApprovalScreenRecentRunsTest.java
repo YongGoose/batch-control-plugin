@@ -39,8 +39,9 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Regression cover for the approval screen's "recent runs" window, requested by ui-dev for
- * commit d6c0878. Matrix rows T-UI-01 (the allowed window sizes), T-UI-02 (every other value
- * falls back to the default of 5 without an error page), T-UI-03 (the window is not a way
+ * commit d6c0878. Matrix rows T-UI-01 (the allowed window sizes), T-UI-02 (the value is trimmed
+ * and then matched against the allowed list; anything else falls back to the default of 5 without
+ * an error page), T-UI-03 (the window is not a way
  * around the P-09 visibility model), T-UI-04 (a deleted target job still renders, with no run
  * history) and T-UI-05 (the post-approval notice is bound to APPROVED + not yet executed).
  *
@@ -78,9 +79,24 @@ public class ApprovalScreenRecentRunsTest {
     /** The window sizes ui-dev's contract allows. */
     private static final List<String> ALLOWED = Arrays.asList("5", "10", "20", "50");
 
-    /** Values that must silently fall back to the default of 5 (no error page). */
+    /**
+     * Values that are not on the allowed list even after trimming, and must therefore silently
+     * fall back to the default of 5 (no error page). A whitespace-padded allowed value does
+     * <em>not</em> belong here — trimming happens <em>before</em> the allow-list check, so
+     * {@code "10 "} is the allowed value 10; see {@link #PADDED_ALLOWED}.
+     */
     private static final List<String> UNSUPPORTED = Arrays.asList(
-            "100000", "-1", "0", "7", "abc", "", "99999999999999999999", "5.5", "10 ");
+            "100000", "-1", "0", "7", "abc", "", "99999999999999999999", "5.5");
+
+    /**
+     * Allowed values carrying leading/trailing whitespace. {@code runs} is a query parameter a
+     * human can type into the address bar, so the screen trims it and then matches the allowed
+     * list: each of these must render the window of its <em>trimmed</em> value, not the default.
+     * The default itself (5) is deliberately not padded here — a 5-window would be
+     * indistinguishable from a fallback, so every entry names a different window size and the
+     * assertion stays falsifiable.
+     */
+    private static final List<String> PADDED_ALLOWED = Arrays.asList("10 ", " 10", " 20 ", " 50");
 
     @Rule
     public JenkinsRule j = new JenkinsRule();
@@ -143,24 +159,36 @@ public class ApprovalScreenRecentRunsTest {
     }
 
     /**
-     * T-UI-02: every value outside the allowed list falls back to the default of 5 silently —
-     * HTTP 200, the default window, and no error page or parse failure surfaced to the user.
+     * T-UI-02: {@code runs} is <strong>trimmed first and then matched</strong> against the allowed
+     * list (5/10/20/50). A value that is still not on the list falls back to the default of 5
+     * silently — HTTP 200, the default window, and no error page or parse failure surfaced to the
+     * user — while a padded allowed value is honoured as that value.
+     *
+     * Both halves live in one method because they are one rule, and the order inside it is the
+     * point: if the allow-list check came first, {@code "10 "} would fall back to 5. Whatever the
+     * value, the user-facing guarantee is identical and is asserted for every value of both sets:
+     * no error page, no stack trace, no {@code NumberFormatException} leaking into the HTML.
      */
     @Test
-    public void t_ui_02_unsupportedRunsValuesFallBackToTheDefault() throws Exception {
+    public void t_ui_02_runsValueIsTrimmedThenMatchedAgainstTheAllowedList() throws Exception {
         RunRequest request = createRequest(READING_APPROVER, "runs-fallback review");
 
+        // (1) not on the allowed list even after trimming: silent fallback to the default window
         for (String unsupported : UNSUPPORTED) {
             String label = "runs=[" + unsupported + "]";
             WebResponse response = detail(READING_APPROVER, request.getId(), unsupported);
-            assertEquals(label + " must not produce an error page", 200, response.getStatusCode());
-
-            String html = response.getContentAsString();
-            assertFalse(label + " must not leak a parse failure into the page",
-                    html.contains("NumberFormatException"));
-            assertFalse(label + " must not render a stack trace",
-                    html.contains("Stack Trace"));
+            String html = assertRendersWithoutParseFailure(label, response);
             assertWindowIn(label, html, DEFAULT_RUNS);
+        }
+
+        // (2) an allowed value with padding: trimming runs before the allow-list check, so the
+        // window is that value and NOT the default - the padding is not an unsupported value
+        for (String padded : PADDED_ALLOWED) {
+            int trimmed = Integer.parseInt(padded.trim());
+            String label = "runs=[" + padded + "] (trimmed to " + trimmed + ")";
+            WebResponse response = detail(READING_APPROVER, request.getId(), padded);
+            String html = assertRendersWithoutParseFailure(label, response);
+            assertWindowIn(label, html, trimmed);
         }
     }
 
@@ -187,7 +215,7 @@ public class ApprovalScreenRecentRunsTest {
         assertEquals("P-09: the designated approver must be able to open the request detail",
                 200, detail(BLIND_APPROVER, blindRequest.getId(), null).getStatusCode());
 
-        for (String value : concat(ALLOWED, UNSUPPORTED)) {
+        for (String value : concat(concat(ALLOWED, PADDED_ALLOWED), UNSUPPORTED)) {
             String label = "runs=[" + value + "] as an approver without Item/Read";
             WebResponse response = detail(BLIND_APPROVER, blindRequest.getId(), value);
             int code = response.getStatusCode();
@@ -284,6 +312,20 @@ public class ApprovalScreenRecentRunsTest {
         WebResponse response = detail(READING_APPROVER, requestId, runsValue);
         assertEquals(label + " must render", 200, response.getStatusCode());
         assertWindowIn(label, response.getContentAsString(), expected);
+    }
+
+    /**
+     * The user-facing guarantee for ANY {@code runs} value, whatever the screen decides to do with
+     * it: a rendered page, and no sign of a parse failure. Returns the HTML so the caller can go
+     * on to assert the window.
+     */
+    private static String assertRendersWithoutParseFailure(String label, WebResponse response) {
+        assertEquals(label + " must not produce an error page", 200, response.getStatusCode());
+        String html = response.getContentAsString();
+        assertFalse(label + " must not leak a parse failure into the page",
+                html.contains("NumberFormatException"));
+        assertFalse(label + " must not render a stack trace", html.contains("Stack Trace"));
+        return html;
     }
 
     /**
