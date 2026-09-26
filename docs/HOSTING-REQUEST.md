@@ -176,23 +176,39 @@ Manage) are exposed to the matrix- and role-based authorization strategies.
 
 How this differs from similar components:
 
-- Pipeline `input` step — a gate inside a run that has already started, usable
-  only from Pipeline, with no record that outlives the build. Batch Control
-  gates the start of a run for any job type and keeps the record independent of
-  build retention.
-- Job StrongAuthSimple — unmaintained for well over a decade, written against
-  Jenkins 1.x, with no Pipeline support, no audit history and no time-boxed
-  permissions. There is no code worth adopting, which is why this is a new
-  plugin rather than an adoption request.
-- Audit Trail / Audit Log — they record what happened. They have no concept of a
-  request, an approver, an approval decision, or a permission that expires.
-  Batch Control is a control plane whose audit history is a by-product.
-- Matrix / Role Strategy authorization — static permissions. Batch Control wraps
-  the configured strategy to add permissions that exist only inside an approved
-  window, and delegates every other decision to it.
-- Commercial batch schedulers — this is the gap the plugin targets: teams
-  already running their batch workload on Jenkins have no free-software option
-  for approval and audit.
+- Pipeline `input` step, and the newer Interactive CI `askInteractive` — a gate
+  inside a run that has already started, usable only from Pipeline. The approver
+  is recorded, but only inside the build, so the record goes when the build is
+  rotated out. Batch Control gates the start of a run for any job type and keeps
+  the record independent of build retention.
+- Job StrongAuthSimple — the closest existing idea: a multi-approver gate on job
+  execution. Its last release was 0.5 in December 2012 against Jenkins 1.409,
+  the last commit to its repository was in March 2013, and it is currently
+  listed as up for adoption. It has no Pipeline support, no audit history and no
+  time-boxed permissions, and adopting a 2012 codebase would mean replacing all
+  of it, so this is a new plugin rather than an adoption request.
+- Audit Trail, AuditFlow, Job Configuration History — they record what happened,
+  and they do it well: Job Configuration History keeps configuration diffs with
+  the user who made them, and AuditFlow adds a searchable store and export. None
+  of them has a concept of a request, an approver, an approval decision, or a
+  permission that expires. Batch Control is a control plane whose audit history
+  is a by-product, and is complementary to these rather than a replacement.
+- Matrix / Role Strategy authorization — grants have no time dimension: an
+  assignment stays in force until an administrator edits it. Role Strategy can
+  already resolve role membership dynamically through its macro extension point,
+  but not by time, and no free plugin grants a permission that expires on its
+  own. Batch Control wraps the configured strategy to add permissions that exist
+  only inside an approved window, and delegates every other decision to it.
+- GitHub PR Approval — refuses to build a fork pull request until someone with
+  Configure permission approves it, and persists that approval. It is a per-PR
+  trust toggle for GitHub Branch Source, keyed to an existing permission rather
+  than a named approver, with no request record and no expiry.
+- Commercial batch schedulers — this is the gap the plugin targets. Free plugins
+  cover parts of it: Pipeline `input` for an in-run approval, Audit Trail and Job
+  Configuration History for after-the-fact records. What is missing is a free
+  option that gates the start of a run for any job type, keeps the request, the
+  approval decision and the configuration change in one record independent of
+  build retention, and grants change permissions that expire on their own.
 
 Tested with JenkinsRule integration tests plus a Docker-based end-to-end suite.
 
@@ -200,11 +216,42 @@ Tested with JenkinsRule integration tests plus a Docker-based end-to-end suite.
 this line if you do not want to disclose it.>
 ```
 
-Before pasting, re-read the four comparison claims. They come from internal
-design notes (`DECISIONS.md` D-01/D-02), not from a fresh survey, and a reviewer
-who maintains one of those plugins will notice a stale claim. The
-"unmaintained for well over a decade" phrasing above is deliberately looser than
-the exact figure in the internal note, which was not re-verified.
+The comparison claims above were re-surveyed against live sources on
+**2026-09-27**, using the plugins.jenkins.io JSON API for release dates and the
+GitHub API for commit dates, because the originals came from internal design
+notes (`DECISIONS.md` D-01/D-02) rather than from a survey. What that survey
+changed, and why, is worth knowing before the text is pasted anywhere:
+
+- The earlier draft claimed that teams on Jenkins have **no** free option for
+  approval and audit. That is falsifiable in one line: `github-pr-approval`
+  (18.vfb_2ea_4ece82b_, 2026-09-02) already refuses to build a fork pull request
+  until someone approves it, and `input` plus Audit Trail cover approval and
+  audit between them. The claim is now scoped to the combination that is
+  genuinely missing, and GitHub PR Approval is named rather than omitted.
+- The earlier draft called Matrix and Role Strategy "static permissions". Role
+  Strategy resolves role membership dynamically through a macro extension point,
+  is actively maintained (last commit 2026-09-26), and is maintained by people
+  likely to read this request. The real differentiator is expiry, not staticness.
+- Two plugins were missing from the audit bullet entirely: **AuditFlow**
+  (89.v07f3a_35a_a_dce, released 2026-09-07, three weeks before this survey,
+  which is why the internal note missed it), whose store, dashboard and
+  formula-protected CSV export are close to our own audit feature set, and **Job
+  Configuration History** (30,215 installs), which keeps configuration diffs with
+  attribution. Omitting a 30k-install plugin that overlaps our change record
+  would have been the first thing a reviewer asked about.
+- "Unmaintained for well over a decade" was factually correct for Job
+  StrongAuthSimple (13 years 9 months since release). What changed is the
+  adjacent sentence: the plugin is **not** deprecated, it is labelled
+  `adopt-this-plugin` with a banner asking for maintainers, so publicly
+  dismissing its code in a hosting thread read badly. The bullet now names the
+  overlap first and argues scope instead.
+- The Pipeline `input` claim was confirmed unchanged in substance. Note that
+  `audit-log` is a separate, stale plugin (1.3, 2021-12-14); it was previously
+  paired with Audit Trail as if both were current, and is no longer named.
+
+Re-check these before submission if more than a few months have passed. The two
+that will age fastest are AuditFlow, which is in active phase-2 development, and
+the Role Strategy commit date.
 
 ### Field 4 — GitHub users to have commit permission
 
