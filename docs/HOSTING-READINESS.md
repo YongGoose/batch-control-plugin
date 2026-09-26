@@ -6,12 +6,12 @@ hosting process.
 | | |
 |---|---|
 | Verification date | **2026-09-26** (all URLs below fetched on this date) |
-| Last updated | **2026-09-26** — preparation pass applied, see *Applied changes* below |
+| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement; see *Applied changes* below |
 | Repository under review | `https://github.com/YongGoose/batch-control-plugin` (public, not a fork, default branch `main` — verified via GitHub API on 2026-09-26) |
 | Branch inspected | `handoff/phase-4-5-continuation` |
 | Requirements checked | **65** |
-| PASS | **54** |
-| FAIL | **5** |
+| PASS | **55** |
+| FAIL | **4** |
 | WARNING | **1** |
 | UNKNOWN | **3** |
 | INFO | **2** |
@@ -20,6 +20,11 @@ hosting process.
 > "60 requirements / 36 PASS / 1 INFO". The checklist in section 2 actually has
 > 65 rows (A 8, B 23, C 17, D 8, E 9) and two INFO rows (D8, E9), so the header
 > totals were wrong. The numbers above are recounted from the table.
+
+> **Count update (G3 pass, 2026-09-26).** C10 moved FAIL → PASS when `README.md`
+> was replaced with plugin documentation, so PASS 54 → 55 and FAIL 5 → 4. The
+> four remaining FAIL rows are all in the CD block (D1, D4, D5, D6) and exist
+> only if form field 6 is answered `Yes` — see **G10**.
 
 > **Verification note.** No Maven build was run while preparing this document
 > (a concurrent full build was in progress). Every row whose verdict depends on
@@ -41,10 +46,10 @@ items were deliberately **not** touched — see G10.
 | G7 | `.github/CODEOWNERS` created | `.github/CODEOWNERS:1` |
 | G8 | `.github/dependabot.yml` created — `maven` weekly, `github-actions` monthly | `.github/dependabot.yml:1-11` |
 | G9 | plugin BOM `7046.v43536164769c` → `7093.v37de7b_4a_8a_4f` | `pom.xml:51` |
+| G3 | `README.md` replaced — the Korean development-kit guide is gone, replaced by English plugin documentation (problem statement, the two controls, a blocked/not-blocked table, requirements, installation, four-step configuration, screen guide, 29 known limitations, roadmap, contributing, security reporting, license) | `README.md:1-576` |
 
-**Not done, by instruction:** G3 (README — separate work item) and G10 (all CD
-files and the `changelist` value — the Yes/No decision is made immediately
-before submission).
+**Not done, by instruction:** G10 (all CD files and the `changelist` value — the
+Yes/No decision is made immediately before submission).
 
 ---
 
@@ -207,7 +212,7 @@ listed in section 1 and section 6.
 | C7 | A dependency-update bot config must exist: one of `.github/dependabot.yml(.yaml)`, `renovate.json`, `.github/renovate.json`, `.github/workflows/updatecli.yml(.yaml)` | RPU `RequiredFilesVerifier.checkDependencyBot` | PASS | `.github/dependabot.yml:1-11` — `maven` weekly + `github-actions` monthly | — |
 | C8 | A license file must exist in the repository and be detectable by GitHub | RPU `GitHubVerifier.checkLicense` | PASS (pending push) | `LICENSE:1-21`, full MIT text, `Copyright (c) 2026 Yongjun Hong`, matching the MIT declaration at `pom.xml:20-25` | GitHub's `license` field only populates after the commit is pushed — re-check the API response before submitting |
 | C9 | A README must exist and be detectable by GitHub | RPU `GitHubVerifier.checkReadme` | PASS | `README.md` exists | — |
-| C10 | README must be usable plugin documentation — reviewed by a human, not the bot ("README content") | Hosting Checker message text; <https://www.jenkins.io/doc/developer/publishing/documentation/> | **FAIL** | `README.md:1-46` is the Claude Code development-kit guide, in Korean, listing agent definitions and phase prompts. No what/why, no installation, no configuration, no usage. Independently found by e2e testing: `docs/reports/e2e-01.md:418-421` | Replace — see gap **G3** |
+| C10 | README must be usable plugin documentation — reviewed by a human, not the bot ("README content") | Hosting Checker message text; <https://www.jenkins.io/doc/developer/publishing/documentation/> | **PASS** (content replaced 2026-09-26; the verdict itself stays a human judgement) | `README.md:1-576` is English plugin documentation: what problem it solves, the two controls, an explicit blocked/not-blocked matrix, requirements, installation, configuration in four steps (including the `Batch Control (wrapping)` strategy step that `docs/reports/e2e-01.md:423-431` found undocumented), a screen guide, 29 known limitations, roadmap, contributing, security reporting, license. The Korean development-kit content is gone from `README.md` and has **not yet been relocated** — see the note in **G3** | Relocate the development-kit text (owner decision **Q8**); no further README work known |
 | C11 | `src/main/resources/index.jelly` should describe the plugin | `docs/HOSTING-CHECKLIST.md:17`; archetype convention (no automated check found in RPU — **source not confirmed as a bot requirement**) | PASS | `src/main/resources/index.jelly:1-8`, English, `escape-by-default='true'` | — |
 | C12 | No inline `<style>` in any `src/main/resources/**.jelly` | RPU `JellyVerifier` (`INLINE_STYLE`, REQUIRED) | PASS | grep over all 17 `.jelly` files: no `<style` | — |
 | C13 | No inline `<script>` JavaScript in Jelly | RPU `JellyVerifier` (`INLINE_SCRIPT`, REQUIRED) | PASS | no `<script` in any `.jelly` | — |
@@ -256,7 +261,7 @@ request cannot be approved while any of them stands.
 |---|---|
 | G1 license file | **RESOLVED** |
 | G2 Jenkinsfile JDK | **RESOLVED** |
-| G3 README | **OPEN** — separate work item, not in scope of this pass |
+| G3 README | **RESOLVED** 2026-09-26 — replaced with English plugin documentation; one follow-up left, relocating the development-kit text (Q8) |
 | G4 `<developers>` | **RESOLVED** |
 | G5 `<url>` / SCM | **RESOLVED** |
 | G6 five POM properties | **RESOLVED for the bot check**, but it opened a new build blocker — see **R1** |
@@ -298,7 +303,7 @@ requests `jdk: 17`, which produces:
   `Jenkinsfile:4` was already 21. No `jdk: 25` row was added (recommendation 7
   stays open).
 
-### G3 — README is the development-kit document, not plugin documentation *(human review, C10)* — OPEN
+### G3 — README is the development-kit document, not plugin documentation *(human review, C10)* — RESOLVED
 
 `README.md:1-46` is titled "batch-control-plugin 개발 키트" and documents the
 Claude Code agent kit: which files the kit contains, how to copy it into an empty
@@ -344,6 +349,62 @@ After hosting, this file becomes the plugin's landing page on plugins.jenkins.io
 - **Where:** `README.md`. The development-kit content should move somewhere else
   (for example `docs/DEV-KIT.md`) rather than be deleted, since it documents the
   working method.
+
+**Done 2026-09-26.** `README.md` is now 576 lines of English plugin
+documentation. What it contains, and where each part is sourced from:
+
+| Section | Source |
+|---|---|
+| The problem; the two controls (run control vs. change control) | `docs/SPEC.md` §2 items 5–9, `docs/DECISIONS.md` D-01/D-03/D-06 |
+| **What is blocked and what is not** — a path-by-path table (UI / REST / CLI / Replay blocked; timer / upstream / SCM / unclassified pass; approval bound to one request and consumed once; queue-entry-only blocking) | `docs/SPEC.md` §2 item 6 acceptance criteria, D-23, D-25, D-27, D-30 |
+| Features (MVP items 1–12 only; 13–15 moved to *Roadmap*) | `docs/SPEC.md` §2 |
+| Requirements, Installation | `pom.xml:37-38` (baseline 2.568 / `jenkins.version` 2.568.3), `pom.xml:64-71` (`structs`, `cloudbees-folder`), `Jenkinsfile` (JDK 21), `e2e/plugins.txt` and `e2e/Dockerfile` |
+| Configuration — four steps, the second being **select `Batch Control (wrapping)`** with the real strategy as delegate | `docs/ARCHITECTURE.md` §4, `e2e/init.groovy.d/00-security.groovy`, the defect at `docs/reports/e2e-01.md:423-431`; field labels read from the Jelly forms and `Messages.properties`, defaults from `docs/SPEC.md` §5 |
+| Screen guide | section display names in `src/main/java/.../action/*.java`, CSV names in `action/HistorySection.java:146-203` |
+| Known limitations — 29 numbered items in 6 groups | `docs/ARCHITECTURE.md` §7, D-19, D-31/32/33, `docs/TEST-MATRIX.md` notes 6 and 12, `docs/reports/security-01.md`, `security-02.md`, `red-team-01.md`, `spec-review-S3.md`, `spec-review-S4.md`, `docs/reports/e2e-02.md:403-440` |
+| Security reporting | <https://www.jenkins.io/security/reporting/> (fetched 2026-09-26): SECURITY Jira project, `specific-plugin` component, plugin named in the summary, `jenkinsci-cert@googlegroups.com` as the fallback |
+
+Deliberately **not** in the README, so that no unverifiable claim reaches the
+landing page:
+
+- **No performance figures.** `docs/SPEC.md` §6 states "7-day dashboard query
+  under 2 seconds at 5,000 runs/day (local)", but note 7 of
+  `docs/TEST-MATRIX.md` excludes it from the regression matrix and no measurement
+  exists. **Not measured — omitted.**
+- **No supported-version range.** Only the compiled baseline (2.568.3 or newer)
+  is stated. Nothing was tested against an older or newer core.
+- **No claims about the maintenance state of other plugins.** The comparison
+  section keeps only structural facts (the `input` step runs inside a started
+  build; audit plugins have no request/approver/expiry concept; matrix and role
+  strategies are static). The "unmaintained for about thirteen years" figure in
+  §6.3 of this document is an internal note and was kept out of the README.
+- **No screenshots.** `e2e/screenshots/` is test evidence, not documentation
+  assets.
+- **Nothing about the development kit, agents or orchestration** — contributor
+  material, not user material. The README's *Contributing* section points only at
+  `docs/SPEC.md`, `docs/DECISIONS.md`, `docs/ARCHITECTURE.md` and
+  `e2e/README.md`.
+
+**Still open (one follow-up, owner decision Q8).** The development-kit text that
+used to be `README.md:1-46` was **not** relocated in this pass — it was only
+removed from `README.md`, and the previous version is in git history. Recommended
+destination, in order of preference:
+
+1. **`CONTRIBUTING.md`** at the repository root, since `docs/HOSTING-READINESS.md`
+   §4 recommendation 2 already wants that file to exist and the documentation
+   guide lists it as recommended. The kit content — how the phases run, which
+   agent owns which path, what a human must do at each gate — *is* the
+   contribution process for this repository. The README's *Contributing* section
+   would then link to it.
+2. **`docs/DEV-KIT.md`**, the destination already named in Q8, if the owner would
+   rather keep `CONTRIBUTING.md` short and conventional (build, test, PR
+   expectations) and leave the multi-agent method as a separate document.
+
+Either way this is a `docs/`-or-root write outside the README, so it is recorded
+as a request rather than applied: **요청: `CONTRIBUTING.md` (or `docs/DEV-KIT.md`)
+— carry over the development-kit content removed from `README.md` (see
+`git show HEAD:README.md` before this commit).** Whether `.claude/` ships in the
+hosted repository at all is the second half of Q8 and remains open.
 
 ### G4 — `<developers>` must be removed from `pom.xml` *(REQUIRED, B6)* — RESOLVED
 
@@ -624,7 +685,7 @@ Q7, Q8. Q5 is the one that gates work — it decides whether G10 exists.
 | **Q5** | Field 6: answer `Yes` or `No` to automated release via GitHub Actions? | `Yes` is labelled "recommended" but adds the four REQUIRED items in G10. `No` is switchable later. |
 | **Q6** | Should the maintainer email in the request differ from `dev.yongjunh@gmail.com`? | Security reports are routed to release-permission holders; the address must be one that is actually monitored. |
 | **Q7** | Has the plugin been piloted on a real in-house Jenkins? If so, may it be mentioned (anonymously) in the Description? | `docs/HOSTING-CHECKLIST.md:55` asks for it; it materially helps human review, but disclosing internal usage is the owner's call. Phase 5 in `docs/WORKFLOW.md` is the pilot, and `docs/STATUS.md` should be consulted for whether it has happened. |
-| **Q8** | Where should the development-kit README content move (e.g. `docs/DEV-KIT.md`), and should the `.claude/` directory ship in the hosted repository at all? | The fork carries everything. A reviewer will see the agent definitions. Not a rule violation, but a presentation choice. |
+| **Q8** | Where should the development-kit README content move — `CONTRIBUTING.md` (recommended, see G3) or `docs/DEV-KIT.md` — and should the `.claude/` directory ship in the hosted repository at all? | The fork carries everything. A reviewer will see the agent definitions. Not a rule violation, but a presentation choice. **Now time-sensitive:** as of the 2026-09-26 G3 pass that content no longer exists anywhere in the working tree, only in git history. |
 
 ---
 
@@ -736,7 +797,9 @@ batch-control-plugin
 
 1. ~~Resolve G1, G2, G4, G5, G6, G7, G8, G9.~~ **Done 2026-09-26.** G10 remains,
    and only applies if field 6 = `Yes` (Q5).
-2. Resolve G3 (README replacement — separate work item).
+2. ~~Resolve G3 (README replacement — separate work item).~~ **Done 2026-09-26.**
+   One follow-up remains: relocate the development-kit content to
+   `CONTRIBUTING.md` or `docs/DEV-KIT.md` (Q8).
 3. **Migrate `src/test/**` to JUnit 5** — required by the
    `ban-junit4-imports.skip=false` property added in step 1. See **R1**; this is
    the largest remaining code task and it is on the critical path.
