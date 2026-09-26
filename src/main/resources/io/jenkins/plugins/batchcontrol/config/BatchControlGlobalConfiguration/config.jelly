@@ -1,9 +1,11 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
   <f:section title="Batch Control">
+    <!-- No <f:description> here: inside a title-less <f:entry> it is laid out on the checkbox
+         caption's line and renders as one run-together string (E2E-D4). The wording lives in
+         help-runControlEnabled.html, like every other field on this screen. -->
     <f:entry field="runControlEnabled">
       <f:checkbox title="Enable run control"/>
-      <f:description>When enabled, protected jobs require an approved run request before they can run.</f:description>
     </f:entry>
     <f:entry field="changeControlEnabled">
       <f:checkbox title="Enable change control"/>

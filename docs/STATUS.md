@@ -13,6 +13,27 @@
 
 ---
 
+## 2026-09-26 — Phase 5 CLOSED, seven owner decisions landed, hosting prep done
+- **Phase 5 gate met.** e2e-01 found four failures; e2e-02 re-ran them on a rebuilt plugin and all four are fixed (reports `docs/reports/e2e-01.md`, `e2e-02.md`). The visual pass was done in a browser by the main session, not inferred from HTTP.
+- **E2E-D1 was the find of the phase**: an approved CONFIGURE grant let the requester *save* a job config but the configure screen returned 403, so nobody could actually use the feature. 159 integration tests passed throughout — the positive path was asserted only on the POST. Root cause was `Item.EXTENDED_READ`, which core ships disabled and resolves through `impliedBy`; the resolution happened inside the delegate ACL where the grant is invisible (P-11, `GrantConfigureAccessTest`).
+- **Owner decisions D-24..D-33** recorded, with SPEC criteria: no separate hold state (the toggles are the off switch); no standing-approval model — single consumption applies to human-submitted requests while cron keeps passing, verified live (an approvalRequired job produced three timer builds in the observation window); delegation lines stay out of MVP; no control change may interrupt a running build; rejection shows the requester reason, approver and time; only the designated approver may decide; marker re-use lands in the audit history; new jobs start controlled except computed children; expiry guidance lives on the grants screen.
+- **P0 coverage is now complete**: T-SEC-07, the last empty row, is filled under the P-03 ruling (masking kept, the limitation documented). Suite 156 → **197 tests**, matrix 135 → **174 rows / 117 P0**. The suite migrated to JUnit 5 with the per-class counts unchanged, and `ban-junit4-imports.skip` is back to `false`.
+- **Hosting preparation**: 65-item checklist now 56 PASS / 0 FAIL (the four CD rows are N/A after the owner chose manual releases). LICENSE, CODEOWNERS, dependabot, README rewritten as a plugin document with `docs/LIMITATIONS.md` behind it, CONTRIBUTING, a PR template, `docs/HOSTING-REQUEST.md` as the run book, and the agent toolkit translated to English so a fork can use it. Remaining owner items: the commit-permission GitHub handle and the submission's "how it differs" wording.
+- **Pre-merge review `security-03`: BLOCKER 0 / HIGH 1 / MEDIUM 2 / LOW 7 — no merge blockers.** S-14 was afterwards **reproduced live**: on a job with an auth token, a user who gets 403 on the build screen started a build by adding `?token=`, because `Cause.RemoteCause` falls through the gate's unclassified branch. The findings go to a dedicated issue and a follow-up PR.
+
+## 2026-09-23 (later) — Phase 4 CLOSED (gate met) → Phase 5 is next
+- security-02 re-review done (commit 16666a2): **BLOCKER 0 / HIGH 0 — Phase 4 gate MET**. S-01/S-03/S-05/S-06/S-07/S-10/S-11 all verified FIXED with file:line evidence; S-02, S-04/P-06, S-08, S-09 deferred by pending human decisions. The new ACL.SYSTEM2 block in IncidentItem.doRerun was scrutinised and cleared (existence lookup only; permission decision outside the context).
+- Coverage gap closed (commit 5937ab1): T-SEC-15 asserts the run-request submit POST is refused (403, no request, no build) without BatchControl/Request — previously only the GET form was asserted. Matrix now 135 rows / 84 P0; suite 156 tests.
+- New LOW findings from the re-review: S-12 (history/CSV surfaces are deliberately outside the P-09 visibility boundary — documentation item, added to issue #6) and S-13 (residue from the S-03 fix — stale comment, an advertised root-level Item/Create that no longer exists, no scope re-validation on approve; cleanup in progress).
+- Also noted: regression test s_05 is shallow (would pass with the monitor cache removed) — strengthening queued.
+- Issue #1 closed. Next: issue #2 (Phase 5 E2E), then #3 (overall cross-review + red-team second pass).
+
+## 2026-09-23 — HANDOFF checkpoint (Phase 4 nearly done; security-02 pending)
+- Done since last entry: security-01 (BLOCKER 0 / HIGH 1 / MEDIUM 4 / LOW 6) → all routable findings fixed (S-01 P-09 visibility model, S-03, S-05 incl. SpotBugs restructure, S-06, S-07, S-10, S-11) + SecurityRegressionTest (7 methods, T-SEC-08..14; matrix now 134 rows) + jenkins-security-scan workflow. Final verify at `6f37f2d`: 155/155 tests, SpotBugs 0.
+- NOT done: security-02 re-review (the Phase 4 closing gate check) — the reviewer agent was killed by an API session limit before starting. Everything else queued behind it: Phase 5 E2E, overall cross-review, Phase 6, Phase 7.
+- Handoff artifacts: docs/HANDOFF.md (environment, position, next steps), GitHub issues #1..#7 (remaining work, human decisions), draft PR with the continuation plan. All branches pushed to origin.
+- Deferred by pending human decisions: S-02, S-04/P-06, T-SEC-07 (P-03), P-09 ratification, P-01..P-08.
+
 ## 2026-09-21 (afternoon) — Phase 3 CLOSED → Phase 4 started
 - S4 result: tests f87d8f0 + impl f49dbad + review fixes (resolve() requires ACKNOWLEDGED; dead HistoryService/CsvSupport deleted; FileStore month bucketing unified on BatchClock zone) + new XssEscapingTest (T-RT-10). spec-review-S4 = PASS WITH NOTES, BLOCKER 0.
 - Final verify: 148/148 tests green, SpotBugs 0 (9m12s).

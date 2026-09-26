@@ -24,16 +24,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC items 2 (admin self-approval), 3 (approver designation) and 5 (run request and decision),
@@ -44,17 +45,18 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class RunRequestServiceTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
     private BatchControlJobProperty property;
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -69,8 +71,10 @@ public class RunRequestServiceTest {
         job = j.createFreeStyleProject("batch-x");
         job.addProperty(new ParametersDefinitionProperty(
                 new StringParameterDefinition("DATE", "2000-01-01")));
-        property = new BatchControlJobProperty(true);
-        job.addProperty(property);
+        // run control is already on, so D-31 attached a property when the job was created:
+        // install this one as the job's only one, otherwise the rows that tighten it later
+        // (T-05-06 sets jobApprovers on it) would mutate a property nobody reads.
+        property = setBatchControl(job, new BatchControlJobProperty(true));
     }
 
     // ---------------------------------------------------------------- SPEC 3
@@ -83,8 +87,7 @@ public class RunRequestServiceTest {
 
         assertRejectedAsInvalid("an approver outside the global list must reject request creation",
                 () -> createAs("u1", "u2", "month-end batch", params("DATE", "2026-09-01")));
-        assertTrue("no request may be stored after a rejected creation",
-                RunRequestService.get().list().isEmpty());
+        assertTrue(RunRequestService.get().list().isEmpty(), "no request may be stored after a rejected creation");
     }
 
     /** T-03-02: a non-admin requester cannot designate themselves as approver. */
@@ -114,10 +117,9 @@ public class RunRequestServiceTest {
         assertRefused("list membership alone is not enough; the approver must still hold Approve",
                 () -> approveAs("a1", request.getId(), "trying anyway"));
 
-        assertEquals("the request must stay PENDING after the refused decision",
-                RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus(), "the request must stay PENDING after the refused decision");
         j.waitUntilNoActivity();
-        assertTrue("no build may run from a refused decision", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "no build may run from a refused decision");
     }
 
     /** T-03-04: the requester changes the approver before the decision; the change is recorded. */
@@ -132,11 +134,11 @@ public class RunRequestServiceTest {
         RunRequest reloaded = RunRequestService.get().load(request.getId());
         assertEquals("a2", reloaded.getApprover());
         List<RunRequest.ApproverChange> changes = reloaded.getApproverChanges();
-        assertEquals("exactly one approver change must be recorded", 1, changes.size());
+        assertEquals(1, changes.size(), "exactly one approver change must be recorded");
         assertEquals("a1", changes.get(0).getFrom());
         assertEquals("a2", changes.get(0).getTo());
         assertEquals("u1", changes.get(0).getBy());
-        assertNotNull("the change must carry a timestamp", changes.get(0).getAt());
+        assertNotNull(changes.get(0).getAt(), "the change must carry a timestamp");
     }
 
     /** T-03-05: once the request is decided (APPROVED) the approver can no longer be changed. */
@@ -151,8 +153,7 @@ public class RunRequestServiceTest {
                         RunRequestService.get().changeApprover(request.getId(), "a2");
                     }
                 });
-        assertEquals("the designated approver must stay unchanged",
-                "a1", RunRequestService.get().load(request.getId()).getApprover());
+        assertEquals("a1", RunRequestService.get().load(request.getId()).getApprover(), "the designated approver must stay unchanged");
     }
 
     /**
@@ -172,7 +173,7 @@ public class RunRequestServiceTest {
         RunRequest reloaded = RunRequestService.get().load(request.getId());
         assertEquals("a3", reloaded.getApprover());
         List<RunRequest.ApproverChange> changes = reloaded.getApproverChanges();
-        assertEquals("every hop must be audited, none may be collapsed or dropped", 2, changes.size());
+        assertEquals(2, changes.size(), "every hop must be audited, none may be collapsed or dropped");
         assertEquals("a1", changes.get(0).getFrom());
         assertEquals("a2", changes.get(0).getTo());
         assertEquals("u1", changes.get(0).getBy());
@@ -187,26 +188,23 @@ public class RunRequestServiceTest {
                 () -> approveAs("a1", request.getId(), "stale approver a1"));
         assertRefused("a2 was superseded and must not be able to approve",
                 () -> approveAs("a2", request.getId(), "stale approver a2"));
-        assertEquals("the refused decisions must leave the request PENDING",
-                RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus(), "the refused decisions must leave the request PENDING");
         j.waitUntilNoActivity();
-        assertTrue("no build may run from a superseded approver's decision", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "no build may run from a superseded approver's decision");
 
         // only the final approver's decision is valid
         approveAs("a3", request.getId(), "ok");
         RequestStatus finalStatus = RunRequestService.get().load(request.getId()).getStatus();
-        assertTrue("the final approver's decision must go through",
-                finalStatus == RequestStatus.APPROVED || finalStatus == RequestStatus.EXECUTED);
+        assertTrue(finalStatus == RequestStatus.APPROVED || finalStatus == RequestStatus.EXECUTED, "the final approver's decision must go through");
         j.waitUntilNoActivity();
-        assertEquals("the approved run must execute exactly once", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approved run must execute exactly once");
     }
 
     /** T-03-06: an admin may designate themselves while allowAdminSelfApproval=true (default). */
     @Test
     public void t_03_06_adminMaySelfDesignateWhenAllowed() throws Exception {
         RunRequest request = createAs("admin", "admin", "urgent hotfix batch", params("DATE", "2026-09-01"));
-        assertEquals("admin self-designation must succeed under allowAdminSelfApproval=true",
-                RequestStatus.PENDING, request.getStatus());
+        assertEquals(RequestStatus.PENDING, request.getStatus(), "admin self-designation must succeed under allowAdminSelfApproval=true");
         assertEquals("admin", request.getRequester());
         assertEquals("admin", request.getApprover());
     }
@@ -220,14 +218,12 @@ public class RunRequestServiceTest {
         approveAs("admin", request.getId(), "self approving as admin");
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertTrue("selfApproved=true must be recorded on an admin self-approval",
-                reloaded.isSelfApproved());
-        assertTrue("the request must be decided",
-                reloaded.getStatus() == RequestStatus.APPROVED
-                        || reloaded.getStatus() == RequestStatus.EXECUTED);
+        assertTrue(reloaded.isSelfApproved(), "selfApproved=true must be recorded on an admin self-approval");
+        assertTrue(reloaded.getStatus() == RequestStatus.APPROVED
+                        || reloaded.getStatus() == RequestStatus.EXECUTED, "the request must be decided");
 
         j.waitUntilNoActivity();
-        assertEquals("the approved run must execute", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approved run must execute");
     }
 
     /** T-02-04: with allowAdminSelfApproval=false even the admin cannot approve their own request. */
@@ -244,9 +240,9 @@ public class RunRequestServiceTest {
                 () -> approveAs("admin", request.getId(), "should not work"));
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("the request must stay PENDING", RequestStatus.PENDING, reloaded.getStatus());
+        assertEquals(RequestStatus.PENDING, reloaded.getStatus(), "the request must stay PENDING");
         j.waitUntilNoActivity();
-        assertTrue("no build may run", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "no build may run");
     }
 
     // ---------------------------------------------------------------- SPEC 5
@@ -259,13 +255,12 @@ public class RunRequestServiceTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild build = job.getBuildByNumber(1);
-        assertNotNull("the approved request must have run the build", build);
+        assertNotNull(build, "the approved request must have run the build");
         ParametersAction parameters = build.getAction(ParametersAction.class);
         assertNotNull(parameters);
         StringParameterValue date = (StringParameterValue) parameters.getParameter("DATE");
         assertNotNull(date);
-        assertEquals("the build must run with exactly the parameters stored at request time",
-                "2026-09-01", date.getValue());
+        assertEquals("2026-09-01", date.getValue(), "the build must run with exactly the parameters stored at request time");
     }
 
     /** T-05-02: an empty reason rejects request creation. */
@@ -290,8 +285,7 @@ public class RunRequestServiceTest {
                     }
                 });
 
-        assertEquals("the request must stay PENDING after the refused rejection",
-                RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(request.getId()).getStatus(), "the request must stay PENDING after the refused rejection");
     }
 
     /** T-05-05: the executed build carries request id, requester and approver as Cause and build Action. */
@@ -304,17 +298,15 @@ public class RunRequestServiceTest {
         FreeStyleBuild build = job.getBuildByNumber(1);
         assertNotNull(build);
         ApprovedCause cause = build.getCause(ApprovedCause.class);
-        assertNotNull("the build must carry an ApprovedCause", cause);
+        assertNotNull(cause, "the build must carry an ApprovedCause");
         assertEquals(request.getId(), cause.getRequestId());
         assertEquals("u1", cause.getRequester());
         assertEquals("a1", cause.getApprover());
-        assertNotNull("the build must carry the approved-run marker action",
-                build.getAction(ApprovedRunAction.class));
+        assertNotNull(build.getAction(ApprovedRunAction.class), "the build must carry the approved-run marker action");
 
         String buildPage = j.createWebClient().login("admin")
                 .getPage(build).getWebResponse().getContentAsString();
-        assertTrue("the request id must be visible on the build page",
-                buildPage.contains(request.getId()));
+        assertTrue(buildPage.contains(request.getId()), "the request id must be visible on the build page");
     }
 
     /** T-05-06: a job-level approver restriction narrows the global list. */
@@ -326,8 +318,7 @@ public class RunRequestServiceTest {
                 () -> createAs("u1", "a2", "month-end batch", params("DATE", "2026-09-01")));
 
         RunRequest allowed = createAs("u1", "a1", "month-end batch", params("DATE", "2026-09-01"));
-        assertEquals("the approver inside the restriction must be accepted",
-                RequestStatus.PENDING, allowed.getStatus());
+        assertEquals(RequestStatus.PENDING, allowed.getStatus(), "the approver inside the restriction must be accepted");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -357,28 +348,28 @@ public class RunRequestServiceTest {
     }
 
     /** SPEC validation failures surface as IllegalArgumentException or hudson.model.Failure. */
-    private static void assertRejectedAsInvalid(String message, ThrowingRunnable action) {
+    private static void assertRejectedAsInvalid(String message, Executable action) {
         boolean rejected = false;
         try {
-            action.run();
+            action.execute();
         } catch (IllegalArgumentException | Failure expected) {
             rejected = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - expected IllegalArgumentException or Failure, got " + other, other);
         }
-        assertTrue(message, rejected);
+        assertTrue(rejected, message);
     }
 
     /** Authorization/state refusals: the exact runtime exception type is not pinned by SPEC. */
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) {
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }

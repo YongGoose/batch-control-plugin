@@ -35,15 +35,15 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Red-team rows around grant-window abuse. Matrix rows T-RT-05 (D-17: jobs created inside an
@@ -54,17 +54,18 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md (items 6, 8, 9 and D-17), docs/ARCHITECTURE.md and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class GrantWindowAbuseTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T00:00:00Z");
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private Folder batchFolder;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
         GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
@@ -90,7 +91,7 @@ public class GrantWindowAbuseTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -117,29 +118,26 @@ public class GrantWindowAbuseTest {
                 + "</hudson.triggers.TimerTrigger></triggers>"
                 + "<builders/><publishers/><buildWrappers/></project>");
         int createCode = wc.getPage(create).getWebResponse().getStatusCode();
-        assertTrue("creating the job inside the grant window must succeed, got HTTP " + createCode,
-                createCode < 400);
+        assertTrue(createCode < 400, "creating the job inside the grant window must succeed, got HTTP " + createCode);
 
         FreeStyleProject planted = j.jenkins.getItemByFullName("team/batch/nightly", FreeStyleProject.class);
         assertNotNull(planted);
         BatchControlJobProperty property = planted.getProperty(BatchControlJobProperty.class);
-        assertNotNull("D-17: a job created inside an active grant window must automatically "
-                + "carry the plugin job property", property);
-        assertTrue("D-17: approvalRequired must default to true for a job created inside an "
-                + "active grant window", property.isApprovalRequired());
+        assertNotNull(property, "D-17: a job created inside an active grant window must automatically "
+                + "carry the plugin job property");
+        assertTrue(property.isApprovalRequired(), "D-17: approvalRequired must default to true for a job created inside an "
+                + "active grant window");
 
         // the window expires; a manual run must not bypass approval
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
         Page blocked = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl(planted.getUrl() + "build"), HttpMethod.POST));
-        assertEquals("the manual run of the planted job must be blocked with guidance",
-                400, blocked.getWebResponse().getStatusCode());
-        assertTrue("the block must explain that approval is required",
-                blocked.getWebResponse().getContentAsString()
-                        .toLowerCase(Locale.ROOT).contains("approval"));
+        assertEquals(400, blocked.getWebResponse().getStatusCode(), "the manual run of the planted job must be blocked with guidance");
+        assertTrue(blocked.getWebResponse().getContentAsString()
+                        .toLowerCase(Locale.ROOT).contains("approval"), "the block must explain that approval is required");
 
         j.waitUntilNoActivity();
-        assertTrue("no build may have run", planted.getBuilds().isEmpty());
+        assertTrue(planted.getBuilds().isEmpty(), "no build may have run");
         assertEquals(1, planted.getNextBuildNumber());
         assertEquals(0, j.jenkins.getQueue().getItems().length);
     }
@@ -168,14 +166,13 @@ public class GrantWindowAbuseTest {
 
         // the window expires mid-batch: every later write must be re-checked and rejected
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
-        assertEquals("a write after expiry must be rejected even though the batch started "
-                + "inside the window (no ride-along on an entry-time check)",
-                403, postConfigXml(wc, jobs[2], "changed"));
+        assertEquals(403, postConfigXml(wc, jobs[2], "changed"), "a write after expiry must be rejected even though the batch started "
+                + "inside the window (no ride-along on an entry-time check)");
         assertEquals(403, postConfigXml(wc, jobs[3], "changed"));
 
         assertEquals("changed", jobs[0].getDescription());
         assertEquals("changed", jobs[1].getDescription());
-        assertEquals("writes after expiry must not have been applied", "base", jobs[2].getDescription());
+        assertEquals("base", jobs[2].getDescription(), "writes after expiry must not have been applied");
         assertEquals("base", jobs[3].getDescription());
     }
 
@@ -197,7 +194,7 @@ public class GrantWindowAbuseTest {
 
         for (int i = 1; i <= 30; i++) {
             String next = String.format("rev-%02d", i);
-            assertEquals("save #" + i + " must succeed", 200, postConfigXml(u1, hot, next));
+            assertEquals(200, postConfigXml(u1, hot, next), "save #" + i + " must succeed");
             if (i == 15) {
                 // another job's change interleaves with the rapid loop
                 assertEquals(200, postConfigXml(admin, side, "side-changed"));
@@ -209,8 +206,7 @@ public class GrantWindowAbuseTest {
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> "hot-job".equals(rec.getTarget()))
                 .collect(Collectors.toList());
-        assertTrue("all 30 rapid saves must be recorded without loss, found " + hotRecords.size(),
-                hotRecords.size() >= 30);
+        assertTrue(hotRecords.size() >= 30, "all 30 rapid saves must be recorded without loss, found " + hotRecords.size());
 
         List<String> diffs = hotRecords.stream()
                 .map(ChangeRecord::getDiff)
@@ -221,15 +217,14 @@ public class GrantWindowAbuseTest {
             String removed = String.format("rev-%02d", i - 1);
             boolean chained = diffs.stream()
                     .anyMatch(diff -> diff.contains(added) && diff.contains(removed));
-            assertTrue("the diff for save #" + i + " must chain against the previous baseline ("
-                    + removed + " -> " + added + ")", chained);
+            assertTrue(chained, "the diff for save #" + i + " must chain against the previous baseline ("
+                    + removed + " -> " + added + ")");
         }
 
-        assertTrue("the interleaved change of the other job must be recorded too "
-                + "(the record pipeline must not block other jobs)",
-                FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        assertTrue(FileStore.get().listChangeRecords(YearMonth.now()).stream()
                         .anyMatch(rec -> rec.getType() == ChangeType.CONFIGURE
-                                && "side-job".equals(rec.getTarget())));
+                                && "side-job".equals(rec.getTarget())), "the interleaved change of the other job must be recorded too "
+                + "(the record pipeline must not block other jobs)");
     }
 
     // ---------------------------------------------------------------- helpers

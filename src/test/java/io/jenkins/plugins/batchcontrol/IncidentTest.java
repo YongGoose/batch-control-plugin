@@ -38,21 +38,21 @@ import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestBuilder;
 import org.jvnet.hudson.test.UnstableBuilder;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 11 (automatic incident registration and handling) plus the D-19 logTail
@@ -62,15 +62,16 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md sections 2/5 and docs/TEST-MATRIX.md
  * only (no src/main knowledge).
  */
+@WithJenkins
 public class IncidentTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -98,15 +99,14 @@ public class IncidentTest {
         j.waitUntilNoActivity();
 
         Incident incident = incidentForRun("cron-fail#1");
-        assertNotNull("a FAILURE must open an incident regardless of its cause (cron included)",
-                incident);
+        assertNotNull(incident, "a FAILURE must open an incident regardless of its cause (cron included)");
         assertEquals(IncidentStatus.OPEN, incident.getStatus());
         assertEquals("cron-fail", incident.getJobFullName());
         assertEquals("FAILURE", incident.getResult());
         List<String> logTail = incident.getLogTail();
-        assertNotNull("the incident must carry a console log excerpt", logTail);
-        assertFalse("the logTail excerpt must not be empty for a real build", logTail.isEmpty());
-        assertTrue("the logTail excerpt is capped at 100 lines", logTail.size() <= 100);
+        assertNotNull(logTail, "the incident must carry a console log excerpt");
+        assertFalse(logTail.isEmpty(), "the logTail excerpt must not be empty for a real build");
+        assertTrue(logTail.size() <= 100, "the logTail excerpt is capped at 100 lines");
     }
 
     /** T-11-02: an approved, successful rerun sets resolvedByRunId but never auto-resolves. */
@@ -137,14 +137,12 @@ public class IncidentTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild second = job.getBuildByNumber(2);
-        assertNotNull("the approved rerun must have executed", second);
+        assertNotNull(second, "the approved rerun must have executed");
         j.assertBuildStatusSuccess(second);
 
         Incident reloaded = IncidentService.get().load(incident.getId());
-        assertEquals("the successful linked rerun must be recorded on the incident",
-                "rerun-x#2", reloaded.getResolvedByRunId());
-        assertEquals("the status must stay OPEN - resolution is a human decision",
-                IncidentStatus.OPEN, reloaded.getStatus());
+        assertEquals("rerun-x#2", reloaded.getResolvedByRunId(), "the successful linked rerun must be recorded on the incident");
+        assertEquals(IncidentStatus.OPEN, reloaded.getStatus(), "the status must stay OPEN - resolution is a human decision");
     }
 
     /** T-11-03: with incidentResults=[FAILURE] an UNSTABLE completion opens nothing. */
@@ -157,16 +155,14 @@ public class IncidentTest {
         unstable.getBuildersList().add(new UnstableBuilder());
         j.assertBuildStatus(Result.UNSTABLE, unstable.scheduleBuild2(0));
         j.waitUntilNoActivity();
-        assertNull("UNSTABLE is outside incidentResults=[FAILURE], no incident may open",
-                incidentForRun("unstable-x#1"));
+        assertNull(incidentForRun("unstable-x#1"), "UNSTABLE is outside incidentResults=[FAILURE], no incident may open");
 
         // positive control so the negative assertion cannot pass vacuously
         FreeStyleProject failing = j.createFreeStyleProject("fail-x");
         failing.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, failing.scheduleBuild2(0));
         j.waitUntilNoActivity();
-        assertNotNull("FAILURE stays inside the configured results and must open an incident",
-                incidentForRun("fail-x#1"));
+        assertNotNull(incidentForRun("fail-x#1"), "FAILURE stays inside the configured results and must open an incident");
     }
 
     /** T-11-04: acknowledge and resolve each record user, time and comment in transitions. */
@@ -185,13 +181,13 @@ public class IncidentTest {
         assertEquals(IncidentStatus.RESOLVED, reloaded.getStatus());
 
         IncidentTransition acknowledged = transitionTo(reloaded, IncidentStatus.ACKNOWLEDGED);
-        assertNotNull("the ACKNOWLEDGED transition must be recorded", acknowledged);
+        assertNotNull(acknowledged, "the ACKNOWLEDGED transition must be recorded");
         assertEquals("u1", acknowledged.getBy());
         assertEquals("taking a look", acknowledged.getComment());
-        assertNotNull("the transition must carry a timestamp", acknowledged.getAt());
+        assertNotNull(acknowledged.getAt(), "the transition must carry a timestamp");
 
         IncidentTransition resolved = transitionTo(reloaded, IncidentStatus.RESOLVED);
-        assertNotNull("the RESOLVED transition must be recorded", resolved);
+        assertNotNull(resolved, "the RESOLVED transition must be recorded");
         assertEquals("u2", resolved.getBy());
         assertEquals("root cause fixed", resolved.getComment());
         assertNotNull(resolved.getAt());
@@ -214,19 +210,16 @@ public class IncidentTest {
                         IncidentService.get().acknowledge(incident.getId(), "reopening?");
                     }
                 });
-        assertEquals("the rejected reverse transition must not change the state",
-                IncidentStatus.RESOLVED, IncidentService.get().load(incident.getId()).getStatus());
+        assertEquals(IncidentStatus.RESOLVED, IncidentService.get().load(incident.getId()).getStatus(), "the rejected reverse transition must not change the state");
 
         try (ACLContext ignored = as("u2")) {
             IncidentService.get().addComment(incident.getId(), "post-mortem attached");
         }
         Incident commented = IncidentService.get().load(incident.getId());
-        assertEquals("a comment on RESOLVED must not change the state",
-                IncidentStatus.RESOLVED, commented.getStatus());
+        assertEquals(IncidentStatus.RESOLVED, commented.getStatus(), "a comment on RESOLVED must not change the state");
         List<IncidentTransition> transitions = commented.getTransitions();
         IncidentTransition last = transitions.get(transitions.size() - 1);
-        assertEquals("the comment must be recorded on the incident history",
-                "post-mortem attached", last.getComment());
+        assertEquals("post-mortem attached", last.getComment(), "the comment must be recorded on the incident history");
         assertEquals("u2", last.getBy());
     }
 
@@ -245,23 +238,19 @@ public class IncidentTest {
 
         Incident incident = incidentForRun("link-x#1");
         assertNotNull(incident);
-        assertEquals("the incident must keep the original build parameters",
-                "2026-09-01", incident.getParameters().get("DATE"));
+        assertEquals("2026-09-01", incident.getParameters().get("DATE"), "the incident must keep the original build parameters");
 
         RunRequest rerun;
         try (ACLContext ignored = as("u1")) {
             rerun = IncidentService.get().rerun(incident.getId(), "a1");
         }
         assertEquals(RequestStatus.PENDING, rerun.getStatus());
-        assertEquals("the rerun request must be prefilled with the original parameters",
-                "2026-09-01", rerun.getParameters().get("DATE"));
-        assertEquals("the rerun request must link back to the incident",
-                incident.getId(), rerun.getIncidentId());
+        assertEquals("2026-09-01", rerun.getParameters().get("DATE"), "the rerun request must be prefilled with the original parameters");
+        assertEquals(incident.getId(), rerun.getIncidentId(), "the rerun request must link back to the incident");
         assertEquals("u1", rerun.getRequester());
 
         Incident reloaded = IncidentService.get().load(incident.getId());
-        assertTrue("the incident must list the rerun request id",
-                reloaded.getRerunRequestIds().contains(rerun.getId()));
+        assertTrue(reloaded.getRerunRequestIds().contains(rerun.getId()), "the incident must list the rerun request id");
     }
 
     /** T-11-07: with ABORTED added to incidentResults an aborted build opens an incident. */
@@ -279,15 +268,14 @@ public class IncidentTest {
         while (run.getExecutor() == null && System.currentTimeMillis() < deadline) {
             Thread.sleep(50);
         }
-        assertNotNull("the running build must expose its executor", run.getExecutor());
+        assertNotNull(run.getExecutor(), "the running build must expose its executor");
         run.getExecutor().interrupt(Result.ABORTED, new CauseOfInterruption.UserInterruption("u1"));
         j.waitForCompletion(run);
         j.assertBuildStatus(Result.ABORTED, run);
         j.waitUntilNoActivity();
 
         Incident incident = incidentForRun("abort-inc#1");
-        assertNotNull("ABORTED is inside the configured results and must open an incident",
-                incident);
+        assertNotNull(incident, "ABORTED is inside the configured results and must open an incident");
         assertEquals("ABORTED", incident.getResult());
         assertEquals(IncidentStatus.OPEN, incident.getStatus());
     }
@@ -319,21 +307,20 @@ public class IncidentTest {
         j.waitUntilNoActivity();
 
         Incident incident = incidentForRun("leak-x#1");
-        assertNotNull("the FAILURE must have opened an incident", incident);
+        assertNotNull(incident, "the FAILURE must have opened an incident");
         List<String> logTail = incident.getLogTail();
         assertNotNull(logTail);
 
         String echoedLine = null;
         for (String line : logTail) {
-            assertFalse("no logTail line may carry the sensitive parameter value in plain text: "
-                    + line, line.contains(secretValue));
+            assertFalse(line.contains(secretValue), "no logTail line may carry the sensitive parameter value in plain text: "
+                    + line);
             if (line.contains("token is")) {
                 echoedLine = line;
             }
         }
-        assertNotNull("the echoed console line must be part of the excerpt", echoedLine);
-        assertTrue("the sensitive value must be masked as ******** (D-19), was: " + echoedLine,
-                echoedLine.contains("********"));
+        assertNotNull(echoedLine, "the echoed console line must be part of the excerpt");
+        assertTrue(echoedLine.contains("********"), "the sensitive value must be masked as ******** (D-19), was: " + echoedLine);
     }
 
     // ---------------------------------------------------------------- helpers
@@ -349,7 +336,7 @@ public class IncidentTest {
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
         Incident incident = incidentForRun(jobName + "#1");
-        assertNotNull("test fixture: the failed build must have opened an incident", incident);
+        assertNotNull(incident, "test fixture: the failed build must have opened an incident");
         assertEquals(IncidentStatus.OPEN, incident.getStatus());
         return incident;
     }
@@ -370,15 +357,15 @@ public class IncidentTest {
         return null;
     }
 
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) {
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }

@@ -47,6 +47,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 결재 시점에 결재자가 `Approve` 권한을 잃었으면 결재가 거부된다(목록 등재 + 권한 보유 둘 다 필요).
 - 수용 기준: 요청자 본인을 결재자로 지정할 수 없다(관리자 자가 결재 허용 시 관리자 예외).
 - 수용 기준: 결재자 변경 시 요청 이력에 (이전 결재자, 새 결재자, 변경자, 시각)이 남는다.
+- 수용 기준: 그 요청의 지정 결재자만 결재할 수 있다. 결재자 목록에 등재된 다른 사용자나 관리자도 대신 결재할 수 없다. 지정 결재자가 부재일 때는 결재 전까지 요청자가 결재자를 변경해 처리한다. (D-29)
 
 **4. 이력 저장소**
 요청·결재·권한·실행·변경·오류를 빌드와 독립된 저장소(`$JENKINS_HOME/batch-control/`)에 기록해, 빌드가 삭제되어도 남습니다.
@@ -65,6 +66,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 승인 후 실행된 빌드의 파라미터가 요청 시 저장된 파라미터와 정확히 일치한다.
 - 수용 기준: 승인 후 파라미터를 바꾸는 경로가 없다. 바꾸려면 새 요청을 만들어야 한다.
 - 수용 기준: 반려 사유가 비어 있으면 반려가 거부된다.
+- 수용 기준: 반려된 요청에서 요청자는 반려 사유, 반려한 결재자, 반려 시각을 볼 수 있다. (D-28)
 - 수용 기준: 사유가 4,000자를 초과하거나 문자열 파라미터 값이 개당 10,000자를 초과하면 요청 생성이 거부된다. (R-7 부분 채택, D-22)
 - 수용 기준: 실행된 빌드에는 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다.
 - 잡 단위 설정(JobProperty): `approvalRequired`(bool), 잡별 결재자 목록 제한(선택).
@@ -78,6 +80,9 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: UpstreamCause는 기본 통과, 잡 설정 `blockUpstream=true`면 차단. `allowedUpstreamJobs` 목록이 있으면 그 잡만 통과.
 - 수용 기준: `blockUpstream=true`일 때 `allowedUpstreamJobs`가 비어 있거나 미설정이면 모든 상위 잡이 차단된다(빈 목록은 미설정과 동일). `blockUpstream=false`면 목록과 무관하게 모든 상위 잡이 통과한다. (R-1, D-16)
 - 수용 기준: 승인 투입 마커는 요청 ID에 묶이고 큐 투입 1회로 소비된다. 동일 마커의 재사용(재큐·rebuild 등)은 차단되고 기록된다. (R-8, D-23)
+- 수용 기준: 1회 소비 규칙은 **사람이 올린 실행 요청에만** 적용된다. cron 정기 실행은 `blockTimer=true`가 아닌 한 요청·승인 없이 계속 통과하므로, 정기 배치 잡은 실행 통제를 켜도 스케줄대로 계속 실행된다. 정기 실행을 멈추려면 `blockTimer`(또는 잡 비활성화)를 켠다. (D-25)
+- 수용 기준: 동일 마커의 재사용 시도는 감사 이력에 `type=MARKER_REUSE_BLOCKED` 레코드로 남고 대시보드·CSV(`changes.csv`)에서 조회된다. `user`는 **재사용을 시도한 계정**이며(원 승인의 요청자가 아니다), 레코드는 소비된 요청 ID와 대상 잡을 식별할 수 있어야 한다. 정상 실행 1회만으로는 이 레코드가 생기지 않는다. 조회는 12절의 `ViewHistory` 게이트를 따른다. (D-30)
+- 수용 기준: 통제 설정 변경(전역 스위치·잡 속성 토글), 대상 잡의 설정 변경, 권한 창 만료 중 어느 것도 이미 실행 중인 빌드를 중단시키지 않는다. 차단은 큐 진입 단계에서만 일어난다. (D-27)
 - 수용 기준: 차단 시 사용자에게 "승인 필요" 안내와 요청 화면 링크가 표시된다(조용한 실패 금지).
 - 수용 기준: 승인 대상 잡의 사이드바에서 "Build Now"가 "Request Run"으로 대체된다.
 
@@ -98,6 +103,7 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 승인되면 그 시간 동안 본인 계정으로 직접 작업하며, 만료 시각이 지나면 즉시 회수됩니다.
 - 전역 설정: `grantDurationOptions`(기본 15, 30, 60분), `maxGrantMinutes`(기본 240).
 - 수용 기준: 승인 즉시 요청자가 지정 범위에서 지정 행위의 Jenkins 권한(Item/Create, Item/Configure, Item/Delete)을 얻는다.
+- 수용 기준: 권한 창 만료 후의 거부 화면은 Jenkins 코어의 것을 그대로 쓴다(코어가 그 화면의 확장점을 제공하지 않으며, 가로채는 구현은 인스턴스 전체의 권한 거부에 영향을 준다). 만료 안내와 재요청 동선은 권한 화면에서 제공한다: 활성 창의 남은 시간, 만료된 창의 이력, 재요청 링크. 편집 중이던 설정 값의 복원은 제공하지 않는다. (D-33)
 - 수용 기준: 지정 범위 밖 잡에는 권한이 생기지 않는다.
 - 수용 기준: 만료 시각 경과 후 첫 권한 검사부터 거부된다(타이머 의존 없음).
 - 수용 기준: 활성 권한이 있는 상태에서 재시작해도 만료 전이면 유지, 만료 후면 즉시 없음.
@@ -105,6 +111,8 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다.
 - 수용 기준: Role Strategy가 전역 권한 전략으로 선택된 경우 관리 화면에 JIT 변경 통제 미지원 안내(AdministrativeMonitor)가 표시된다.
 - 수용 기준: 실행 통제가 켜져 있으면, 활성 Grant(권한 창) 안에서 생성된 잡은 `approvalRequired=true`가 기본으로 적용된다(권한 창을 이용해 무승인 실행 경로를 심는 것 방지). (R-2 경량 채택, D-17)
+- 수용 기준: 멀티브랜치 프로젝트가 자동 생성한 브랜치 자식 잡은 이 기본값에서 제외한다(설정 화면이 없어 해제 경로가 없고, 재인덱싱 시 설정이 재생성되기 때문). 해당 잡의 실행은 10절대로 기록된다. (D-32)
+- 수용 기준: 실행 통제가 켜져 있으면, **새로 생성되는 모든 잡**에 `approvalRequired=true`가 기본으로 적용된다(생성 경로·생성자와 무관). 통제를 풀려면 잡 설정을 바꿔야 하며, 그 변경 자체가 변경 통제 대상이라 기록에 남는다. 이 기본값은 사람이 직접 누르는 실행에만 영향을 준다 — 타이머·상위 잡·SCM 트리거는 6절 정책대로 계속 통과하므로 자동 생성 잡의 자동 빌드는 멈추지 않는다. (D-31)
 - 구현: 기존 권한 전략을 감싸는 위임형 AuthorizationStrategy. 관리자가 전역 보안 설정에서 선택.
 
 **9. 변경 자동 기록**
@@ -177,7 +185,8 @@ RunRecord         runId(jobFullName#number), jobFullName, number, causeType, use
                   parameters, result, startedAt, durationMs, abortedBy?, runRequestId?
 Incident          id, runId, jobFullName, result, status(OPEN|ACKNOWLEDGED|RESOLVED),
                   transitions[{status,by,at,comment}], logTail, rerunRequestIds[], resolvedByRunId?
-ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RETENTION|GRANT_REVOKE),
+ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RETENTION|GRANT_REVOKE|
+                       MARKER_REUSE_BLOCKED),
                   target, user, at, grantId?, diff?, detail
 ```
 

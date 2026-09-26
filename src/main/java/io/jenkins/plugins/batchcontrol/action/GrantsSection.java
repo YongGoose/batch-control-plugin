@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.ModelObject;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -11,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -231,6 +233,27 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /** Jelly helper: human-readable timestamp. */
     public String format(Instant instant) {
         return Dates.format(instant);
+    }
+
+    /**
+     * Jelly helper: how much of a grant window is left ({@code 12 min 30 sec}), so the user does
+     * not have to subtract the absolute expiry time from the current time (UX-11). Read through
+     * {@link BatchClock} like every other time read in the plugin.
+     *
+     * @return the remaining span, or {@code "expired"} once the window has closed (a grant can
+     *         still be listed for the moment between expiry and the sweeper run)
+     */
+    public String remaining(@CheckForNull Instant expiresAt) {
+        if (expiresAt == null) {
+            return "";
+        }
+        long millis = expiresAt.toEpochMilli() - BatchClock.now().toEpochMilli();
+        return millis <= 0 ? "expired" : Util.getTimeSpanString(millis);
+    }
+
+    /** Jelly helper: {@code 1 minute} / {@code 15 minutes} for the duration select (UX-12). */
+    public String minutesLabel(int minutes) {
+        return minutes == 1 ? "1 minute" : minutes + " minutes";
     }
 
     /** Jelly helper: comma-joined action list ("CREATE, CONFIGURE"). */

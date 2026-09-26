@@ -31,17 +31,19 @@ import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import hudson.cli.CLICommandInvoker;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 6 (blocking every unapproved manual run path at queue entry, with the
@@ -51,17 +53,24 @@ import static org.junit.Assert.assertTrue;
  * Blocking assertion baseline (matrix header): queue empty + getNextBuildNumber() unchanged
  * + no build after waitUntilNoActivity().
  *
+ * Fixture note (D-31): run control is on before the jobs are created, so every job here is
+ * born with a BatchControlJobProperty already attached. Job settings therefore go in through
+ * {@link BatchControlFixtures#setBatchControl} and "not controlled" through
+ * {@link BatchControlFixtures#uncontrolled} — a bare addProperty would be shadowed by the
+ * default one.
+ *
  * Written from docs/SPEC.md, docs/TEST-MATRIX.md and docs/POC-RESULTS.md only (no src/main knowledge).
  */
+@WithJenkins
 public class QueueBlockTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(true);
         cfg.save();
@@ -108,18 +117,17 @@ public class QueueBlockTest {
     /** T-06-04: Pipeline Replay of an approval-required job does not enter the queue. */
     @Test
     public void t_06_04_pipelineReplayIsBlocked() throws Exception {
-        WorkflowJob pipeline = j.createProject(WorkflowJob.class, "pipe");
+        WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
         j.buildAndAssertSuccess(pipeline); // first run happens before the job becomes protected
-        pipeline.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(pipeline, new BatchControlJobProperty(true));
 
         ReplayAction replay = pipeline.getBuildByNumber(1).getAction(ReplayAction.class);
-        assertNotNull("a completed pipeline build must expose the replay action", replay);
-        assertNull("replay of an approval-required job must not enter the queue",
-                replay.run("echo 'replayed'", Collections.<String, String>emptyMap()));
+        assertNotNull(replay, "a completed pipeline build must expose the replay action");
+        assertNull(replay.run("echo 'replayed'", Collections.<String, String>emptyMap()), "replay of an approval-required job must not enter the queue");
 
         assertBlocked(pipeline, 2);
-        assertEquals("no second build may exist", 1, pipeline.getBuilds().size());
+        assertEquals(1, pipeline.getBuilds().size(), "no second build may exist");
     }
 
     /** T-06-05: an upstream build step is blocked when blockUpstream=true (no allow list). */
@@ -127,7 +135,7 @@ public class QueueBlockTest {
     public void t_06_05_upstreamBuildStepBlockedWhenBlockUpstream() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -144,7 +152,7 @@ public class QueueBlockTest {
         protect(job);
         // matrix note 4: reproduce cron firing by scheduling with a TimerTriggerCause
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNotNull("a timer cause must pass by default", future);
+        assertNotNull(future, "a timer cause must pass by default");
         j.assertBuildStatusSuccess(future);
     }
 
@@ -153,11 +161,11 @@ public class QueueBlockTest {
     public void t_06_07_timerCauseBlockedWhenBlockTimer() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         // an unattended cause is refused quietly: scheduleBuild2 returns null, nothing is thrown
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNull("a blocked timer cause must be refused at queue entry", future);
+        assertNull(future, "a blocked timer cause must be refused at queue entry");
         assertBlocked(job, 1);
         assertTrue(job.getBuilds().isEmpty());
     }
@@ -184,11 +192,10 @@ public class QueueBlockTest {
         }
         j.waitUntilNoActivity();
 
-        assertEquals("the approved submission must pass the queue gate", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approved submission must pass the queue gate");
         FreeStyleBuild build = job.getBuildByNumber(1);
         j.assertBuildStatusSuccess(build);
-        assertNotNull("the run must carry the plugin's ApprovedCause",
-                build.getCause(ApprovedCause.class));
+        assertNotNull(build.getCause(ApprovedCause.class), "the run must carry the plugin's ApprovedCause");
     }
 
     /** T-06-09: clicking the job page's build anchor (WebClient) does not enter the queue. */
@@ -227,7 +234,7 @@ public class QueueBlockTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild build = job.getBuildByNumber(1);
-        assertNotNull("an upstream cause must pass by default", build);
+        assertNotNull(build, "an upstream cause must pass by default");
         j.assertBuildStatusSuccess(build);
     }
 
@@ -237,7 +244,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -245,7 +252,7 @@ public class QueueBlockTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild build = job.getBuildByNumber(1);
-        assertNotNull("an allow-listed upstream job must pass", build);
+        assertNotNull(build, "an allow-listed upstream job must pass");
         j.assertBuildStatusSuccess(build);
     }
 
@@ -255,7 +262,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
-        job.addProperty(property);
+        setBatchControl(job, property);
 
         WorkflowJob other = j.createProject(WorkflowJob.class, "z");
         other.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -269,28 +276,29 @@ public class QueueBlockTest {
     /** T-06-16: a job without approvalRequired is unaffected by run control. */
     @Test
     public void t_06_16_nonApprovalJobUnaffected() throws Exception {
-        FreeStyleProject free = j.createFreeStyleProject("free-x");
+        // D-31 attaches approvalRequired=true at creation while run control is on; this row is
+        // about a job that carries no batch-control property at all, so strip it back to that.
+        FreeStyleProject free = uncontrolled(j.createFreeStyleProject("free-x"));
         JenkinsRule.WebClient wc = j.createWebClient();
         wc.getPage(new WebRequest(wc.createCrumbedUrl(free.getUrl() + "build"), HttpMethod.POST));
         j.waitUntilNoActivity();
 
         FreeStyleBuild build = free.getBuildByNumber(1);
-        assertNotNull("a non-approval job must build normally with run control on", build);
+        assertNotNull(build, "a non-approval job must build normally with run control on");
         j.assertBuildStatusSuccess(build);
     }
 
     // ---------------------------------------------------------------- helpers
 
     private void protect(FreeStyleProject target) throws Exception {
-        target.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(target, new BatchControlJobProperty(true));
     }
 
     /** Matrix common blocking baseline. */
     private void assertBlocked(Job<?, ?> target, int nextBuildNumberBefore) throws Exception {
-        assertEquals("the queue must stay empty", 0, j.jenkins.getQueue().getItems().length);
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
         j.waitUntilNoActivity();
-        assertEquals("nextBuildNumber must not move", nextBuildNumberBefore, target.getNextBuildNumber());
-        assertEquals("the queue must still be empty after settling",
-                0, j.jenkins.getQueue().getItems().length);
+        assertEquals(nextBuildNumberBefore, target.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must still be empty after settling");
     }
 }

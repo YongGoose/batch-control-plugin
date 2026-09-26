@@ -37,6 +37,26 @@ public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
         return approvalRequired;
     }
 
+    /**
+     * These settings with {@code approvalRequired} set as given, every other setting carried over.
+     *
+     * <p>{@code approvalRequired} is final, so the D-31 default has to rebuild the property rather
+     * than flip a field; rebuilding must not drop the trigger policy ({@code blockTimer},
+     * {@code blockUpstream}, {@code allowedUpstreamJobs}) or the job-level approver list that the
+     * creator supplied in the same config.xml.
+     */
+    public BatchControlJobProperty withApprovalRequired(boolean required) {
+        if (required == approvalRequired) {
+            return this;
+        }
+        BatchControlJobProperty copy = new BatchControlJobProperty(required);
+        copy.blockTimer = blockTimer;
+        copy.blockUpstream = blockUpstream;
+        copy.allowedUpstreamJobs = getAllowedUpstreamJobs();
+        copy.jobApprovers = getJobApprovers();
+        return copy;
+    }
+
     public boolean isBlockTimer() {
         return blockTimer;
     }

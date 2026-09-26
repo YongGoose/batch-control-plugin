@@ -36,15 +36,17 @@ import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 10 (run dashboard / run records). Matrix rows T-10-01, T-10-02, T-10-03,
@@ -54,13 +56,14 @@ import static org.junit.Assert.assertTrue;
  * gate through HTTP status codes. Written from docs/SPEC.md, docs/ARCHITECTURE.md
  * sections 2/5 and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class RunRecordListenerTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -78,24 +81,26 @@ public class RunRecordListenerTest {
     /** T-10-01: Freestyle and Pipeline completions are both recorded with an accurate causeType. */
     @Test
     public void t_10_01_freestyleAndPipelineAreBothRecorded() throws Exception {
-        FreeStyleProject freestyle = j.createFreeStyleProject("fs-x");
+        // This row measures the recorder, not the queue gate: both jobs stay out of run control
+        // (D-31 would otherwise make them approval-required at creation and block the USER cause).
+        FreeStyleProject freestyle = uncontrolled(j.createFreeStyleProject("fs-x"));
         j.assertBuildStatusSuccess(freestyle.scheduleBuild2(0, userCause("u1")));
 
-        WorkflowJob pipeline = j.createProject(WorkflowJob.class, "pipe-x");
+        WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe-x"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'record me'", true));
         j.assertBuildStatusSuccess(pipeline.scheduleBuild2(0, new CauseAction(userCause("u1"))));
         j.waitUntilNoActivity();
 
         RunRecord freestyleRecord = record("fs-x#1");
-        assertNotNull("a Freestyle completion must append a RunRecord", freestyleRecord);
+        assertNotNull(freestyleRecord, "a Freestyle completion must append a RunRecord");
         assertEquals("fs-x", freestyleRecord.getJobFullName());
         assertEquals(CauseType.USER, freestyleRecord.getCauseType());
         assertEquals("SUCCESS", freestyleRecord.getResult());
-        assertEquals("the triggering user must be recorded", "u1", freestyleRecord.getUser());
-        assertNotNull("the record must carry the start time", freestyleRecord.getStartedAt());
+        assertEquals("u1", freestyleRecord.getUser(), "the triggering user must be recorded");
+        assertNotNull(freestyleRecord.getStartedAt(), "the record must carry the start time");
 
         RunRecord pipelineRecord = record("pipe-x#1");
-        assertNotNull("a Pipeline completion must append a RunRecord", pipelineRecord);
+        assertNotNull(pipelineRecord, "a Pipeline completion must append a RunRecord");
         assertEquals("pipe-x", pipelineRecord.getJobFullName());
         assertEquals(CauseType.USER, pipelineRecord.getCauseType());
         assertEquals("SUCCESS", pipelineRecord.getResult());
@@ -114,22 +119,23 @@ public class RunRecordListenerTest {
         while (run.getExecutor() == null && System.currentTimeMillis() < deadline) {
             Thread.sleep(50);
         }
-        assertNotNull("the running build must expose its executor", run.getExecutor());
+        assertNotNull(run.getExecutor(), "the running build must expose its executor");
         run.getExecutor().interrupt(Result.ABORTED, new CauseOfInterruption.UserInterruption("u1"));
         j.waitForCompletion(run);
         j.assertBuildStatus(Result.ABORTED, run);
 
         RunRecord record = record("abort-x#1");
-        assertNotNull("an aborted completion must still append a RunRecord", record);
+        assertNotNull(record, "an aborted completion must still append a RunRecord");
         assertEquals("ABORTED", record.getResult());
-        assertEquals("the interrupting user recorded by Jenkins must be surfaced as abortedBy",
-                "u1", record.getAbortedBy());
+        assertEquals("u1", record.getAbortedBy(), "the interrupting user recorded by Jenkins must be surfaced as abortedBy");
     }
 
     /** T-10-03: causes classify as USER / TIMER / UPSTREAM / SCM / OTHER / APPROVED_REQUEST. */
     @Test
     public void t_10_03_causeTypesAreClassified() throws Exception {
-        FreeStyleProject target = j.createFreeStyleProject("cause-x");
+        // the first five causes must reach the recorder unblocked, so the job starts outside run
+        // control (D-31 attaches approvalRequired=true at creation while run control is on)
+        FreeStyleProject target = uncontrolled(j.createFreeStyleProject("cause-x"));
 
         // #1 USER
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, userCause("u1")));
@@ -146,7 +152,7 @@ public class RunRecordListenerTest {
         // #5 OTHER (a cause outside every known classification)
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, new SyntheticCause()));
         // #6 APPROVED_REQUEST (protect the job only now, so the earlier causes were unaffected)
-        target.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(target, new BatchControlJobProperty(true));
         RunRequest request;
         try (ACLContext ignored = as("u1")) {
             request = RunRequestService.get().create(target, new LinkedHashMap<>(),
@@ -156,7 +162,7 @@ public class RunRecordListenerTest {
             RunRequestService.get().approve(request.getId(), "ok");
         }
         j.waitUntilNoActivity();
-        assertEquals("all six classification builds must have run", 6, target.getBuilds().size());
+        assertEquals(6, target.getBuilds().size(), "all six classification builds must have run");
 
         assertCauseType("cause-x#1", CauseType.USER);
         assertCauseType("cause-x#2", CauseType.TIMER);
@@ -164,15 +170,14 @@ public class RunRecordListenerTest {
         assertCauseType("cause-x#4", CauseType.SCM);
         assertCauseType("cause-x#5", CauseType.OTHER);
         assertCauseType("cause-x#6", CauseType.APPROVED_REQUEST);
-        assertEquals("the USER record must carry the triggering user",
-                "u1", record("cause-x#1").getUser());
+        assertEquals("u1", record("cause-x#1").getUser(), "the USER record must carry the triggering user");
     }
 
     /** T-10-04: an approved-request run links record and request in both directions. */
     @Test
     public void t_10_04_approvedRequestRunLinksRecordAndRequest() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("appr-x");
-        job.addProperty(new BatchControlJobProperty(true));
+        setBatchControl(job, new BatchControlJobProperty(true));
 
         RunRequest request;
         try (ACLContext ignored = as("u1")) {
@@ -188,12 +193,10 @@ public class RunRecordListenerTest {
         RunRecord record = record("appr-x#1");
         assertNotNull(record);
         assertEquals(CauseType.APPROVED_REQUEST, record.getCauseType());
-        assertEquals("the record must link to the request detail via runRequestId",
-                request.getId(), record.getRunRequestId());
+        assertEquals(request.getId(), record.getRunRequestId(), "the record must link to the request detail via runRequestId");
 
         RunRequest reloaded = RunRequestService.get().load(request.getId());
-        assertEquals("the request must carry the executed run id",
-                "appr-x#1", reloaded.getExecutedRunId());
+        assertEquals("appr-x#1", reloaded.getExecutedRunId(), "the request must carry the executed run id");
     }
 
     /** T-10-05: the dashboard is gated by ViewHistory (403 without, 200 with). */
@@ -203,15 +206,13 @@ public class RunRecordListenerTest {
                 .withThrowExceptionOnFailingStatusCode(false).login("nohist");
         Page denied = noHistory.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/dashboard/"), HttpMethod.GET));
-        assertEquals("without ViewHistory the dashboard must answer 403",
-                403, denied.getWebResponse().getStatusCode());
+        assertEquals(403, denied.getWebResponse().getStatusCode(), "without ViewHistory the dashboard must answer 403");
 
         JenkinsRule.WebClient viewer = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false).login("viewer");
         Page allowed = viewer.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/dashboard/"), HttpMethod.GET));
-        assertEquals("with ViewHistory the dashboard must render",
-                200, allowed.getWebResponse().getStatusCode());
+        assertEquals(200, allowed.getWebResponse().getStatusCode(), "with ViewHistory the dashboard must render");
     }
 
     /**
@@ -227,33 +228,33 @@ public class RunRecordListenerTest {
         WorkflowMultiBranchProject mb = j.jenkins.createProject(WorkflowMultiBranchProject.class, "mb");
         mb.getSourcesList().add(new BranchSource(new SingleSCMSource("main", new NullSCM())));
         Queue.Item indexing = mb.scheduleBuild2(0);
-        assertNotNull("branch indexing must be schedulable", indexing);
+        assertNotNull(indexing, "branch indexing must be schedulable");
         indexing.getFuture().get();
         j.waitUntilNoActivity();
 
         WorkflowJob branch = mb.getItem("main");
-        assertNotNull("indexing must have created the branch child job", branch);
+        assertNotNull(branch, "indexing must have created the branch child job");
         if (branch.getLastBuild() == null) {
             // some branch-api versions do not auto-build the discovered branch
             QueueTaskFuture<WorkflowRun> first = branch.scheduleBuild2(0);
-            assertNotNull("the branch child must be buildable", first);
+            assertNotNull(first, "the branch child must be buildable");
             first.get();
         }
         j.waitUntilNoActivity();
         long recorded = FileStore.get().listRunRecords(YearMonth.now()).stream()
                 .filter(rec -> "mb/main".equals(rec.getJobFullName()))
                 .count();
-        assertTrue("a multibranch child completion must be recorded", recorded >= 1);
+        assertTrue(recorded >= 1, "a multibranch child completion must be recorded");
 
         // record-only: with run control on, a manual user-cause run of the child is not blocked
         int nextNumber = branch.getNextBuildNumber();
         QueueTaskFuture<WorkflowRun> manual = branch.scheduleBuild2(0,
                 new CauseAction(userCause("u1")));
-        assertNotNull("run control must not block a multibranch child (record-only)", manual);
+        assertNotNull(manual, "run control must not block a multibranch child (record-only)");
         manual.get();
         j.waitUntilNoActivity();
-        assertNotNull("the manual run must exist", branch.getBuildByNumber(nextNumber));
-        assertNotNull("the manual run must be recorded too", record("mb/main#" + nextNumber));
+        assertNotNull(branch.getBuildByNumber(nextNumber), "the manual run must exist");
+        assertNotNull(record("mb/main#" + nextNumber), "the manual run must be recorded too");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -285,7 +286,7 @@ public class RunRecordListenerTest {
 
     private void assertCauseType(String runId, CauseType expected) {
         RunRecord record = record(runId);
-        assertNotNull("a RunRecord must exist for " + runId, record);
-        assertEquals("wrong causeType for " + runId, expected, record.getCauseType());
+        assertNotNull(record, "a RunRecord must exist for " + runId);
+        assertEquals(expected, record.getCauseType(), "wrong causeType for " + runId);
     }
 }

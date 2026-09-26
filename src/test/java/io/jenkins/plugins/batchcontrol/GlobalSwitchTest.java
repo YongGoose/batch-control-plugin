@@ -16,16 +16,17 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 1 (global switches). Matrix rows T-01-01 .. T-01-06.
@@ -33,10 +34,15 @@ import static org.junit.Assert.assertTrue;
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  * Expected API contract is listed in the test-author report for this slice.
  */
+@WithJenkins
 public class GlobalSwitchTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUpJenkins(JenkinsRule rule) {
+        this.j = rule;
+    }
 
     /** T-01-01: both switches off (fresh install) + approvalRequired job -> Build Now runs as before. */
     @Test
@@ -49,7 +55,7 @@ public class GlobalSwitchTest {
         j.waitUntilNoActivity();
 
         FreeStyleBuild build = p.getBuildByNumber(1);
-        assertNotNull("with both switches off the build must run exactly as before installation", build);
+        assertNotNull(build, "with both switches off the build must run exactly as before installation");
         j.assertBuildStatusSuccess(build);
     }
 
@@ -58,7 +64,7 @@ public class GlobalSwitchTest {
     public void t_01_02_enableRunControlLeavesConfigToggleRecord() throws Exception {
         enableSecurityWithAdmin();
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
-        assertFalse("fresh install must default to run control off", cfg.isRunControlEnabled());
+        assertFalse(cfg.isRunControlEnabled(), "fresh install must default to run control off");
 
         try (ACLContext ignored = ACL.as2(User.getById("admin", true).impersonate2())) {
             cfg.setRunControlEnabled(true);
@@ -66,9 +72,9 @@ public class GlobalSwitchTest {
         }
 
         ChangeRecord toggle = findConfigToggle("runControlEnabled", "false -> true");
-        assertNotNull("toggling the switch must leave a CONFIG_TOGGLE change record", toggle);
+        assertNotNull(toggle, "toggling the switch must leave a CONFIG_TOGGLE change record");
         assertEquals("admin", toggle.getUser());
-        assertNotNull("the record must carry the toggle time", toggle.getAt());
+        assertNotNull(toggle.getAt(), "the record must carry the toggle time");
     }
 
     /** T-01-03: both switches off -> job reconfigure and delete succeed exactly as before (no veto, no block). */
@@ -83,8 +89,7 @@ public class GlobalSwitchTest {
         assertEquals("updated by test", p.getDescription());
 
         wc.getPage(new WebRequest(wc.createCrumbedUrl(p.getUrl() + "doDelete"), HttpMethod.POST));
-        assertNull("delete must succeed as before while both switches are off",
-                j.jenkins.getItemByFullName("legacy-job"));
+        assertNull(j.jenkins.getItemByFullName("legacy-job"), "delete must succeed as before while both switches are off");
     }
 
     /** T-01-04: runControlEnabled=true, changeControlEnabled=false -> no change-control blocking and no change-control UI. */
@@ -100,19 +105,15 @@ public class GlobalSwitchTest {
         HtmlForm form = wc.getPage(p, "configure").getFormByName("config");
         form.getTextAreaByName("description").setText("run control only");
         j.submit(form);
-        assertEquals("configure must not be blocked while change control is off",
-                "run control only", p.getDescription());
+        assertEquals("run control only", p.getDescription(), "configure must not be blocked while change control is off");
 
         String jobPageText = wc.getPage(p).asNormalizedText();
-        assertFalse("change-control UI must not appear when changeControlEnabled=false",
-                jobPageText.contains("Request Grant"));
+        assertFalse(jobPageText.contains("Request Grant"), "change-control UI must not appear when changeControlEnabled=false");
         String rootPageText = wc.goTo("").asNormalizedText();
-        assertFalse("change-control UI must not appear on the root page either",
-                rootPageText.contains("Request Grant"));
+        assertFalse(rootPageText.contains("Request Grant"), "change-control UI must not appear on the root page either");
 
         wc.getPage(new WebRequest(wc.createCrumbedUrl(p.getUrl() + "doDelete"), HttpMethod.POST));
-        assertNull("delete must not be vetoed while change control is off",
-                j.jenkins.getItemByFullName("plain-job"));
+        assertNull(j.jenkins.getItemByFullName("plain-job"), "delete must not be vetoed while change control is off");
     }
 
     /** T-01-05: changeControlEnabled=true, runControlEnabled=false, approvalRequired job -> build runs, no run-control UI. */
@@ -129,13 +130,12 @@ public class GlobalSwitchTest {
         wc.getPage(new WebRequest(wc.createCrumbedUrl(p.getUrl() + "build"), HttpMethod.POST));
         j.waitUntilNoActivity();
         FreeStyleBuild build = p.getBuildByNumber(1);
-        assertNotNull("run control is off, so the build must not be blocked", build);
+        assertNotNull(build, "run control is off, so the build must not be blocked");
         j.assertBuildStatusSuccess(build);
 
         String jobPageText = wc.getPage(p).asNormalizedText();
-        assertTrue("Build Now must remain when run control is off", jobPageText.contains("Build Now"));
-        assertFalse("run-control UI must not appear when runControlEnabled=false",
-                jobPageText.contains("Request Run"));
+        assertTrue(jobPageText.contains("Build Now"), "Build Now must remain when run control is off");
+        assertFalse(jobPageText.contains("Request Run"), "run-control UI must not appear when runControlEnabled=false");
     }
 
     /** T-01-06: admin turns runControlEnabled true -> false; ChangeRecord(CONFIG_TOGGLE, admin, true->false). */
@@ -152,7 +152,7 @@ public class GlobalSwitchTest {
         }
 
         ChangeRecord toggle = findConfigToggle("runControlEnabled", "true -> false");
-        assertNotNull("toggling the switch off must leave a CONFIG_TOGGLE change record", toggle);
+        assertNotNull(toggle, "toggling the switch off must leave a CONFIG_TOGGLE change record");
         assertEquals("admin", toggle.getUser());
         assertNotNull(toggle.getAt());
     }

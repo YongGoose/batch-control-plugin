@@ -1,0 +1,56 @@
+# Jenkins under test for the batch-control e2e pass (Phase 5).
+#
+# Usage: scripts/up.sh (build + start + wait), scripts/down.sh, scripts/reset.sh.
+name: batch-control-e2e
+
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: batch-control-e2e-jenkins:2.568.3
+    container_name: batch-control-e2e
+    restart: "no"
+    ports:
+      - "${BC_PORT:-8080}:8080"
+    environment:
+      # runSetupWizard=false: the wizard would block every scenario.
+      # noSignatureCheck: no update-centre traffic is wanted during a test run.
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Dhudson.model.DownloadService.noSignatureCheck=true
+        -Duser.timezone=${TZ:-Asia/Seoul}
+      TZ: "${TZ:-Asia/Seoul}"
+      # Consumed by init.groovy.d/00-security.groovy; values come from e2e/.env.
+      BC_ADMIN_PASSWORD: "${BC_ADMIN_PASSWORD:?set BC_ADMIN_PASSWORD in e2e/.env}"
+      BC_APPROVER_PASSWORD: "${BC_APPROVER_PASSWORD:?set BC_APPROVER_PASSWORD in e2e/.env}"
+      BC_REQUESTER_PASSWORD: "${BC_REQUESTER_PASSWORD:?set BC_REQUESTER_PASSWORD in e2e/.env}"
+    volumes:
+      # JENKINS_HOME is a named volume so a restart keeps state (grants must
+      # survive a restart) while scripts/reset.sh can wipe it in one step.
+      - jenkins_home:/var/jenkins_home
+      # Bootstrap scripts, re-read on every boot.
+      - ./init.groovy.d:/var/jenkins_home/init.groovy.d:ro
+      # The artifact under test. Built by `mvn -ntp clean package -DskipTests`
+      # in the project root; mounted rather than copied so a rebuilt .hpi only
+      # needs a container restart, not an image rebuild.
+      #
+      # It goes into the image's reference directory, NOT straight into
+      # /var/jenkins_home/plugins: bind-mounting a file there makes Docker
+      # create the parent directory as root, and Jenkins (running as `jenkins`)
+      # then dies at boot with
+      #   SEVERE Failed Inspecting plugin /var/jenkins_home/plugins/batch-control.jpi
+      #   java.nio.file.AccessDeniedException: /var/jenkins_home/plugins/batch-control
+      # because it cannot explode the archive. The `.override` suffix is the
+      # official jenkins.sh marker that copies the file over an existing plugin
+      # on every boot, so a rebuilt .hpi is picked up without reset.sh.
+      - ../target/batch-control.hpi:/usr/share/jenkins/ref/plugins/batch-control.jpi.override:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+volumes:
+  jenkins_home:

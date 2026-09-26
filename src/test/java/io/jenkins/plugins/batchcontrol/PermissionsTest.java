@@ -14,14 +14,15 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 2 (permission system). Matrix rows T-02-01, T-02-02, T-02-05.
@@ -29,10 +30,15 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class PermissionsTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUpJenkins(JenkinsRule rule) {
+        this.j = rule;
+    }
 
     /** T-02-01: a user without BatchControl/Manage cannot save the global configuration (403). */
     @Test
@@ -50,10 +56,8 @@ public class PermissionsTest {
                 .withThrowExceptionOnFailingStatusCode(false)
                 .login("u1");
         Page page = wc.getPage(new WebRequest(wc.createCrumbedUrl("configSubmit"), HttpMethod.POST));
-        assertEquals("a user holding every BatchControl permission except Manage must get 403",
-                403, page.getWebResponse().getStatusCode());
-        assertFalse("the rejected POST must not have changed any switch",
-                BatchControlGlobalConfiguration.get().isRunControlEnabled());
+        assertEquals(403, page.getWebResponse().getStatusCode(), "a user holding every BatchControl permission except Manage must get 403");
+        assertFalse(BatchControlGlobalConfiguration.get().isRunControlEnabled(), "the rejected POST must not have changed any switch");
     }
 
     /** T-02-02: the five permissions appear as a "Batch Control" group in the Matrix Authorization screen. */
@@ -77,11 +81,9 @@ public class PermissionsTest {
         };
         String[] expectedNames = {"Request", "Approve", "RequestGrant", "ViewHistory", "Manage"};
         for (int i = 0; i < expected.length; i++) {
-            assertTrue(expectedNames[i] + " must belong to the Batch Control group",
-                    permissions.contains(expected[i]));
+            assertTrue(permissions.contains(expected[i]), expectedNames[i] + " must belong to the Batch Control group");
             assertEquals(expectedNames[i], expected[i].name);
-            assertTrue(expectedNames[i] + " must be enabled so authorization strategies expose it",
-                    expected[i].getEnabled());
+            assertTrue(expected[i].getEnabled(), expectedNames[i] + " must be enabled so authorization strategies expose it");
         }
 
         HtmlPage page = j.createWebClient().login("admin").goTo("configureSecurity");
@@ -89,8 +91,7 @@ public class PermissionsTest {
         // (<legend class="mas-card__group-title">) and a hidden filter dropdown, so the title is
         // present in the DOM but invisible to HtmlUnit's normalized (visible-only) text. Assert on
         // the raw DOM instead; visible-text verification is covered by the Phase 5 e2e visual check.
-        assertTrue("the security configuration screen must expose the Batch Control permission group in its DOM",
-                page.getWebResponse().getContentAsString().contains("Batch Control"));
+        assertTrue(page.getWebResponse().getContentAsString().contains("Batch Control"), "the security configuration screen must expose the Batch Control permission group in its DOM");
     }
 
     /** T-02-05: a Manage holder can POST the global config form; values are saved (form round-trip keeps them). */
@@ -111,8 +112,7 @@ public class PermissionsTest {
         j.submit(form); // must succeed (200) for a Manage holder
 
         BatchControlGlobalConfiguration reloaded = BatchControlGlobalConfiguration.get();
-        assertEquals("approver list must survive the config form round-trip",
-                Arrays.asList("a1", "a2"), reloaded.getApprovers());
+        assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "approver list must survive the config form round-trip");
         assertFalse(reloaded.isAllowAdminSelfApproval());
         assertEquals(48, reloaded.getPendingTimeoutHours());
     }

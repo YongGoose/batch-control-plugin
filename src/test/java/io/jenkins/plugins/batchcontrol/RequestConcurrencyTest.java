@@ -21,17 +21,17 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.springframework.security.core.Authentication;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 7, D-20: request state transitions are atomic (compare-and-set).
@@ -41,15 +41,16 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class RequestConcurrencyTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -93,17 +94,15 @@ public class RequestConcurrencyTest {
             pool.shutdownNow();
         }
 
-        assertEquals("exactly one of two concurrent approvals may succeed (compare-and-set)",
-                1, successes.get());
+        assertEquals(1, successes.get(), "exactly one of two concurrent approvals may succeed (compare-and-set)");
 
         j.waitUntilNoActivity();
-        assertEquals("the build must run exactly once", 1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the build must run exactly once");
         assertEquals(2, job.getNextBuildNumber());
 
         RunRequest reloaded = RunRequestService.get().load(requestId);
-        assertTrue("the request must be decided exactly once",
-                reloaded.getStatus() == RequestStatus.APPROVED
-                        || reloaded.getStatus() == RequestStatus.EXECUTED);
+        assertTrue(reloaded.getStatus() == RequestStatus.APPROVED
+                        || reloaded.getStatus() == RequestStatus.EXECUTED, "the request must be decided exactly once");
     }
 
     /** T-RT-15: approve vs cancel race -> exactly one wins, no mixed state. */
@@ -144,25 +143,22 @@ public class RequestConcurrencyTest {
             pool.shutdownNow();
         }
 
-        assertEquals("exactly one of approve/cancel may win (first CAS wins)",
-                1, approveWins.get() + cancelWins.get());
+        assertEquals(1, approveWins.get() + cancelWins.get(), "exactly one of approve/cancel may win (first CAS wins)");
 
         j.waitUntilNoActivity();
         RunRequest reloaded = RunRequestService.get().load(requestId);
         if (cancelWins.get() == 1) {
             assertEquals(RequestStatus.CANCELLED, reloaded.getStatus());
-            assertTrue("a cancelled request must never have started a build", job.getBuilds().isEmpty());
-            assertNull("a CANCELLED request must not carry an executedRunId", reloaded.getExecutedRunId());
+            assertTrue(job.getBuilds().isEmpty(), "a cancelled request must never have started a build");
+            assertNull(reloaded.getExecutedRunId(), "a CANCELLED request must not carry an executedRunId");
         } else {
-            assertTrue("the approved request must be decided",
-                    reloaded.getStatus() == RequestStatus.APPROVED
-                            || reloaded.getStatus() == RequestStatus.EXECUTED);
-            assertEquals("the approval must run the build exactly once", 1, job.getBuilds().size());
+            assertTrue(reloaded.getStatus() == RequestStatus.APPROVED
+                            || reloaded.getStatus() == RequestStatus.EXECUTED, "the approved request must be decided");
+            assertEquals(1, job.getBuilds().size(), "the approval must run the build exactly once");
         }
         // mixed-state invariant, independent of who won
-        assertFalse("no mixed state: CANCELLED with a build or executedRunId is forbidden",
-                reloaded.getStatus() == RequestStatus.CANCELLED
-                        && (!job.getBuilds().isEmpty() || reloaded.getExecutedRunId() != null));
+        assertFalse(reloaded.getStatus() == RequestStatus.CANCELLED
+                        && (!job.getBuilds().isEmpty() || reloaded.getExecutedRunId() != null), "no mixed state: CANCELLED with a build or executedRunId is forbidden");
     }
 
     // ---------------------------------------------------------------- helpers

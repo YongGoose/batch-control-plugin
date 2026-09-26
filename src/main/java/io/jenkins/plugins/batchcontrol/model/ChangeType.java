@@ -15,5 +15,12 @@ public enum ChangeType {
     MOVE,
     CONFIG_TOGGLE,
     RETENTION,
-    GRANT_REVOKE
+    GRANT_REVOKE,
+    /**
+     * A blocked re-use of an approved-run marker (D-23 refusal, D-30 audit trail): the marker
+     * authorizes exactly one queue submission, and a further submission of the same marker is
+     * refused and recorded under this type so an operator can see the attempt. {@code user} is
+     * the account that attempted the re-use, not the requester of the original approval.
+     */
+    MARKER_REUSE_BLOCKED
 }

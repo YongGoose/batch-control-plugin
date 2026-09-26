@@ -42,19 +42,19 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.UnstableBuilder;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 12 (history query, monthly aggregation, CSV export, retention) plus the
@@ -68,6 +68,7 @@ import static org.junit.Assert.assertTrue;
  * ViewHistory. Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class HistoryWebTest {
 
     private static final String[] CSV_PATHS = {
@@ -76,13 +77,13 @@ public class HistoryWebTest {
             "batch-control/history/changes.csv",
             "batch-control/history/requests.csv"};
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -100,7 +101,7 @@ public class HistoryWebTest {
         cfg.save();
     }
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -109,15 +110,12 @@ public class HistoryWebTest {
     @Test
     public void t_12_01_historyWithoutViewHistoryIs403() throws Exception {
         JenkinsRule.WebClient noHistory = webClient("nohist");
-        assertEquals("GET /batch-control/history without ViewHistory must be 403",
-                403, get(noHistory, "batch-control/history/").getStatusCode());
+        assertEquals(403, get(noHistory, "batch-control/history/").getStatusCode(), "GET /batch-control/history without ViewHistory must be 403");
         // SPEC item 12: EVERY query screen is gated, the incident screens included
-        assertEquals("GET /batch-control/incidents without ViewHistory must be 403",
-                403, get(noHistory, "batch-control/incidents/").getStatusCode());
+        assertEquals(403, get(noHistory, "batch-control/incidents/").getStatusCode(), "GET /batch-control/incidents without ViewHistory must be 403");
 
         JenkinsRule.WebClient viewer = webClient("viewer");
-        assertEquals("with ViewHistory the history screen must render",
-                200, get(viewer, "batch-control/history/").getStatusCode());
+        assertEquals(200, get(viewer, "batch-control/history/").getStatusCode(), "with ViewHistory the history screen must render");
     }
 
     /** T-12-02: the retention work deletes month files past retentionMonths and records it. */
@@ -140,33 +138,25 @@ public class HistoryWebTest {
         j.assertBuildStatus(Result.FAILURE, oldFail.scheduleBuild2(0));
         j.waitUntilNoActivity();
 
-        assertFalse("fixture: the old month must hold run records",
-                FileStore.get().listRunRecords(oldMonth).isEmpty());
-        assertFalse("fixture: the old month must hold change records",
-                FileStore.get().listChangeRecords(oldMonth).isEmpty());
-        assertFalse("fixture: the old month must hold incidents",
-                IncidentService.get().list(oldMonth).isEmpty());
+        assertFalse(FileStore.get().listRunRecords(oldMonth).isEmpty(), "fixture: the old month must hold run records");
+        assertFalse(FileStore.get().listChangeRecords(oldMonth).isEmpty(), "fixture: the old month must hold change records");
+        assertFalse(IncidentService.get().list(oldMonth).isEmpty(), "fixture: the old month must hold incidents");
 
         BatchClock.reset(); // retention judges against the real current time
         ExtensionList.lookupSingleton(RetentionPeriodicWork.class).doRun();
 
-        assertTrue("run records past retentionMonths must be deleted",
-                FileStore.get().listRunRecords(oldMonth).isEmpty());
-        assertTrue("change records past retentionMonths must be deleted",
-                FileStore.get().listChangeRecords(oldMonth).isEmpty());
-        assertTrue("incidents past retentionMonths must no longer be listed",
-                IncidentService.get().list(oldMonth).isEmpty());
+        assertTrue(FileStore.get().listRunRecords(oldMonth).isEmpty(), "run records past retentionMonths must be deleted");
+        assertTrue(FileStore.get().listChangeRecords(oldMonth).isEmpty(), "change records past retentionMonths must be deleted");
+        assertTrue(IncidentService.get().list(oldMonth).isEmpty(), "incidents past retentionMonths must no longer be listed");
 
         List<ChangeRecord> retention = FileStore.get().listChangeRecords(YearMonth.now()).stream()
                 .filter(rec -> rec.getType() == ChangeType.RETENTION)
                 .collect(Collectors.toList());
-        assertFalse("the deletion itself must be recorded as ChangeRecord(RETENTION)",
-                retention.isEmpty());
+        assertFalse(retention.isEmpty(), "the deletion itself must be recorded as ChangeRecord(RETENTION)");
         String retentionText = retention.stream()
                 .map(rec -> rec.getTarget() + " " + rec.getDetail())
                 .collect(Collectors.joining(" "));
-        assertTrue("the RETENTION record must identify the deleted month",
-                retentionText.contains(oldMonth.toString()));
+        assertTrue(retentionText.contains(oldMonth.toString()), "the RETENTION record must identify the deleted month");
     }
 
     /** T-12-03: date filters and CSV export work for all four data sets. */
@@ -194,29 +184,23 @@ public class HistoryWebTest {
         JenkinsRule.WebClient viewer = webClient("viewer");
         for (int i = 0; i < CSV_PATHS.length; i++) {
             WebResponse in = get(viewer, CSV_PATHS[i] + inclusive);
-            assertEquals(CSV_PATHS[i] + ": CSV download must succeed",
-                    200, in.getStatusCode());
-            assertTrue(CSV_PATHS[i] + ": the response must be served as CSV, was "
-                    + in.getContentType(),
-                    in.getContentType().toLowerCase(Locale.ROOT).contains("csv"));
-            assertTrue(CSV_PATHS[i] + ": an in-range record must be exported",
-                    in.getContentAsString().contains(markers[i]));
+            assertEquals(200, in.getStatusCode(), CSV_PATHS[i] + ": CSV download must succeed");
+            assertTrue(in.getContentType().toLowerCase(Locale.ROOT).contains("csv"), CSV_PATHS[i] + ": the response must be served as CSV, was "
+                    + in.getContentType());
+            assertTrue(in.getContentAsString().contains(markers[i]), CSV_PATHS[i] + ": an in-range record must be exported");
 
             WebResponse out = get(viewer, CSV_PATHS[i] + exclusive);
             assertEquals(200, out.getStatusCode());
-            assertFalse(CSV_PATHS[i] + ": a record outside the date filter must not be exported",
-                    out.getContentAsString().contains(markers[i]));
+            assertFalse(out.getContentAsString().contains(markers[i]), CSV_PATHS[i] + ": a record outside the date filter must not be exported");
         }
 
         // the history screen honors the same date filter
         WebResponse screenIn = get(viewer, "batch-control/history/" + inclusive);
         assertEquals(200, screenIn.getStatusCode());
-        assertTrue("the in-range run must be listed on the history screen",
-                screenIn.getContentAsString().contains("hist-x"));
+        assertTrue(screenIn.getContentAsString().contains("hist-x"), "the in-range run must be listed on the history screen");
         WebResponse screenOut = get(viewer, "batch-control/history/" + exclusive);
         assertEquals(200, screenOut.getStatusCode());
-        assertFalse("an out-of-range run must not be listed on the history screen",
-                screenOut.getContentAsString().contains("hist-x"));
+        assertFalse(screenOut.getContentAsString().contains("hist-x"), "an out-of-range run must not be listed on the history screen");
     }
 
     /** T-12-04: the monthly summary reports every count exactly. */
@@ -249,8 +233,7 @@ public class HistoryWebTest {
         Incident unstableIncident = IncidentService.get().list(YearMonth.now()).stream()
                 .filter(incident -> "sum-u#1".equals(incident.getRunId()))
                 .findFirst().orElse(null);
-        assertNotNull("fixture: the UNSTABLE completion must have opened an incident",
-                unstableIncident);
+        assertNotNull(unstableIncident, "fixture: the UNSTABLE completion must have opened an incident");
         try (ACLContext ignored = as("viewer")) {
             IncidentService.get().acknowledge(unstableIncident.getId(), "known flake");
             IncidentService.get().resolve(unstableIncident.getId(), "flake confirmed");
@@ -270,8 +253,7 @@ public class HistoryWebTest {
 
         WebResponse summary = get(webClient("viewer"),
                 "batch-control/history/summary?month=" + YearMonth.now());
-        assertEquals("the monthly summary must render for a ViewHistory holder",
-                200, summary.getStatusCode());
+        assertEquals(200, summary.getStatusCode(), "the monthly summary must render for a ViewHistory holder");
         String body = summary.getContentAsString();
         assertSummaryCount(body, "runs", 4);
         assertSummaryCount(body, "success", 2);
@@ -288,8 +270,7 @@ public class HistoryWebTest {
     public void t_12_05_csvExportsWithoutViewHistoryAre403() throws Exception {
         JenkinsRule.WebClient noHistory = webClient("nohist");
         for (String path : CSV_PATHS) {
-            assertEquals(path + " without ViewHistory must be 403",
-                    403, get(noHistory, path).getStatusCode());
+            assertEquals(403, get(noHistory, path).getStatusCode(), path + " without ViewHistory must be 403");
         }
     }
 
@@ -317,8 +298,7 @@ public class HistoryWebTest {
             RunRequestService.get().approve(request.getId(), "ok");
         }
         j.waitUntilNoActivity();
-        assertEquals("the approved request must have produced the run record",
-                1, job.getBuilds().size());
+        assertEquals(1, job.getBuilds().size(), "the approved request must have produced the run record");
 
         JenkinsRule.WebClient viewer = webClient("viewer");
         String requestsCsv = get(viewer, "batch-control/history/requests.csv").getContentAsString();
@@ -330,8 +310,7 @@ public class HistoryWebTest {
         // the parameter payloads must reach the run export, and no CSV may expose any
         // payload at the start of a cell without the neutralizing apostrophe
         for (String payload : parameterPayloads) {
-            assertTrue("runs.csv must export the parameter value " + payload,
-                    runsCsv.contains(payload));
+            assertTrue(runsCsv.contains(payload), "runs.csv must export the parameter value " + payload);
         }
         String changesCsv = get(viewer, "batch-control/history/changes.csv").getContentAsString();
         String incidentsCsv = get(viewer, "batch-control/history/incidents.csv").getContentAsString();
@@ -362,42 +341,36 @@ public class HistoryWebTest {
             int code = get(viewer,
                     "batch-control/incidents/" + incident.getId() + "/" + action
                             + "?comment=via-get").getStatusCode();
-            assertTrue("GET must never " + action + " an incident (got " + code + ")",
-                    code >= 400);
+            assertTrue(code >= 400, "GET must never " + action + " an incident (got " + code + ")");
         }
         JenkinsRule.WebClient requester = webClient("u1");
         int rerunCode = get(requester,
                 "batch-control/incidents/" + incident.getId() + "/rerun?approver=a1")
                 .getStatusCode();
-        assertTrue("GET must never create a rerun request (got " + rerunCode + ")",
-                rerunCode >= 400);
+        assertTrue(rerunCode >= 400, "GET must never create a rerun request (got " + rerunCode + ")");
 
         Incident reloaded = IncidentService.get().load(incident.getId());
-        assertEquals("the incident must still be OPEN after every rejected GET",
-                IncidentStatus.OPEN, reloaded.getStatus());
-        assertTrue("no rerun request id may have been linked",
-                reloaded.getRerunRequestIds() == null
-                        || reloaded.getRerunRequestIds().isEmpty());
-        assertEquals("no request may have been created by a GET",
-                requestsBefore, RunRequestService.get().list().size());
+        assertEquals(IncidentStatus.OPEN, reloaded.getStatus(), "the incident must still be OPEN after every rejected GET");
+        assertTrue(reloaded.getRerunRequestIds() == null
+                        || reloaded.getRerunRequestIds().isEmpty(), "no rerun request id may have been linked");
+        assertEquals(requestsBefore, RunRequestService.get().list().size(), "no request may have been created by a GET");
     }
 
     /** T-SEC-06 (remainder): GET on the global configure paths never flips a switch. */
     @Test
     public void t_sec_06_getOnConfigurePathsDoesNotToggleSwitches() throws Exception {
-        assertTrue("precondition from setUp", cfg.isRunControlEnabled());
-        assertFalse("precondition from setUp", cfg.isChangeControlEnabled());
+        assertTrue(cfg.isRunControlEnabled(), "precondition from setUp");
+        assertFalse(cfg.isChangeControlEnabled(), "precondition from setUp");
 
         JenkinsRule.WebClient admin = webClient("admin");
-        assertEquals("the global configure form itself renders on GET",
-                200, get(admin, "configure").getStatusCode());
+        assertEquals(200, get(admin, "configure").getStatusCode(), "the global configure form itself renders on GET");
         int submitCode = get(admin, "configSubmit").getStatusCode();
-        assertTrue("GET on the configure submission endpoint must be rejected (got "
-                + submitCode + ")", submitCode >= 400);
+        assertTrue(submitCode >= 400, "GET on the configure submission endpoint must be rejected (got "
+                + submitCode + ")");
 
         BatchControlGlobalConfiguration reloaded = BatchControlGlobalConfiguration.get();
-        assertTrue("no GET may flip runControlEnabled", reloaded.isRunControlEnabled());
-        assertFalse("no GET may flip changeControlEnabled", reloaded.isChangeControlEnabled());
+        assertTrue(reloaded.isRunControlEnabled(), "no GET may flip runControlEnabled");
+        assertFalse(reloaded.isChangeControlEnabled(), "no GET may flip changeControlEnabled");
     }
 
     // ---------------------------------------------------------------- helpers
@@ -418,18 +391,17 @@ public class HistoryWebTest {
     /** The summary contract: a JSON body carrying "key": value pairs (matrix note 23). */
     private static void assertSummaryCount(String body, String key, int expected) {
         Pattern pattern = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*" + expected + "\\b");
-        assertTrue("the monthly summary must report " + key + "=" + expected
-                + " but the body was: " + body, pattern.matcher(body).find());
+        assertTrue(pattern.matcher(body).find(), "the monthly summary must report " + key + "=" + expected
+                + " but the body was: " + body);
     }
 
     /** D-18 strict form for a payload that is a cell of its own (e.g. the reason column). */
     private static void assertPresentAndApostrophePrefixed(String csv, String payload) {
         int idx = csv.indexOf(payload);
-        assertTrue("the payload must be exported: " + payload, idx >= 0);
+        assertTrue(idx >= 0, "the payload must be exported: " + payload);
         while (idx >= 0) {
-            assertTrue("every export of '" + payload
-                    + "' must carry the leading apostrophe (D-18)",
-                    idx > 0 && csv.charAt(idx - 1) == '\'');
+            assertTrue(idx > 0 && csv.charAt(idx - 1) == '\'', "every export of '" + payload
+                    + "' must carry the leading apostrophe (D-18)");
             idx = csv.indexOf(payload, idx + 1);
         }
     }
@@ -456,8 +428,8 @@ public class HistoryWebTest {
                     atCellStart = false;
                 }
             }
-            assertFalse("CSV cell must not start with the unescaped formula payload '"
-                    + payload + "' (D-18) around index " + idx, atCellStart);
+            assertFalse(atCellStart, "CSV cell must not start with the unescaped formula payload '"
+                    + payload + "' (D-18) around index " + idx);
             idx = csv.indexOf(payload, idx + 1);
         }
     }

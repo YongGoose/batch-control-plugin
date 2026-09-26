@@ -23,18 +23,18 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import hudson.cli.CLICommandInvoker;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * HTTP surface of run control. Matrix rows T-SEC-01, T-SEC-02, T-SEC-05, T-SEC-06,
@@ -45,16 +45,17 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md, docs/TEST-MATRIX.md and docs/POC-RESULTS.md only (no src/main knowledge).
  */
+@WithJenkins
 public class RunRequestWebTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private FreeStyleProject job;      // parametrized-request target for record rows
     private FreeStyleProject plainJob; // no parameters: target of the /build guidance rows
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -83,12 +84,11 @@ public class RunRequestWebTest {
         Page page = wc.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/requests/" + id + "/approve"), HttpMethod.GET));
         int code = page.getWebResponse().getStatusCode();
-        assertTrue("GET must never approve; expected 405/rejected but got " + code, code >= 400);
+        assertTrue(code >= 400, "GET must never approve; expected 405/rejected but got " + code);
 
-        assertEquals("the request must stay PENDING after the rejected GET",
-                RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus(), "the request must stay PENDING after the rejected GET");
         j.waitUntilNoActivity();
-        assertTrue("no build may have been scheduled", job.getBuilds().isEmpty());
+        assertTrue(job.getBuilds().isEmpty(), "no build may have been scheduled");
     }
 
     /** T-SEC-02: POST approve without the Approve permission is 403. */
@@ -99,8 +99,7 @@ public class RunRequestWebTest {
 
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/requests/" + id + "/approve"), HttpMethod.POST));
-        assertEquals("a user without BatchControl/Approve must get 403",
-                403, page.getWebResponse().getStatusCode());
+        assertEquals(403, page.getWebResponse().getStatusCode(), "a user without BatchControl/Approve must get 403");
 
         assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
         j.waitUntilNoActivity();
@@ -115,8 +114,7 @@ public class RunRequestWebTest {
 
         Page page = wc.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/requests/" + id + "/approve"), HttpMethod.POST));
-        assertEquals("a POST without the crumb must be rejected with 403",
-                403, page.getWebResponse().getStatusCode());
+        assertEquals(403, page.getWebResponse().getStatusCode(), "a POST without the crumb must be rejected with 403");
 
         assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
         j.waitUntilNoActivity();
@@ -131,15 +129,14 @@ public class RunRequestWebTest {
         JenkinsRule.WebClient approverClient = webClient().login("a1");
         Page rejectPage = approverClient.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/requests/" + id + "/reject"), HttpMethod.GET));
-        assertTrue("GET must never reject", rejectPage.getWebResponse().getStatusCode() >= 400);
+        assertTrue(rejectPage.getWebResponse().getStatusCode() >= 400, "GET must never reject");
 
         JenkinsRule.WebClient requesterClient = webClient().login("u1");
         Page cancelPage = requesterClient.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/requests/" + id + "/cancel"), HttpMethod.GET));
-        assertTrue("GET must never cancel", cancelPage.getWebResponse().getStatusCode() >= 400);
+        assertTrue(cancelPage.getWebResponse().getStatusCode() >= 400, "GET must never cancel");
 
-        assertEquals("the request must still be PENDING after both rejected GETs",
-                RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus(), "the request must still be PENDING after both rejected GETs");
     }
 
     /** T-04-04: records are append-only; no modify/delete HTTP endpoint exists (404/405). */
@@ -153,17 +150,16 @@ public class RunRequestWebTest {
                     wc.createCrumbedUrl("batch-control/requests/" + id + "/" + candidate),
                     HttpMethod.POST));
             int code = page.getWebResponse().getStatusCode();
-            assertTrue("no mutation endpoint '" + candidate + "' may exist (expected 404/405, got "
-                    + code + ")", code == 404 || code == 405);
+            assertTrue(code == 404 || code == 405, "no mutation endpoint '" + candidate + "' may exist (expected 404/405, got "
+                    + code + ")");
         }
 
         Page deleteVerb = wc.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/requests/" + id + "/"), HttpMethod.DELETE));
-        assertTrue("the HTTP DELETE verb must be rejected on a record",
-                deleteVerb.getWebResponse().getStatusCode() >= 400);
+        assertTrue(deleteVerb.getWebResponse().getStatusCode() >= 400, "the HTTP DELETE verb must be rejected on a record");
 
         RunRequest survivor = RunRequestService.get().load(id);
-        assertNotNull("the record must survive every mutation attempt", survivor);
+        assertNotNull(survivor, "the record must survive every mutation attempt");
         assertEquals(RequestStatus.PENDING, survivor.getStatus());
     }
 
@@ -184,12 +180,11 @@ public class RunRequestWebTest {
                     wc.createCrumbedUrl("batch-control/requests/" + id + "/" + candidate),
                     HttpMethod.POST));
             int code = page.getWebResponse().getStatusCode();
-            assertTrue("no parameter-change endpoint '" + candidate + "' may exist (expected 404/405, got "
-                    + code + ")", code == 404 || code == 405);
+            assertTrue(code == 404 || code == 405, "no parameter-change endpoint '" + candidate + "' may exist (expected 404/405, got "
+                    + code + ")");
         }
 
-        assertEquals("the stored parameters must be exactly as requested",
-                before, RunRequestService.get().load(id).getParameters());
+        assertEquals(before, RunRequestService.get().load(id).getParameters(), "the stored parameters must be exactly as requested");
         j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
     }
@@ -201,13 +196,10 @@ public class RunRequestWebTest {
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl(plainJob.getUrl() + "build"), HttpMethod.POST));
 
-        assertEquals("a blocked manual run must answer HTTP 400 (silent failure is forbidden)",
-                400, page.getWebResponse().getStatusCode());
+        assertEquals(400, page.getWebResponse().getStatusCode(), "a blocked manual run must answer HTTP 400 (silent failure is forbidden)");
         String body = page.getWebResponse().getContentAsString();
-        assertTrue("the response must explain that approval is required",
-                body.toLowerCase(Locale.ROOT).contains("approval"));
-        assertTrue("the response must link to the request screen",
-                body.contains("batch-control"));
+        assertTrue(body.toLowerCase(Locale.ROOT).contains("approval"), "the response must explain that approval is required");
+        assertTrue(body.contains("batch-control"), "the response must link to the request screen");
 
         j.waitUntilNoActivity();
         assertTrue(plainJob.getBuilds().isEmpty());
@@ -221,9 +213,8 @@ public class RunRequestWebTest {
                 .asUser("u1")
                 .invokeWithArgs("plain-x");
 
-        assertNotEquals("the blocked CLI build must not exit 0", 0, result.returnCode());
-        assertTrue("stderr must carry the approval guidance",
-                result.stderr().toLowerCase(Locale.ROOT).contains("approval"));
+        assertNotEquals(0, result.returnCode(), "the blocked CLI build must not exit 0");
+        assertTrue(result.stderr().toLowerCase(Locale.ROOT).contains("approval"), "stderr must carry the approval guidance");
 
         j.waitUntilNoActivity();
         assertTrue(plainJob.getBuilds().isEmpty());
@@ -242,14 +233,11 @@ public class RunRequestWebTest {
             String visibleText = page.asNormalizedText();
             String rawHtml = page.getWebResponse().getContentAsString();
 
-            assertFalse(target.getName() + ": the Build Now caption must not be visible",
-                    visibleText.contains("Build Now"));
-            assertTrue(target.getName() + ": a Request Run entry must be rendered",
-                    rawHtml.contains("Request Run"));
+            assertFalse(visibleText.contains("Build Now"), target.getName() + ": the Build Now caption must not be visible");
+            assertTrue(rawHtml.contains("Request Run"), target.getName() + ": a Request Run entry must be rendered");
             // DOM-presence basis (same convention as the T-02-02 note): the sidebar link
             // must point into the plugin's request screen
-            assertTrue(target.getName() + ": the request link must point at batch-control",
-                    rawHtml.contains("batch-control"));
+            assertTrue(rawHtml.contains("batch-control"), target.getName() + ": the request link must point at batch-control");
         }
     }
 

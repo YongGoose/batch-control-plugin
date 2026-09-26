@@ -26,21 +26,21 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.JenkinsSessionRule;
+import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8 restart durability of grants. Matrix rows T-08-04 (still valid after a restart
  * before expiry) and T-08-07 (gone immediately after a restart past expiry).
  *
- * Split from GrantServiceTest because these rows need JenkinsSessionRule; the downtime is
+ * Split from GrantServiceTest because these rows need JenkinsSessionExtension; the downtime is
  * modeled by moving BatchClock between the two sessions (matrix notes 1 and 3).
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
@@ -50,12 +50,12 @@ public class GrantRestartTest {
     private static final Instant T0 = Instant.parse("2026-09-20T09:00:00Z");
     private static final String JOB = "batch-x";
 
-    @Rule
-    public JenkinsSessionRule session = new JenkinsSessionRule();
+    @RegisterExtension
+    final JenkinsSessionExtension session = new JenkinsSessionExtension();
 
     private String grantId;
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -68,23 +68,19 @@ public class GrantRestartTest {
             Grant grant = grantU1Configure(30);
             grantId = grant.getId();
 
-            assertTrue("the grant must be persisted under batch-control/grants/<id>.xml",
-                    new File(r.jenkins.getRootDir(),
-                            "batch-control/grants/" + grantId + ".xml").isFile());
-            assertEquals("sanity: the grant must work before the restart",
-                    200, postConfigXml(r, "u1", "before-restart"));
+            assertTrue(new File(r.jenkins.getRootDir(),
+                            "batch-control/grants/" + grantId + ".xml").isFile(), "the grant must be persisted under batch-control/grants/<id>.xml");
+            assertEquals(200, postConfigXml(r, "u1", "before-restart"), "sanity: the grant must work before the restart");
         });
 
         // the controller is down for 10 minutes: still inside the 30-minute window
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(10)), ZoneOffset.UTC));
 
         session.then(r -> {
-            assertTrue("the grant must still be active after the restart (before expiry)",
-                    GrantService.get().hasActiveGrant("u1", JOB, Item.CONFIGURE));
+            assertTrue(GrantService.get().hasActiveGrant("u1", JOB, Item.CONFIGURE), "the grant must still be active after the restart (before expiry)");
             assertTrue(GrantService.get().listActive().stream()
                     .anyMatch(g -> g.getId().equals(grantId)));
-            assertEquals("u1 must still be able to save the config after the restart",
-                    200, postConfigXml(r, "u1", "after-restart"));
+            assertEquals(200, postConfigXml(r, "u1", "after-restart"), "u1 must still be able to save the config after the restart");
             FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
             assertEquals("after-restart", job.getDescription());
         });
@@ -103,15 +99,12 @@ public class GrantRestartTest {
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
 
         session.then(r -> {
-            assertFalse("a grant expired during the downtime must be gone immediately",
-                    GrantService.get().hasActiveGrant("u1", JOB, Item.CONFIGURE));
+            assertFalse(GrantService.get().hasActiveGrant("u1", JOB, Item.CONFIGURE), "a grant expired during the downtime must be gone immediately");
             assertTrue(GrantService.get().listActive().stream()
                     .noneMatch(g -> g.getId().equals(grantId)));
-            assertEquals("the very first config POST after the restart must be denied",
-                    403, postConfigXml(r, "u1", "too-late"));
+            assertEquals(403, postConfigXml(r, "u1", "too-late"), "the very first config POST after the restart must be denied");
             FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
-            assertEquals("the description must be unchanged after the denied write",
-                    "inside-window", job.getDescription());
+            assertEquals("inside-window", job.getDescription(), "the description must be unchanged after the denied write");
         });
     }
 

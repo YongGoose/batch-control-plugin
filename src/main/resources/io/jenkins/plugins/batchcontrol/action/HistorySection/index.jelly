@@ -54,6 +54,48 @@
         <a class="jenkins-button ${it.kind == 'requests' ? 'jenkins-button--primary' : ''}" href="?${it.query('requests')}">Requests</a>
       </p>
 
+      <!-- Blocked approval-marker re-use (D-30), shown on every tab and only when there is
+           something to show. A blocked attempt creates no run record, so on the default Runs tab
+           it would otherwise be invisible - the very problem D-30 was decided to fix. It sits
+           above the selected table so it is read before the table, and it is part of this view,
+           which the ViewHistory gate in HistorySection#getTarget() already covers: no new URL and
+           no new reader is introduced, so a user without ViewHistory still gets 403 for the whole
+           section (T-06-19). Every rendered value is user-controlled (job name, account name,
+           refusal text) and goes out through the default escaping of this page. -->
+      <j:if test="${!empty(it.markerReuseItems)}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          <strong>Blocked re-use of an approved-run marker</strong>
+          <p style="margin: 0.25rem 0 0.5rem 0;">
+            An already consumed approval was submitted again and refused (D-23), so no build ran.
+            ${it.markerReuseCount} attempt(s) between ${it.filter.fromValue} and
+            ${it.filter.toValue} match the filter above. Review whether this was an operator
+            retrying or an automation replaying an approval it no longer holds.
+          </p>
+          <table class="jenkins-table">
+            <thead>
+              <tr><th>Job</th><th>Attempted by</th><th>At</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+              <j:forEach var="m" items="${it.markerReuseAlertItems}">
+                <tr>
+                  <td>${m.target}</td>
+                  <td>${m.user}</td>
+                  <td>${it.format(m.at)}</td>
+                  <td>${m.detail}</td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <j:if test="${it.markerReuseOverflow > 0}">
+            <p style="margin: 0.5rem 0 0 0;">
+              ${it.markerReuseOverflow} further attempt(s) are not listed here. See the
+              <a href="?${it.query('changes')}">Changes</a> tab or
+              <a href="changes.csv?${it.baseQuery}">changes.csv</a> for all of them.
+            </p>
+          </j:if>
+        </div>
+      </j:if>
+
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No matching records between ${it.filter.fromValue} and ${it.filter.toValue}.</p>

@@ -23,16 +23,16 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.JenkinsSessionRule;
+import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 4 (restart durability of approved-but-unsubmitted requests) and item 7
@@ -51,12 +51,12 @@ public class RestartRecoveryTest {
     private static final Instant T0 = Instant.parse("2026-09-20T09:00:00Z");
     private static final String JOB = "batch-x";
 
-    @Rule
-    public JenkinsSessionRule session = new JenkinsSessionRule();
+    @RegisterExtension
+    final JenkinsSessionExtension session = new JenkinsSessionExtension();
 
     private String requestId;
 
-    @After
+    @AfterEach
     public void resetClock() {
         BatchClock.reset();
     }
@@ -74,24 +74,22 @@ public class RestartRecoveryTest {
 
             requestId = request.getId();
             assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(requestId).getStatus());
-            assertTrue("no build may exist before the restart", job.getBuilds().isEmpty());
+            assertTrue(job.getBuilds().isEmpty(), "no build may exist before the restart");
         });
         session.then(r -> {
             r.waitUntilNoActivity();
             FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
             assertNotNull(job);
-            assertEquals("startup recovery must submit the approved request exactly once",
-                    1, job.getBuilds().size());
+            assertEquals(1, job.getBuilds().size(), "startup recovery must submit the approved request exactly once");
             assertEquals(2, job.getNextBuildNumber());
 
             FreeStyleBuild build = job.getBuildByNumber(1);
             ApprovedCause cause = build.getCause(ApprovedCause.class);
-            assertNotNull("the recovered run must carry the ApprovedCause", cause);
+            assertNotNull(cause, "the recovered run must carry the ApprovedCause");
             assertEquals(requestId, cause.getRequestId());
 
             RunRequest reloaded = RunRequestService.get().load(requestId);
-            assertEquals("the request must be marked executed after the recovered run",
-                    RequestStatus.EXECUTED, reloaded.getStatus());
+            assertEquals(RequestStatus.EXECUTED, reloaded.getStatus(), "the request must be marked executed after the recovered run");
             assertNotNull(reloaded.getExecutedRunId());
         });
     }
@@ -121,12 +119,10 @@ public class RestartRecoveryTest {
         session.then(r -> {
             r.waitUntilNoActivity();
             RunRequest reloaded = RunRequestService.get().load(requestId);
-            assertNotEquals("restart downtime is the documented exception: the request must not expire",
-                    RequestStatus.EXPIRED, reloaded.getStatus());
+            assertNotEquals(RequestStatus.EXPIRED, reloaded.getStatus(), "restart downtime is the documented exception: the request must not expire");
 
             FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
-            assertEquals("the recovered approval must be submitted normally",
-                    1, job.getBuilds().size());
+            assertEquals(1, job.getBuilds().size(), "the recovered approval must be submitted normally");
             assertEquals(RequestStatus.EXECUTED,
                     RunRequestService.get().load(requestId).getStatus());
         });
@@ -150,8 +146,8 @@ public class RestartRecoveryTest {
         session.then(r -> {
             r.waitUntilNoActivity();
             FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
-            assertEquals("restored queue item + startup recovery must be deduplicated by requestId: "
-                    + "exactly one build per request", 1, job.getBuilds().size());
+            assertEquals(1, job.getBuilds().size(), "restored queue item + startup recovery must be deduplicated by requestId: "
+                    + "exactly one build per request");
             assertEquals(2, job.getNextBuildNumber());
 
             RunRequest reloaded = RunRequestService.get().load(requestId);

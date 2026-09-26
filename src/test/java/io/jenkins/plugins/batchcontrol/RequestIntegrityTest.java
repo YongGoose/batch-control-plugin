@@ -26,17 +26,18 @@ import java.util.concurrent.Future;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.function.ThrowingRunnable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Red-team integrity rows adopted into SPEC (D-16, D-21, D-22, D-23).
@@ -46,15 +47,16 @@ import static org.junit.Assert.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@WithJenkins
 public class RequestIntegrityTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
     private BatchControlGlobalConfiguration cfg;
 
-    @Before
-    public void setUp() throws Exception {
+    @BeforeEach
+    public void setUp(JenkinsRule rule) throws Exception {
+        this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
@@ -74,7 +76,9 @@ public class RequestIntegrityTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList()); // empty == unset == block all
-        protectedJob.addProperty(property);
+        // run control is already on, so D-31 gave the job a property at creation; install this
+        // one as the only one or blockUpstream would be shadowed (see BatchControlFixtures)
+        setBatchControl(protectedJob, property);
 
         WorkflowJob caller = j.createProject(WorkflowJob.class, "caller-a");
         caller.setDefinition(new CpsFlowDefinition("build job: 'protected-b', wait: false", true));
@@ -82,7 +86,7 @@ public class RequestIntegrityTest {
 
         j.waitUntilNoActivity();
         assertEquals(0, j.jenkins.getQueue().getItems().length);
-        assertTrue("an empty allow list must block every upstream job", protectedJob.getBuilds().isEmpty());
+        assertTrue(protectedJob.getBuilds().isEmpty(), "an empty allow list must block every upstream job");
         assertEquals(1, protectedJob.getNextBuildNumber());
     }
 
@@ -97,13 +101,12 @@ public class RequestIntegrityTest {
         RunRequest request = createAs("u1", jobX);
         approveAs("a1", request.getId());
         j.waitUntilNoActivity();
-        assertEquals("the approved submission runs exactly once", 1, jobX.getBuilds().size());
+        assertEquals(1, jobX.getBuilds().size(), "the approved submission runs exactly once");
 
         FreeStyleBuild firstBuild = jobX.getBuildByNumber(1);
         ApprovedRunAction marker = firstBuild.getAction(ApprovedRunAction.class);
-        assertNotNull("the executed run must carry the marker action", marker);
-        assertEquals("the marker must be bound to the request id",
-                request.getId(), marker.getRequestId());
+        assertNotNull(marker, "the executed run must carry the marker action");
+        assertEquals(request.getId(), marker.getRequestId(), "the marker must be bound to the request id");
 
         // replaying the very same marker on the same job (re-queue / rebuild path) must be blocked
         assertScheduleRefused("a consumed marker must not schedule the same job again",
@@ -113,8 +116,8 @@ public class RequestIntegrityTest {
                 () -> jobY.scheduleBuild2(0, new Cause.UserIdCause(), marker));
 
         j.waitUntilNoActivity();
-        assertEquals("job X must still have exactly one build", 1, jobX.getBuilds().size());
-        assertTrue("job Y must have no build at all", jobY.getBuilds().isEmpty());
+        assertEquals(1, jobX.getBuilds().size(), "job X must still have exactly one build");
+        assertTrue(jobY.getBuilds().isEmpty(), "job Y must have no build at all");
     }
 
     /** T-RT-03: renaming the target of a PENDING request invalidates it; a name-swapped job never runs (D-21). */
@@ -125,8 +128,7 @@ public class RequestIntegrityTest {
         RunRequest request = createAs("u1", alpha);
 
         alpha.renameTo("alpha-renamed");
-        assertEquals("renaming the target job must invalidate the request",
-                RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus(), "renaming the target job must invalidate the request");
 
         // swap attack: a different, unreviewed job takes over the original name
         FreeStyleProject beta = j.createFreeStyleProject("beta");
@@ -136,8 +138,8 @@ public class RequestIntegrityTest {
                 () -> approveAs("a1", request.getId()));
 
         j.waitUntilNoActivity();
-        assertTrue("the reviewed (renamed) job must not have run", alpha.getBuilds().isEmpty());
-        assertTrue("the swapped-in job must never run under the old approval", beta.getBuilds().isEmpty());
+        assertTrue(alpha.getBuilds().isEmpty(), "the reviewed (renamed) job must not have run");
+        assertTrue(beta.getBuilds().isEmpty(), "the swapped-in job must never run under the old approval");
         RunRequest reloaded = RunRequestService.get().load(request.getId());
         assertEquals(RequestStatus.INVALIDATED, reloaded.getStatus());
         assertNull(reloaded.getExecutedRunId());
@@ -153,8 +155,7 @@ public class RequestIntegrityTest {
         Folder folder = j.jenkins.createProject(Folder.class, "team");
         Items.move(gamma, folder);
 
-        assertEquals("moving the target job must invalidate the request",
-                RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus(), "moving the target job must invalidate the request");
         assertRefused("approving after the move must be refused",
                 () -> approveAs("a1", request.getId()));
         j.waitUntilNoActivity();
@@ -174,12 +175,11 @@ public class RequestIntegrityTest {
         assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(request.getId()).getStatus());
 
         delta.renameTo("delta-renamed");
-        assertEquals("renaming an APPROVED (not yet submitted) target must invalidate the request",
-                RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus());
+        assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus(), "renaming an APPROVED (not yet submitted) target must invalidate the request");
 
         j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
-        assertTrue("the invalidated approval must never execute", delta.getBuilds().isEmpty());
+        assertTrue(delta.getBuilds().isEmpty(), "the invalidated approval must never execute");
     }
 
     /** T-RT-19: reason over 4,000 chars or a parameter value over 10,000 chars rejects creation (D-22). */
@@ -192,8 +192,7 @@ public class RequestIntegrityTest {
                 () -> createWith(target, "r".repeat(4001), param("DATA", "small")));
         assertRejectedAsInvalid("a parameter value over 10,000 characters must reject creation",
                 () -> createWith(target, "normal batch reason", param("DATA", "x".repeat(10001))));
-        assertTrue("nothing may be stored from rejected creations",
-                RunRequestService.get().list().isEmpty());
+        assertTrue(RunRequestService.get().list().isEmpty(), "nothing may be stored from rejected creations");
 
         // boundary values are still accepted
         RunRequest atLimit = createWith(target, "k".repeat(4000), param("DATA", "y".repeat(10000)));
@@ -235,7 +234,7 @@ public class RequestIntegrityTest {
     private static void assertScheduleRefused(String message, ScheduleAttempt attempt) throws Exception {
         try {
             Future<?> future = attempt.call();
-            assertNull(message, future);
+            assertNull(future, message);
         } catch (Failure expectedGuidance) {
             // throwing the guidance Failure is equally acceptable
         }
@@ -246,27 +245,27 @@ public class RequestIntegrityTest {
         Future<?> call() throws Exception;
     }
 
-    private static void assertRejectedAsInvalid(String message, ThrowingRunnable action) {
+    private static void assertRejectedAsInvalid(String message, Executable action) {
         boolean rejected = false;
         try {
-            action.run();
+            action.execute();
         } catch (IllegalArgumentException | Failure expected) {
             rejected = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - expected IllegalArgumentException or Failure, got " + other, other);
         }
-        assertTrue(message, rejected);
+        assertTrue(rejected, message);
     }
 
-    private static void assertRefused(String message, ThrowingRunnable action) {
+    private static void assertRefused(String message, Executable action) {
         boolean refused = false;
         try {
-            action.run();
+            action.execute();
         } catch (RuntimeException expected) {
             refused = true;
         } catch (Throwable other) {
             throw new AssertionError(message + " - unexpected exception " + other, other);
         }
-        assertTrue(message, refused);
+        assertTrue(refused, message);
     }
 }
