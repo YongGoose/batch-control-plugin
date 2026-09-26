@@ -4,8 +4,8 @@ import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import java.io.IOException;
 
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * Fixture helpers for job-level batch-control settings.
@@ -55,9 +55,8 @@ final class BatchControlFixtures {
             throws IOException {
         uncontrolled(job);
         addProperty(job, property);
-        assertSame("fixture: the installed BatchControlJobProperty must be the one the plugin"
-                + " reads back from " + job.getFullName(),
-                property, job.getProperty(BatchControlJobProperty.class));
+        assertSame(property, job.getProperty(BatchControlJobProperty.class), "fixture: the installed BatchControlJobProperty must be the one the plugin"
+                + " reads back from " + job.getFullName());
         return property;
     }
 
@@ -73,8 +72,7 @@ final class BatchControlFixtures {
             // Job#removeProperty(Class) drops the first match only; D-31 plus a fixture's own
             // addProperty can leave more than one behind.
         }
-        assertNull("fixture: " + job.getFullName() + " must carry no BatchControlJobProperty",
-                job.getProperty(BatchControlJobProperty.class));
+        assertNull(job.getProperty(BatchControlJobProperty.class), "fixture: " + job.getFullName() + " must carry no BatchControlJobProperty");
         return job;
     }
 
