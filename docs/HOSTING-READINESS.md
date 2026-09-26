@@ -1,7 +1,8 @@
 # jenkinsci Hosting Readiness
 
 Empirical readiness report for submitting `batch-control` to the Jenkins project
-hosting process.
+hosting process. It answers *do we meet the requirements*. For *what to do, in
+what order, on the day*, use [`HOSTING-REQUEST.md`](HOSTING-REQUEST.md).
 
 | | |
 |---|---|
@@ -766,6 +767,12 @@ accounts to receive commit permission, i.e. Q3). Both need the owner.
 ---
 
 ## 6. Draft submission
+
+> **The operative copy is [`HOSTING-REQUEST.md`](HOSTING-REQUEST.md).** That
+> document is the run book to follow on submission day — the pasteable field
+> values, the pre-submission checks, the bot flow and the post-approval steps.
+> The draft below stays here as the record of how each value was derived; if the
+> two ever disagree, `HOSTING-REQUEST.md` is what gets pasted.
 
 Fill the template at
 <https://github.com/jenkins-infra/repository-permissions-updater/issues/new?template=1-hosting-request.yml>.
