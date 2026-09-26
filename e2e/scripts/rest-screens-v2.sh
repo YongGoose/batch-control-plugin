@@ -3,7 +3,7 @@
 # pass only has to judge layout:
 #
 #   T-E2E-05 re-judgement  the decision screen now carries "Recent Runs of This
-#                          Job" and a size control (?runs=5/10/20/50 + "Show")
+#                          Job" and a size control (?runs=5/10/20/50)
 #   the allow-list         ?runs=100000 / -1 / abc must fall back to the default,
 #                          never read more history than the largest option
 #   UX-9                   the executed run is a link
@@ -33,22 +33,33 @@ echo "--- POST submit -> HTTP $status, $REQUEST_PATH"
 
 status=$(bc_get approver "$OUT_DIR/s2-decision.html" "$REQUEST_PATH")
 echo "--- GET $REQUEST_PATH (approver, default) -> HTTP $status"
+# The size control changed shape in e98d211: it used to be a GET form (select +
+# "Show" button), and is now a row of links, because core's hudson-behavior.js
+# appends the CSRF crumb to every form and a GET form put it in the address bar.
+# Both shapes are probed, so the output says which one the running build serves.
 for needle in 'Recent Runs of This Job' '<th>Build' '<th>Result' '<th>Started' '<th>Duration' \
-              'Runs to show' 'name="runs"' '>Show<' 'Reason' 'Parameters' 'Decision'; do
+              'Runs to show' 'href="?runs=' 'aria-current' 'name="runs"' '>Show<' \
+              'Reason' 'Parameters' 'Decision'; do
   if grep -q -- "$needle" "$OUT_DIR/s2-decision.html"; then r=YES; else r=NO; fi
   printf '    carries %-28s %s\n' "'$needle'" "$r"
 done
 echo "    recent-run rows: $(rows "$OUT_DIR/s2-decision.html")"
-echo "    size options offered: $(grep -o '<option value="[0-9]*"' "$OUT_DIR/s2-decision.html" | sort -u | tr '\n' ' ')"
-echo "    selected: $(grep -o '<option value="[0-9]*" selected="selected"' "$OUT_DIR/s2-decision.html" | head -1)"
+echo "    size options offered: $({ grep -o 'href="?runs=[0-9]*"\|<option value="[0-9]*"' "$OUT_DIR/s2-decision.html" || true; } | sort -u | tr '\n' ' ')"
+echo "    current size marked: $({ grep -o 'aria-current="true">[0-9]*<\|<option value="[0-9]*" selected="selected"' "$OUT_DIR/s2-decision.html" || true; } | head -1)"
 echo "    count sentence: $(grep -o 'Showing [^<]*' "$OUT_DIR/s2-decision.html" | head -1)"
 
 # --- the size control and its allow-list
 for value in 10 20 50 100000 -1 abc ''; do
   body="$OUT_DIR/s2-runs-${value:-empty}.html"
   status=$(bc_get approver "$body" "${REQUEST_PATH}?runs=$value")
-  sel=$(grep -o '<option value="[0-9]*" selected="selected"' "$body" | head -1 \
-        | sed -e 's/<option value="//' -e 's/" selected="selected"//')
+  # The current size is marked by aria-current (links) or selected="selected"
+  # (the pre-e98d211 form); read whichever the running build emits.
+  sel=$({ grep -o 'aria-current="true">[0-9]*<' "$body" || true; } | head -1 \
+        | sed -e 's/aria-current="true">//' -e 's/<$//')
+  if [ -z "$sel" ]; then
+    sel=$({ grep -o '<option value="[0-9]*" selected="selected"' "$body" || true; } | head -1 \
+          | sed -e 's/<option value="//' -e 's/" selected="selected"//')
+  fi
   printf -- "--- ?runs=%-8s -> HTTP %s, selected=%-3s rows=%s\n" "${value:-<empty>}" "$status" "${sel:-none}" "$(rows "$body")"
 done
 
@@ -70,7 +81,8 @@ echo "--- $(bc_script "$OUT_DIR/s2-executors-0.groovy") (holding the approved bu
 status=$(bc_post approver "$OUT_DIR/s2-approve.html" "${REQUEST_PATH}approve" --data-urlencode "comment=e2e-02")
 echo "--- POST approve -> HTTP $status"
 status=$(bc_get approver "$OUT_DIR/s2-approved.html" "$REQUEST_PATH")
-if grep -q 'This request is approved and the run starts shortly' "$OUT_DIR/s2-approved.html"; then
+if grep -q -e 'batch-control-approved-notice' \
+        -e 'This request is approved and the run starts shortly' "$OUT_DIR/s2-approved.html"; then
   echo "    APPROVED notice right after approving: YES"
 else
   echo "    APPROVED notice right after approving: NO (the run may already have started)"
@@ -88,7 +100,8 @@ status=$(bc_get approver "$OUT_DIR/s2-executed.html" "$REQUEST_PATH")
 echo "--- GET $REQUEST_PATH after execution -> HTTP $status"
 echo "    status now: $(grep -o '>APPROVED<\|>EXECUTED<' "$OUT_DIR/s2-executed.html" | sort -u | tr '\n' ' ')"
 echo "    executed run rendered as: $(grep -o '<th style="text-align: left;">Executed run</th>[^§]\{0,200\}' "$OUT_DIR/s2-executed.html" | grep -o '<a href="[^"]*">[^<]*</a>\|<td>[^<]*</td>' | head -1)"
-if grep -q 'This request is approved and the run starts shortly' "$OUT_DIR/s2-executed.html"; then
+if grep -q -e 'batch-control-approved-notice' \
+        -e 'This request is approved and the run starts shortly' "$OUT_DIR/s2-executed.html"; then
   echo "    APPROVED notice still shown after execution: YES (it should be gone)"
 else
   echo "    APPROVED notice still shown after execution: NO (correct)"
