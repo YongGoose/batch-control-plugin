@@ -64,10 +64,9 @@ export PATH="$JAVA_HOME/bin:$HOME/tools/apache-maven-3.9.16/bin:$PATH"
 > is nearly always an environment difference, not a product defect, and finding
 > that out later is expensive.
 >
-> Related, and temporary: `pom.xml` sets `ban-junit4-imports.skip` to `true`
-> with a comment explaining why. It is expected to go back to `false` as the
-> JUnit 5 migration completes; please do not add new JUnit 4 imports in the
-> meantime.
+> Related: `ban-junit4-imports.skip` in `pom.xml` is back to `false` now that the
+> migration of the test sources is done, so a JUnit 4 import fails the build
+> rather than being merely discouraged. Write new tests against JUnit 5.
 
 ### Running it twice at once
 
@@ -275,6 +274,31 @@ behind any of them.
 - **Never run two Maven builds against this checkout at once.** They share
   `target/` and deadlock on Windows file locks (`patch-modules`). Serialise your
   builds — this includes a `verify` in one terminal and an `hpi:run` in another.
+- **Never pipe Maven's output through `head`** (or anything else that closes the
+  pipe early). The reader exits, Maven takes SIGPIPE mid-build, and the JVMs it
+  spawned can outlive it still holding
+  `target/patch-modules/org-netbeans-insane-hook.jar` — which on Windows then
+  blocks the **`clean` phase of the next build**. The failure therefore surfaces
+  one build later, on a command that has nothing to do with it, and looks like a
+  broken checkout. Redirect the whole run to a file and grep the file instead:
+  `mvn -ntp clean verify > /tmp/verify.log 2>&1 ; echo "exit=$?"`. If a lock has
+  already happened, wait for the leftover `java` processes to exit before deleting
+  `target/`; killing Maven while it holds the lock reproduces the same state.
+- **Do not filter that log too narrowly — the reason gets filtered out.** A
+  pattern of `Tests run|BUILD` leaves a bare `BUILD FAILURE` line with no cause in
+  sight. Always include `[ERROR]`, e.g.
+  `grep -nE "Tests run|\[ERROR\]|BugInstance|BUILD " /tmp/verify.log`, and read
+  the *first* error rather than the last — the later ones are usually
+  consequences.
+- **A test count that went down is not a passing build.** Tests stop running
+  silently: a method that lost its `@Test`, a class whose runner annotation no
+  longer matches the JUnit version it is written against, a name outside the
+  surefire include pattern. Nothing reports an error, because there was simply
+  less to do. Compare the count against the previous green run, and if it dropped
+  without your having deleted tests on purpose, find the tests that stopped
+  running before looking at anything else. Any change that rewrites test
+  annotations or moves test classes carries this risk — it is the reason the JUnit
+  5 migration of the test sources made the comparison an explicit step.
 - **A red `RunRequestServiceTest.t_03_05` is probably not a product defect.** On
   Windows a JenkinsRule temporary directory occasionally cannot be deleted
   because a handle is still open, and the teardown failure is reported against
@@ -337,8 +361,11 @@ This plugin was built as an orchestration of specialised Claude Code agents —
 separate roles for the specification, the implementation, the tests, security
 review, red-teaming and the release files, each restricted to its own paths, with
 the human owner ruling on every design decision. The agent definitions are in
-`.claude/`, and `CLAUDE.md` plus `docs/WORKFLOW.md` describe how the work was
-divided.
+`.claude/agents/`, the procedures they follow in `.claude/skills/`
+(`slice-workflow` — the order one unit of work goes through and why;
+`verify-gate` — how to decide whether a build actually passed; `test-contract` —
+the two test rules that are easy to break), and `CLAUDE.md` plus
+`docs/WORKFLOW.md` describe how the work was divided.
 
 That is context, not a requirement: **you do not need to work that way to
 contribute here.** It is worth a paragraph only because the process left visible
