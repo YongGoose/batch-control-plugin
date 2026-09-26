@@ -7,6 +7,7 @@ import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.security.GlobalMatrixAuthorizationStrategy;
+import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -43,15 +44,17 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Red-team rows around grant-window abuse. Matrix rows T-RT-05 (D-17: jobs created inside an
- * active grant window default to approvalRequired=true when run control is on), T-RT-06
- * (writes are re-checked per write across the expiry boundary) and T-RT-20 (bounded version:
- * 30 rapid config.xml POSTs keep the change records consistent).
+ * Red-team rows around grant-window abuse. Matrix rows T-RT-05 (D-17 + D-34: a job created inside
+ * an active grant window starts locked — approval-required and blocked for timer and upstream
+ * causes — so the window cannot be used to plant a run path that outlives it), T-RT-06 (writes
+ * are re-checked per write across the expiry boundary) and T-RT-20 (bounded version: 30 rapid
+ * config.xml POSTs keep the change records consistent).
  *
- * Written from docs/SPEC.md (items 6, 8, 9 and D-17), docs/ARCHITECTURE.md and
+ * Written from docs/SPEC.md (items 6, 8, 9 and D-17, D-31, D-34), docs/ARCHITECTURE.md and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
@@ -97,13 +100,20 @@ public class GrantWindowAbuseTest {
     }
 
     /**
-     * T-RT-05 (D-17): a job created by u1 inside an active CREATE/CONFIGURE grant window gets
-     * approvalRequired=true automatically, so a manual run after the window expired is blocked.
-     * (Timer runs still follow the SPEC 6 timer policy; SPEC grants no stronger cron block, so
-     * none is asserted here.)
+     * T-RT-05 (D-17, completed by D-34): u1 plants a cron job inside an active CREATE/CONFIGURE
+     * grant window. The job must start fully locked — {@code approvalRequired} (D-17/D-31) and,
+     * since D-34, {@code blockTimer} and {@code blockUpstream} as well — so that after the window
+     * closes neither a manual run nor the planted cron runs.
+     *
+     * <p>This is the row's original red-team demand (R-2: "a change window must not be usable to
+     * plant an unapproved run path"). It had been narrowed to the manual path only, because D-17
+     * promised no more than {@code approvalRequired} and that switch refuses human causes alone
+     * (SPEC 6, D-25) — which is precisely the hole D-34 was decided to close: the planted cron
+     * kept firing indefinitely after the window had expired, with nobody having approved the
+     * job's operation. The cron assertion is therefore restored to the row.
      */
     @Test
-    public void t_rt_05_jobCreatedInGrantWindowDefaultsToApprovalRequired() throws Exception {
+    public void t_rt_05_jobPlantedInGrantWindowStartsLocked() throws Exception {
         grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
                 Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30);
 
@@ -127,6 +137,9 @@ public class GrantWindowAbuseTest {
                 + "carry the plugin job property");
         assertTrue(property.isApprovalRequired(), "D-17: approvalRequired must default to true for a job created inside an "
                 + "active grant window");
+        assertTrue(property.isBlockTimer(), "D-34: a job planted inside a change window must start with blockTimer on — "
+                + "the window authorized creating the job, not operating it");
+        assertTrue(property.isBlockUpstream(), "D-34: a job planted inside a change window must start with blockUpstream on");
 
         // the window expires; a manual run must not bypass approval
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
@@ -135,6 +148,11 @@ public class GrantWindowAbuseTest {
         assertEquals(400, blocked.getWebResponse().getStatusCode(), "the manual run of the planted job must be blocked with guidance");
         assertTrue(blocked.getWebResponse().getContentAsString()
                         .toLowerCase(Locale.ROOT).contains("approval"), "the block must explain that approval is required");
+
+        // and neither may the cron the window was used to plant (D-34, R-2). Matrix note 4: the
+        // firing is reproduced with a TimerTriggerCause; an unattended cause is refused quietly.
+        assertNull(planted.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "D-34: after the change window closed, the planted cron must not run either — "
+                + "otherwise the window did plant an unapproved run path (R-2)");
 
         j.waitUntilNoActivity();
         assertTrue(planted.getBuilds().isEmpty(), "no build may have run");
