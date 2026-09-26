@@ -6,22 +6,23 @@ hosting process.
 | | |
 |---|---|
 | Verification date | **2026-09-26** (all URLs below fetched on this date) |
-| Last updated | **2026-09-26** — preparation pass applied, then the G3 README replacement, then `CONTRIBUTING.md` + the README link + `.github/PULL_REQUEST_TEMPLATE.md` (G3 follow-up / §4 recommendation 2 / first half of Q8); see *Applied changes* below |
+| Last updated | **2026-09-26** — preparation pass, then the G3 README replacement, then `CONTRIBUTING.md` + the README link + `.github/PULL_REQUEST_TEMPLATE.md`, then the JUnit 5 migration (R1/B18/E4), the owner answers to Q1/Q5/Q8 and the README rewrite; see *Applied changes* below |
 | Repository under review | `https://github.com/YongGoose/batch-control-plugin` (public, not a fork, default branch `main` — verified via GitHub API on 2026-09-26) |
 | Branch inspected | `handoff/phase-4-5-continuation` |
 | Requirements checked | **65** |
-| PASS | **55** |
-| FAIL | **4** |
+| PASS | **56** |
+| FAIL | **0** |
 | WARNING | **1** |
-| UNKNOWN | **3** |
+| UNKNOWN | **2** |
 | INFO | **2** |
+| NOT APPLICABLE | **4** |
 
 > **Count correction (2026-09-26).** The first revision of this header said
 > "60 requirements / 36 PASS / 1 INFO". The checklist in section 2 actually has
 > 65 rows (A 8, B 23, C 17, D 8, E 9) and two INFO rows (D8, E9), so the header
 > totals were wrong. The numbers above are recounted from the table.
 
-> **Count update (G3 pass, 2026-09-26).** C10 moved FAIL → PASS when `README.md`
+> **Count update (G3 pass, 2026-09-26; superseded by the note below).** C10 moved FAIL → PASS when `README.md`
 > was replaced with plugin documentation, so PASS 54 → 55 and FAIL 5 → 4. The
 > four remaining FAIL rows are all in the CD block (D1, D4, D5, D6) and exist
 > only if form field 6 is answered `Yes` — see **G10**.
@@ -32,10 +33,31 @@ hosting process.
 > *recommendation* from the documentation guide, not one of the 65 checklist rows,
 > so no row's verdict moves.
 
-> **Verification note.** No Maven build was run while preparing this document
-> (a concurrent full build was in progress). Every row whose verdict depends on
-> a build is marked `UNKNOWN — build verification required`, never assumed to
-> pass.
+> **Count update (owner answers + JUnit 5 migration, 2026-09-26).** Two changes,
+> and between them they clear every FAIL.
+>
+> **Q5 is answered `No`,** so the four CD rows (D1, D4, D5, D6) are not
+> requirements for this submission at all. They move FAIL → **N/A** rather than
+> PASS, because nothing about them was fixed; the `.mvn/` files and `cd.yaml`
+> still do not exist and do not need to. CD can be enabled later by a follow-up
+> PR to repository-permissions-updater, at which point these four become live
+> again — see **G10**. D3 (the `${revision}${changelist}` warning) stays a
+> WARNING for the same reason it always was: it is advice, and it only bites once
+> CD is on.
+>
+> **The test suite is on JUnit 5,** so B18 is no longer "PASS by the bot, red in
+> the build" but simply PASS, and E4 moves UNKNOWN → PASS. PASS 55 → 56,
+> UNKNOWN 3 → 2, FAIL 4 → 0. See **R1**.
+>
+> The two remaining UNKNOWN rows are E1 and E2, both of which need the owner and
+> neither of which anyone else can close.
+
+> **Verification note.** No Maven build was run *by the author of this document*.
+> The E4 result recorded below (195 tests, 0 failures, SpotBugs
+> `BugInstance size is 0`, `BUILD SUCCESS`, with `ban-junit4-imports.skip=false`
+> in place) was reported by the orchestrating session on 2026-09-26 and is
+> recorded here with that attribution, not as an independent verification. It
+> must be re-run on the final pre-submission tree in any case — see §6.7 step 6.
 
 ### Applied changes (preparation pass, 2026-09-26)
 
@@ -52,9 +74,11 @@ items were deliberately **not** touched — see G10.
 | G7 | `.github/CODEOWNERS` created | `.github/CODEOWNERS:1` |
 | G8 | `.github/dependabot.yml` created — `maven` weekly, `github-actions` monthly | `.github/dependabot.yml:1-11` |
 | G9 | plugin BOM `7046.v43536164769c` → `7093.v37de7b_4a_8a_4f` | `pom.xml:51` |
-| G3 | `README.md` replaced — the Korean development-kit guide is gone, replaced by English plugin documentation (problem statement, the two controls, a blocked/not-blocked table, requirements, installation, four-step configuration, screen guide, 29 known limitations, roadmap, contributing, security reporting, license) | `README.md:1-576` |
+| G3 | `README.md` replaced — the Korean development-kit guide is gone, replaced by English plugin documentation (problem statement, the two controls, what run control does and does not stop, requirements, installation, four-step configuration, screen guide, limitations, roadmap, contributing, security reporting, license) | `README.md` |
 | G3 follow-up / §4 rec. 2 / Q8 (first half) | `CONTRIBUTING.md` created — the contributor material G3 removed, rewritten in English for contributors rather than transcribed: build/test with expected results, repository layout, document system + identifier glossary, test conventions, `e2e/`, known pitfalls, PR rules, and one context section on the agent orchestration | `CONTRIBUTING.md` |
 | §4 rec. 2 (rest) | README *Contributing* section rewritten to link `CONTRIBUTING.md`, keeping only `mvn clean verify` + `mvn hpi:run`; `.github/PULL_REQUEST_TEMPLATE.md` created with the five checks from `CONTRIBUTING.md` §7 plus the issue and contract anchor | `README.md` *Contributing*, `.github/PULL_REQUEST_TEMPLATE.md` |
+| R1 / B18 / E4 | `src/test/**` migrated to JUnit 5 in stages, then `ban-junit4-imports.skip` restored to `false`; the enforcer rule now passes and so does the full build | commits `aa2b344`, `abebb3e`, `71ba3f0`, `c8f63a0`; `pom.xml:42` |
+| C10 (second pass) | `README.md` cut roughly in half and rewritten in prose after the owner found it too long and mechanical; the exhaustive limitation list moved to a new `docs/LIMITATIONS.md`, and `README.ko.md` rewritten as Korean prose rather than a translation | `README.md`, `README.ko.md`, `docs/LIMITATIONS.md` |
 
 **Not done, by instruction:** G10 (all CD files and the `changelist` value — the
 Yes/No decision is made immediately before submission).
@@ -200,7 +224,7 @@ listed in section 1 and section 6.
 | B15 | Property `hpi.strictBundledArtifacts` = `true` | RPU `MavenVerifier.checkProperties` | PASS (bot) / see **R1** | `pom.xml:39` | Build verification required |
 | B16 | Property `ban-commons-lang-2.skip` = `false` | same | PASS | `pom.xml:40`; static scan found **0** commons-lang 2 references (see **R1**) | — |
 | B17 | Property `ban-deprecated-stapler.skip` = `false` | same | PASS | `pom.xml:41`; static scan found **0** v1 Stapler references (see **R1**) | — |
-| B18 | Property `ban-junit4-imports.skip` = `false` | same | PASS (bot) / **will break the build** | `pom.xml:42`; **239 JUnit 4 references in 34 of 34 test files** (see **R1**) | JUnit 5 migration owned by test-author |
+| B18 | Property `ban-junit4-imports.skip` = `false` | same | **PASS** | `pom.xml:42` = `false`, and `src/test` holds **0** references to non-Jupiter `org.junit.*`. All 35 test classes import `org.junit.jupiter` — 34 tracked plus `SecretParameterMaskingTest`, which is untracked on this branch and so does not show in a diff against `HEAD`; it is Jupiter-based too. The enforcer rule `check-junit-imports` runs in `generate-test-sources` and passes (see **R1**) | — |
 | B19 | Property `banObsoleteDependencyOverrides.skip` = `false` | same | PASS | `pom.xml:43`; no dependency declares a version, so there is nothing to override (see **R1**) | — |
 | B20 | Plugin BOM imported and its `artifactId` in sync with the baseline (`bom-<baseline>.x`) | RPU `MavenVerifier.checkDependencyManagement` | PASS | `pom.xml:50` = `bom-${jenkins.baseline}.x` → `bom-2.568.x` | — |
 | B21 | BOM version must equal the latest released BOM for that line | same | PASS | `pom.xml:51` = `7093.v37de7b_4a_8a_4f`, which was `<latest>` and `<release>` in the live `maven-metadata.xml` on 2026-09-26 | Re-check on submission day — moving target |
@@ -220,7 +244,7 @@ listed in section 1 and section 6.
 | C7 | A dependency-update bot config must exist: one of `.github/dependabot.yml(.yaml)`, `renovate.json`, `.github/renovate.json`, `.github/workflows/updatecli.yml(.yaml)` | RPU `RequiredFilesVerifier.checkDependencyBot` | PASS | `.github/dependabot.yml:1-11` — `maven` weekly + `github-actions` monthly | — |
 | C8 | A license file must exist in the repository and be detectable by GitHub | RPU `GitHubVerifier.checkLicense` | PASS (pending push) | `LICENSE:1-21`, full MIT text, `Copyright (c) 2026 Yongjun Hong`, matching the MIT declaration at `pom.xml:20-25` | GitHub's `license` field only populates after the commit is pushed — re-check the API response before submitting |
 | C9 | A README must exist and be detectable by GitHub | RPU `GitHubVerifier.checkReadme` | PASS | `README.md` exists | — |
-| C10 | README must be usable plugin documentation — reviewed by a human, not the bot ("README content") | Hosting Checker message text; <https://www.jenkins.io/doc/developer/publishing/documentation/> | **PASS** (content replaced 2026-09-26; the verdict itself stays a human judgement) | `README.md:1-576` is English plugin documentation: what problem it solves, the two controls, an explicit blocked/not-blocked matrix, requirements, installation, configuration in four steps (including the `Batch Control (wrapping)` strategy step that `docs/reports/e2e-01.md:423-431` found undocumented), a screen guide, 29 known limitations, roadmap, contributing, security reporting, license. The Korean development-kit content is gone from `README.md` and has **not yet been relocated** — see the note in **G3** | Relocate the development-kit text (owner decision **Q8**); no further README work known |
+| C10 | README must be usable plugin documentation — reviewed by a human, not the bot ("README content") | Hosting Checker message text; <https://www.jenkins.io/doc/developer/publishing/documentation/> | **PASS** (content replaced, then rewritten for length and tone, 2026-09-26; the verdict itself stays a human judgement) | `README.md` is English plugin documentation: what problem it solves, the two controls, what run control does and does not stop, requirements, installation, configuration in four steps (including the `Batch Control (wrapping)` strategy step that `docs/reports/e2e-01.md:423-431` found undocumented), a screen guide, the limitations that change a decision, roadmap, comparison, contributing, security reporting, license. The full limitation list lives in `docs/LIMITATIONS.md`, and `README.ko.md` is a Korean companion with the English kept canonical. Length was set against real jenkinsci READMEs — see **G3** | none known |
 | C11 | `src/main/resources/index.jelly` should describe the plugin | `docs/HOSTING-CHECKLIST.md:17`; archetype convention (no automated check found in RPU — **source not confirmed as a bot requirement**) | PASS | `src/main/resources/index.jelly:1-8`, English, `escape-by-default='true'` | — |
 | C12 | No inline `<style>` in any `src/main/resources/**.jelly` | RPU `JellyVerifier` (`INLINE_STYLE`, REQUIRED) | PASS | grep over all 17 `.jelly` files: no `<style` | — |
 | C13 | No inline `<script>` JavaScript in Jelly | RPU `JellyVerifier` (`INLINE_SCRIPT`, REQUIRED) | PASS | no `<script` in any `.jelly` | — |
@@ -233,12 +257,19 @@ listed in section 1 and section 6.
 
 | # | Requirement | Source | Status | Evidence | Action |
 |---|---|---|---|---|---|
-| D1 | Property `changelist` must be exactly `999999-SNAPSHOT` | RPU `MavenVerifier.checkAutomaticReleasesSettings`; <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | **FAIL** (deliberately unchanged) | `pom.xml:36` = `-SNAPSHOT` | Set to `999999-SNAPSHOT` only if Q5 = `Yes` |
+> **Q5 is answered `No` (owner, 2026-09-26),** so this whole block is out of
+> scope for the first submission. The four rows that were FAIL are marked
+> **N/A**: nothing was fixed, they simply are not requirements while field 6 is
+> `No`. If CD is enabled later by a follow-up PR to
+> repository-permissions-updater, every row here becomes live again and D3's
+> advice starts to matter.
+
+| D1 | Property `changelist` must be exactly `999999-SNAPSHOT` | RPU `MavenVerifier.checkAutomaticReleasesSettings`; <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | **N/A** (field 6 = `No`) | `pom.xml:36` = `-SNAPSHOT`, unchanged | Set to `999999-SNAPSHOT` if CD is ever enabled |
 | D2 | `<version>` must contain `${changelist}` | same | PASS | `pom.xml:13` = `${revision}${changelist}` | — |
-| D3 | `${revision}${changelist}` as the version is discouraged | RPU, severity WARNING | **WARN** | `pom.xml:13` | Prefer `${changelist}` (fully automated) or `${revision}.${changelist}` per the CD doc |
-| D4 | `.mvn/extensions.xml` must exist | RPU `RequiredFilesVerifier.checkFilesForCD` | **FAIL** (deliberately unchanged) | no `.mvn/` directory | Copy from `jenkinsci/archetypes/common-files/.mvn/extensions.xml`, only if Q5 = `Yes` |
-| D5 | `.mvn/maven.config` must exist and contain the line `-Dchangelist.format=%d.v%s` | same | **FAIL** (deliberately unchanged) | no `.mvn/` directory | Copy the archetype file, only if Q5 = `Yes`; CD doc also lists `-Pmight-produce-incrementals` |
-| D6 | `.github/workflows/cd.yaml` (or `.yml`) must exist | same | **FAIL** (deliberately unchanged) | `.github/workflows/` contains only the security scan | `curl … https://raw.githubusercontent.com/jenkinsci/.github/master/workflow-templates/cd.yaml`, only if Q5 = `Yes` |
+| D3 | `${revision}${changelist}` as the version is discouraged | RPU, severity WARNING | **WARN** (advice only, and inert while field 6 = `No`) | `pom.xml:13` | Prefer `${changelist}` (fully automated) or `${revision}.${changelist}` per the CD doc, if CD is ever enabled |
+| D4 | `.mvn/extensions.xml` must exist | RPU `RequiredFilesVerifier.checkFilesForCD` | **N/A** (field 6 = `No`) | no `.mvn/` directory | Copy from `jenkinsci/archetypes/common-files/.mvn/extensions.xml` if CD is ever enabled |
+| D5 | `.mvn/maven.config` must exist and contain the line `-Dchangelist.format=%d.v%s` | same | **N/A** (field 6 = `No`) | no `.mvn/` directory | Copy the archetype file if CD is ever enabled; the CD doc also lists `-Pmight-produce-incrementals` |
+| D6 | `.github/workflows/cd.yaml` (or `.yml`) must exist | same | **N/A** (field 6 = `No`) | `.github/workflows/` contains only the security scan | `curl … https://raw.githubusercontent.com/jenkinsci/.github/master/workflow-templates/cd.yaml` if CD is ever enabled |
 | D7 | `.github/release-drafter.y*ml` and `.github/workflows/release-drafter.y*ml` must **not** exist | same | PASS | neither exists | — |
 | D8 | After hosting, a PR to repository-permissions-updater must add `cd: enabled: true` to `permissions/plugin-batch-control.yml`, then `MAVEN_TOKEN` / `MAVEN_USERNAME` appear as repository secrets | <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | INFO (post-approval) | n/a | Part of step E in `docs/HOSTING-CHECKLIST.md` |
 
@@ -249,7 +280,7 @@ listed in section 1 and section 6.
 | E1 | Description must explain "how it's different from other components that may be considered similar to this one" | Issue template field 3 | **UNKNOWN** | Material exists (`docs/DECISIONS.md:7` D-01, `:9` D-02) but no submission text has been reviewed by the owner | Use the section 6 draft, owner to confirm |
 | E2 | GitHub users to have commit permission | Issue template field 4 | **UNKNOWN** | Owner data | Owner supplies |
 | E3 | Jenkins project (accounts.jenkins.io) users with release permission must have signed into Jira **and** Artifactory | Issue template field 5; RPU `JenkinsProjectUserVerifier` | PASS (owner-confirmed 2026-09-26) | Owner states the accounts.jenkins.io account is created and needs no further verification | The literal username string for field 5 is still owner-supplied when the form is filled |
-| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **UNKNOWN — build verification required**, and expected red | Not run (concurrent build in progress). `ban-junit4-imports.skip=false` was added this pass and the whole test suite is JUnit 4 — see **R1** | Migrate the tests to JUnit 5, then run `mvn -q clean verify` |
+| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **PASS** (reported by the orchestrating session 2026-09-26, not verified by this document's author) | Full `mvn clean verify` with all five enforcement properties on: **195 tests, 0 failures**, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`. The test count is identical class by class to the pre-migration suite, with 0 `@Disabled` and 0 deletions | Re-run on the final pre-submission tree (§6.7 step 6) |
 | E5 | No Korean strings in code or resources | `CLAUDE.md:45`; `docs/HOSTING-CHECKLIST.md:45` | PASS | Unicode Hangul scan over `src/`: 0 matching files | — |
 | E6 | No hardcoded credentials | `docs/HOSTING-CHECKLIST.md:28`; Jenkins security docs | PASS | grep for `password =`/`secret =`/`apiKey`/`token =` string literals over `src/main/java`: 0 hits | — |
 | E7 | No unexpected outbound network calls | Jenkins security review practice | PASS | grep over `src/main/java` for `HttpURLConnection`, `HttpClient`, `openStream`, `okhttp`, `Socket(`, `java.net.URL`: the only match is `import java.net.URLEncoder` in `src/main/java/io/jenkins/plugins/batchcontrol/ui/FilterParser.java:6`, which is string encoding, not I/O | — |
@@ -269,15 +300,19 @@ request cannot be approved while any of them stands.
 |---|---|
 | G1 license file | **RESOLVED** |
 | G2 Jenkinsfile JDK | **RESOLVED** |
-| G3 README | **RESOLVED** 2026-09-26 — replaced with English plugin documentation; one follow-up left, relocating the development-kit text (Q8) |
+| G3 README | **RESOLVED** — English plugin documentation, later rewritten for length and tone, with `docs/LIMITATIONS.md` and `README.ko.md` alongside it |
 | G4 `<developers>` | **RESOLVED** |
 | G5 `<url>` / SCM | **RESOLVED** |
-| G6 five POM properties | **RESOLVED for the bot check**, but it opened a new build blocker — see **R1** |
+| G6 five POM properties | **RESOLVED**; it opened a build blocker (JUnit 4 imports) which is itself now cleared — see **R1** |
 | G7 CODEOWNERS | **RESOLVED** |
 | G8 dependency bot | **RESOLVED** |
 | G9 BOM version | **RESOLVED** as of 2026-09-26; re-check on submission day |
-| G10 CD block | **DEFERRED** by owner decision — nothing applied |
-| G11 build health | **OPEN** and now expected to fail — see **R1** |
+| G10 CD block | **NOT APPLICABLE** — Q5 answered `No`; nothing applied, nothing needed |
+| G11 build health | **RESOLVED** — `mvn clean verify` green with all five properties on; re-run on the final tree |
+
+Nothing in this section blocks the request any more. What is left is owner input,
+not engineering: **E1** (the Description wording) and **E2** (the GitHub accounts
+for commit permission).
 
 ### G1 — No license file in the repository *(REQUIRED, C8)* — RESOLVED
 
@@ -505,7 +540,9 @@ property at `pom.xml:45`.
   a code change owned by core-dev / test-author, not by this document.
 - **Done 2026-09-26.** All five are present with the exact required values at
   `pom.xml:39-43`. The caution above turned out to be justified for exactly one
-  of the three `ban-*` switches — see **R1**.
+  of the three `ban-*` switches, `ban-junit4-imports`, which blocked the build
+  until the test suite was migrated to JUnit 5; that is now done and all five
+  switches pass. See **R1**.
 
 ### G7 — `.github/CODEOWNERS` is missing *(REQUIRED, C6)* — RESOLVED
 
@@ -560,137 +597,116 @@ property at `pom.xml:45`.
 - **Still outstanding:** the bump changes resolved versions for every managed
   dependency, so it is one of the two reasons E4 must be re-run.
 
-### G10 — CD block, only if field 6 is answered `Yes` *(REQUIRED, D1/D4/D5/D6)* — DEFERRED
+### G10 — CD block *(was REQUIRED, D1/D4/D5/D6)* — NOT APPLICABLE
 
-If the owner answers `Yes` (the template calls it "recommended"), four more
-REQUIRED findings appear today: `changelist` is `-SNAPSHOT` instead of
-`999999-SNAPSHOT` (`pom.xml:44`), and `.mvn/extensions.xml`,
-`.mvn/maven.config` (with `-Dchangelist.format=%d.v%s`) and
-`.github/workflows/cd.yaml` are all absent. Plus the `${revision}${changelist}`
-warning (D3).
+**Q5 is answered `No` (owner, 2026-09-26).** Field 6 will be `No`, so none of
+this block is a requirement for the first review and the four rows are marked N/A
+rather than PASS: nothing was fixed. `changelist` is still `-SNAPSHOT`
+(`pom.xml:36`), and `.mvn/extensions.xml`, `.mvn/maven.config` and
+`.github/workflows/cd.yaml` still do not exist.
 
-- **Decision required — Q5.** Answering `No` removes all of G10 from the
-  first review; CD can be enabled later by a follow-up PR to
-  repository-permissions-updater.
-- **Deliberately not applied 2026-09-26.** By owner instruction, nothing in this
-  block was touched: `changelist` stays `-SNAPSHOT` (`pom.xml:36`), and no
-  `.mvn/extensions.xml`, `.mvn/maven.config` or `.github/workflows/cd.yaml` was
-  created. Applying them before the Yes/No decision would only have to be
-  reverted if the answer is `No`. The one CD-adjacent choice already made is the
-  monthly `github-actions` dependabot entry in G8, which is harmless either way.
+This is reversible and cheap to revisit. CD is enabled after hosting by a
+follow-up PR to repository-permissions-updater adding `cd: enabled: true` (D8),
+and at that point all four files have to be created and D3's advice on the
+version expression starts to matter. The one CD-adjacent choice already made is
+the monthly `github-actions` dependabot entry from G8, which is harmless either
+way.
 
-### G11 — Build health unverified *(E4)* — OPEN, now expected to fail
+### G11 — Build health *(E4)* — RESOLVED
 
-`mvn clean verify` was deliberately not run for this report. The hosting team
-does read the ci.jenkins.io build, and G6/G9 both risk breaking it. Run
-`mvn -q clean verify` on the final pre-submission tree and treat a red build as
-blocking.
+The concern was that G6 (five enforcement properties) and G9 (the BOM bump) were
+both applied without a build, so nobody knew whether the tree compiled. The
+static scan in **R1** then showed that one of the properties definitely broke it.
 
-**Update 2026-09-26.** No build was run in this pass either (a concurrent build
-was in progress; running a second Maven process would have contended on
-`target\patch-modules` on Windows). The G6 properties were applied without a
-build, and the static scan in **R1** shows that one of them — JUnit 4 imports —
-*will* fail. So E4 is not merely unverified, it is expected red until the test
-suite is migrated. Two independent reasons to re-run: the enforcement switches
-(**R1**) and the BOM bump (G9).
+**Resolved 2026-09-26.** The JUnit 5 migration cleared the enforcer rule and the
+orchestrating session reports a full `mvn clean verify` at 195 tests, 0 failures,
+SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`, with all five properties on and
+the new BOM in place. That covers both original reasons to re-run.
+
+It still has to be run once more on the final pre-submission tree (§6.7 step 6),
+because the hosting team reads the ci.jenkins.io build and because the BOM and
+parent POM versions are re-checked on the submission day (§6.7 step 4).
 
 ---
 
 ## 3a. R1 — Build-breakage register for the five enforcement properties
 
-Static scan over `src/` on 2026-09-26, done because no Maven build could be run.
-This is a source-level scan, so it bounds the problem but does not replace the
-enforcer output — a rule may also fire on transitive bytecode that grep cannot
-see.
+This register began as a static scan over `src/`, done because no Maven build
+could be run at the time. It has since been settled by an actual build: the
+orchestrating session reports `mvn clean verify` green with all five properties
+on (2026-09-26), so the "expected to pass" verdicts below are now confirmed
+rather than inferred. The scan evidence is kept because it is what identified the
+one genuine blocker before any build existed.
 
-| Property | Static scan verdict | Evidence |
+| Property | Verdict | Evidence |
 |---|---|---|
-| `ban-junit4-imports.skip=false` | **WILL FAIL THE BUILD** | **239 references to `org.junit.*` (non-Jupiter) across 34 files — that is 34 of 34 files under `src/test`.** Zero files import `org.junit.jupiter`. |
+| `ban-junit4-imports.skip=false` | **PASSES** (was: will fail the build) | **0** references to non-Jupiter `org.junit.*` under `src/test`; all 35 files import `org.junit.jupiter`. Resolved by the migration recorded below. |
 | `ban-deprecated-stapler.skip=false` | Expected to pass | **0** references to v1 `StaplerRequest` / `StaplerResponse`; the code uses `StaplerRequest2` (13) and `StaplerResponse2` (12) throughout, and the single current-request lookup is already the v2 form — `src/main/java/io/jenkins/plugins/batchcontrol/action/HistorySection.java:220` calls `Stapler.getCurrentRequest2()`. **0** hits for `Stapler.getCurrentRequest()` / `getCurrentResponse()`. |
 | `ban-commons-lang-2.skip=false` | Expected to pass | **0** references to `org.apache.commons.lang.` (excluding `lang3`) anywhere under `src/`. |
 | `banObsoleteDependencyOverrides.skip=false` | Expected to pass | No dependency in `pom.xml:58-108` declares a `<version>`, so there is no override for the rule to object to. |
 | `hpi.strictBundledArtifacts=true` | Expected to pass | Compile-scope dependencies are only `structs` and `cloudbees-folder`, both Jenkins plugins, so nothing should be bundled into the HPI's `WEB-INF/lib`. Cross-checks E8: `src/` contains no jars, minified JS or vendored sources. |
 
-### R1 detail — the JUnit 4 blocker
+### R1 detail — the JUnit 4 blocker, and how it was cleared
 
-Which JUnit 4 symbols are in use, by occurrence count:
+**RESOLVED 2026-09-26** (commits `aa2b344`, `abebb3e`, `71ba3f0`, then `c8f63a0`
+restoring the property). What is kept below is the part a future reader can use:
+why the switch was dangerous, and the two things that made the migration itself
+risky.
 
-| Symbol | Count | JUnit 5 replacement |
-|---|---|---|
-| `org.junit.Test` | 33 | `org.junit.jupiter.api.Test` |
-| `org.junit.Rule` | 32 | no direct equivalent — see below |
-| `org.junit.Assert.assertTrue` | 32 | `org.junit.jupiter.api.Assertions.assertTrue` |
-| `org.junit.Assert.assertEquals` | 31 | `Assertions.assertEquals` (argument order differs for the message overload) |
-| `org.junit.Before` | 26 | `org.junit.jupiter.api.BeforeEach` |
-| `org.junit.Assert.assertNotNull` | 25 | `Assertions.assertNotNull` |
-| `org.junit.Assert.assertFalse` | 21 | `Assertions.assertFalse` |
-| `org.junit.Assert.assertNull` | 16 | `Assertions.assertNull` |
-| `org.junit.After` | 9 | `org.junit.jupiter.api.AfterEach` |
-| `org.junit.function.ThrowingRunnable` | 8 | `org.junit.jupiter.api.function.Executable` |
-| `org.junit.Assert.assertNotEquals` | 3 | `Assertions.assertNotEquals` |
-| `org.junit.Assert.assertThrows` | 2 | `Assertions.assertThrows` |
-| `org.junit.Assert.assertSame` | 1 | `Assertions.assertSame` |
+**Why it was a blocker rather than a nuisance.** The enforcer rule
+`check-junit-imports` binds to `generate-test-sources`, which is *before* the
+tests compile and run. With `ban-junit4-imports.skip=false` and a JUnit 4 suite,
+the build therefore stops before executing a single test. It is not a red test
+report, it is no test report at all: `mvn clean verify` fails with an enforcer
+message and zero evidence about whether the plugin works. That is also why the
+property could not simply be left on and dealt with later, and why removing it
+from the POM was not an option either — B18 is a REQUIRED bot finding.
 
-`org.junit.Rule` is the hard part, not the assertions. The 32 `@Rule` fields are
-JenkinsRule-based:
+**The shape of the work.** 239 references to non-Jupiter `org.junit.*` across
+all 34 tracked test files (35 including `BatchControlFixtures.java`, which was
+untracked at the time of the scan and so invisible in a diff against `HEAD`).
+The assertions were the easy half, a mechanical rename to
+`org.junit.jupiter.api.Assertions`. The hard half was `org.junit.Rule`: 30
+references to `JenkinsRule` and 4 to `JenkinsSessionRule`, in
+`GlobalConfigDefaultsTest`, `GrantRestartTest`, `RestartRecoveryTest` and
+`StoreDurabilityTest`. `JenkinsRule` becomes
+`org.jvnet.hudson.test.junit.jupiter.WithJenkins` with a `JenkinsRule` parameter
+injected per test method, which rewrites every method signature in the file, and
+`JenkinsSessionRule` becomes `JenkinsSessionExtension` with the session bodies
+rewritten. Only two files had no `@Rule` at all and could be converted purely
+mechanically.
 
-- `org.jvnet.hudson.test.JenkinsRule` — **30** references. The JUnit 5 form is
-  `org.jvnet.hudson.test.junit.jupiter.WithJenkins` plus a `JenkinsRule`
-  parameter injected into each test method, which changes every method
-  signature in those files.
-- `org.jvnet.hudson.test.JenkinsSessionRule` — **4** references in exactly four
-  files: `GlobalConfigDefaultsTest`, `GrantRestartTest`, `RestartRecoveryTest`,
-  `StoreDurabilityTest` — the restart/persistence tests. These need
-  `JenkinsSessionExtension`, and the session-body lambdas need rewriting.
-- Supporting test helpers that are not themselves JUnit 4 and can stay:
-  `MockAuthorizationStrategy` (23), `FailureBuilder` (3), `UnstableBuilder` (2),
-  `TestExtension` (2), `TestBuilder` (1).
+**What made it worth splitting into stages.** It was done as separate commits for
+the `JenkinsRule` classes and the `JenkinsSessionRule` classes, with the
+enforcement property restored last, so that a failure at any point named one
+class of problem rather than all of them at once.
 
-Per-file reference counts (all under
-`src/test/java/io/jenkins/plugins/batchcontrol/`), heaviest first:
+**The trap worth writing down.** `assertEquals` and `assertThrows` take their
+message argument in a *different position* in JUnit 5 — the message moves to the
+end. A JUnit 4 call whose message was left in the JUnit 4 position still
+compiles: the message silently becomes the `expected` value, or the two compared
+values shift. Nothing warns, and the test then either passes for the wrong reason
+or fails with an assertion message that describes something other than what
+actually broke. Anyone repeating this migration should diff the argument order of
+every message-carrying assertion by hand rather than trusting a find-and-replace.
 
-```
-10  GrantServiceTest.java
- 9  SecurityRegressionTest.java, OwnerScenarioRejectionTest.java, IncidentTest.java
- 8  RunRequestWebTest.java, RequestIntegrityTest.java, NewJobApprovalDefaultTest.java,
-    MarkerReuseAuditTest.java, HistoryWebTest.java, GrantConfigureAccessTest.java,
-    ExpiryAndCancelTest.java, ChangeRecordTest.java, ApprovalScreenRecentRunsTest.java
- 7  RunRequestServiceTest.java, RestartRecoveryTest.java, RequestConcurrencyTest.java,
-    QueueBlockTest.java, OwnerScenarioLiveToggleTest.java, OwnerScenarioConfigChangeTest.java,
-    OwnerScenarioApproverDelegationTest.java, OwnerScenarioApprovalTraceTest.java,
-    NewJobAutomationSafetyTest.java, GrantWindowAbuseTest.java, GlobalSwitchTest.java
- 6  store/PathCodecTest.java, StoreDurabilityTest.java, RunRecordListenerTest.java,
-    GrantWebTest.java, GrantRestartTest.java, GrantMonitorsTest.java
- 5  XssEscapingTest.java, PermissionsTest.java, GlobalConfigDefaultsTest.java
- 2  BatchControlFixtures.java
-```
-
-`BatchControlFixtures.java` is currently untracked (new in this branch) and also
-JUnit 4; whoever migrates should not miss it because it does not appear in a
-diff against `HEAD`.
-
-Exactly two of the 34 files contain no `org.junit.Rule` and can be migrated
-mechanically: `store/PathCodecTest.java` (a plain unit test) and
-`BatchControlFixtures.java` (a shared helper). The other 32 need the
-`JenkinsRule`/`JenkinsSessionRule` conversion, which rewrites method signatures.
-
-**Ownership.** `src/test/**` belongs to test-author. **Request** recorded in the
-report for this pass; this document does not change test sources.
-
-**If the migration cannot be scheduled before submission,** the only
-alternatives are to accept a red ci.jenkins.io build (the hosting team reads it
-— effectively blocking), or to remove `ban-junit4-imports.skip` from the POM and
-accept the REQUIRED B18 bot finding. Neither is acceptable for approval, so the
-migration is on the critical path.
+**Outcome.** 0 non-Jupiter `org.junit.*` references remain, 0 tests are
+`@Disabled`, 0 were deleted, and the per-class test count matches the
+pre-migration suite across all 34 classes. With the property back on, the
+orchestrating session reports a full `mvn clean verify` at **195 tests, 0
+failures, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`**. B18 and E4 are
+both PASS.
 
 ---
 
 ## 4. Non-blocking recommendations
 
 1. **`CHANGELOG.md` is absent.** The documentation page recommends "Use GitHub
-   Releases or create a CHANGELOG file". Not a bot requirement. With CD, GitHub
-   Releases are generated, so a `CHANGELOG.md` is optional — but a
-   `Keep a Changelog` file starting at `Unreleased` costs nothing.
+   Releases or create a CHANGELOG file". Not a bot requirement. This one got
+   slightly more relevant when Q5 was answered `No`: without CD nothing generates
+   release notes automatically, so either releases are drafted by hand or a
+   `Keep a Changelog` file starting at `Unreleased` carries them. The file costs
+   nothing.
 2. ~~**`CONTRIBUTING.md` and a pull-request template** are listed as recommended
    by the documentation guide. Absent today.~~ **DONE 2026-09-26.** Both exist:
    `CONTRIBUTING.md` at the repository root (build/test with expected results,
@@ -726,20 +742,26 @@ migration is on the critical path.
 
 ## 5. Open questions for the owner
 
-**Q2** (license) and **Q4** (accounts.jenkins.io account) were answered by the
-owner on 2026-09-26 and are struck through below. Six remain: Q1, Q3, Q5, Q6,
-Q7, Q8. Q5 is the one that gates work — it decides whether G10 exists.
+The owner answered **Q1**, **Q2**, **Q4**, **Q5** and **Q8** on 2026-09-26; those
+are struck through below. Three remain: **Q3**, **Q6** and **Q7**. None of them
+gates any work, and none is one of the 65 checklist rows — Q3 is the literal value
+for form field 4, Q6 is an email address, Q7 is a disclosure choice about the
+Description text.
+
+In checklist terms the only rows that are not PASS, N/A, WARN or INFO are **E1**
+(the "how is this different" wording in the Description) and **E2** (the GitHub
+accounts to receive commit permission, i.e. Q3). Both need the owner.
 
 | # | Question | Why it must be a human decision |
 |---|---|---|
-| **Q1** | Confirm the final plugin id and display name: `batch-control` / `Batch Control`, repository `batch-control-plugin`. | "The ID cannot be changed after the first release; Jenkins would consider it a different plugin." All naming checks (A1–A8) currently pass with these values, but the decision is irreversible. |
+| ~~**Q1**~~ | ~~Confirm the final plugin id and display name: `batch-control` / `Batch Control`, repository `batch-control-plugin`.~~ **RESOLVED 2026-09-26** — owner confirmed `batch-control` is kept. The decision is irreversible after the first release ("Jenkins would consider it a different plugin"), and all naming checks A1–A8 pass with these values. | — |
 | ~~**Q2**~~ | ~~License: keep MIT? And the exact copyright line for `LICENSE`.~~ **RESOLVED 2026-09-26** — owner confirmed **MIT**, holder **`Yongjun Hong`** (personal, not an employer), year **2026**. Applied at `LICENSE:1-3`, consistent with `pom.xml:20-25`. | — |
 | **Q3** | GitHub accounts to receive commit permission (field 4). Is `@YongGoose` the only one? | Owner data. |
 | ~~**Q4**~~ | ~~The accounts.jenkins.io account for release permission, and confirmation it has signed into Jira and Artifactory.~~ **RESOLVED 2026-09-26** — owner confirmed the accounts.jenkins.io account is created and needs no separate verification (E3 → PASS). The literal username string still has to be typed into field 5 at submission time, without an `@`, and it is independent of the GitHub handle. | — |
-| **Q5** | Field 6: answer `Yes` or `No` to automated release via GitHub Actions? | `Yes` is labelled "recommended" but adds the four REQUIRED items in G10. `No` is switchable later. |
+| ~~**Q5**~~ | ~~Field 6: answer `Yes` or `No` to automated release via GitHub Actions?~~ **RESOLVED 2026-09-26** — owner answered **`No`**. G10 therefore drops out of the first review and D1/D4/D5/D6 become N/A. CD stays available later through a follow-up PR to repository-permissions-updater (D8). | — |
 | **Q6** | Should the maintainer email in the request differ from `dev.yongjunh@gmail.com`? | Security reports are routed to release-permission holders; the address must be one that is actually monitored. |
 | **Q7** | Has the plugin been piloted on a real in-house Jenkins? If so, may it be mentioned (anonymously) in the Description? | `docs/HOSTING-CHECKLIST.md:55` asks for it; it materially helps human review, but disclosing internal usage is the owner's call. Phase 5 in `docs/WORKFLOW.md` is the pilot, and `docs/STATUS.md` should be consulted for whether it has happened. |
-| **Q8** (half answered) | ~~Where should the development-kit README content move — `CONTRIBUTING.md` (recommended, see G3) or `docs/DEV-KIT.md`~~ — and should the `.claude/` directory ship in the hosted repository at all? | **First half settled 2026-09-26:** the content was rewritten for contributors into **`CONTRIBUTING.md`** at the repository root, so it is no longer only in git history and the time-sensitivity is gone. **Second half still open:** the fork carries everything, so a reviewer will see the agent definitions in `.claude/`. Not a rule violation, but a presentation choice. `CONTRIBUTING.md` §8 currently points at `.claude/` for context; if the directory is stripped, that paragraph needs one edit. |
+| ~~**Q8**~~ | ~~Where should the development-kit README content move, and should the `.claude/` directory ship in the hosted repository at all?~~ **RESOLVED 2026-09-26.** The content was rewritten for contributors into **`CONTRIBUTING.md`** at the repository root, so it is no longer only in git history. And `.claude/` **does** ship: the owner decided to keep it, three skills were added (`5966360`), and `CLAUDE.md`, `docs/WORKFLOW.md` and `.claude/agents/**` were translated to English (`7281863`), so a reviewer or a forker can actually read the tooling instead of finding untranslated internal notes. `CONTRIBUTING.md` §8 points at `.claude/` and stays correct as written. | — |
 
 ---
 
@@ -843,28 +865,35 @@ batch-control-plugin
 ### 6.6 Field 6 — Automated release via GitHub Actions (recommended)
 
 ```
-<OWNER: Yes | No — see Q5. Answering Yes adds the four REQUIRED CD items in
- gap G10, which are all unmet today.>
+No
 ```
+
+Owner-confirmed 2026-09-26 (Q5). This is why D1/D4/D5/D6 are N/A and G10 is out
+of scope. CD can be turned on after hosting through the D8 follow-up PR.
 
 ### 6.7 Pre-submission sequence
 
-1. ~~Resolve G1, G2, G4, G5, G6, G7, G8, G9.~~ **Done 2026-09-26.** G10 remains,
-   and only applies if field 6 = `Yes` (Q5).
-2. ~~Resolve G3 (README replacement — separate work item).~~ **Done 2026-09-26.**
-   ~~One follow-up remains: relocate the development-kit content to
-   `CONTRIBUTING.md` or `docs/DEV-KIT.md` (Q8).~~ **Follow-up done 2026-09-26** —
-   `CONTRIBUTING.md` created. Two small items left: link it from the README's
-   *Contributing* section, and the `.claude/` half of Q8.
-3. **Migrate `src/test/**` to JUnit 5** — required by the
-   `ban-junit4-imports.skip=false` property added in step 1. See **R1**; this is
-   the largest remaining code task and it is on the critical path.
+1. ~~Resolve G1, G2, G4, G5, G6, G7, G8, G9.~~ **Done 2026-09-26.**
+   ~~G10 remains, and only applies if field 6 = `Yes` (Q5).~~ **G10 is out of
+   scope**: Q5 = `No`.
+2. ~~Resolve G3 (README replacement), relocate the development-kit content, link
+   `CONTRIBUTING.md` from the README, and settle the `.claude/` half of Q8.~~
+   **All done 2026-09-26.** The README was subsequently rewritten for length and
+   tone, with the full limitation list split into `docs/LIMITATIONS.md` and a
+   Korean companion at `README.ko.md`.
+3. ~~**Migrate `src/test/**` to JUnit 5** — required by the
+   `ban-junit4-imports.skip=false` property added in step 1.~~ **Done
+   2026-09-26** (`aa2b344`, `abebb3e`, `71ba3f0`, `c8f63a0`). See **R1** for the
+   two traps worth knowing if it is ever repeated.
 4. Re-check the live latest `bom-2.568.x` version and the latest parent POM
-   version on the submission day.
+   version on the submission day. **Both are moving targets** — the BOM in
+   particular has already been bumped once for this submission (G9), so treat the
+   value in `pom.xml` as stale until it is re-fetched on the day.
 5. ~~Confirm the accounts.jenkins.io user(s) have logged into Jira and
    Artifactory.~~ **Owner-confirmed 2026-09-26** (Q4).
-6. Run `mvn -q clean verify` — green, SpotBugs clean (G11). Expected red until
-   step 3 is done.
+6. Run `mvn -q clean verify` on the final tree — green, SpotBugs clean (G11).
+   Last known result: 195 tests, 0 failures, `BugInstance size is 0`,
+   `BUILD SUCCESS`. Re-run anyway, because step 4 can change the dependency tree.
 7. Push everything to the default branch of
    `https://github.com/YongGoose/batch-control-plugin`. The bot reads the
    repository's default branch, so nothing may be left on a feature branch.
@@ -931,5 +960,8 @@ State these as unverified rather than as requirements:
   (weekly) / 2.516.2 (LTS). These values rotate — re-read the page rather than
   trusting this paragraph if the baseline is ever revisited.
 - **`mvn clean verify` result, SpotBugs count, and the effect of enabling the
-  three `ban-*` enforcement properties (G6).** Not executed. **Build
-  verification required.**
+  three `ban-*` enforcement properties (G6).** Not executed by the author of this
+  document. The result recorded at E4 and R1 (195 tests, 0 failures, SpotBugs
+  `BugInstance size is 0`, `BUILD SUCCESS`) comes from the orchestrating session
+  on 2026-09-26. It is a real build, but it is second-hand here, and it must be
+  re-run on the final pre-submission tree in any case (§6.7 step 6).
