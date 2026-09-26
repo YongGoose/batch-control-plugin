@@ -1,0 +1,4 @@
+# Secrets: real passwords live here, only .env.example is committed.
+.env
+# Transient curl output captured by scripts/rest-*.sh.
+out/

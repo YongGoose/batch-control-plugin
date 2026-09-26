@@ -1,0 +1,14 @@
+# Plugins installed into the image by jenkins-plugin-cli (transitive
+# dependencies are resolved automatically).
+#
+# Hard dependencies of batch-control, read from the .hpi manifest
+# (Plugin-Dependencies: cloudbees-folder, structs):
+structs
+cloudbees-folder
+# Needed by the e2e scenarios themselves:
+#  matrix-auth         - the real authorization strategy the plugin wraps, so
+#                        the five Batch Control permissions can be assigned per
+#                        user and JIT change control can be observed.
+#  workflow-aggregator - the Pipeline sample job (batch-pipeline).
+matrix-auth
+workflow-aggregator
