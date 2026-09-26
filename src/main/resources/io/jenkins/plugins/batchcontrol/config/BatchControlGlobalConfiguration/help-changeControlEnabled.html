@@ -1,3 +1,27 @@
 <div>
-  When enabled, job creation, configuration, and deletion require a temporary permission grant.
+  When enabled, Batch Control watches changes to jobs:
+  <ul>
+    <li>job creation, configuration, deletion, rename and move are recorded in the change
+      history, with a diff of <code>config.xml</code> for configuration changes (this recording is
+      also enabled by <b>Enable run control</b>);</li>
+    <li>deleting a job is refused unless the user holds an active permission window that covers
+      it;</li>
+    <li>an administrative monitor reports accounts that hold standing Create, Configure or Delete
+      permissions outside the permission-window flow;</li>
+    <li>each job's sidebar offers <b>Request Change Permission</b>, which opens the grant screen
+      with that job filled in.</li>
+  </ul>
+  <p>
+    This switch does <b>not</b> decide whether creating or configuring a job needs a permission
+    window. That is decided by the authorization strategy: select <b>Batch Control (wrapping)</b>
+    in <i>Configure Global Security</i> and it grants time-limited Item Create, Configure and
+    Delete permissions from approved windows. Without that strategy, an approved window confers
+    nothing.
+  </p>
+  <p>
+    Because permission windows live in the authorization strategy rather than in this switch,
+    requesting and approving a window still works while this switch is off, and turning it off
+    does not revoke windows that are already active. Turning it off does stop the delete veto and
+    the administrative monitor.
+  </p>
 </div>

@@ -1,7 +1,20 @@
 <div>
-  When enabled, protected jobs require an approved run request before they can run: a job marked
-  <b>Require approval to run</b> in its Batch Control property cannot be started until a run
-  request for it has been approved.
+  When enabled, a job marked <b>Require approval to run</b> in its Batch Control property refuses
+  runs that a person started — the build button, <code>/job/&lt;name&gt;/build</code>,
+  <code>/job/&lt;name&gt;/buildWithParameters</code>, the CLI <code>build</code> command and
+  Pipeline Replay — unless an approved run request is being used. A refused person gets an
+  "Approval required" page naming the request screen; a refused unattended trigger is declined
+  quietly, because it has nobody to show a message to.
+  <p>
+    Automatic triggers are <b>not</b> refused by default, so a scheduled batch job keeps running to
+    its schedule after this switch is turned on:
+  </p>
+  <ul>
+    <li>cron (timer) runs pass unless the job's <b>Block cron (timer) triggers</b> is checked;</li>
+    <li>upstream-triggered runs pass unless the job's <b>Block upstream triggers</b> is checked, in
+      which case only the jobs in <b>Allowed upstream jobs</b> pass;</li>
+    <li>runs started by an SCM trigger pass.</li>
+  </ul>
   <p>
     When disabled, Batch Control leaves every run path exactly as Jenkins would handle it.
   </p>
