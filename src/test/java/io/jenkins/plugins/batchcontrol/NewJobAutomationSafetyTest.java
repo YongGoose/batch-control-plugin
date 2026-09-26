@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
 import hudson.model.Cause;
+import hudson.model.Failure;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -15,6 +16,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import java.net.URL;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.Future;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
@@ -148,6 +150,13 @@ public class NewJobAutomationSafetyTest {
      * T-08-29 (the intended effect of D-31): on the very same kind of job, the human paths are
      * refused — both the HTTP build POST and a user-caused submission. Without this row the three
      * pass-through rows above are satisfied by a build that gates nothing at all.
+     *
+     * Assertion technique: SPEC 6 requires the refusal of a human-originated cause to carry
+     * guidance and a link to the run-request screen ("조용한 실패 금지" — no silent failure), so
+     * the refusal surfaces out of the queue decision as {@link Failure}, which Jenkins renders
+     * as the guidance page for the HTTP path. This row therefore asserts that the exception is
+     * raised and that its message carries both halves of that acceptance criterion, instead of
+     * calling {@code scheduleBuild2} and letting the guidance escape as a test error.
      */
     @Test
     public void t_08_29_humanRunOfTheNewJobIsBlocked() throws Exception {
@@ -161,18 +170,34 @@ public class NewJobAutomationSafetyTest {
         assertTrue("D-31: a person pressing Build on a new job must need an approved request, "
                         + "got HTTP " + response.getWebResponse().getStatusCode(),
                 response.getWebResponse().getStatusCode() >= 400);
+        assertTrue("SPEC 6 forbids a silent failure: the refused POST must explain that an "
+                        + "approval is required",
+                response.getWebResponse().getContentAsString()
+                        .toLowerCase(Locale.ROOT).contains("approval"));
 
-        Future<FreeStyleBuild> userCaused;
+        Failure guidance = null;
         try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
-            userCaused = generated.scheduleBuild2(0, new Cause.UserIdCause());
+            Future<FreeStyleBuild> admitted = generated.scheduleBuild2(0, new Cause.UserIdCause());
+            assertNull("a user-caused submission must be refused at queue entry", admitted);
+        } catch (Failure expectedGuidance) {
+            guidance = expectedGuidance;
         }
-        assertNull("a user-caused submission must be refused at queue entry", userCaused);
+        assertNotNull("SPEC 6: a human-originated cause must be refused with guidance, so the "
+                + "queue decision raises Failure rather than dropping the submission silently",
+                guidance);
+        String message = guidance.getMessage();
+        assertNotNull("the guidance Failure must carry a message", message);
+        assertTrue("the guidance must state that an approval is required, got: " + message,
+                message.toLowerCase(Locale.ROOT).contains("approval"));
+        assertTrue("the guidance must point at the job's own run-request screen, got: " + message,
+                message.contains(generated.getUrl() + "batch-control"));
 
         // matrix common blocking baseline
         assertEquals("the queue must stay empty", 0, j.jenkins.getQueue().getItems().length);
         j.waitUntilNoActivity();
         assertEquals("nextBuildNumber must not move", 1, generated.getNextBuildNumber());
         assertTrue("no build may have run", generated.getBuilds().isEmpty());
+        assertNull("neither human path may leave a build behind", generated.getLastBuild());
     }
 
     // ---------------------------------------------------------------- helpers
