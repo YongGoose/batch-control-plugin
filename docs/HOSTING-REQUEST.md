@@ -18,6 +18,19 @@ Everything marked `<OWNER: …>` is a value only the owner can supply. Everythin
 else is a confirmed value or a confirmed procedure; anything that could not be
 confirmed is marked **unverified** in place.
 
+Fields 4 and 5 are filled in from the owner's accounts.jenkins.io profile as
+they supplied it on 2026-09-27: username `yong_goose`, name Yongjun Hong, email
+`yongjunh@apache.org`. Field 5 carries the username with no `@`; field 4 carries
+the GitHub handle, which is a different identity and is taken from the repository
+URL. The only remaining `<OWNER: …>` marker is the optional real-world-use
+sentence in field 3.
+
+One thing to check before submitting: the **GitHub username field of that
+accounts.jenkins.io profile was empty** in what the owner supplied. The bot's
+`REQUIRED` checks are the Artifactory and Jira logins in step 0, not this field,
+so an empty value should not block approval - but filling it in costs nothing and
+removes a question for whoever reviews the permissions PR.
+
 ---
 
 ## Step 0 — Owner prerequisites (do these days before, not on the day)
@@ -256,7 +269,7 @@ the Role Strategy commit date.
 ### Field 4 — GitHub users to have commit permission
 
 ```
-<OWNER: GitHub handles, with @, one per line. Almost certainly just @YongGoose.>
+@YongGoose
 ```
 
 Each must be a real GitHub **user** account — an organization here is a
@@ -266,8 +279,7 @@ Each must be a real GitHub **user** account — an organization here is a
 ### Field 5 — Jenkins project users to have release permission
 
 ```
-<OWNER: accounts.jenkins.io username(s), one per line, NO @ prefix. This is the
-identity from step 0, not the GitHub handle.>
+yong_goose
 ```
 
 The template itself says the listed users "must NOT be mentioned" — do not write
