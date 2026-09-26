@@ -81,7 +81,7 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: `blockUpstream=true`일 때 `allowedUpstreamJobs`가 비어 있거나 미설정이면 모든 상위 잡이 차단된다(빈 목록은 미설정과 동일). `blockUpstream=false`면 목록과 무관하게 모든 상위 잡이 통과한다. (R-1, D-16)
 - 수용 기준: 승인 투입 마커는 요청 ID에 묶이고 큐 투입 1회로 소비된다. 동일 마커의 재사용(재큐·rebuild 등)은 차단되고 기록된다. (R-8, D-23)
 - 수용 기준: 1회 소비 규칙은 **사람이 올린 실행 요청에만** 적용된다. cron 정기 실행은 `blockTimer=true`가 아닌 한 요청·승인 없이 계속 통과하므로, 정기 배치 잡은 실행 통제를 켜도 스케줄대로 계속 실행된다. 정기 실행을 멈추려면 `blockTimer`(또는 잡 비활성화)를 켠다. (D-25)
-- 수용 기준: 동일 마커의 재사용 시도는 감사 이력에 별도 레코드로 남고 대시보드·CSV에서 조회된다. (D-30)
+- 수용 기준: 동일 마커의 재사용 시도는 감사 이력에 `type=MARKER_REUSE_BLOCKED` 레코드로 남고 대시보드·CSV(`changes.csv`)에서 조회된다. `user`는 **재사용을 시도한 계정**이며(원 승인의 요청자가 아니다), 레코드는 소비된 요청 ID와 대상 잡을 식별할 수 있어야 한다. 정상 실행 1회만으로는 이 레코드가 생기지 않는다. 조회는 12절의 `ViewHistory` 게이트를 따른다. (D-30)
 - 수용 기준: 통제 설정 변경(전역 스위치·잡 속성 토글), 대상 잡의 설정 변경, 권한 창 만료 중 어느 것도 이미 실행 중인 빌드를 중단시키지 않는다. 차단은 큐 진입 단계에서만 일어난다. (D-27)
 - 수용 기준: 차단 시 사용자에게 "승인 필요" 안내와 요청 화면 링크가 표시된다(조용한 실패 금지).
 - 수용 기준: 승인 대상 잡의 사이드바에서 "Build Now"가 "Request Run"으로 대체된다.
@@ -110,6 +110,8 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다.
 - 수용 기준: Role Strategy가 전역 권한 전략으로 선택된 경우 관리 화면에 JIT 변경 통제 미지원 안내(AdministrativeMonitor)가 표시된다.
 - 수용 기준: 실행 통제가 켜져 있으면, 활성 Grant(권한 창) 안에서 생성된 잡은 `approvalRequired=true`가 기본으로 적용된다(권한 창을 이용해 무승인 실행 경로를 심는 것 방지). (R-2 경량 채택, D-17)
+- 수용 기준: 멀티브랜치 프로젝트가 자동 생성한 브랜치 자식 잡은 이 기본값에서 제외한다(설정 화면이 없어 해제 경로가 없고, 재인덱싱 시 설정이 재생성되기 때문). 해당 잡의 실행은 10절대로 기록된다. (D-32)
+- 수용 기준: 실행 통제가 켜져 있으면, **새로 생성되는 모든 잡**에 `approvalRequired=true`가 기본으로 적용된다(생성 경로·생성자와 무관). 통제를 풀려면 잡 설정을 바꿔야 하며, 그 변경 자체가 변경 통제 대상이라 기록에 남는다. 이 기본값은 사람이 직접 누르는 실행에만 영향을 준다 — 타이머·상위 잡·SCM 트리거는 6절 정책대로 계속 통과하므로 자동 생성 잡의 자동 빌드는 멈추지 않는다. (D-31)
 - 구현: 기존 권한 전략을 감싸는 위임형 AuthorizationStrategy. 관리자가 전역 보안 설정에서 선택.
 
 **9. 변경 자동 기록**
@@ -182,7 +184,8 @@ RunRecord         runId(jobFullName#number), jobFullName, number, causeType, use
                   parameters, result, startedAt, durationMs, abortedBy?, runRequestId?
 Incident          id, runId, jobFullName, result, status(OPEN|ACKNOWLEDGED|RESOLVED),
                   transitions[{status,by,at,comment}], logTail, rerunRequestIds[], resolvedByRunId?
-ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RETENTION|GRANT_REVOKE),
+ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RETENTION|GRANT_REVOKE|
+                       MARKER_REUSE_BLOCKED),
                   target, user, at, grantId?, diff?, detail
 ```
 
