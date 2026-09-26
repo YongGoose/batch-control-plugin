@@ -14,6 +14,8 @@ import hudson.model.StringParameterValue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
@@ -262,6 +264,16 @@ public final class RunRequestService {
      * the queue lock; must therefore never be called while holding this service's lock on
      * another thread path that also takes the queue lock.
      *
+     * <p>A refusal that is a genuine <em>re-use</em> of a marker the plugin once minted also
+     * lands in the audit history as {@code ChangeRecord(MARKER_REUSE_BLOCKED)} (D-30), so the
+     * attempt is visible on the history screen and in {@code changes.csv} and not only in the
+     * log. Two refusals qualify: the ticket is already spent (re-queue, rebuild, replay of the
+     * executed build), and the marker is presented on a job it was not issued for. The three
+     * remaining refusals are not re-use of a granted authorization and stay log-only: an
+     * unknown request id (nothing was ever approved under it), a request that was never
+     * approved or is no longer approved, and an approval that timed out before submission
+     * (D-20) — that one is the request's own EXPIRED transition, not an actor's attempt.
+     *
      * @return {@code true} if the submission is authorized (ticket claimed just now)
      */
     public boolean consumeMarker(String requestId, String jobFullName) {
@@ -272,19 +284,27 @@ public final class RunRequestService {
                 LOGGER.warning(() -> "Refusing approval marker for unknown request " + requestId);
                 return false;
             }
+            // Checked before the status check: consumption sets queuedAt and the run then moves
+            // the request to EXECUTED, so a replay of an executed approval must be reported as
+            // the spent ticket it is rather than as a mere wrong status.
+            if (request.getQueuedAt() != null || request.getExecutedRunId() != null
+                    || request.getStatus() == RequestStatus.EXECUTED) {
+                LOGGER.warning(() -> "Refusing re-use of the already consumed approval marker of request "
+                        + requestId + " (D-23 single consumption)");
+                recordMarkerReuseBlocked(requestId, jobFullName,
+                        "its single submission ticket was already claimed");
+                return false;
+            }
             if (request.getStatus() != RequestStatus.APPROVED) {
                 LOGGER.warning(() -> "Refusing approval marker for request " + requestId
                         + " in status " + request.getStatus());
                 return false;
             }
-            if (request.getQueuedAt() != null || request.getExecutedRunId() != null) {
-                LOGGER.warning(() -> "Refusing re-use of the already consumed approval marker of request "
-                        + requestId + " (D-23 single consumption)");
-                return false;
-            }
             if (!request.getJobFullName().equals(jobFullName)) {
                 LOGGER.warning(() -> "Refusing approval marker of request " + requestId
                         + " (bound to job '" + request.getJobFullName() + "') on job '" + jobFullName + "'");
+                recordMarkerReuseBlocked(requestId, jobFullName,
+                        "the approval is bound to job '" + request.getJobFullName() + "'");
                 return false;
             }
             Instant now = BatchClock.now();
@@ -302,6 +322,33 @@ public final class RunRequestService {
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * Appends the audit record of a blocked marker re-use (D-30).
+     *
+     * <p>Field layout (SPEC leaves it open; see P-12):
+     * <ul>
+     *   <li>{@code target} — the job the marker was <em>presented on</em>, so the history
+     *       screen's job filter finds the attempt on the job that would have run;</li>
+     *   <li>{@code user} — the account that made the attempt, taken from the current
+     *       authentication (this runs on the caller's thread inside the queue gate), never the
+     *       requester of the original approval;</li>
+     *   <li>{@code detail} — the consumed request id, the job and the refusal reason, comma-free
+     *       so the CSV export keeps one cell per column;</li>
+     *   <li>{@code grantId}/{@code diff} — left {@code null}: a blocked run submission happens
+     *       outside any change window and has no before/after configuration.</li>
+     * </ul>
+     *
+     * <p>No switch check is needed: the queue gate only reaches this code while run control is
+     * on, which is one of the two switches that make change recording active (D-13).
+     */
+    private void recordMarkerReuseBlocked(String requestId, String jobFullName, String reason) {
+        String actor = Jenkins.getAuthentication2().getName();
+        store.appendChangeRecord(ChangeRecord.create(ChangeType.MARKER_REUSE_BLOCKED,
+                jobFullName, actor,
+                "Blocked re-use of the approved-run marker of request " + requestId
+                        + " on job '" + jobFullName + "' - " + reason));
     }
 
     /** Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). */
