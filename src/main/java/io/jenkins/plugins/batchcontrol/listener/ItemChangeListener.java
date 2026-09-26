@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
@@ -31,7 +32,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * {@code approvalRequired=true}, independently of the creator and of the creation path. D-17 only
  * covered jobs created inside an active grant window, which left every job an administrator
  * created in the ordinary course of work uncontrolled. The internal property save is suppressed
- * from recording (only the CREATE record remains, no recursion).
+ * from recording (only the CREATE record remains, no recursion). D-32 carves out the one class of
+ * job that cannot honour that default — a child a container computes for itself.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -108,8 +110,10 @@ public class ItemChangeListener extends ItemListener {
      * {@code approvalRequired=true}. No creator and no creation path is exempt, which is why this
      * sits on {@link ItemListener#onCreated}: every creation entry point core offers (the New Item
      * form, a {@code createItem} config.xml POST, the CLI {@code create-job}, a job copy, a Job DSL
-     * or multibranch generation) ends in {@code ItemGroupMixIn}, which fires this event once per
-     * created item. D-17 (creation inside a grant window) is the subset that stays covered.
+     * generation) ends in {@code ItemGroupMixIn}, which fires this event once per created item.
+     * D-17 (creation inside a grant window) is the subset that stays covered. A child computed by
+     * its container reaches this method through a different door — {@code ChildObserver#created} —
+     * and is the one case D-32 turns away.
      *
      * <p>An {@code approvalRequired=false} supplied in the creation payload does not win: the
      * default is what SPEC item 8 pins, and letting the payload opt out would reopen the hole
@@ -119,6 +123,9 @@ public class ItemChangeListener extends ItemListener {
      * <p>The property save is a plugin-internal write: it is suppressed from CONFIGURE recording
      * (which also guards against listener recursion through the save fired by
      * {@code addProperty}); the snapshot seeded afterwards already contains it.
+     *
+     * <p>D-32 is the single exemption: a job a container computes for itself (see
+     * {@link #isComputedChild}).
      */
     private static void applyApprovalRequiredDefault(Item item) {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
@@ -129,6 +136,12 @@ public class ItemChangeListener extends ItemListener {
         }
         Job<?, ?> job = (Job<?, ?>) item;
         String fullName = job.getFullName();
+        if (isComputedChild(job)) {
+            LOGGER.fine(() -> "Job '" + fullName + "' is a computed child of '"
+                    + job.getParent().getFullName() + "'; the approvalRequired=true default does "
+                    + "not apply to it (D-32). Its runs are still recorded.");
+            return;
+        }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
         if (existing != null && existing.isApprovalRequired()) {
             return;
@@ -155,6 +168,47 @@ public class ItemChangeListener extends ItemListener {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void addProperty(Job job, BatchControlJobProperty property) throws IOException {
         job.addProperty(property);
+    }
+
+    /**
+     * D-32: is this item a child a container generates and regenerates on its own? Such a child is
+     * exempt from the D-31 default, because the two things D-31 relies on do not hold for it: it
+     * has no configuration screen, so the documented way out ("edit the job, and the edit is
+     * recorded") does not exist; and the container rebuilds the child's configuration on every
+     * recomputation, so the property is not guaranteed to survive — the control would blink on and
+     * off. Its runs are still recorded (SPEC item 10).
+     *
+     * <p>The test is the generic property "my parent computes its children", not "my parent is a
+     * multibranch project": the item's parent being a {@code ComputedFolder}. Three facts from the
+     * dependency sources make that the exact condition:
+     * <ul>
+     *   <li>{@code ComputedFolder} (cloudbees-folder) declares {@code computeChildren(ChildObserver,
+     *       TaskListener)} abstract and calls it from {@code updateChildren} — being a
+     *       {@code ComputedFolder} <em>is</em> the contract "I own and recreate my children".</li>
+     *   <li>The creation event this listener answers to is fired by that machinery and nowhere
+     *       else for such children: {@code ChildObserver#created(I)}, implemented by
+     *       {@code ComputedFolder$FullReindexChildObserver} and
+     *       {@code ComputedFolder$EventChildObserver}, calls {@code ItemListener.fireOnCreated}
+     *       after adding the child to the folder. So every computed child — and only a computed
+     *       child — arrives here with a {@code ComputedFolder} as its parent.</li>
+     *   <li>{@code jenkins.branch.MultiBranchProject extends ComputedFolder<P>} (branch-api), which
+     *       is what makes a multibranch branch job the case D-32 names, and
+     *       {@code jenkins.branch.OrganizationFolder extends ComputedFolder<MultiBranchProject>},
+     *       so the same rule covers the repository projects an organization folder computes.</li>
+     * </ul>
+     *
+     * <p>No optional dependency is touched. branch-api and workflow-multibranch are test-scoped
+     * here and are never loaded by this check; {@code cloudbees-folder} is a non-optional compile
+     * dependency of this plugin, so Jenkins refuses to load batch-control without it and the class
+     * is always present. That is why this is a plain {@code instanceof} rather than the class-name
+     * match {@link io.jenkins.plugins.batchcontrol.queue.ApprovalQueueDecisionHandler} uses for
+     * Pipeline's {@code ReplayCause} (workflow-cps is genuinely absent on some instances).
+     *
+     * <p>The container itself is never a concern: a {@code ComputedFolder} is an {@code
+     * AbstractFolder}, not a {@code Job}, so it is already filtered out above.
+     */
+    private static boolean isComputedChild(Item item) {
+        return item.getParent() instanceof ComputedFolder;
     }
 
     // ---------------------------------------------------------------- snapshots
