@@ -10,7 +10,7 @@ bc_login requester
 bc_login admin
 
 before=$(bc_get admin "$OUT_DIR/blocked-before.json" "/job/batch-daily/api/json?tree=builds[number]" > /dev/null; \
-         grep -o '"number":[0-9]*' "$OUT_DIR/blocked-before.json" | wc -l | tr -d ' ')
+         { grep -o '"number":[0-9]*' "$OUT_DIR/blocked-before.json" || true; } | wc -l | tr -d ' ')
 echo "builds before: $before"
 
 status=$(bc_post requester "$OUT_DIR/blocked-build.html" "/job/batch-daily/build?delay=0sec")
@@ -25,7 +25,7 @@ echo "    guidance text: $(grep -o -i 'Approval required[^<]*' "$OUT_DIR/blocked
 
 sleep 5
 after=$(bc_get admin "$OUT_DIR/blocked-after.json" "/job/batch-daily/api/json?tree=builds[number]" > /dev/null; \
-        grep -o '"number":[0-9]*' "$OUT_DIR/blocked-after.json" | wc -l | tr -d ' ')
+        { grep -o '"number":[0-9]*' "$OUT_DIR/blocked-after.json" || true; } | wc -l | tr -d ' ')
 echo "builds after: $after (expected $before)"
 bc_get admin "$OUT_DIR/blocked-queue.json" "/queue/api/json?tree=items[task[name],why]" > /dev/null
 echo "queue: $(cat "$OUT_DIR/blocked-queue.json")"
