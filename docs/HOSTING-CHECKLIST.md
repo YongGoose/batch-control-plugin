@@ -16,7 +16,7 @@ release-manager와 security-reviewer가 사용한다. 출처: jenkins.io 플러�
 - [ ] `Jenkinsfile`에 `buildPlugin()`
 - [ ] `src/main/resources/index.jelly`에 플러그인 설명
 - [ ] 의존성에 사용하지 않는 플러그인 없음
-- [ ] 릴리스 버전이 아닌 `${revision}${changelist}` 방식(CD 준비)
+- [ ] 릴리스 버전이 아닌 `${changelist}` 방식 (CD 사용, 2026-09-27)
 
 ## B. 보안 (security-reviewer 검토 기준)
 

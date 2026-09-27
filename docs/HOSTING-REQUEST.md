@@ -11,7 +11,7 @@ form.
 | Written / all URLs re-verified | **2026-09-26** |
 | Repository to submit | `https://github.com/YongGoose/batch-control-plugin` (default branch `main`) |
 | Target repository name | `batch-control-plugin` |
-| Automated release (form field 6) | **No** (owner decision, 2026-09-26) |
+| Automated release (form field 6) | **Yes** (owner decision, 2026-09-27; was `No` on 2026-09-26) |
 | Readiness verdict at that date | 0 `FAIL`; the only open rows are the two that need the owner — see readiness §5 |
 
 Everything marked `<OWNER: …>` is a value only the owner can supply. Everything
@@ -288,13 +288,25 @@ them as `@name`. An empty list is a `REQUIRED` finding.
 ### Field 6 — Automated release via GitHub Actions (recommended)
 
 ```
-No
+Yes
 ```
 
-Decided by the owner on 2026-09-26. Answering `Yes` instead would switch on an
-extra block of `REQUIRED` checks (a `${changelist}` version, `.mvn/` files, a CD
-workflow) that this repository does not satisfy today — see readiness G10. CD can
-be enabled later by a follow-up PR to repository-permissions-updater.
+Changed from `No` to `Yes` by the owner on 2026-09-27, after the request had
+already been filed. `Yes` switches on an extra block of `REQUIRED` checks, and the
+repository now satisfies all of them:
+
+- `<version>${changelist}</version>` with `<changelist>999999-SNAPSHOT</changelist>`
+  (no `${revision}`, which also clears the D3 warning);
+- `.mvn/extensions.xml` and `.mvn/maven.config` (with `-Dchangelist.format=%d.v%s`),
+  copied from `jenkinsci/archetypes/common-files`;
+- `.github/workflows/cd.yaml`, copied from `jenkinsci/.github/workflow-templates`;
+- no `release-drafter` config or workflow, which must be absent under CD.
+
+With CD on, the Artifactory login check on field 5 no longer applies. Releases
+are cut by the `cd` workflow after a successful ci.jenkins.io build when merged
+pull requests carry a changelog label; versions look like `123.vabcdef012345`.
+The `MAVEN_USERNAME` / `MAVEN_TOKEN` repository secrets are provisioned by the
+Jenkins infrastructure once the repository is hosted with CD enabled.
 
 ---
 
