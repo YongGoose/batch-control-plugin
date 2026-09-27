@@ -61,10 +61,6 @@ public final class Grant {
         return id;
     }
 
-    public String getGrantRequestId() {
-        return grantRequestId;
-    }
-
     public String getUser() {
         return user;
     }

@@ -38,23 +38,46 @@ public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
     }
 
     /**
-     * These settings with {@code approvalRequired} set as given, every other setting carried over.
+     * The new-job activation lock of D-34: {@code approvalRequired}, {@code blockTimer} and
+     * {@code blockUpstream} all on, and no upstream allow list — so no cause at all can start the
+     * job until somebody turns a switch off in its configuration.
      *
-     * <p>{@code approvalRequired} is final, so the D-31 default has to rebuild the property rather
-     * than flip a field; rebuilding must not drop the trigger policy ({@code blockTimer},
-     * {@code blockUpstream}, {@code allowedUpstreamJobs}) or the job-level approver list that the
-     * creator supplied in the same config.xml.
+     * <p>The empty allow list is part of the lock rather than an accident of construction: with
+     * {@code blockUpstream} on, {@code allowedUpstreamJobs} is the list of upstream jobs that are
+     * <em>exempt</em> from it (D-16), so a non-empty list is an open upstream door (P-14).
      */
-    public BatchControlJobProperty withApprovalRequired(boolean required) {
-        if (required == approvalRequired) {
-            return this;
-        }
-        BatchControlJobProperty copy = new BatchControlJobProperty(required);
-        copy.blockTimer = blockTimer;
-        copy.blockUpstream = blockUpstream;
-        copy.allowedUpstreamJobs = getAllowedUpstreamJobs();
-        copy.jobApprovers = getJobApprovers();
-        return copy;
+    public static BatchControlJobProperty activationLocked() {
+        BatchControlJobProperty locked = new BatchControlJobProperty(true);
+        locked.blockTimer = true;
+        locked.blockUpstream = true;
+        locked.allowedUpstreamJobs = new ArrayList<>();
+        return locked;
+    }
+
+    /**
+     * These settings with the D-34 activation lock applied: every setting that decides whether a
+     * run may start is forced to its locked value, and the settings that decide nothing about
+     * starting a run are carried over.
+     *
+     * <p>{@code approvalRequired} is final, so the default has to rebuild the property rather than
+     * flip a field. {@code jobApprovers} is carried over because it only ever <em>narrows</em> who
+     * may approve a request for this job ({@code policy.ApprovalPolicy#checkDesignation} applies it
+     * on top of the global approver list), so honouring a creator-supplied value cannot widen
+     * anything. The trigger policy is not carried over — see {@link #activationLocked()} and P-14.
+     */
+    public BatchControlJobProperty withActivationLock() {
+        BatchControlJobProperty locked = activationLocked();
+        locked.jobApprovers = getJobApprovers();
+        return locked;
+    }
+
+    /**
+     * Whether these settings already <em>are</em> the activation lock, so that applying it again
+     * would cost the job a property rebuild (two saves, S-20) and change nothing.
+     */
+    public boolean isActivationLocked() {
+        return approvalRequired && blockTimer && blockUpstream
+                && getAllowedUpstreamJobs().isEmpty();
     }
 
     public boolean isBlockTimer() {

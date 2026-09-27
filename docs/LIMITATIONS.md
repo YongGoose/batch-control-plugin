@@ -19,10 +19,15 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
    instance, is not recognised as person-initiated and therefore **passes** the
    approval gate. The pass is logged. This is the same default-open posture as
    the timer and upstream policies: verify how your own trigger plugins behave
-   before relying on the gate.
-3. **cron, upstream and SCM triggers pass by default**, and anything installed
-   during a permission window keeps firing after that window closes. Expiry
-   removes the *permission*, not the automation that was configured with it.
+   before relying on the gate. Core's own build token is *not* in this category:
+   the `RemoteCause` that a `?token=` submission carries is classified, refused
+   quietly and written to the audit history as a blocked attempt.
+3. **cron, upstream and SCM triggers pass by default** on a job that already
+   exists, and anything installed during a permission window keeps firing after
+   that window closes. Expiry removes the *permission*, not the automation that
+   was configured with it. A job **created** while run control is on is the
+   exception: it starts with cron and upstream blocked (item 13), so this applies
+   to it only once somebody has unlocked it.
 4. **A blocked job called from a Pipeline `build` step fails its caller.** When
    a protected job is refused at queue entry, the upstream job ends as `FAILURE`.
    This happens even with `wait: false`; it is Jenkins' behaviour, not a choice
@@ -66,25 +71,54 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 Read this section before enabling run control on an instance that generates jobs
 from scripts.
 
-13. **While run control is on, every newly created job starts with
-    `approvalRequired=true`**, whatever the creation path (UI, REST, CLI, Job
-    DSL, a seed job) and whoever the creator is. An explicit
-    `approvalRequired=false` in the creation payload is overwritten. Turning the
-    control off afterwards means editing the job, which is itself a recorded
-    change; that recorded path is the intended way out.
+13. **While run control is on, every newly created job starts locked**, whatever
+    the creation path (UI, REST, CLI, Job DSL, a seed job, a copy) and whoever the
+    creator is: `approvalRequired=true`, `blockTimer=true`, `blockUpstream=true`
+    and an empty `allowedUpstreamJobs`. No cause can start the job until somebody
+    turns a switch off in its configuration, which is itself a recorded change and,
+    with change control on, needs a permission window. Creating a job and putting
+    it into service are deliberately two separate acts.
 
-    A Job DSL or JCasC definition that pins `approvalRequired: false` is not
-    idempotent against a *fresh* creation: the first seed run creates the job
-    controlled, and only a second run, an update rather than a creation, clears
-    it. A generated job that must run unattended needs that second pass, and the
-    pass is recorded.
+    **Values in the creation payload do not survive the lock.** An
+    `approvalRequired=false`, a `blockTimer=false`, a `blockUpstream=false` or an
+    `allowedUpstreamJobs` list supplied in a `config.xml` POST, a CLI
+    `create-job`, a Job DSL seed or the job being copied from is discarded. Only
+    `jobApprovers` is carried over, because it can only ever *narrow* who may
+    approve. The allow list is emptied rather than kept because with
+    `blockUpstream=true` that list is precisely the set of upstream jobs **exempt**
+    from the block, so honouring a supplied one would leave the upstream door open
+    and make the lock cosmetic. The case that makes this concrete is name
+    squatting: an existing pipeline runs `build job: 'X'` where `X` does not exist
+    yet, and whoever may create items creates `X` with the calling pipeline in its
+    exempt list; the pipeline's next run would then execute their job with no
+    approval and no window.
+
+    **The consequence is silent, and this is the part to plan for.** A Job DSL or
+    JCasC definition that pins `blockTimer: false` (or an allow list) *appears to
+    be ignored* on a fresh creation: the seed run creates the job locked, and only
+    a later seed run, which is an update rather than a creation, restores the
+    pinned values. So a generated nightly job does not run its first night, and
+    because an unattended refusal is silent by contract, a locked job looks exactly
+    like a job whose cron never fires.
+
+    Three things tell those two cases apart. The job's **configuration screen** is
+    the first: if `Block cron (timer) triggers` is checked on a job whose Job DSL
+    definition says otherwise, the lock is the reason. The **controller log** is
+    the second: a refused timer run logs one "Blocked timer-triggered run of job"
+    line per attempt, and a cron that never fired logs nothing at all. The
+    **change history** is the third: the job has a `CREATE` record and no
+    subsequent `CONFIGURE` record clearing the switches, which is the positive
+    evidence that nothing has unlocked it since. The same three steps are in the
+    product as the inline help of `Block cron (timer) triggers`
+    (`help-blockTimer`), which is where an operator whose cron did not fire looks
+    first; the other trigger and run-control help texts point at it.
 
     This is not theoretical. The seed jobs in this repository's own e2e
-    environment stopped building silently the first time this default landed,
-    including the ones whose whole purpose was to run unattended, and the fix was
-    to make the seed script clear the property right after creating them. Note
-    that automatic builds are not what breaks: timer, upstream and SCM causes
-    still pass. What stops is anything a person has to press.
+    environment stopped building silently the first time the approval default
+    landed, including the ones whose whole purpose was to run unattended, and the
+    fix was to make the seed script clear the property right after creating them.
+    A generated job that must run unattended needs that second pass, and the pass
+    is recorded.
 
 14. **Branch jobs generated by a multibranch project are exempt** from that
     default. They have no configuration screen, so there would be no way to turn
@@ -160,14 +194,24 @@ from scripts.
     windows and the re-request link are on the Grants screen instead, and the
     remaining time is shown there so you can renew before expiry.
     **Configuration you were editing is not restored**, because restoring it would
-    mean storing a change that was just judged unauthorised.
+    mean storing a change that was just judged unauthorised. The page says only
+    "missing the Job/Configure permission", so it names neither windows nor where
+    to ask for one, and it is identical to the page a user who never had a window
+    sees: the two situations cannot be told apart from the refusal itself. What
+    stands in for it is the **Request Change Permission** entry on the job's own
+    sidebar, which is reachable before the refusal rather than after it.
 28. **Monthly summary edge cases** (current behaviour, not yet ratified): an
     `ACKNOWLEDGED` incident is counted in neither the open nor the resolved
     column, and a request that was approved and then expired or was invalidated
     is counted in neither the approved nor the rejected column.
-29. **The Grants section is visible even with change control off**, because the
-    authorization strategy is deliberately independent of the switch. The Role
-    Strategy notice likewise appears with both switches off.
+29. **With change control off the Grants screen is closed**, its links are gone from
+    the Batch Control landing page, and requesting or approving a window is refused
+    with a message that says why, plus a `GRANT_REQUEST_BLOCKED` record. The URL
+    itself still answers, deliberately, so that an old bookmark reaches that
+    explanation rather than a dead link. Nothing about the audit trail is gated this
+    way: the history, dashboard, incident and change-record screens show the same
+    content whichever way the switch is set. The Role Strategy notice likewise
+    appears with both switches off.
 30. **A request does not follow its job.** If the target job is renamed or moved
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
@@ -179,6 +223,46 @@ from scripts.
     accumulate until the pending timeout clears them. Likewise nothing limits the
     rate of configuration changes, so a burst of saves inside a window produces a
     burst of diff and snapshot writes against a single store lock.
+32. **Performance at volume is unmeasured.** The history, dashboard and
+    change-record screens read a whole month bucket into memory on every page
+    load, the incident list opens one file per incident, and run and grant
+    request files are never pruned and are all scanned every minute by the
+    expiry job. SPEC item 6's target of 5,000 runs a day has therefore not been
+    measured, and it is not expected to hold at that scale until the store gains
+    an index.
+
+## Before you switch either control on
+
+Two consequences of the design that are easy to meet unprepared. Both were
+observed on a running Jenkins 2.568.3, and neither is a defect: they are what the
+code does on purpose.
+
+33. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
+    resolved the way Jenkins resolves any permission, by walking `impliedBy`, so
+    every permission that declares itself implied by a granted action is answered
+    too. Enumerated over the installed permissions of the reference environment, a
+    `CONFIGURE` window also confers `Item/ExtendedRead` (reading `config.xml`),
+    `Credentials/UseItem` and `Run/Replay`; the last two come from the
+    `credentials` and `workflow-cps` plugins, so the set is a property of what is
+    installed and another plugin can extend it. Scope is never widened, and no
+    chain reaches `Overall/Administer` or any `BatchControl/*` permission. This is
+    the same set a standing matrix entry for `Item/Configure` confers; the
+    difference is provenance, since a window is approved by a non-administrator who
+    is shown only the word `CONFIGURE`. `Run/Replay` is the one worth naming: the
+    queue gate still refuses a replay of a job that requires approval, so it is not
+    a run-gate bypass there, but on a job without run control a window holder can
+    replay a build with a modified Pipeline script.
+34. **Turning change control off cuts off work in progress.** The switch is a kill
+    switch: while it is off no window confers anything, and flipping it off revokes
+    every window open at that moment, one `GRANT_REVOKE` record per closure naming
+    the account that flipped it. Whoever is part-way through a change loses the
+    permission to finish it with no warning, and the only way back is a new request
+    once the control is on again. That is the deliberate trade against a switch that
+    would leave windows quietly conferring `Item/Configure` for up to
+    `maxGrantMinutes` (default 240) after the control was supposedly off. The off
+    period accumulates nothing that could take effect later, because a window can
+    neither be requested nor approved during it (item 29), and it removes nothing
+    from the audit history of the windows that did exist.
 
 ## Out of scope by design
 

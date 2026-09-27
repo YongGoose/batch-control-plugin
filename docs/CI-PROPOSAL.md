@@ -20,7 +20,7 @@ The owner's requirement:
 different answers. Both are covered below.
 
 * **(a) Behavioural regression.** Does an incoming pull request break behaviour
-  that works today? This is a question about *when and where our 195 tests run* —
+  that works today? This is a question about *when and where our 231 tests run* —
   specifically whether they run on a pull request opened from someone else's fork.
 * **(b) Jenkins core compatibility.** We are pinned to `jenkins.version` 2.568.3.
   Does the plugin still work on other core versions — older LTS lines, newer LTS
@@ -284,7 +284,7 @@ even if the hosting request were abandoned.
 * All third-party actions pinned to a commit SHA with a version comment, matching
   the style already used in `jenkins-security-scan.yml`.
 
-This is the whole of reading (a) for the pre-transfer period: 195 tests and
+This is the whole of reading (a) for the pre-transfer period: 231 tests and
 SpotBugs run on every pull request, including from forks, with no secrets exposure.
 JDK 25 is included because it is free in parallel and
 `docs/HOSTING-READINESS.md` §4 item 7 already wants forward JDK coverage.
@@ -424,25 +424,29 @@ matter are contributor wait time and our maintenance burden.
 
 | Item | When | Wall clock added to a PR | Recurring runner time | Maintenance burden | What it buys |
 |---|---|---|---|---|---|
-| **N1** `build.yml`, linux × JDK 21+25 | Now | ~20 min (two jobs in parallel) | ~40 min per PR push, free | Low — one ~25-line file; action SHA bumps arrive via the existing monthly `github-actions` dependabot entry | The only regression gate that exists before the transfer. 195 tests + SpotBugs on every fork PR |
+| **N1** `build.yml`, linux × JDK 21+25 | Now | ~21–24 min (two jobs in parallel) | ~45 min per PR push, free | Low — one ~25-line file; action SHA bumps arrive via the existing monthly `github-actions` dependabot entry | The only regression gate that exists before the transfer. 231 tests + SpotBugs on every fork PR |
 | **N2** branch protection | Now | none | none | none | Makes N1 actually block a bad merge |
 | **N3** fork-PR policy | Now | none (adds a maintainer click for new contributors) | none | none | Prevents a hostile PR from editing the workflow and running it |
-| **T1** `jdk: 25` in `Jenkinsfile`; drop 25 from `build.yml` | At transfer | −0 (net: GHA halves to ~20 min, one job) | ci.jenkins.io: one more configuration | Low | JDK 25 coverage on Jenkins infra; keeps GHA lean |
+| **T1** `jdk: 25` in `Jenkinsfile`; drop 25 from `build.yml` | At transfer | −0 (net: GHA runner time halves to ~22 min, one job) | ci.jenkins.io: one more configuration | Low | JDK 25 coverage on Jenkins infra; keeps GHA lean |
 | **T2** `close-bom-if-passing.yml` | At transfer | none | ~1 min per dependabot BOM PR | Near zero — a 3-line reusable call | Weekly BOM bumps close themselves; plugin-dependency drift stays tested without manual triage |
 | **T3** required-check decision | At transfer | none | none | none | One unambiguous merge gate instead of two ambiguous ones |
-| **L1** weekly forward-compat job | Later | none (not on PRs) | ~20 min/week | Medium — the target version is a literal that must be bumped when a new LTS line opens; expect occasional real failures needing investigation | Early warning that a core release breaks us, before users hit it |
+| **L1** weekly forward-compat job | Later | none (not on PRs) | ~22 min/week | Medium — the target version is a literal that must be bumped when a new LTS line opens; expect occasional real failures needing investigation | Early warning that a core release breaks us, before users hit it |
 | **L2** incrementalify | Later | none | none | Low once done | Unblocks L3 and CD |
 | **L3** BOM membership | Later (gated on adoption) | none | none for us | Medium — obliges us to cut releases promptly when PCT finds something | The complete answer to (b): our tests run against every maintained LTS line and weekly, on someone else's infrastructure |
 | **L4** e2e weekly | Later | none | ~30 min/week | **High** — brittle HTML assertions; expect periodic triage | Catches real-Jenkins integration breakage that `JenkinsRule` cannot see |
-| *rejected* full 3-OS × 2-JDK GHA matrix | — | ~35–50 min (slowest row wins) | ~6× N1 | High — Windows/macOS `JenkinsRule` flakiness lands on us, not on Jenkins infra | Nothing ci.jenkins.io does not already give us after the transfer |
-| *rejected* downward LTS matrix on PRs | — | +~20 min per line | ~20 min/line/PR | **High** — one Maven profile per line, each with its own pinned BOM version to keep current | Failures on core versions we never claimed to support (§3.2) |
+| *rejected* full 3-OS × 2-JDK GHA matrix | — | ~40–55 min (slowest row wins) | ~6× N1 | High — Windows/macOS `JenkinsRule` flakiness lands on us, not on Jenkins infra | Nothing ci.jenkins.io does not already give us after the transfer |
+| *rejected* downward LTS matrix on PRs | — | +~22 min per line | ~22 min/line/PR | **High** — one Maven profile per line, each with its own pinned BOM version to keep current | Failures on core versions we never claimed to support (§3.2) |
 
-Assumptions behind the numbers: 195 tests ≈ 14 min locally
-(`docs/HOSTING-READINESS.md` R1/G11), plus ~3–6 min for checkout, JDK setup and
-dependency resolution on a warm Maven cache; `ubuntu-latest` is 4 vCPU, so a
-single-fork run is comparable to or slightly slower than local. Windows runners
-run this kind of workload roughly 1.5–2× slower. These are estimates, not
-measurements — the first real run should be used to correct them.
+Behind the numbers: **231 tests in 17 min 40 s, measured** with
+`mvn -o -B clean verify` on the integrated issue-12 tree on 2026-09-27
+(`docs/HOSTING-READINESS.md` E4/R1), which replaces the earlier 195-test ≈ 14-min
+assumption. On top of that, ~3–6 min for checkout, JDK setup and dependency
+resolution on a warm Maven cache, which is still an estimate; `ubuntu-latest` is
+4 vCPU, so a single-fork run is comparable to or slightly slower than local.
+Windows runners run this kind of workload roughly 1.5–2× slower. So the local
+build time is now a measurement and every runner figure in the table above is an
+extrapolation from it — the first real GitHub Actions run should be used to
+correct the extrapolation.
 
 ---
 
@@ -530,3 +534,7 @@ change has been made. Per the owner's instruction, implementation waits on
 approval of §3. No Maven build was run while writing this; the 195-test and
 14-minute figures are taken from `docs/HOSTING-READINESS.md` and the task brief,
 not measured here.
+
+*Added 2026-09-27:* those two figures have since been superseded by a measured
+231 tests in 17 min 40 s (§4), and the tables were recomputed from it. That
+measurement was also made elsewhere, not by this document.

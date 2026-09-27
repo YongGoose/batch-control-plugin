@@ -1,3 +1,34 @@
 <div>
   If checked, cron (timer) triggered builds of this job are blocked; by default they pass through.
+  <p>
+    <b>A job created while run control is on does not start at that default.</b> Every newly
+    created job starts locked — <b>Require approval to run</b>, <b>Block cron (timer) triggers</b>
+    and <b>Block upstream triggers</b> all on and the allowed-upstream list empty — whoever created
+    it and however. Creating a job therefore does not put it into service. Bringing it into service
+    means turning a switch off here, and that change is recorded and, with change control on, needs
+    a permission window. Jobs that already existed when run control was turned on are untouched.
+  </p>
+  <p>
+    A value supplied when the job was created does not survive the lock: a
+    <code>blockTimer=false</code> in a <code>config.xml</code> POST, a CLI <code>create-job</code>,
+    a Job DSL seed or the job this one was copied from is overwritten. Only the job-level approver
+    list is carried over, because it can only narrow who may approve. So a definition that pins
+    <code>blockTimer: false</code> is not idempotent against a fresh creation and appears simply to
+    have been ignored; a later run of the same seed is an update rather than a creation and does
+    restore it.
+  </p>
+  <p>
+    <b>If this job's cron did not fire, read this first.</b> A blocked timer run is refused
+    quietly, because an unattended trigger has nobody to show a message to. A locked job therefore
+    looks exactly like a job whose cron never fired, and three things tell those two cases apart:
+  </p>
+  <ul>
+    <li>this screen — if <b>Block cron (timer) triggers</b> is checked while your definition says
+      otherwise, the lock is the reason;</li>
+    <li>the controller log — a refused timer run logs one "Blocked timer-triggered run of job"
+      line per attempt, and a cron that never fired logs nothing at all;</li>
+    <li>the change history — the job has a <code>CREATE</code> record and no later
+      <code>CONFIGURE</code> record clearing the switches, which is positive evidence that nothing
+      has unlocked it since.</li>
+  </ul>
 </div>

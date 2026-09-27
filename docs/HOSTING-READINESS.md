@@ -57,7 +57,12 @@ what order, on the day*, use [`HOSTING-REQUEST.md`](HOSTING-REQUEST.md).
 > The E4 result recorded below (195 tests, 0 failures, SpotBugs
 > `BugInstance size is 0`, `BUILD SUCCESS`, with `ban-junit4-imports.skip=false`
 > in place) was reported by the orchestrating session on 2026-09-26 and is
-> recorded here with that attribution, not as an independent verification. It
+> recorded here with that attribution, not as an independent verification. The
+> same applies to the later measurement added beside it: `mvn -o -B clean verify`
+> on the integrated issue-12 tree, **231 tests, 0 failures, 0 errors, 0 skipped**,
+> SpotBugs `BugInstance size is 0`, `BUILD SUCCESS` in 17 min 40 s, reported by
+> the orchestrating session on 2026-09-27. Both are records of someone else's
+> build; neither replaces the other. It
 > must be re-run on the final pre-submission tree in any case — see §6.7 step 6.
 
 ### Applied changes (preparation pass, 2026-09-26)
@@ -281,7 +286,7 @@ listed in section 1 and section 6.
 | E1 | Description must explain "how it's different from other components that may be considered similar to this one" | Issue template field 3 | **UNKNOWN** | Material exists (`docs/DECISIONS.md:7` D-01, `:9` D-02) but no submission text has been reviewed by the owner | Use the section 6 draft, owner to confirm |
 | E2 | GitHub users to have commit permission | Issue template field 4 | **UNKNOWN** | Owner data | Owner supplies |
 | E3 | Jenkins project (accounts.jenkins.io) users with release permission must have signed into Jira **and** Artifactory | Issue template field 5; RPU `JenkinsProjectUserVerifier` | PASS (owner-confirmed 2026-09-26) | Owner states the accounts.jenkins.io account is created and needs no further verification | The literal username string for field 5 is still owner-supplied when the form is filled |
-| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **PASS** (reported by the orchestrating session 2026-09-26, not verified by this document's author) | Full `mvn clean verify` with all five enforcement properties on: **195 tests, 0 failures**, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`. The test count is identical class by class to the pre-migration suite, with 0 `@Disabled` and 0 deletions | Re-run on the final pre-submission tree (§6.7 step 6) |
+| E4 | `mvn clean verify` green, SpotBugs clean | `docs/HOSTING-CHECKLIST.md:37,43`; human code review | **PASS** (reported by the orchestrating session 2026-09-26 and again 2026-09-27, neither verified by this document's author) | 2026-09-26, full `mvn clean verify` with all five enforcement properties on: **195 tests, 0 failures**, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`; the test count identical class by class to the pre-migration suite, with 0 `@Disabled` and 0 deletions. 2026-09-27, the §6.7 step 6 re-run landing early on the integrated issue-12 tree (27 commits ahead of main): `mvn -o -B clean verify`, **231 tests, 0 failures, 0 errors, 0 skipped**, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`, 17 min 40 s, no `[ERROR]` line in the log. The growth is 197 + 7 (D-34) + 27 (UI-lane regressions); the matrix is 208 rows, so tests and rows are counted separately and are not the same number | Re-run once more on the final pre-submission tree (§6.7 step 6) |
 | E5 | No Korean strings in code or resources | `CLAUDE.md:45`; `docs/HOSTING-CHECKLIST.md:45` | PASS | Unicode Hangul scan over `src/`: 0 matching files | — |
 | E6 | No hardcoded credentials | `docs/HOSTING-CHECKLIST.md:28`; Jenkins security docs | PASS | grep for `password =`/`secret =`/`apiKey`/`token =` string literals over `src/main/java`: 0 hits | — |
 | E7 | No unexpected outbound network calls | Jenkins security review practice | PASS | grep over `src/main/java` for `HttpURLConnection`, `HttpClient`, `openStream`, `okhttp`, `Socket(`, `java.net.URL`: the only match is `import java.net.URLEncoder` in `src/main/java/io/jenkins/plugins/batchcontrol/ui/FilterParser.java:6`, which is string encoding, not I/O | — |
@@ -449,8 +454,9 @@ taken: **`CONTRIBUTING.md` now exists at the repository root**, which also clear
 What `CONTRIBUTING.md` contains, and how it differs from the old README text: it
 was **rewritten for contributors, not transcribed**, and translated to English.
 Sections: build and test (JDK 21 / Maven 3.9.16, the four commands, and what a
-healthy run looks like — about 195 tests, 0 failures, `BugInstance size is 0`,
-with the count flagged as moving while the JUnit 5 migration is in flight),
+healthy run looks like — 0 failures, `BugInstance size is 0`, with the test total
+deliberately not pinned, because it moves with every lane that lands, and
+`docs/TEST-MATRIX.md` named as the authority on what the suite should cover),
 repository layout, the document system plus a glossary of the identifier prefixes
 (`D-nn`, `P-nn`, `T-05-02`, `T-CFG`, `T-SEC`, `T-RT`, `T-OS`, `T-UI`, `T-E2E`,
 `RT-nn`, `S-nn`, S1..S4, "falsifiability guard"), the test conventions (matrix row
@@ -624,6 +630,12 @@ orchestrating session reports a full `mvn clean verify` at 195 tests, 0 failures
 SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`, with all five properties on and
 the new BOM in place. That covers both original reasons to re-run.
 
+**Re-measured 2026-09-27** on the integrated issue-12 tree: `mvn -o -B clean
+verify`, 231 tests, 0 failures, 0 errors, 0 skipped, SpotBugs
+`BugInstance size is 0`, `BUILD SUCCESS`, 17 min 40 s. Also reported by the
+orchestrating session, and recorded beside the 2026-09-26 line rather than in
+place of it.
+
 It still has to be run once more on the final pre-submission tree (§6.7 step 6),
 because the hosting team reads the ci.jenkins.io build and because the BOM and
 parent POM versions are re-checked on the submission day (§6.7 step 4).
@@ -696,7 +708,8 @@ every message-carrying assertion by hand rather than trusting a find-and-replace
 pre-migration suite across all 34 classes. With the property back on, the
 orchestrating session reports a full `mvn clean verify` at **195 tests, 0
 failures, SpotBugs `BugInstance size is 0`, `BUILD SUCCESS`**. B18 and E4 are
-both PASS.
+both PASS. The same suite measured **231 tests** on 2026-09-27 after the issue-12
+lanes landed; that figure belongs to the later tree, not to this migration.
 
 ---
 
@@ -899,8 +912,9 @@ of scope. CD can be turned on after hosting through the D8 follow-up PR.
 5. ~~Confirm the accounts.jenkins.io user(s) have logged into Jira and
    Artifactory.~~ **Owner-confirmed 2026-09-26** (Q4).
 6. Run `mvn -q clean verify` on the final tree — green, SpotBugs clean (G11).
-   Last known result: 195 tests, 0 failures, `BugInstance size is 0`,
-   `BUILD SUCCESS`. Re-run anyway, because step 4 can change the dependency tree.
+   Last known result (2026-09-27, integrated issue-12 tree): 231 tests, 0
+   failures, 0 errors, 0 skipped, `BugInstance size is 0`, `BUILD SUCCESS`, 17 min
+   40 s. Re-run anyway, because step 4 can change the dependency tree.
 7. Push everything to the default branch of
    `https://github.com/YongGoose/batch-control-plugin`. The bot reads the
    repository's default branch, so nothing may be left on a feature branch.
@@ -970,5 +984,7 @@ State these as unverified rather than as requirements:
   three `ban-*` enforcement properties (G6).** Not executed by the author of this
   document. The result recorded at E4 and R1 (195 tests, 0 failures, SpotBugs
   `BugInstance size is 0`, `BUILD SUCCESS`) comes from the orchestrating session
-  on 2026-09-26. It is a real build, but it is second-hand here, and it must be
-  re-run on the final pre-submission tree in any case (§6.7 step 6).
+  on 2026-09-26, and the later one recorded beside it (231 tests, same zeros,
+  17 min 40 s, on the integrated issue-12 tree) from the same session on
+  2026-09-27. Both are real builds, both are second-hand here, and the suite must
+  be re-run on the final pre-submission tree in any case (§6.7 step 6).

@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -46,9 +47,6 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 @Restricted(NoExternalUse.class)
 public class JobRequestAction implements Action, StaplerProxy {
 
-    /** Mask stored instead of secret parameter values; never persist password plaintext. */
-    private static final String SECRET_MASK = "********";
-
     private final Job<?, ?> job;
 
     public JobRequestAction(Job<?, ?> job) {
@@ -79,9 +77,14 @@ public class JobRequestAction implements Action, StaplerProxy {
         return "symbol-paper-plane-outline";
     }
 
+    /**
+     * The one sidebar entry on a controlled job that reads "Request Run" (U-02): core's relabeled
+     * build link is named {@link RequestRunUiDecorator#BLOCKED_BUILD_LABEL} so the two cannot be
+     * confused.
+     */
     @Override
     public String getDisplayName() {
-        return "Request Run";
+        return RequestRunUiDecorator.REQUEST_RUN_LABEL;
     }
 
     @Override
@@ -117,6 +120,13 @@ public class JobRequestAction implements Action, StaplerProxy {
      * POST {@code submit} — creates the run request and redirects to its detail page at
      * {@code /batch-control/requests/<id>/}. Validation failures from the service render as a
      * {@link Failure} page with the message.
+     *
+     * <p>N-01: {@link #parseParameters} is inside the {@code try} on purpose. A parameter
+     * definition rejects a bad value by throwing {@link IllegalArgumentException} — a choice
+     * parameter given a value outside its choices, for instance — and that is the same class the
+     * service's own validation throws. Parsing outside the {@code try} turned user-supplied
+     * input into an uncaught exception and an HTTP 500 "Oops!" page while an empty reason
+     * correctly answered 400; both are user input and both belong in the same 400 channel.
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -127,10 +137,10 @@ public class JobRequestAction implements Action, StaplerProxy {
         JSONObject formData = req.getSubmittedForm();
         String reason = Util.fixEmptyAndTrim(formData.optString("reason", ""));
         String approver = Util.fixEmptyAndTrim(formData.optString("approver", ""));
-        Map<String, String> parameters = parseParameters(req, formData);
 
         RunRequest request;
         try {
+            Map<String, String> parameters = parseParameters(req, formData);
             request = RunRequestService.get().create(job, parameters, reason, approver);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
@@ -143,6 +153,10 @@ public class JobRequestAction implements Action, StaplerProxy {
      * Parses the {@code parameter} JSON array the same way core's
      * {@code ParametersDefinitionProperty._doBuild} does (each entry goes through the parameter
      * definition's {@code createValue}), then flattens the values to strings.
+     *
+     * <p>Throws {@link Failure} for a parameter name the job does not define, and lets a
+     * definition's own {@link IllegalArgumentException} propagate for a value it refuses; the
+     * caller turns the latter into the same 400 as every other rejected submission (N-01).
      */
     private Map<String, String> parseParameters(StaplerRequest2 req, JSONObject formData) {
         Map<String, String> parameters = new LinkedHashMap<>();
@@ -182,11 +196,11 @@ public class JobRequestAction implements Action, StaplerProxy {
      */
     private static String flatten(ParameterValue value) {
         if (value.isSensitive()) {
-            return SECRET_MASK;
+            return SecretMasker.MASK;
         }
         Object raw = value.getValue();
         if (raw instanceof Secret) {
-            return SECRET_MASK;
+            return SecretMasker.MASK;
         }
         return raw == null ? "" : String.valueOf(raw);
     }

@@ -51,6 +51,7 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.UnstableBuilder;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -208,7 +209,10 @@ public class HistoryWebTest {
     public void t_12_04_monthlySummaryCountsAreExact() throws Exception {
         // 2 SUCCESS (one via an approved request), 1 FAILURE, 1 UNSTABLE
         FreeStyleProject sumA = j.createFreeStyleProject("sum-a");
-        sumA.addProperty(new BatchControlJobProperty(true));
+        // setBatchControl, not addProperty: this fixture needs an approval-required job whose
+        // timer is still open, and after D-34 a job created under run control starts with
+        // blockTimer=true (matrix notes 42, 46)
+        setBatchControl(sumA, new BatchControlJobProperty(true));
         RunRequest approved;
         try (ACLContext ignored = as("u1")) {
             approved = RunRequestService.get().create(sumA, new LinkedHashMap<>(),

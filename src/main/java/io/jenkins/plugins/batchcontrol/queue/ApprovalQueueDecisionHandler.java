@@ -11,7 +11,9 @@ import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
+import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -28,6 +30,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>run control off, task not a job, or job not approval-required → pass;</li>
  *   <li>approval marker present → validate and consume it (D-23), pass or refuse quietly;</li>
  *   <li>Pipeline Replay → refuse quietly (the replay UI has no error channel for a Failure);</li>
+ *   <li>remote (build-token) cause → refuse quietly and record the attempt (S-14);</li>
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
@@ -89,14 +92,42 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 3. User-originated (UI button, REST build endpoints, CLI): guide, never fail silently.
+        // 3. Remote trigger with a build token: refused quietly and recorded (S-14).
+        //
+        // Core mints Cause.RemoteCause — not UserIdCause — as soon as a build token is presented
+        // on /job/X/build or /job/X/buildWithParameters (one shared static,
+        // ParameterizedJobMixIn#getBuildCause, so both endpoints behave identically), and
+        // BuildAuthorizationToken#checkPermission returns on a token match before it would reach
+        // checkPermission(Item.BUILD). Before this branch existed such a submission fell through
+        // to step 7 and passed, which made the two endpoints SPEC item 6 names as blocked
+        // bypassable by anyone holding the token string.
+        //
+        // Refused quietly, like the timer and upstream refusals and unlike step 4: the caller is
+        // a script reading an HTTP status, so guidance text has no reader. Quiet is why the
+        // attempt is written to the audit history instead — the same reasoning D-30 applies to a
+        // blocked marker re-use. The record is bounded (S-21): see BlockedAttemptAudit.
+        for (Cause cause : causes) {
+            if (cause instanceof Cause.RemoteCause) {
+                LOGGER.warning(() -> "Blocked a remote (build-token) run of approval-required job '"
+                        + job.getFullName() + "': " + cause.getShortDescription());
+                BlockedAttemptAudit.get().record(ChangeType.REMOTE_RUN_BLOCKED,
+                        job.getFullName(), job.getFullName(),
+                        Jenkins.getAuthentication2().getName(),
+                        "Blocked a remote run submission of job '" + job.getFullName()
+                                + "' - the job requires an approved batch-control run request and "
+                                + "a build token does not substitute for one - " + cause.getShortDescription());
+                return false;
+            }
+        }
+
+        // 4. User-originated (UI button, REST build endpoints, CLI): guide, never fail silently.
         for (Cause cause : causes) {
             if (cause instanceof Cause.UserIdCause) {
                 throw new Failure(approvalRequiredMessage(job));
             }
         }
 
-        // 4. Timer (cron): pass by default, blocked quietly per job setting.
+        // 5. Timer (cron): pass by default, blocked quietly per job setting.
         for (Cause cause : causes) {
             if (cause instanceof TimerTrigger.TimerTriggerCause) {
                 if (property.isBlockTimer()) {
@@ -108,7 +139,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 5. Upstream (includes the Pipeline build step's BuildUpstreamCause subtype): D-16.
+        // 6. Upstream (includes the Pipeline build step's BuildUpstreamCause subtype): D-16.
         for (Cause cause : causes) {
             if (cause instanceof Cause.UpstreamCause) {
                 if (!property.isBlockUpstream()) {
@@ -126,7 +157,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 6. SCM causes pass; unknown or empty cause sets pass with a log line.
+        // 7. SCM causes pass; unknown or empty cause sets pass with a log line.
         for (Cause cause : causes) {
             if (cause instanceof SCMTrigger.SCMTriggerCause) {
                 return true;

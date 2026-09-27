@@ -28,6 +28,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -79,7 +80,11 @@ public class OwnerScenarioApprovalTraceTest {
         cfg.save();
 
         job = j.createFreeStyleProject("batch-x");
-        job.addProperty(new BatchControlJobProperty(true));
+        // setBatchControl, not addProperty: T-OS-04 contrasts an approved run with an unapproved
+        // timer run on the same job, so the job must be approval-required with its timer open.
+        // After D-34 a job created under run control starts with blockTimer=true, which would
+        // shadow-block the timer half of the row (matrix notes 42, 46).
+        setBatchControl(job, new BatchControlJobProperty(true));
     }
 
     /**

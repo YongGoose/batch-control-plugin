@@ -47,20 +47,18 @@ export PATH="$JAVA_HOME/bin:$HOME/tools/apache-maven-3.9.16/bin:$PATH"
 
 `mvn clean verify` takes roughly **ten minutes** and must end with:
 
-- **0 failures and 0 errors**, around **195 tests** run. The suite is
-  33 hand-written test classes (177 `@Test` methods at the time of writing) plus
-  the parent POM's generated `InjectedTest`, which contributes about twenty more
-  checks over the plugin's extensions and Jelly resources.
+- **0 failures and 0 errors.** The suite is the hand-written test classes plus the
+  parent POM's generated `InjectedTest`, which contributes about twenty more checks
+  over the plugin's extensions and Jelly resources. What the suite is *meant* to
+  cover is `docs/TEST-MATRIX.md`, not a total quoted here.
 - **`BugInstance size is 0`** from SpotBugs. There is no baseline exclusion file
   to hide findings behind; zero means zero.
 - `BUILD SUCCESS`.
 
-> The test count is the one number here that legitimately moves. A JUnit 5
-> migration of the test sources is in progress, and the last figures recorded in
-> the reports are 194 tests (`docs/reports/e2e-02.md`) plus one row added
-> afterwards. Treat "about 195, zero failures" as the signal and the exact
-> integer as informational — but treat *any* failure, and any SpotBugs finding,
-> as something to explain before you write code. A first build that is not green
+> The test count is the one number here that legitimately moves, and it moves with
+> every lane that lands, so this guide deliberately does not pin it: take the total
+> your own green run prints as the baseline for your next one. Treat *any* failure,
+> and any SpotBugs finding, as something to explain before you write code. A first build that is not green
 > is nearly always an environment difference, not a product defect, and finding
 > that out later is expensive.
 >
@@ -148,8 +146,8 @@ same change as the code.
 So "P-03 blocks T-SEC-07" reads as: a pending human decision about password
 parameters is why one security row has not been written.
 
-Current matrix size: **173 rows** — P0 116 / P1 49 / P2 8; unit 3 /
-integration 161 / e2e 9. P0 means release-blocking.
+Current matrix size: **208 rows** — P0 144 / P1 56 / P2 8; unit 8 /
+integration 191 / e2e 9. P0 means release-blocking.
 
 ### Language
 

@@ -14,7 +14,6 @@ import hudson.model.StringParameterValue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -22,6 +21,7 @@ import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedRunAction;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
@@ -32,7 +32,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
@@ -342,13 +341,19 @@ public final class RunRequestService {
      *
      * <p>No switch check is needed: the queue gate only reaches this code while run control is
      * on, which is one of the two switches that make change recording active (D-13).
+     *
+     * <p>The append goes through {@link BlockedAttemptAudit} rather than straight to the store
+     * (S-21): this runs with the global queue lock held, so a repeated attempt must not be able to
+     * append without bound. The merge key is the request id together with the job the marker was
+     * presented on — the two facts D-30 requires the record to identify — so every distinct
+     * attempt is still recorded and only a repetition of the identical one is merged.
      */
     private void recordMarkerReuseBlocked(String requestId, String jobFullName, String reason) {
         String actor = Jenkins.getAuthentication2().getName();
-        store.appendChangeRecord(ChangeRecord.create(ChangeType.MARKER_REUSE_BLOCKED,
-                jobFullName, actor,
+        BlockedAttemptAudit.get().record(ChangeType.MARKER_REUSE_BLOCKED,
+                requestId + " on " + jobFullName, jobFullName, actor,
                 "Blocked re-use of the approved-run marker of request " + requestId
-                        + " on job '" + jobFullName + "' - " + reason));
+                        + " on job '" + jobFullName + "' - " + reason);
     }
 
     /** Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). */

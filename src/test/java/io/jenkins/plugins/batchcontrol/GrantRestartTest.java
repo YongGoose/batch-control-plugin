@@ -108,6 +108,24 @@ public class GrantRestartTest {
         });
     }
 
+    /** A corrupt grant XML is skipped on load; it must not make every permission check throw. */
+    @Test
+    public void corruptGrantFileIsSkippedAndPermissionChecksStillWork() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            grantId = grantU1Configure(30).getId();
+            java.nio.file.Files.writeString(new File(r.jenkins.getRootDir(),
+                    "batch-control/grants/zz-corrupt.xml").toPath(), "<grant><id>broken");
+        });
+
+        session.then(r -> {
+            FreeStyleProject job = r.jenkins.getItemByFullName(JOB, FreeStyleProject.class);
+            assertTrue(GrantService.get().hasActiveGrant("u1", JOB, Item.CONFIGURE), "the intact grant must still load next to the corrupt file");
+            assertFalse(job.getACL().hasPermission2(User.getById("u1", true).impersonate2(), Item.DELETE), "a permission check must answer, not throw");
+            assertEquals(200, postConfigXml(r, "u1", "after-corrupt"), "the intact grant must still authorize the config save");
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** Installs a persistable wrapped matrix strategy, change control and the target job. */

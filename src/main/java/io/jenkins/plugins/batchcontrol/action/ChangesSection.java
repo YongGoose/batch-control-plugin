@@ -1,10 +1,12 @@
 package io.jenkins.plugins.batchcontrol.action;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.DiffSummary;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -151,6 +153,17 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     /** Jelly helper: human-readable timestamp. */
     public String format(Instant instant) {
         return Dates.format(instant);
+    }
+
+    /**
+     * Jelly helper: {@code +12 / -3 lines} for a record's diff, shown next to the disclosure
+     * control so the size of a configuration change is readable without opening it (U-07).
+     *
+     * @return an empty string when there is no countable diff (no diff, or the "too large to
+     *         store" placeholder), in which case the view shows no summary
+     */
+    public String diffSummary(@CheckForNull String diff) {
+        return DiffSummary.of(diff);
     }
 
     private List<ChangeRecord> allSorted() {
