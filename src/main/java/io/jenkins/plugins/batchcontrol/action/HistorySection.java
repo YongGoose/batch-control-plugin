@@ -101,6 +101,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * Serves the index URL {@code /batch-control/history/}. The whole section is read-only, so
      * every verb except GET/HEAD is refused with 405.
      */
+    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         if (refuseNonGet(req, rsp)) {
@@ -115,6 +117,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * GET {@code summary?month=YYYY-MM} — the monthly aggregate as JSON (T-12-04). Absent month
      * defaults to the current month; a malformed month is a 400.
      */
+    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doSummary(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String month)
             throws IOException {
         if (refuseNonGet(req, rsp)) {
@@ -147,6 +151,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * {@code changes.csv}, {@code requests.csv}); anything else under this section is a 404.
      * Stapler cannot route dotted tokens to {@code do*} methods, hence the dynamic dispatch.
      */
+    // Read-only CSV export (GET/HEAD only); ViewHistory enforced in getTarget(), no state change.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doDynamic(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         String rest = req.getRestOfPath();

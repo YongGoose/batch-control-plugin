@@ -42,6 +42,8 @@ public class RetentionPeriodicWork extends PeriodicWork {
     }
 
     @Override
+    // PeriodicWork callback, not an HTTP entry point.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doRun() {
         if (Jenkins.getInstanceOrNull() == null) {
             return;

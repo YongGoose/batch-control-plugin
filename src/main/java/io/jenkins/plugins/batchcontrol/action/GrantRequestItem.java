@@ -101,6 +101,8 @@ public class GrantRequestItem implements ModelObject {
      * GET/HEAD is refused with 405. The decision endpoints below are separate URLs
      * ({@code approve}, {@code reject}, {@code cancel}) and are not affected by this guard.
      */
+    // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         String method = req.getMethod();
