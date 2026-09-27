@@ -29,6 +29,8 @@ public class ActiveGrantsSection {
      * is redirected to the grants index. Every other verb is refused with 405 (no state change
      * on this URL).
      */
+    // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
         String method = req.getMethod();
         if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
@@ -67,6 +69,8 @@ public class ActiveGrantsSection {
          * view for a single grant, so redirect to the grants index. GET never changes state; the
          * only state change in this subtree is the {@code @RequirePOST} revoke endpoint below.
          */
+        // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
+        @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
         public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
             String method = req.getMethod();
             if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {

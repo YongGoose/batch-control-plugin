@@ -127,6 +127,8 @@ public class IncidentItem implements ModelObject {
      * happen only on the named endpoints below, so every verb except GET/HEAD is refused with
      * 405 here.
      */
+    // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         String method = req.getMethod();

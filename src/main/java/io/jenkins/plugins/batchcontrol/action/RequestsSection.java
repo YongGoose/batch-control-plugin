@@ -61,6 +61,8 @@ public class RequestsSection implements ModelObject, StaplerProxy {
      * (SPEC item 4): there is no modify/delete HTTP API, so every verb except GET/HEAD is
      * refused with 405.
      */
+    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         String method = req.getMethod();
