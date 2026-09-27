@@ -58,10 +58,6 @@
   <dependencies>
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
-      <artifactId>structs</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>cloudbees-folder</artifactId>
     </dependency>
     <dependency>

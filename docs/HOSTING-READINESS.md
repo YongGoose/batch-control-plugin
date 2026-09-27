@@ -235,7 +235,7 @@ listed in section 1 and section 6.
 | B20 | Plugin BOM imported and its `artifactId` in sync with the baseline (`bom-<baseline>.x`) | RPU `MavenVerifier.checkDependencyManagement` | PASS | `pom.xml:50` = `bom-${jenkins.baseline}.x` → `bom-2.568.x` | — |
 | B21 | BOM version must equal the latest released BOM for that line | same | PASS | `pom.xml:51` = `7093.v37de7b_4a_8a_4f`, which was `<latest>` and `<release>` in the live `maven-metadata.xml` on 2026-09-26 | Re-check on submission day — moving target |
 | B22 | No explicit `<version>` on dependencies the BOM manages | same | PASS | `pom.xml:58-108` — no dependency declares a version | — |
-| B23 | No banned third-party dependency in `compile` scope (must use the API plugin instead) | RPU `MavenVerifier.checkDependencies` + `banned-dependencies.lst` | PASS | compile deps are only `structs` (`pom.xml:59-62`) and `cloudbees-folder` (`pom.xml:63-66`); neither is in the banned list | — |
+| B23 | No banned third-party dependency in `compile` scope (must use the API plugin instead) | RPU `MavenVerifier.checkDependencies` + `banned-dependencies.lst` | PASS | the only compile dep is `cloudbees-folder` (`pom.xml:59-62`), which is not in the banned list | — |
 
 ### C. Required repository files
 
@@ -373,7 +373,7 @@ After hosting, this file becomes the plugin's landing page on plugins.jenkins.io
   2. **Features** in user language, staying inside `docs/SPEC.md` section 1 MVP
      scope (items 1–12); SPEC items 13–15 go under a separate "Roadmap" heading.
   3. **Installation**, including the dependency reality found in e2e: the `.hpi`
-     manifest only requires `structs` and `cloudbees-folder`, but the five
+     manifest only requires `cloudbees-folder`, but the five
      permissions cannot be assigned without a matrix/role-style authorization
      strategy (`docs/reports/e2e-01.md`, documentation defect 3).
   4. **Configuration** — the global switches are off by default; and the step
@@ -407,7 +407,7 @@ documentation. What it contains, and where each part is sourced from:
 | The problem; the two controls (run control vs. change control) | `docs/SPEC.md` §2 items 5–9, `docs/DECISIONS.md` D-01/D-03/D-06 |
 | **What is blocked and what is not** — a path-by-path table (UI / REST / CLI / Replay blocked; timer / upstream / SCM / unclassified pass; approval bound to one request and consumed once; queue-entry-only blocking) | `docs/SPEC.md` §2 item 6 acceptance criteria, D-23, D-25, D-27, D-30 |
 | Features (MVP items 1–12 only; 13–15 moved to *Roadmap*) | `docs/SPEC.md` §2 |
-| Requirements, Installation | `pom.xml:37-38` (baseline 2.568 / `jenkins.version` 2.568.3), `pom.xml:64-71` (`structs`, `cloudbees-folder`), `Jenkinsfile` (JDK 21), `e2e/plugins.txt` and `e2e/Dockerfile` |
+| Requirements, Installation | `pom.xml:37-38` (baseline 2.568 / `jenkins.version` 2.568.3), `pom.xml` (`cloudbees-folder`), `Jenkinsfile` (JDK 21), `e2e/plugins.txt` and `e2e/Dockerfile` |
 | Configuration — four steps, the second being **select `Batch Control (wrapping)`** with the real strategy as delegate | `docs/ARCHITECTURE.md` §4, `e2e/init.groovy.d/00-security.groovy`, the defect at `docs/reports/e2e-01.md:423-431`; field labels read from the Jelly forms and `Messages.properties`, defaults from `docs/SPEC.md` §5 |
 | Screen guide | section display names in `src/main/java/.../action/*.java`, CSV names in `action/HistorySection.java:146-203` |
 | Known limitations — 29 numbered items in 6 groups | `docs/ARCHITECTURE.md` §7, D-19, D-31/32/33, `docs/TEST-MATRIX.md` notes 6 and 12, `docs/reports/security-01.md`, `security-02.md`, `red-team-01.md`, `spec-review-S3.md`, `spec-review-S4.md`, `docs/reports/e2e-02.md:403-440` |
@@ -657,7 +657,7 @@ one genuine blocker before any build existed.
 | `ban-deprecated-stapler.skip=false` | Expected to pass | **0** references to v1 `StaplerRequest` / `StaplerResponse`; the code uses `StaplerRequest2` (13) and `StaplerResponse2` (12) throughout, and the single current-request lookup is already the v2 form — `src/main/java/io/jenkins/plugins/batchcontrol/action/HistorySection.java:220` calls `Stapler.getCurrentRequest2()`. **0** hits for `Stapler.getCurrentRequest()` / `getCurrentResponse()`. |
 | `ban-commons-lang-2.skip=false` | Expected to pass | **0** references to `org.apache.commons.lang.` (excluding `lang3`) anywhere under `src/`. |
 | `banObsoleteDependencyOverrides.skip=false` | Expected to pass | No dependency in `pom.xml:58-108` declares a `<version>`, so there is no override for the rule to object to. |
-| `hpi.strictBundledArtifacts=true` | Expected to pass | Compile-scope dependencies are only `structs` and `cloudbees-folder`, both Jenkins plugins, so nothing should be bundled into the HPI's `WEB-INF/lib`. Cross-checks E8: `src/` contains no jars, minified JS or vendored sources. |
+| `hpi.strictBundledArtifacts=true` | Expected to pass | The only compile-scope dependency is `cloudbees-folder`, a Jenkins plugin, so nothing should be bundled into the HPI's `WEB-INF/lib`. Cross-checks E8: `src/` contains no jars, minified JS or vendored sources. |
 
 ### R1 detail — the JUnit 4 blocker, and how it was cleared
 

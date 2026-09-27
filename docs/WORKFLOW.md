@@ -14,7 +14,7 @@ P0 setup → P1 PoC 🧑 → P2 test matrix 🧑 → P3 implementation (4 slices
 **Work**
 1. Generate `empty-plugin` with `mvn -U archetype:generate -Dfilter="io.jenkins.archetypes:"`. artifactId `batch-control`, groupId `io.jenkins.plugins`, package `io.jenkins.plugins.batchcontrol`.
 2. Merge the generated files into this kit directory (keeping the kit's CLAUDE.md, docs/, .claude/).
-3. pom.xml: latest parent POM, latest LTS `jenkins.version`, dependencies `workflow-job`, `workflow-cps` (for tests), `matrix-auth` (for tests), `cloudbees-folder`, `structs`. `jenkins-test-harness` in test scope.
+3. pom.xml: latest parent POM, latest LTS `jenkins.version`, dependencies `workflow-job`, `workflow-cps` (for tests), `matrix-auth` (for tests), `cloudbees-folder`. `jenkins-test-harness` in test scope.
 4. `buildPlugin()` in `Jenkinsfile`.
 5. Confirm `mvn -q clean verify` passes. `git init`, first commit.
 6. Record Phase 0 as complete in `docs/STATUS.md`.

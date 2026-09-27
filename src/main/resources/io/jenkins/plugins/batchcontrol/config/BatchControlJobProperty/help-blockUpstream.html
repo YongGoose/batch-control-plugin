@@ -25,7 +25,7 @@
   <p>
     A blocked upstream run is refused quietly, because the trigger has nobody to show a message to,
     although the upstream job surfaces the failure. If a chain stopped working unexpectedly, this
-    screen is the first thing to check, and the controller log carries one "Blocked
-    upstream-triggered run of job" line per refusal.
+    screen is the first thing to check, and the controller log carries a "Blocked
+    upstream-triggered run of job" line, at most once an hour per job (repeats are logged at FINE).
   </p>
 </div>

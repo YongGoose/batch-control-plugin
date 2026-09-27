@@ -25,8 +25,8 @@
   <ul>
     <li>this screen — if <b>Block cron (timer) triggers</b> is checked while your definition says
       otherwise, the lock is the reason;</li>
-    <li>the controller log — a refused timer run logs one "Blocked timer-triggered run of job"
-      line per attempt, and a cron that never fired logs nothing at all;</li>
+    <li>the controller log — a refused timer run logs a "Blocked timer-triggered run of job"
+      line at most once an hour per job (repeats are logged at FINE), and a cron that never fired logs nothing at all;</li>
     <li>the change history — the job has a <code>CREATE</code> record and no later
       <code>CONFIGURE</code> record clearing the switches, which is positive evidence that nothing
       has unlocked it since.</li>

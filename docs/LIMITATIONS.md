@@ -104,8 +104,8 @@ from scripts.
     Three things tell those two cases apart. The job's **configuration screen** is
     the first: if `Block cron (timer) triggers` is checked on a job whose Job DSL
     definition says otherwise, the lock is the reason. The **controller log** is
-    the second: a refused timer run logs one "Blocked timer-triggered run of job"
-    line per attempt, and a cron that never fired logs nothing at all. The
+    the second: a refused timer run logs a "Blocked timer-triggered run of job"
+    line at INFO at most once an hour per job (repeats go to FINE), and a cron that never fired logs nothing at all. The
     **change history** is the third: the job has a `CREATE` record and no
     subsequent `CONFIGURE` record clearing the switches, which is the positive
     evidence that nothing has unlocked it since. The same three steps are in the

@@ -101,7 +101,7 @@ options is likewise turned away quietly and logged.
 ## Requirements
 
 Jenkins 2.568.3 or newer, the baseline the plugin is compiled against;
-`structs` and `cloudbees-folder`, which the Plugin Manager resolves for you.
+`cloudbees-folder`, which the Plugin Manager resolves for you.
 
 The five Batch Control permissions are only visible on authorization strategies
 that draw a permission matrix, so with Jenkins' built-in "Logged-in users can do
@@ -324,7 +324,7 @@ be ignored. A generated nightly job therefore does not run its first night, and
 because an unattended refusal is silent by contract, that looks exactly like a cron
 that never fired. The job's own configuration screen is what tells the two apart:
 if `Block cron (timer) triggers` is checked, the lock is why. The controller log
-also carries one "blocked timer-triggered run" line per refusal. The seed jobs in
+also carries a "blocked timer-triggered run" line, at most once an hour per job. The seed jobs in
 this repository's own e2e environment stopped building the first time this landed.
 
 **Secrets survive only as far as detection reaches.** A stored incident log tail
