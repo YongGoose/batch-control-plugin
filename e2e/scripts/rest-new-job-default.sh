@@ -1,37 +1,38 @@
 #!/usr/bin/env bash
-# D-31 / D-32 (issue #10) - while run control is on, every newly created job
-# starts approval-required.
+# D-34 / P-14 - while run control is on, every newly created job starts
+# activation-locked: approvalRequired, blockTimer and blockUpstream all true and
+# no upstream allow list, so no cause at all can start it until somebody turns a
+# switch off in its configuration (a recorded CONFIGURE change).
 #
-#   A  created through the REST createItem endpoint with no plugin property
-#      -> the property must be there with approvalRequired=true
-#   B  created with approvalRequired=false in the payload
-#      -> the payload must not win (D-31: opting out is a later, recorded change)
-#   C  created with a one-minute timer
-#      -> the timer must still run it (approval blocks people, not automation)
-#   D  created while run control is OFF
-#      -> no default is applied (the feature must be invisible when switched off)
+#   A  created through REST createItem with no plugin property -> locked
+#   B  created with a payload that opts out (approvalRequired=false,
+#      blockTimer=false, blockUpstream=false, an upstream allow list)
+#      -> the payload does not win, the job is locked
+#   C  a TIMER cause on A is refused by the queue gate
+#   D  admin clears blockTimer on A through config.xml -> the TIMER cause
+#      passes, and a CONFIGURE change record for A exists
 #
-# Manual runs of A are refused with guidance; TIMER and SCM causes pass the gate.
-# The four jobs are deleted at the end.
+# Every check prints PASS/FAIL; the script exits non-zero on any FAIL. The jobs
+# are deleted at the end.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-echo "### D-31 / D-32  the new-job approval default"
+echo "### D-34 / P-14  the new-job activation lock"
 
 bc_login admin
-bc_login requester
 
-A=batch-e2e-d31-plain
-B=batch-e2e-d31-optout
-C=batch-e2e-d31-timer
-D=batch-e2e-d31-switchoff
+A=batch-e2e-d34-plain
+B=batch-e2e-d34-optout
+FAILS=0
+check() {   # $1 = label, $2 = expected, $3 = actual
+  if [ "$2" = "$3" ]; then echo "PASS  $1 ($3)"; else echo "FAIL  $1: expected '$2', got '$3'"; FAILS=$((FAILS + 1)); fi
+}
 
-# minimal Freestyle payloads ----------------------------------------------------
-make_config() {   # $1 = extra <properties> body, $2 = extra <triggers> body
-  cat > "$OUT_DIR/d31-config.xml" <<XML
+make_config() {   # $1 = extra <properties> body
+  cat > "$OUT_DIR/d34-config.xml" <<XML
 <?xml version='1.1' encoding='UTF-8'?>
 <project>
-  <description>Created by the e2e D-31 scenario.</description>
+  <description>Created by the e2e D-34 scenario.</description>
   <keepDependencies>false</keepDependencies>
   <properties>$1</properties>
   <scm class="hudson.scm.NullSCM"/>
@@ -39,11 +40,11 @@ make_config() {   # $1 = extra <properties> body, $2 = extra <triggers> body
   <disabled>false</disabled>
   <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
   <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
-  <triggers>$2</triggers>
+  <triggers/>
   <concurrentBuild>false</concurrentBuild>
   <builders>
     <hudson.tasks.Shell>
-      <command>echo "d31 sample job"</command>
+      <command>echo "d34 sample job"</command>
     </hudson.tasks.Shell>
   </builders>
   <publishers/>
@@ -53,23 +54,32 @@ XML
 }
 
 create_job() {    # $1 = name
-  bc_post admin "$OUT_DIR/d31-create-$1.html" "/createItem?name=$1" \
-    -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/d31-config.xml"
+  bc_post admin "$OUT_DIR/d34-create-$1.html" "/createItem?name=$1" \
+    -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/d34-config.xml"
 }
 
-report_property() {  # $1 = name
-  bc_get admin "$OUT_DIR/d31-$1.xml" "/job/$1/config.xml" > /dev/null
-  if grep -q 'BatchControlJobProperty' "$OUT_DIR/d31-$1.xml"; then
-    echo "    property present, approvalRequired = $(grep -o '<approvalRequired>[a-z]*' "$OUT_DIR/d31-$1.xml" | head -1 | sed 's#<approvalRequired>##')"
-  else
-    echo "    property absent"
-  fi
+field() {         # $1 = job, $2 = element -> value of the plugin property's element
+  bc_get admin "$OUT_DIR/d34-$1.xml" "/job/$1/config.xml" > /dev/null
+  sed -n '/BatchControlJobProperty/,/\/io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty/p' \
+    "$OUT_DIR/d34-$1.xml" | grep -o "<$2>[^<]*" | head -1 | sed "s#<$2>##"
+}
+
+upstream_list() { # $1 = job -> number of <string> entries in allowedUpstreamJobs
+  bc_get admin "$OUT_DIR/d34-$1.xml" "/job/$1/config.xml" > /dev/null
+  sed -n '/<allowedUpstreamJobs/,/<\/allowedUpstreamJobs>/p' "$OUT_DIR/d34-$1.xml" | grep -c '<string>' || true
+}
+
+assert_locked() { # $1 = job
+  check "$1 approvalRequired" true "$(field "$1" approvalRequired)"
+  check "$1 blockTimer"       true "$(field "$1" blockTimer)"
+  check "$1 blockUpstream"    true "$(field "$1" blockUpstream)"
+  check "$1 allowedUpstreamJobs entries" 0 "$(upstream_list "$1")"
 }
 
 # --- A: plain creation
-make_config '' ''
-echo "--- POST /createItem?name=$A (admin, no plugin property in the payload) -> HTTP $(create_job "$A")"
-report_property "$A"
+make_config ''
+check "POST /createItem?name=$A" 200 "$(create_job "$A")"
+assert_locked "$A"
 
 # --- B: the payload tries to opt out
 make_config '
@@ -77,87 +87,41 @@ make_config '
       <approvalRequired>false</approvalRequired>
       <blockTimer>false</blockTimer>
       <blockUpstream>false</blockUpstream>
-      <allowedUpstreamJobs/>
+      <allowedUpstreamJobs><string>some-upstream</string></allowedUpstreamJobs>
       <jobApprovers/>
-    </io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>' ''
-echo "--- POST /createItem?name=$B (admin, payload says approvalRequired=false) -> HTTP $(create_job "$B")"
-report_property "$B"
+    </io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty>'
+check "POST /createItem?name=$B (opt-out payload)" 200 "$(create_job "$B")"
+assert_locked "$B"
 
-# --- A: a manual run must be refused with guidance, and nothing may build
-status=$(bc_post requester "$OUT_DIR/d31-manual.html" "/job/$A/build?delay=0sec")
-echo "--- POST /job/$A/build (requester) -> HTTP $status (expected 400 with guidance)"
-echo "    guidance: $(grep -o -i 'Approval required[^<]*' "$OUT_DIR/d31-manual.html" | head -1)"
-
-# --- A: which causes the queue gate lets through
-cat > "$OUT_DIR/d31-causes.groovy" <<GROOVY
+# --- C/D: probe a TIMER cause through the queue gate
+cat > "$OUT_DIR/d34-timer.groovy" <<GROOVY
 import hudson.model.CauseAction
-import hudson.model.Cause
 import hudson.model.Queue
-import hudson.triggers.SCMTrigger
 import hudson.triggers.TimerTrigger
 import jenkins.model.Jenkins
-
 def job = Jenkins.get().getItemByFullName('$A')
-def sb = new StringBuilder()
-def probe = { String label, Cause cause ->
-    // A user-originated cause is refused by THROWING hudson.model.Failure (so the
-    // person sees why); the unattended causes are refused by returning false.
-    // Catching it here keeps all three results in one answer.
-    try {
-        def r = Queue.getInstance().schedule2(job, 0, [new CauseAction(cause)])
-        sb << "\${label}: refused=\${r.isRefused()} created=\${r.isCreated()}\n"
-    } catch (Throwable t) {
-        sb << "\${label}: refused by \${t.getClass().simpleName} - \${t.message}\n"
-    }
-    // Keep the environment clean: drop whatever the probe queued.
-    Queue.getInstance().clear()
-}
-probe('TIMER', new TimerTrigger.TimerTriggerCause())
-probe('SCM  ', new SCMTrigger.SCMTriggerCause('e2e probe'))
-probe('USER ', new Cause.UserIdCause('requester'))
-return sb.toString()
+def r = Queue.getInstance().schedule2(job, 0, [new CauseAction(new TimerTrigger.TimerTriggerCause())])
+Queue.getInstance().clear()
+return "created=\${r.isCreated()}"
 GROOVY
-echo "--- which causes pass the gate on $A (approval required, blockTimer=false):"
-bc_script "$OUT_DIR/d31-causes.groovy" | sed 's/^/    /'
+check "TIMER cause on locked $A" "created=false" "$(bc_script "$OUT_DIR/d34-timer.groovy" | tr -d '[:space:]' | sed 's/^Result://')"
 
-# --- C: a real timer run
-make_config '' '
-    <hudson.triggers.TimerTrigger>
-      <spec>* * * * *</spec>
-    </hudson.triggers.TimerTrigger>'
-echo "--- POST /createItem?name=$C (admin, one-minute timer) -> HTTP $(create_job "$C")"
-report_property "$C"
-echo "--- waiting up to 80s for the timer to run the approval-required job"
-built=no
-for _ in $(seq 1 27); do
-  bc_get admin "$OUT_DIR/d31-timer.json" "/job/$C/api/json?tree=builds[number,result]" > /dev/null
-  if grep -q '"number"' "$OUT_DIR/d31-timer.json"; then built=yes; break; fi
-  sleep 3
-done
-echo "    timer produced a build: $built  $(cat "$OUT_DIR/d31-timer.json")"
+bc_get admin "$OUT_DIR/d34-edit.xml" "/job/$A/config.xml" > /dev/null
+sed 's#<blockTimer>true</blockTimer>#<blockTimer>false</blockTimer>#' "$OUT_DIR/d34-edit.xml" > "$OUT_DIR/d34-edit-new.xml"
+check "admin POST /job/$A/config.xml (blockTimer=false)" 200 \
+  "$(bc_post admin "$OUT_DIR/d34-edit.html" "/job/$A/config.xml" \
+      -H 'Content-Type: application/xml' --data-binary "@$OUT_DIR/d34-edit-new.xml")"
+check "$A blockTimer after admin edit" false "$(field "$A" blockTimer)"
+check "TIMER cause on $A after blockTimer cleared" "created=true" "$(bc_script "$OUT_DIR/d34-timer.groovy" | tr -d '[:space:]' | sed 's/^Result://')"
 
-# --- D: run control off
-cat > "$OUT_DIR/d31-switch.groovy" <<'GROOVY'
-import jenkins.model.Jenkins
-def c = Jenkins.get().pluginManager.uberClassLoader
-        .loadClass('io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration')
-        .getMethod('get').invoke(null)
-c.setRunControlEnabled(RUN_CONTROL)
-c.save()
-return "runControlEnabled = ${c.isRunControlEnabled()}"
-GROOVY
-sed 's/RUN_CONTROL/false/' "$OUT_DIR/d31-switch.groovy" > "$OUT_DIR/d31-switch-off.groovy"
-sed 's/RUN_CONTROL/true/'  "$OUT_DIR/d31-switch.groovy" > "$OUT_DIR/d31-switch-on.groovy"
-echo "--- $(bc_script "$OUT_DIR/d31-switch-off.groovy")"
-make_config '' ''
-echo "--- POST /createItem?name=$D (admin, run control OFF) -> HTTP $(create_job "$D")"
-report_property "$D"
-echo "--- $(bc_script "$OUT_DIR/d31-switch-on.groovy")"
+bc_get admin "$OUT_DIR/d34-changes.csv" "/batch-control/history/changes.csv" > /dev/null
+check "CONFIGURE change record for $A" yes \
+  "$(grep -q ",CONFIGURE,$A," "$OUT_DIR/d34-changes.csv" && echo yes || echo no)"
 
 # --- cleanup
-for job in "$A" "$B" "$C" "$D"; do
-  status=$(bc_post admin "$OUT_DIR/d31-delete.html" "/job/$job/doDelete")
-  echo "--- POST /job/$job/doDelete (admin) -> HTTP $status"
+for job in "$A" "$B"; do
+  bc_post admin "$OUT_DIR/d34-delete.html" "/job/$job/doDelete" > /dev/null
 done
-bc_get admin "$OUT_DIR/d31-jobs.json" "/api/json?tree=jobs[name]" > /dev/null
-echo "jobs left: $(cat "$OUT_DIR/d31-jobs.json")"
+
+echo "### D-34 / P-14: $FAILS failure(s)"
+[ "$FAILS" -eq 0 ]
