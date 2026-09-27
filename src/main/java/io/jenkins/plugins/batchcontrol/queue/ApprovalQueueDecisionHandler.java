@@ -13,9 +13,14 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Supplier;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -52,6 +57,18 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     private static final String REPLAY_CAUSE_CLASS =
             "org.jenkinsci.plugins.workflow.cps.replay.ReplayCause";
 
+    /** An INFO line per job and kind is written at most this often; the rest go to FINE. */
+    static final long INFO_INTERVAL_MILLIS = 60L * 60L * 1000L;
+
+    /** Bound on the rate-limit map; it is simply cleared when full. */
+    private static final int MAX_RATE_LIMIT_ENTRIES = 10_000;
+
+    private static final String RATE_LIMIT_SUFFIX =
+            " (further occurrences for this job are logged at FINE for the next hour)";
+
+    /** Last INFO time in epoch millis, keyed by kind plus job full name. */
+    private static final ConcurrentMap<String, Long> LAST_INFO = new ConcurrentHashMap<>();
+
     @Override
     public boolean shouldSchedule(Queue.Task p, List<Action> actions) {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
@@ -86,8 +103,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         // 2. Pipeline Replay: refused quietly (ReplayAction.run has no Failure channel).
         for (Cause cause : causes) {
             if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
-                LOGGER.info(() -> "Blocked replay of approval-required job '"
-                        + job.getFullName() + "'");
+                logRateLimited("replay", job,
+                        () -> "Blocked replay of approval-required job '" + job.getFullName() + "'");
                 return false;
             }
         }
@@ -131,7 +148,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         for (Cause cause : causes) {
             if (cause instanceof TimerTrigger.TimerTriggerCause) {
                 if (property.isBlockTimer()) {
-                    LOGGER.info(() -> "Blocked timer-triggered run of job '"
+                    logRateLimited("timer", job, () -> "Blocked timer-triggered run of job '"
                             + job.getFullName() + "' (blockTimer=true)");
                     return false;
                 }
@@ -151,7 +168,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     return true;
                 }
                 // D-16: with blockUpstream an empty/unset allow list blocks every upstream job.
-                LOGGER.info(() -> "Blocked upstream-triggered run of job '" + job.getFullName()
+                logRateLimited("upstream", job, () -> "Blocked upstream-triggered run of job '"
+                        + job.getFullName()
                         + "' from '" + upstream + "' (blockUpstream=true, not on the allow list)");
                 return false;
             }
@@ -163,9 +181,41 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 return true;
             }
         }
-        LOGGER.info(() -> "Letting job '" + job.getFullName()
+        logRateLimited("unclassified", job, () -> "Letting job '"
+                + job.getFullName()
                 + "' pass the approval gate with unclassified causes: " + causes);
         return true;
+    }
+
+    /**
+     * Logs at INFO at most once per {@link #INFO_INTERVAL_MILLIS} per kind and job, and at FINE
+     * otherwise, so a frequent cron on a locked job cannot flood the log.
+     */
+    private static void logRateLimited(String kind, Job<?, ?> job, Supplier<String> message) {
+        if (claimInfoSlot(kind + '|' + job.getFullName())) {
+            LOGGER.info(() -> message.get() + RATE_LIMIT_SUFFIX);
+        } else {
+            LOGGER.log(Level.FINE, message);
+        }
+    }
+
+    private static boolean claimInfoSlot(String key) {
+        if (!LOGGER.isLoggable(Level.INFO)) {
+            return false;
+        }
+        long now = BatchClock.now().toEpochMilli();
+        if (LAST_INFO.size() >= MAX_RATE_LIMIT_ENTRIES) {
+            LAST_INFO.clear();
+        }
+        boolean[] claimed = {false};
+        LAST_INFO.compute(key, (k, last) -> {
+            if (last == null || now - last >= INFO_INTERVAL_MILLIS) {
+                claimed[0] = true;
+                return now;
+            }
+            return last;
+        });
+        return claimed[0];
     }
 
     private static List<Cause> collectCauses(List<Action> actions) {

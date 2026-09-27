@@ -15,13 +15,20 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
+import io.jenkins.plugins.batchcontrol.queue.ApprovalQueueDecisionHandler;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
@@ -168,6 +175,43 @@ public class QueueBlockTest {
         assertNull(future, "a blocked timer cause must be refused at queue entry");
         assertBlocked(job, 1);
         assertTrue(job.getBuilds().isEmpty());
+    }
+
+    /** A frequent cron on a locked job logs one INFO line per hour, not one per refusal. */
+    @Test
+    public void blockedTimerInfoLogIsRateLimited() throws Exception {
+        FreeStyleProject cronJob = j.createFreeStyleProject("timer-log-rate-limit");
+        BatchControlJobProperty property = new BatchControlJobProperty(true);
+        property.setBlockTimer(true);
+        setBatchControl(cronJob, property);
+
+        List<LogRecord> infoRecords = Collections.synchronizedList(new ArrayList<>());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord logRecord) {
+                if (logRecord.getLevel() == Level.INFO
+                        && logRecord.getMessage().contains("'timer-log-rate-limit'")) {
+                    infoRecords.add(logRecord);
+                }
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        Logger logger = Logger.getLogger(ApprovalQueueDecisionHandler.class.getName());
+        logger.addHandler(handler);
+        try {
+            assertNull(cronJob.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "the first timer cause must be refused");
+            assertNull(cronJob.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "the second timer cause must be refused");
+        } finally {
+            logger.removeHandler(handler);
+        }
+        assertEquals(1, infoRecords.size(), "only the first refusal within the hour is logged at INFO");
     }
 
     /** T-06-08: the plugin's own approved submission passes and runs the build. */
