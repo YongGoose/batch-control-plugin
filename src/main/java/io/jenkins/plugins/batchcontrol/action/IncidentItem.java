@@ -21,7 +21,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -73,11 +72,6 @@ public class IncidentItem implements ModelObject {
     @CheckForNull
     public String getRunUrl() {
         return RunLinks.runUrlFromRunId(incident.getRunId());
-    }
-
-    /** One-line parameter rendering; values come from the incident already masked. */
-    public String parameters(Map<String, String> parameters) {
-        return RunLinks.formatParameters(parameters);
     }
 
     /** Root-relative build URL for the resolving run, or null. */

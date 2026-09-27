@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -45,9 +46,6 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  */
 @Restricted(NoExternalUse.class)
 public class JobRequestAction implements Action, StaplerProxy {
-
-    /** Mask stored instead of secret parameter values; never persist password plaintext. */
-    private static final String SECRET_MASK = "********";
 
     private final Job<?, ?> job;
 
@@ -198,11 +196,11 @@ public class JobRequestAction implements Action, StaplerProxy {
      */
     private static String flatten(ParameterValue value) {
         if (value.isSensitive()) {
-            return SECRET_MASK;
+            return SecretMasker.MASK;
         }
         Object raw = value.getValue();
         if (raw instanceof Secret) {
-            return SECRET_MASK;
+            return SecretMasker.MASK;
         }
         return raw == null ? "" : String.valueOf(raw);
     }
