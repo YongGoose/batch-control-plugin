@@ -223,6 +223,13 @@ from scripts.
     accumulate until the pending timeout clears them. Likewise nothing limits the
     rate of configuration changes, so a burst of saves inside a window produces a
     burst of diff and snapshot writes against a single store lock.
+32. **Performance at volume is unmeasured.** The history, dashboard and
+    change-record screens read a whole month bucket into memory on every page
+    load, the incident list opens one file per incident, and run and grant
+    request files are never pruned and are all scanned every minute by the
+    expiry job. SPEC item 6's target of 5,000 runs a day has therefore not been
+    measured, and it is not expected to hold at that scale until the store gains
+    an index.
 
 ## Before you switch either control on
 
@@ -230,7 +237,7 @@ Two consequences of the design that are easy to meet unprepared. Both were
 observed on a running Jenkins 2.568.3, and neither is a defect: they are what the
 code does on purpose.
 
-32. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
+33. **A `CONFIGURE` window confers more than `Item/Configure`.** The window is
     resolved the way Jenkins resolves any permission, by walking `impliedBy`, so
     every permission that declares itself implied by a granted action is answered
     too. Enumerated over the installed permissions of the reference environment, a
@@ -245,7 +252,7 @@ code does on purpose.
     queue gate still refuses a replay of a job that requires approval, so it is not
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
-33. **Turning change control off cuts off work in progress.** The switch is a kill
+34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
     the account that flipped it. Whoever is part-way through a change loses the

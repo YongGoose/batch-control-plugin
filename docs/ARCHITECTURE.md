@@ -15,16 +15,16 @@
 | 실행 차단 | `hudson.model.Queue.QueueDecisionHandler#shouldSchedule(Task, List<Action>)` | `CauseAction`으로 원인 분류. 승인 투입은 `ApprovedRunAction`(마커)으로 통과. 차단 시 사용자 유래 Cause(UserIdCause·CLI·REST)는 `Failure` throw로 안내, Timer·SCM 등 무인 Cause는 `return false` + 로그 |
 | 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | 요청 저장 파라미터 그대로 |
 | 삭제 차단 | `ItemListener#onCheckDelete(Item)` → `throw new Failure(...)` | 변경 통제 on + 활성 Grant(DELETE) 없으면 거부 |
-| 변경 기록 | `ItemListener#onCreated/onUpdated/onDeleted/onRenamed/onLocationChanged` | 사후 훅. 현재 인증 `Jenkins.getAuthentication2()` 기록 |
+| 변경 기록 | `ItemListener#onCreated/onDeleted/onRenamed/onLocationChanged` | 사후 훅. 현재 인증 `Jenkins.getAuthentication2()` 기록 |
 | 설정 diff | `SaveableListener#onChange(Saveable, XmlFile)` + 직전 스냅숏 보관 | 스냅숏은 `snapshots/<jobFullName>.xml`에 최신 1개만 |
 | 임시 권한 | `hudson.security.AuthorizationStrategy`(위임형) + `hudson.security.ACL` | 4절 참고 |
-| 권한 정의 | `hudson.security.PermissionGroup`, `hudson.security.Permission` | `Item` 스코프. `Manage`는 `Jenkins.ADMINISTER` implied |
+| 권한 정의 | `hudson.security.PermissionGroup`, `hudson.security.Permission` | `PermissionScope.JENKINS` 스코프(전역 권한). `Manage`는 `Jenkins.ADMINISTER` implied |
 | 요청/결재/대시보드 화면 | `hudson.model.RootAction`(전역), `hudson.model.Action` + `TransientActionFactory<Job>`(잡별) | Jelly 뷰 |
 | Build Now 대체 | `TransientActionFactory<Job>` + `AlternativeUiTextProvider` | 승인 대상 잡만 |
-| 실행 기록 | `hudson.model.listeners.RunListener#onStarted/onCompleted/onFinalized` | `Run` 기준이라 Freestyle·Pipeline 공통 |
+| 실행 기록 | `hudson.model.listeners.RunListener#onFinalized` (실행 기록은 여기서만 생성) | `Run` 기준이라 Freestyle·Pipeline 공통 |
 | 중단자 | `jenkins.model.InterruptedBuildAction` | 있으면 `abortedBy` |
-| 오류 등록 | `RunListener#onCompleted`에서 `Result` 확인 | 로그 tail은 `Run.getLog(100)` |
-| 만료·보관 정리 | `hudson.model.PeriodicWork` (1분 주기) / `AsyncPeriodicWork`(일 1회 보관 정리) | 만료 판정의 원본은 시각 비교, 주기 작업은 상태 갱신·정리용 |
+| 오류 등록 | `RunListener#onFinalized`에서 `Result` 확인 | 로그 tail은 `Run.getLog(100)` |
+| 만료·보관 정리 | `hudson.model.PeriodicWork` (1분 주기) / `PeriodicWork`(일 1회 보관 정리) | 만료 판정의 원본은 시각 비교, 주기 작업은 상태 갱신·정리용 |
 | 재시작 복구 | `@Initializer(after = InitMilestone.JOB_CONFIG_ADAPTED)` | APPROVED 미투입 요청 재투입, 만료 처리 |
 | 관리 경고 | `hudson.model.AdministrativeMonitor` | 권한 부여 없이 Configure를 가진 사용자 감지 |
 | 전역 설정 | `jenkins.model.GlobalConfiguration` | JCasC는 2차 |
@@ -41,7 +41,7 @@ io.jenkins.plugins.batchcontrol
 ├── queue/        ApprovalQueueDecisionHandler, ApprovedRunAction, ApprovedCause
 ├── listener/     ItemChangeListener, ConfigSnapshotListener, RunRecordListener, DeleteVetoListener
 ├── ops/          IncidentService, ExpiryPeriodicWork, RetentionPeriodicWork, StartupRecovery, ConfigureWithoutGrantMonitor
-├── action/       JobRequestAction(잡별 요청 화면), RunRequestRootAction, GrantRootAction, DashboardRootAction, IncidentRootAction, HistoryRootAction, CsvExport
+├── action/       BatchControlRootAction(전역 /batch-control/) + RequestsSection, GrantsSection, ActiveGrantsSection, DashboardSection, IncidentsSection, HistorySection, ChangesSection, JobRequestAction(잡별 요청 화면), JobGrantRequestAction
 └── ui/           뷰 모델, 페이징, 필터 파서
 ```
 
@@ -59,8 +59,13 @@ BatchControlAuthorizationStrategy extends AuthorizationStrategy
 
 GrantAwareACL extends ACL
   - hasPermission2(auth, perm):
-      if perm in {Item.CREATE, Item.CONFIGURE, Item.DELETE} and item != null:
-          if GrantService.hasActiveGrant(auth.getName(), item.getFullName(), perm, now): return true
+      if auth == SYSTEM: return true
+      if item != null and auth is not anonymous:
+          if changeControlEnabled:                       # 변경 통제 게이트가 먼저 (S-15)
+              for p = perm; p != null; p = p.impliedBy:  # impliedBy 체인 순회
+                  if p.enabled and GrantAction.fromPermission(p) != null
+                     and GrantService.hasActiveGrant(auth.getName(), item.getFullName(), p):
+                      return true
       return delegateACL.hasPermission2(auth, perm)
 ```
 
@@ -68,7 +73,7 @@ GrantAwareACL extends ACL
 - 만료: `hasActiveGrant`가 `expiresAt > now && revokedAt == null`을 검사. 타이머 없음.
 - 범위: `scope.type == FOLDER`면 `item.getFullName()`이 폴더 경로로 시작하는지, `JOB`이면 정확히 일치.
 - CREATE는 폴더(ItemGroup)의 ACL에서 검사되므로 FOLDER 범위 Grant만 CREATE를 부여할 수 있다.
-- 성능: GrantService는 활성 Grant를 메모리 맵에 유지(사용자 → 목록), 파일은 원본.
+- 성능: GrantService는 모든 Grant(활성·만료·회수 포함)를 하나의 평면 목록으로 메모리에 유지하고 조회 시 순회한다. 파일이 원본.
 - JCasC/설정 화면: `delegate`를 Describable로 선택. 기존 Matrix/Role 설정은 delegate 안에 그대로 유지.
 - 이 전략은 변경 통제 스위치와 무관하게 설치·선택 가능해야 하며, 활성 Grant가 없으면 delegate와 완전히 동일하게 동작한다.
 
@@ -89,7 +94,7 @@ $JENKINS_HOME/batch-control/
 
 - ID: `yyyyMMdd-HHmmss-<6자리 랜덤>` (파일명 안전, 시간순 정렬 가능).
 - 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush.
-- 읽기: 월 파일을 읽어 메모리 필터. 최근 2개월은 캐시(파일 mtime으로 무효화).
+- 읽기: 월 파일을 읽어 메모리 필터 (캐시 없음, 요청마다 파일을 읽음).
 - 비밀 마스킹: `hudson.model.PasswordParameterValue`와 `Secret` 타입은 `********`로 저장.
 - 보관: `retentionMonths` 초과 월 파일 삭제 + ChangeRecord(RETENTION).
 - 잡 이름 인코딩: `/` → `%2F`, 기타 URL-safe 인코딩. 디코딩 시 경로 탈출(`..`) 검증.
@@ -98,12 +103,12 @@ $JENKINS_HOME/batch-control/
 
 ```
 [실행 요청]
-사용자 → JobRequestAction(POST /job/X/batch-control/request)
+사용자 → JobRequestAction(POST /job/X/batch-control/submit)
   → 권한 Request 확인 → RunRequestService.create(사유, 파라미터, 결재자)
   → 검증(결재자 목록, 자가 지정 금지, 사유 필수) → FileStore 저장(PENDING)
 
 [결재]
-결재자 → RunRequestRootAction(POST /batch-control/requests/<id>/approve)
+결재자 → BatchControlRootAction → RequestItem(POST /batch-control/requests/<id>/approve)
   → 권한 Approve 확인 + 지정 결재자 일치 확인 + (자가 결재 정책)
   → RunRequestService.approve → APPROVED 저장
   → scheduleBuild2(파라미터, ApprovedCause, ApprovedRunAction)
