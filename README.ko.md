@@ -89,7 +89,7 @@ triggers`와 `Block upstream triggers`가 그 역할을 하고, 뒤쪽 항목에
 
 ## 요구 사항
 
-Jenkins 2.568.3 이상(플러그인이 컴파일되는 기준선), 그리고 `structs`와 `cloudbees-folder`.
+Jenkins 2.568.3 이상(플러그인이 컴파일되는 기준선), 그리고 `cloudbees-folder`.
 의존성은 플러그인 관리자가 알아서 해결합니다.
 
 Batch Control의 다섯 권한은 권한 매트릭스를 그려 주는 권한 전략에서만 보입니다. Jenkins 내장

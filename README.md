@@ -101,7 +101,7 @@ options is likewise turned away quietly and logged.
 ## Requirements
 
 Jenkins 2.568.3 or newer, the baseline the plugin is compiled against;
-`structs` and `cloudbees-folder`, which the Plugin Manager resolves for you.
+`cloudbees-folder`, which the Plugin Manager resolves for you.
 
 The five Batch Control permissions are only visible on authorization strategies
 that draw a permission matrix, so with Jenkins' built-in "Logged-in users can do
