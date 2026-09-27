@@ -38,7 +38,7 @@ echo "--- runs.csv -> HTTP $status, $(( $(grep -c '' "$OUT_DIR/dash-runs.csv") -
 echo "    cause types: $(cut -d, -f4 "$OUT_DIR/dash-runs.csv" | tail -n +2 | sort | uniq -c | tr '\n' ' ')"
 
 status=$(bc_get admin "$OUT_DIR/dash-page1.html" "/batch-control/dashboard/")
-rows=$(grep -c '<tr' "$OUT_DIR/dash-page1.html" || true)
+rows=$(grep -o '<tr' "$OUT_DIR/dash-page1.html" | wc -l | tr -d ' ')
 echo "--- GET /batch-control/dashboard/ -> HTTP $status, $rows <tr> elements (header rows included)"
 echo "    paging controls: $(grep -o 'href="[^"]*page=[0-9]*"' "$OUT_DIR/dash-page1.html" | sort -u | tr '\n' ' ')"
 echo "    page text: $(grep -o -i 'page [0-9]* of [0-9]*\|Next\|Previous\|Older\|Newer' "$OUT_DIR/dash-page1.html" | sort -u | tr '\n' ' ')"
