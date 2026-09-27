@@ -15,8 +15,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>Recording is active while ANY global switch is on (SPEC item 9 last criterion, D-13) and
  * fully off when both are off, in which case the plugin writes nothing at all.
  *
- * <p>The suppression flag guards internal plugin-initiated saves (the D-17 automatic job
- * property) against being recorded as user CONFIGURE changes — and against listener recursion.
+ * <p>The suppression flag guards internal plugin-initiated saves (the D-31/D-34
+ * activation-lock property written on every job creation) against being recorded as user CONFIGURE changes — and against listener recursion.
  */
 @Restricted(NoExternalUse.class)
 final class ChangeRecording {

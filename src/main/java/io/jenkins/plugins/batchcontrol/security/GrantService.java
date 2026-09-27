@@ -71,8 +71,8 @@ public final class GrantService {
 
     /**
      * The first active grant of {@code user} that covers {@code itemFullName} and includes
-     * {@code action}, or {@code null}. A {@code null} action matches any action (used by the
-     * D-17 "created inside a grant window" check).
+     * {@code action}, or {@code null}. A {@code null} action matches any action (used by
+     * {@code ItemChangeListener} to link RENAME/MOVE change records to the grant in use).
      */
     @CheckForNull
     public synchronized Grant findActiveGrant(String user, String itemFullName,

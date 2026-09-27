@@ -12,8 +12,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.access.AccessDeniedException;
 
 /**
- * Approver eligibility rules (SPEC items 2 and 3), shared by {@link RunRequestService} and the
- * web actions. Two different failure families are used on purpose:
+ * Approver eligibility rules (SPEC items 2 and 3), shared by {@link RunRequestService} and
+ * {@code GrantRequestService}. Two different failure families are used on purpose:
  *
  * <ul>
  *   <li>{@link IllegalArgumentException} for designation-time validation (bad input on request

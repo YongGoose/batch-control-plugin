@@ -10,8 +10,9 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * The plugin's only time-rendering vocabulary (U-07). Every screen goes through these three
- * methods so that the same kind of value never reads two ways on two screens:
+ * The plugin's only time-rendering vocabulary (U-07). Every timestamp and span shown on a
+ * screen goes through these three methods so that the same kind of value never reads two
+ * ways on two screens (grant durations are rendered elsewhere):
  *
  * <ul>
  *   <li>a <b>point in time</b> is always absolute, {@code yyyy-MM-dd HH:mm:ss z} in the
