@@ -151,6 +151,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * {@code changes.csv}, {@code requests.csv}); anything else under this section is a 404.
      * Stapler cannot route dotted tokens to {@code do*} methods, hence the dynamic dispatch.
      */
+    // Read-only CSV export (GET/HEAD only); ViewHistory enforced in getTarget(), no state change.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doDynamic(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         String rest = req.getRestOfPath();
