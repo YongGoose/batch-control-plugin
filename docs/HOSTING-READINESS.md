@@ -263,12 +263,11 @@ listed in section 1 and section 6.
 
 | # | Requirement | Source | Status | Evidence | Action |
 |---|---|---|---|---|---|
-> **Q5 is answered `No` (owner, 2026-09-26),** so this whole block is out of
-> scope for the first submission. The four rows that were FAIL are marked
-> **N/A**: nothing was fixed, they simply are not requirements while field 6 is
-> `No`. If CD is enabled later by a follow-up PR to
-> repository-permissions-updater, every row here becomes live again and D3's
-> advice starts to matter.
+> **Update 2026-09-27: field 6 is now `Yes`** (owner decision, reversing the
+> 2026-09-26 `No`). Every row in this block is live, and D1-D6 now pass: the
+> version is `${changelist}` with `changelist=999999-SNAPSHOT`, and `.mvn/` and
+> `cd.yaml` were added from the official templates. The earlier N/A statuses
+> below are kept for the record and superseded by this note.
 
 | D1 | Property `changelist` must be exactly `999999-SNAPSHOT` | RPU `MavenVerifier.checkAutomaticReleasesSettings`; <https://www.jenkins.io/doc/developer/publishing/releasing-cd/> | **N/A** (field 6 = `No`) | `pom.xml:36` = `-SNAPSHOT`, unchanged | Set to `999999-SNAPSHOT` if CD is ever enabled |
 | D2 | `<version>` must contain `${changelist}` | same | PASS | `pom.xml:13` = `${revision}${changelist}` | — |
