@@ -1,5 +1,5 @@
 /*
- * Three sample jobs for the e2e scenarios. Created once (a job that already
+ * Four sample jobs for the e2e scenarios. Created once (a job that already
  * exists is left alone, so builds and history survive a restart).
  *
  *  batch-daily    parameterized Freestyle, approval required  -> T-E2E-01..07
@@ -12,11 +12,32 @@
  *                 incident lifecycle (auto-registration -> ACKNOWLEDGED ->
  *                 comment -> RESOLVED) can be exercised on demand.
  *
- * Note on D-31: while run control is on, EVERY newly created job gets
- * approvalRequired=true, including the ones created here - the listener fires on
- * the programmatic path too. The two jobs that must run unattended therefore opt
- * out explicitly right after creation (uncontrol()); without that, batch-cron
- * stops producing dashboard volume and batch-failing can never fail on demand.
+ * Note on D-31 / D-34 / P-14: while run control is on, EVERY newly created job
+ * starts under the activation lock - approvalRequired=true, blockTimer=true,
+ * blockUpstream=true, allowedUpstreamJobs emptied - including the ones created
+ * here, because the listener fires on the programmatic path too. Two consequences
+ * for this file, and one trap it used to fall into:
+ *
+ *  1. The two jobs that must run unattended opt out explicitly right after
+ *     creation (uncontrol()); without that, batch-cron stops producing dashboard
+ *     volume and batch-failing can never fail on demand. Under D-34 that is no
+ *     longer only about approvalRequired: blockTimer=true on its own would stop
+ *     batch-cron's timer even if approval were not required. uncontrol() removes
+ *     the whole property, so it takes all three switches with it.
+ *  2. For the two controlled jobs the property has to be REPLACED, not added.
+ *     Core's Job#addProperty appends and Job#getProperty returns the first
+ *     match, so addProperty() on a job that already carries the creation-time
+ *     lock leaves the fixture's own copy shadowed: the plugin goes on reading the
+ *     lock, and what this file says the job is configured with is not what is in
+ *     force. That is why the two controlled jobs go through control(), which
+ *     removes any existing copy first. The shadowing used to be invisible - both
+ *     copies said approvalRequired=true and neither job has a timer - but the
+ *     fixture was stating a property nothing read.
+ *
+ * The D-34 default itself is asserted in scripts/rest-new-job-default.sh, on
+ * throwaway jobs. This file states each sample job's intended property outright,
+ * so a scenario that reads batch-daily's configuration sees what this file says
+ * rather than whatever the creation default happened to install.
  */
 import hudson.model.Cause
 import hudson.model.ChoiceParameterDefinition
@@ -35,15 +56,41 @@ def propertyClass = uber.loadClass('io.jenkins.plugins.batchcontrol.config.Batch
 def requireApproval = { boolean value -> propertyClass.getConstructor(boolean).newInstance(value) }
 
 /*
- * Removes the approvalRequired default D-31 applies at creation time. Only for the
- * jobs whose whole purpose is to run without a request.
+ * Removes the activation lock D-31/D-34 apply at creation time. Only for the jobs
+ * whose whole purpose is to run without a request.
+ *
+ * removeProperty takes the property as a whole, so all three switches
+ * (approvalRequired, blockTimer, blockUpstream) go with it - which is what these
+ * two jobs need under D-34, where blockTimer alone would be enough to stop
+ * batch-cron's timer. Asserted at runtime by scripts/rest-sample-jobs-unattended.sh.
  */
 def uncontrol = { job ->
     if (job.getProperty(propertyClass) != null) {
         job.removeProperty(propertyClass)
         job.save()
-        log.info("e2e: removed the D-31 approvalRequired default from '${job.fullName}'")
+        log.info("e2e: removed the D-31/D-34 activation lock from '${job.fullName}'")
     }
+}
+
+/*
+ * Installs `property` as THE batch-control property of `job`, replacing the one
+ * the creation default (D-31/D-34) has already installed.
+ *
+ * Adding without removing would only shadow it: core appends in addProperty and
+ * returns the first match in getProperty, so the plugin would keep reading the
+ * creation-time lock and this file's intent would be decorative. See the note at
+ * the top of the file.
+ */
+def control = { job, property ->
+    if (job.getProperty(propertyClass) != null) {
+        job.removeProperty(propertyClass)
+    }
+    job.addProperty(property)
+    job.save()
+    def applied = job.getProperty(propertyClass)
+    log.info("e2e: '${job.fullName}' batch-control property is now "
+            + "approvalRequired=${applied.isApprovalRequired()} "
+            + "blockTimer=${applied.isBlockTimer()} blockUpstream=${applied.isBlockUpstream()}")
 }
 
 // ---------------------------------------------------------------- batch-daily
@@ -59,9 +106,13 @@ if (jenkins.getItemByFullName('batch-daily') == null) {
                     'Target business date (YYYY-MM-DD).'),
             new ChoiceParameterDefinition('MODE', ['full', 'partial'] as String[],
                     'full = reload everything, partial = deltas only.')))
-    job.addProperty(requireApproval(true))
     job.getBuildersList().add(new Shell('echo "batch-daily DATE=$DATE MODE=$MODE"\nsleep 2\necho done'))
     job.save()
+    // Replaces the creation-time activation lock with what this job is for:
+    // approval required, timers and upstream triggers not blocked (it has
+    // neither, and leaving the lock in place would make the fixture's own
+    // statement of intent unreadable from the job's configuration).
+    control(job, requireApproval(true))
     log.info('e2e: created job batch-daily')
 }
 
@@ -88,8 +139,8 @@ if (jenkins.getItemByFullName('batch-pipeline') == null) {
   }
 }
 ''', true))
-    job.addProperty(requireApproval(true))
     job.save()
+    control(job, requireApproval(true))
     log.info('e2e: created job batch-pipeline')
 }
 

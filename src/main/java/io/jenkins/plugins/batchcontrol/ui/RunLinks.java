@@ -79,8 +79,13 @@ public final class RunLinks {
         return sb.toString();
     }
 
-    /** Human-readable duration ({@code 3 min 20 sec}); empty for non-positive values. */
+    /**
+     * Human-readable duration ({@code 3 min 20 sec}); empty for non-positive values.
+     *
+     * <p>Delegates to {@link Dates#span} so durations and grant countdowns cannot drift into two
+     * different spellings of the same kind of value (U-07).
+     */
     public static String formatDuration(long durationMs) {
-        return durationMs <= 0 ? "" : Util.getTimeSpanString(durationMs);
+        return Dates.span(durationMs);
     }
 }

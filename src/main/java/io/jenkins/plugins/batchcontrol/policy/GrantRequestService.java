@@ -4,6 +4,8 @@ import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -38,6 +40,10 @@ import org.springframework.security.access.AccessDeniedException;
  * <p><b>Failure families</b>: {@link IllegalArgumentException} for input validation,
  * {@link IllegalStateException} for wrong-state transitions, {@link AccessDeniedException}
  * (403 on the web layer) for authorization refusals.
+ *
+ * <p><b>S-15</b>: {@link #create} and {@link #approve} refuse outright while change control is off,
+ * because the switch is a kill switch and a window approved while it is off would otherwise take
+ * effect unreviewed the moment it was turned back on. See {@code checkChangeControlEnabled}.
  */
 @Restricted(NoExternalUse.class)
 public final class GrantRequestService {
@@ -85,6 +91,11 @@ public final class GrantRequestService {
     public GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
                                String reason, String approver) {
         Objects.requireNonNull(scope, "scope");
+        // S-15, refused before any other validation: the switch being off is a precondition of the
+        // whole feature rather than a property of this request, so it must not depend on the request
+        // being well-formed, and the caller should read "change control is off" rather than a
+        // complaint about a field of a request that could never have taken effect anyway.
+        checkChangeControlEnabled("requested", scope.getFullName());
         // The RequestGrant permission is enforced by the HTTP layer (GrantsSection.doCreate,
         // T-08-13); the service stays callable by internal flows acting for a named requester.
         String requester = Jenkins.getAuthentication2().getName();
@@ -173,6 +184,12 @@ public final class GrantRequestService {
         lock.lock();
         try {
             GrantRequest request = require(id);
+            // S-15: after require(id), so the refusal record names the scope the window was for and
+            // the history stays queryable by job; before every other check, because an approval that
+            // cannot confer anything should not turn on whether the request is still PENDING or the
+            // caller happens to be its designated approver. Existence was already disclosed to any
+            // caller by require(id) before this change, so nothing new leaks.
+            checkChangeControlEnabled("approved", request.getScope().getFullName());
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
@@ -283,6 +300,59 @@ public final class GrantRequestService {
     }
 
     // ---------------------------------------------------------------- internals
+
+    /**
+     * S-15: refuses the transition while change control is off, and records the attempt.
+     *
+     * <p>The change-control switch is a kill switch. With it off a window confers nothing
+     * ({@code security.GrantAwareACL}) and the windows that were open when it was flipped have been
+     * revoked ({@code security.GrantService#revokeAllActive}). Letting a window still be requested
+     * and approved would put the removed state straight back, only displaced in time: a window
+     * approved while the switch is off would spring to life the moment it is turned back on, having
+     * been reviewed by nobody at that point. Refusing at the source leaves nothing to resurrect,
+     * which is why this is preferred over sweeping again when the switch goes on.
+     *
+     * <p>Only {@code create} and {@code approve} are gated. {@code reject}, {@code cancel} and the
+     * pending-expiry sweep all <em>close</em> requests, and refusing those would strand every
+     * pending request for as long as the switch is off, with nothing gained — a closed request
+     * confers nothing either way.
+     *
+     * <p>{@link IllegalStateException} rather than {@link AccessDeniedException} on purpose: per
+     * this class's failure families, the caller's authorization is not in question (the HTTP layer
+     * already checked {@code RequestGrant}/{@code Approve}) — the instance is in a state where the
+     * transition does not exist. Both web entry points already turn this family into a
+     * {@code hudson.model.Failure} carrying the message, so the user reads the reason rather than a
+     * bare 500 and no UI change is needed.
+     *
+     * @param attemptedTransition past participle used in the message and the record
+     *                            ("requested", "approved")
+     * @param scopeFullName the scope the window was for; becomes the record's target
+     * @throws IllegalStateException if change control is off
+     */
+    private static void checkChangeControlEnabled(String attemptedTransition, String scopeFullName) {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        if (cfg.isChangeControlEnabled()) {
+            return;
+        }
+        String user = Jenkins.getAuthentication2().getName();
+        String target = scopeFullName == null || scopeFullName.isEmpty()
+                ? "(no scope)" : scopeFullName;
+        // D-13 / SPEC item 9 last criterion: with BOTH switches off the plugin writes nothing at
+        // all, so the record follows the same activity gate every other record does. The refusal
+        // itself still applies — it is the recording that is conditional, not the behaviour.
+        if (cfg.isRunControlEnabled()) {
+            ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REQUEST_BLOCKED, target, user,
+                    "A permission window for '" + target + "' could not be " + attemptedTransition
+                            + ": change control is off (S-15)");
+            FileStore.get().appendChangeRecord(record);
+        }
+        LOGGER.info(() -> "Refused to let '" + user + "' have a permission window for '" + target
+                + "' " + attemptedTransition + ": change control is off (S-15)");
+        throw new IllegalStateException("Change control is off, so permission windows cannot be "
+                + attemptedTransition + ". While the switch is off a window would confer nothing, "
+                + "and it would take effect unreviewed as soon as the switch was turned back on. "
+                + "Ask an administrator to enable change control first.");
+    }
 
     private GrantRequest require(String id) {
         GrantRequest request = store.loadGrantRequest(id);

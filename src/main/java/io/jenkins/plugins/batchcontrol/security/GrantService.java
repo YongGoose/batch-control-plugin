@@ -30,6 +30,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * restart and one whose window ended during the downtime is gone from the very first check
  * (SPEC item 8). Activity is always judged by {@link Grant#isActiveAt} against
  * {@link BatchClock} at check time — no timers.
+ *
+ * <p>S-15: the change-control switch gates whether a grant <em>confers</em> anything (that check is
+ * in {@link GrantAwareACL}), and turning the switch off also closes the windows that are open at
+ * that moment — see {@link #revokeAllActive()}.
  */
 @Restricted(NoExternalUse.class)
 public final class GrantService {
@@ -133,17 +137,94 @@ public final class GrantService {
             throw new IllegalStateException("Grant " + grantId + " is already revoked.");
         }
         String caller = Jenkins.getAuthentication2().getName();
+        revokeOne(grant, caller, "revoked");
+        return grant;
+    }
+
+    /**
+     * S-15, the kill switch: revokes every grant that is active right now and returns how many were
+     * closed. Called when the change-control switch is turned off (see
+     * {@code config.BatchControlGlobalConfiguration#setChangeControlEnabled}) — turning the switch
+     * off has to close the windows that are already open, not merely stop new ones from conferring.
+     *
+     * <p>Two things this does that {@link GrantAwareACL}'s switch check alone does not:
+     * <ul>
+     *   <li>it is <b>durable</b>. The ACL check makes an open window stop conferring while the
+     *       switch is off; without the revocation, switching change control back on would bring
+     *       every one of those windows back to life for the remainder of its duration (up to
+     *       {@code maxGrantMinutes}, default 240). A revoked grant never returns —
+     *       {@link Grant#isActiveAt} is false for it for good.</li>
+     *   <li>it is <b>visible</b>. Each revocation appends a {@code ChangeRecord(GRANT_REVOKE)}
+     *       naming the account that flipped the switch, the grantee whose window was closed and the
+     *       position in the batch, so the audit history says who cut the work off and how much of it
+     *       there was. A silent mass revocation would be worse than none: the users whose in-flight
+     *       configuration changes suddenly stop working would have nothing to read.</li>
+     * </ul>
+     *
+     * <p><b>This is destructive to other people's in-flight work, by design.</b> Whoever turns the
+     * switch off cuts off every change currently underway with no warning; that is the trade the
+     * owner chose over a switch that leaves windows quietly open. The caller writes its own
+     * CONFIG_TOGGLE record before calling this, so the history reads "the switch went off" and then
+     * "these windows were closed", in that order.
+     *
+     * <p>No permission check of its own, deliberately, and unlike {@link #revoke(String)}: the
+     * caller is a plain configuration setter whose only web entry point is core's
+     * {@code /manage/configure} submission, already gated on {@code Overall/Administer} — which
+     * implies {@code BatchControl/Manage} in any case. Putting a check here would instead impose a
+     * permission gate on a setter that JCasC and startup also drive.
+     *
+     * @return the number of active windows that were closed
+     */
+    public synchronized int revokeAllActive() {
+        List<Grant> active = listActive();
+        if (active.isEmpty()) {
+            return 0;
+        }
+        String caller = Jenkins.getAuthentication2().getName();
+        int total = active.size();
+        int closed = 0;
+        for (Grant cached : active) {
+            // Revoke the store's copy — the same one revoke(String) mutates — so the persisted
+            // grant and the cache cannot end up disagreeing about who revoked it and when.
+            Grant grant = store.loadGrant(cached.getId());
+            if (grant == null) {
+                LOGGER.warning(() -> "Grant " + cached.getId() + " is active in memory but has no "
+                        + "file in the store, so it cannot be revoked as part of switching change "
+                        + "control off; dropping it from the cache instead (S-15).");
+                grants().removeIf(existing -> existing.getId().equals(cached.getId()));
+                continue;
+            }
+            if (grant.getRevokedAt() != null) {
+                // Already revoked behind the cache's back: nothing to write, no record to duplicate.
+                replaceInCache(grant);
+                continue;
+            }
+            closed++;
+            revokeOne(grant, caller, "revoked because change control was switched off ("
+                    + closed + " of " + total + " active permission windows closed)");
+        }
+        int closedCount = closed;
+        LOGGER.info(() -> "Change control was switched off by '" + caller + "': " + closedCount
+                + " of " + total + " active permission windows were revoked (S-15)");
+        return closed;
+    }
+
+    /**
+     * Marks {@code grant} revoked by {@code caller}, persists it, refreshes the cache and appends
+     * the {@code GRANT_REVOKE} record. The single revocation write path, so a per-grant revocation
+     * and a switch-off mass revocation cannot drift apart in what they persist or record.
+     */
+    private void revokeOne(Grant grant, String caller, String detail) {
         grant.markRevoked(BatchClock.now(), caller);
         store.saveGrant(grant);
         replaceInCache(grant);
         ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REVOKE,
                 grant.getScope().getFullName(), caller,
                 "Grant " + grant.getId() + " for user '" + grant.getUser() + "' ("
-                        + grant.getScope() + ") revoked");
+                        + grant.getScope() + ") " + detail);
         record.setGrantId(grant.getId());
         store.appendChangeRecord(record);
-        LOGGER.info(() -> "Grant " + grantId + " revoked by '" + caller + "'");
-        return grant;
+        LOGGER.info(() -> "Grant " + grant.getId() + " revoked by '" + caller + "'");
     }
 
     // ---------------------------------------------------------------- cache

@@ -4,7 +4,12 @@
     <l:side-panel>
       <l:tasks>
         <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list" title="Run Requests"/>
-        <l:task href="${rootURL}/batch-control/grants/" icon="symbol-lock-closed" title="Grants"/>
+        <!-- P-15: the Grants subtree closes while change control is off, so it is not offered
+             either. The audit screens below stay: the switch governs what windows confer, not
+             what history may be read. -->
+        <j:if test="${it.grantsAvailable}">
+          <l:task href="${rootURL}/batch-control/grants/" icon="symbol-lock-closed" title="Grants"/>
+        </j:if>
         <l:task href="${rootURL}/batch-control/changes/" icon="symbol-clock" title="Change Records"/>
         <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
         <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
@@ -18,7 +23,9 @@
       </p>
       <p>
         <a class="jenkins-button jenkins-button--primary" href="requests/">Run Requests</a>
-        <a class="jenkins-button" href="grants/">Grants</a>
+        <j:if test="${it.grantsAvailable}">
+          <a class="jenkins-button" href="grants/">Grants</a>
+        </j:if>
         <a class="jenkins-button" href="changes/">Change Records</a>
         <a class="jenkins-button" href="dashboard/">Dashboard</a>
         <a class="jenkins-button" href="incidents/">Incidents</a>

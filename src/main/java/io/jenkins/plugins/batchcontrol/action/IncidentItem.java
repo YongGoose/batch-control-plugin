@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -188,7 +189,10 @@ public class IncidentItem implements ModelObject {
         // null for an existing-but-unreadable job, which would silently skip exactly the check
         // this exists for; the permission check itself runs as the real caller after the
         // context is closed. When the job is truly gone, the service decides what a rerun of
-        // it means.
+        // it means. This is the one lookup that deliberately does NOT go through
+        // Visibility.findVisibleJob (S-16): under SYSTEM2 the lookup cannot throw
+        // AccessDeniedException, and swallowing an invisible job into null here would skip the
+        // Item/Read check below instead of enforcing it.
         Job<?, ?> job;
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
             job = Jenkins.get().getItemByFullName(incident.getJobFullName(), Job.class);
@@ -220,9 +224,17 @@ public class IncidentItem implements ModelObject {
         }
     }
 
+    /**
+     * The incident's job, or null when it is gone or invisible to the caller.
+     *
+     * <p>S-16: routed through {@link Visibility#findVisibleJob}, because
+     * {@code getItemByFullName} signals "you may discover this but not read it" by throwing
+     * {@code AccessDeniedException}, not by returning null — and a throw from a Jelly-facing
+     * getter is swallowed into a blank value instead of an error, which degrades this page
+     * silently.
+     */
     @CheckForNull
     private Job<?, ?> findJob() {
-        // getItemByFullName is permission-aware: returns null when the job is gone or invisible.
-        return Jenkins.get().getItemByFullName(incident.getJobFullName(), Job.class);
+        return Visibility.findVisibleJob(incident.getJobFullName());
     }
 }

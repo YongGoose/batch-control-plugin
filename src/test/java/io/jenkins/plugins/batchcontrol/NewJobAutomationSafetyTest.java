@@ -31,32 +31,48 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The safety net of D-31: making every new job approval-required by default must not stop
- * automatically generated CI. SPEC 6 refuses only human-originated causes and Pipeline Replay,
- * and lets timer, upstream, SCM and unclassified causes through, so a job that a multibranch
- * scan, a Job DSL seed or a timer owns keeps building on its own triggers; the only new friction
- * is a person pressing Build.
+ * The other half of D-34: a lock that cannot be opened is not a feature, and the lock must not
+ * be wider than the decision.
  *
- * Matrix rows T-08-26 (timer cause still builds), T-08-27 (upstream chain still builds),
- * T-08-28 (SCM trigger cause still builds) and T-08-29 (the human path is blocked — the intended
- * effect of D-31). The four rows sit in one class on purpose: together they are the statement
- * "D-31 does not stop automation, it stops people", and reading one without the others gives
- * half the contract.
+ * <p>D-34 (SPEC item 8) makes a newly created job start with {@code approvalRequired},
+ * {@code blockTimer} and {@code blockUpstream} all on, so that creating a job does not put it
+ * into service; {@link NewJobActivationLockTest} measures that lock. This class measures what
+ * happens next and what stays untouched:
  *
- * Fixture: every row creates its job through the product path (a {@code createItem} POST) with
- * run control on, so the job is the D-31 job and not a hand-configured stand-in. Whether the
- * default was applied by the plugin is T-08-19..24's assertion, not this class's; here the
- * fixture guarantees the controlled state (applying the property explicitly if the default has
- * not landed yet) and asserts it before firing any cause, so a row can never pass by measuring
- * an uncontrolled job.
+ * <ul>
+ *   <li>T-08-26 — turning {@code blockTimer} off in the job's configuration brings the job into
+ *       service: it then builds on its own cron schedule while {@code approvalRequired} stays on,
+ *       so people still need an approval but the schedule runs. This is the way out D-34 names.</li>
+ *   <li>T-08-27 — the same for {@code blockUpstream}: with the switch off, an upstream job's
+ *       {@code build} step starts the job again, so a seed/parent chain can be brought back.</li>
+ *   <li>T-08-28 — SCM-triggered runs (multibranch, polling) still pass on a fully locked new job:
+ *       D-34 locks the timer and upstream doors only, and SPEC 6 keeps the SCM cause open.</li>
+ *   <li>T-08-29 — the human path remains refused with guidance (D-31, unchanged by D-34); this
+ *       row is what keeps T-08-26/27 from being satisfied by a gate that blocks nothing.</li>
+ * </ul>
  *
- * Written from docs/SPEC.md (items 6, 8, D-31), docs/DECISIONS.md and docs/TEST-MATRIX.md only
- * (no src/main knowledge).
+ * <p>History of these rows: before D-34, T-08-26/27 asserted that a <em>newly created</em> job
+ * still builds from a timer and from an upstream call — the D-31 safety net for unattended CI.
+ * D-34 reverses exactly that contract (creation must not activate), so the rows were rewritten
+ * to measure the property they were really protecting — that a job's automatic triggers can be
+ * live — at the point where D-34 now puts it: after somebody turns the switches off.
+ *
+ * <p>Fixture: every row creates its job through the product path (a {@code createItem} POST) with
+ * run control on, then states the job-level switches explicitly (a single
+ * {@link BatchControlJobProperty}, see {@link BatchControlFixtures}) and asserts them before any
+ * cause is fired. Unlocking through the property is the same convention T-OS-05/06 use for an
+ * administrator flipping a switch on a job; the recording of that configuration change is SPEC
+ * item 9 and is covered by T-09-01/02. So no row can pass by measuring a job whose state it did
+ * not establish, and the rows stay meaningful both before and after D-34 lands.
+ *
+ * <p>Written from docs/SPEC.md (items 6, 8, 9 and D-25, D-31, D-34), docs/DECISIONS.md and
+ * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class NewJobAutomationSafetyTest {
@@ -88,67 +104,74 @@ public class NewJobAutomationSafetyTest {
     }
 
     /**
-     * T-08-26 (D-31 + SPEC 6 timer policy): a newly created, controlled job still builds from
-     * its own cron schedule without any request. This is the row that stands between D-31 and a
-     * night of stopped batch jobs.
+     * T-08-26 (D-34 activation path, SPEC 6 timer policy): a job created under run control starts
+     * locked out of its own schedule; turning {@code blockTimer} off in its configuration brings
+     * it into service, and it then builds from its cron without any request —
+     * {@code approvalRequired} stays on, so the switch releases the schedule and nothing else.
+     * Without this row D-34 would be a lock with no key.
      */
     @Test
-    public void t_08_26_newJobStillBuildsFromTimerCause() throws Exception {
-        FreeStyleProject generated = newJobUnderRunControl("auto-timer");
+    public void t_08_26_unlockedJobBuildsFromTimerCause() throws Exception {
+        FreeStyleProject generated = newJobUnlockedForAutomation("auto-timer");
 
         // matrix note 4: cron firing is reproduced by scheduling with a TimerTriggerCause
         Future<FreeStyleBuild> firing =
                 generated.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
-        assertNotNull(firing, "SPEC 6: a timer cause must still pass on a newly created controlled job");
+        assertNotNull(firing, "D-34: a job whose blockTimer has been turned off must build from its timer");
         j.assertBuildStatusSuccess(firing);
         j.waitUntilNoActivity();
         assertEquals(1, generated.getBuilds().size(), "the timer run must be the job's build #1");
+        assertTrue(isApprovalRequired(generated), "the unlock must release the schedule only: approvalRequired stays on");
     }
 
     /**
-     * T-08-27 (D-31 + SPEC 6 upstream policy): a newly created, controlled job still builds when
-     * an upstream job calls it, so a seed/parent chain keeps working. The upstream job is created
+     * T-08-27 (D-34 activation path, SPEC 6 upstream policy): the same for the upstream door.
+     * With {@code blockUpstream} turned off, an upstream job's {@code build} step starts the job
+     * again, so a seed/parent chain can be brought back into service. The upstream job is created
      * while run control is off so that only the downstream job's gating is measured.
      */
     @Test
-    public void t_08_27_newJobStillBuildsFromUpstreamChain() throws Exception {
+    public void t_08_27_unlockedJobBuildsFromUpstreamChain() throws Exception {
         setRunControl(false);
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "auto-upstream");
         upstream.setDefinition(new CpsFlowDefinition(
                 "build job: 'auto-downstream', wait: true", true));
         setRunControl(true);
 
-        FreeStyleProject generated = newJobUnderRunControl("auto-downstream");
+        FreeStyleProject generated = newJobUnlockedForAutomation("auto-downstream");
 
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 
         FreeStyleBuild downstream = generated.getBuildByNumber(1);
-        assertNotNull(downstream, "SPEC 6: an upstream cause must still pass on a newly created controlled job");
+        assertNotNull(downstream, "D-34: a job whose blockUpstream has been turned off must build when an "
+                + "upstream job calls it");
         j.assertBuildStatusSuccess(downstream);
+        assertTrue(isApprovalRequired(generated), "the unlock must release the upstream door only: approvalRequired stays on");
     }
 
     /**
-     * T-08-28 (D-31 + SPEC 6 cause policy): a newly created, controlled job still builds from an
-     * SCM trigger, which is how multibranch and polling jobs run.
+     * T-08-28 (D-34 scope + SPEC 6 cause policy): a fully locked new job still builds from an SCM
+     * trigger, which is how multibranch and polling jobs run. D-34 locks the timer and the
+     * upstream door; it must not bleed into the SCM cause SPEC 6 keeps open.
      */
     @Test
-    public void t_08_28_newJobStillBuildsFromScmCause() throws Exception {
-        FreeStyleProject generated = newJobUnderRunControl("auto-scm");
+    public void t_08_28_lockedNewJobStillBuildsFromScmCause() throws Exception {
+        FreeStyleProject generated = newLockedJobUnderRunControl("auto-scm");
 
         Future<FreeStyleBuild> polling = generated.scheduleBuild2(0,
                 new SCMTrigger.SCMTriggerCause("simulated polling detected changes"));
-        assertNotNull(polling, "SPEC 6: an SCM trigger cause must still pass on a newly created "
-                + "controlled job");
+        assertNotNull(polling, "SPEC 6: an SCM trigger cause must still pass on a newly created, fully "
+                + "locked job");
         j.assertBuildStatusSuccess(polling);
         j.waitUntilNoActivity();
         assertEquals(1, generated.getBuilds().size(), "the SCM run must be the job's build #1");
     }
 
     /**
-     * T-08-29 (the intended effect of D-31): on the very same kind of job, the human paths are
-     * refused — both the HTTP build POST and a user-caused submission. Without this row the three
-     * pass-through rows above are satisfied by a build that gates nothing at all.
+     * T-08-29 (the intended effect of D-31, unchanged by D-34): on the very same kind of job, the
+     * human paths are refused — both the HTTP build POST and a user-caused submission. Without
+     * this row the pass-through rows above are satisfied by a build that gates nothing at all.
      *
      * Assertion technique: SPEC 6 requires the refusal of a human-originated cause to carry
      * guidance and a link to the run-request screen ("조용한 실패 금지" — no silent failure), so
@@ -159,7 +182,7 @@ public class NewJobAutomationSafetyTest {
      */
     @Test
     public void t_08_29_humanRunOfTheNewJobIsBlocked() throws Exception {
-        FreeStyleProject generated = newJobUnderRunControl("auto-human");
+        FreeStyleProject generated = newLockedJobUnderRunControl("auto-human");
 
         JenkinsRule.WebClient u1 = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false)
@@ -202,13 +225,10 @@ public class NewJobAutomationSafetyTest {
     }
 
     /**
-     * Creates a job through the product creation path while run control is on, and returns it in
-     * a provably controlled state. D-31 is expected to have applied {@code approvalRequired=true}
-     * by itself (T-08-19..24 assert exactly that); if it has not, the fixture applies the
-     * property explicitly so that the cause-policy rows still measure the queue gate instead of
-     * an unprotected job. The state is asserted either way, so no row can pass vacuously.
+     * Creates a job through the product creation path (a {@code createItem} POST) while run
+     * control is on, so the job is the D-34 job and not a hand-configured stand-in.
      */
-    private FreeStyleProject newJobUnderRunControl(String name) throws Exception {
+    private FreeStyleProject createJobUnderRunControl(String name) throws Exception {
         JenkinsRule.WebClient admin = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false)
                 .login("admin");
@@ -221,16 +241,44 @@ public class NewJobAutomationSafetyTest {
 
         FreeStyleProject created = j.jenkins.getItemByFullName(name, FreeStyleProject.class);
         assertNotNull(created, "the job " + name + " must have been created");
+        return created;
+    }
 
-        BatchControlJobProperty property = created.getProperty(BatchControlJobProperty.class);
-        if (property != null && !property.isApprovalRequired()) {
-            created.removeProperty(BatchControlJobProperty.class);
-            property = null;
-        }
-        if (property == null) {
-            created.addProperty(new BatchControlJobProperty(true));
-        }
+    /**
+     * The D-34 state of a newly created job, stated explicitly: all three switches on. Whether
+     * the plugin applies that by itself is {@link NewJobActivationLockTest}'s assertion, not this
+     * class's — here the fixture establishes the state (a single property, matrix note 42) and
+     * asserts it before any cause is fired, so the row measures the queue gate on a locked job
+     * and can never pass by measuring an unprotected one.
+     */
+    private FreeStyleProject newLockedJobUnderRunControl(String name) throws Exception {
+        FreeStyleProject created = createJobUnderRunControl(name);
+        BatchControlJobProperty locked = new BatchControlJobProperty(true);
+        locked.setBlockTimer(true);
+        locked.setBlockUpstream(true);
+        BatchControlFixtures.setBatchControl(created, locked);
+
         assertTrue(isApprovalRequired(created), "fixture: " + name + " must be approval-required before a cause is fired");
+        assertTrue(locked.isBlockTimer() && locked.isBlockUpstream(), "fixture: " + name + " must be locked out of timer and upstream runs");
+        return created;
+    }
+
+    /**
+     * The same job after somebody brought it into service: the two automation switches turned off
+     * in the job's configuration while {@code approvalRequired} stays on. This is the way out
+     * D-34 names ("turn the switch off in the job configuration"), expressed the way T-OS-05/06
+     * express an administrator flipping a job switch.
+     */
+    private FreeStyleProject newJobUnlockedForAutomation(String name) throws Exception {
+        FreeStyleProject created = createJobUnderRunControl(name);
+        BatchControlJobProperty unlocked = new BatchControlJobProperty(true);
+        unlocked.setBlockTimer(false);
+        unlocked.setBlockUpstream(false);
+        BatchControlFixtures.setBatchControl(created, unlocked);
+
+        assertTrue(isApprovalRequired(created), "fixture: " + name + " must still be approval-required after the unlock");
+        assertFalse(unlocked.isBlockTimer(), "fixture: blockTimer must be off for the activation rows");
+        assertFalse(unlocked.isBlockUpstream(), "fixture: blockUpstream must be off for the activation rows");
         return created;
     }
 

@@ -1,7 +1,39 @@
 <div>
-  When enabled, protected jobs require an approved run request before they can run: a job marked
-  <b>Require approval to run</b> in its Batch Control property cannot be started until a run
-  request for it has been approved.
+  When enabled, a job marked <b>Require approval to run</b> in its Batch Control property refuses
+  runs that a person started — the build button, <code>/job/&lt;name&gt;/build</code>,
+  <code>/job/&lt;name&gt;/buildWithParameters</code>, the CLI <code>build</code> command and
+  Pipeline Replay — unless an approved run request is being used. A refused person gets an
+  "Approval required" page naming the request screen; a refused unattended trigger is declined
+  quietly, because it has nobody to show a message to.
+  <p>
+    Automatic triggers are <b>not</b> refused by default, so the jobs that already exist when this
+    switch is turned on keep running to their schedules:
+  </p>
+  <ul>
+    <li>cron (timer) runs pass unless the job's <b>Block cron (timer) triggers</b> is checked;</li>
+    <li>upstream-triggered runs pass unless the job's <b>Block upstream triggers</b> is checked, in
+      which case only the jobs in <b>Allowed upstream jobs</b> pass;</li>
+    <li>runs started by an SCM trigger pass.</li>
+  </ul>
+  <p>
+    <b>Jobs created after this switch is on are the exception, and it is the thing to plan for.</b>
+    While run control is on, every newly created job starts locked: <b>Require approval to run</b>,
+    <b>Block cron (timer) triggers</b> and <b>Block upstream triggers</b> all on and the
+    allowed-upstream list empty, whoever created it and however. Creating a job does not put it into
+    service; turning a switch off in its configuration is what does, and that change is recorded
+    and, with change control on, needs a permission window. Values supplied when the job was created
+    do not survive — a <code>blockTimer=false</code> or an allowed-upstream list in a
+    <code>config.xml</code> POST, a CLI <code>create-job</code>, a Job DSL seed or a copied job is
+    overwritten, and only the job-level approver list is carried over.
+  </p>
+  <p>
+    So if your instance generates jobs from scripts, a definition that pins
+    <code>blockTimer: false</code> appears to be ignored on a fresh creation, a generated nightly
+    job does not run its first night, and because an unattended refusal is silent by contract that
+    looks exactly like a cron that never fired. The help on a job's <b>Block cron (timer)
+    triggers</b> lists the three ways to tell the two apart. Read the automation note in
+    <code>docs/LIMITATIONS.md</code> before turning this switch on.
+  </p>
   <p>
     When disabled, Batch Control leaves every run path exactly as Jenkins would handle it.
   </p>

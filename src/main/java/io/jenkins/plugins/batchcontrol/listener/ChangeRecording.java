@@ -49,15 +49,39 @@ final class ChangeRecording {
     }
 
     /**
-     * Suppresses recording on this thread (plugin-internal saves). Always pair with
-     * {@link #endSuppression()} in a {@code finally} block.
+     * Suppresses recording on this thread (plugin-internal saves) and returns the state to
+     * restore. Always pair with {@link #endSuppression(boolean)} in a {@code finally} block,
+     * passing the value this method returned:
+     *
+     * <pre>boolean previous = beginSuppression();
+     *try { … } finally { endSuppression(previous); }</pre>
+     *
+     * <p>The returned token is what makes the pair nestable (S-19). An inner
+     * {@code begin}/{@code end} pair that unconditionally cleared the flag would also end an
+     * outer suppression that is still meant to be in effect, and the outer caller's remaining
+     * internal saves would then be recorded as user CONFIGURE changes.
      */
-    static void beginSuppression() {
+    static boolean beginSuppression() {
+        boolean previous = SUPPRESSED.get();
         SUPPRESSED.set(Boolean.TRUE);
+        return previous;
     }
 
-    static void endSuppression() {
-        SUPPRESSED.set(Boolean.FALSE);
+    /**
+     * Restores the suppression state captured by {@link #beginSuppression()}.
+     *
+     * <p>Restoring "not suppressed" removes the entry rather than storing {@code FALSE}: the
+     * suppressed window is short-lived while the threads that enter it (HTTP request handlers,
+     * queue threads) are pooled and long-lived, so leaving a mapping behind on every one of them
+     * is a leak with no purpose — {@code withInitial} already answers {@code FALSE} for a thread
+     * with no entry.
+     */
+    static void endSuppression(boolean previous) {
+        if (previous) {
+            SUPPRESSED.set(Boolean.TRUE);
+        } else {
+            SUPPRESSED.remove();
+        }
     }
 
     static boolean isSuppressed() {

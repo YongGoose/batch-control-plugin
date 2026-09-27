@@ -1,8 +1,8 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import hudson.Util;
 import hudson.model.Failure;
+import hudson.model.Item;
 import hudson.model.ModelObject;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -12,7 +12,6 @@ import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -51,13 +50,38 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * <p>No state transition logic lives here; everything is delegated to
  * {@link GrantRequestService} and {@link GrantService}. Viewing requires one of the plugin
  * permissions (requesters see their requests, approvers their inbox, managers the active
- * grants), enforced for the whole subtree by {@link #getTarget()}.
+ * grants), and the whole subtree additionally closes while change control is off — both enforced
+ * by {@link #getTarget()}.
+ *
+ * <p>The switch closes this screen and nothing else. It must never reach the audit trail: the
+ * Change Records and History screens keep showing the windows that existed and the changes made
+ * under them, because a switch flip that retroactively hid audit records would be a worse defect
+ * than the one the gate fixes.
  */
 @Restricted(NoExternalUse.class)
 public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Page size for both the request list and the active grant list. */
     public static final int PAGE_SIZE = 50;
+
+    /**
+     * What a caller is told when they reach this screen while change control is off (P-15).
+     *
+     * <p>It names the switch and where it lives on purpose. The alternative — 404 or a bare 403 —
+     * is the U-01 failure recreated one screen along: a user following a link they were given
+     * yesterday would have no way to tell which of "I lost a permission", "the screen moved" and
+     * "an administrator turned something off" had happened. The closing sentence exists because
+     * the switch going off revokes every open window, so the natural next question is whether the
+     * record of them survived; it does.
+     */
+    private static final String CHANGE_CONTROL_OFF_MESSAGE =
+            "Change control is off, so this instance is not using permission windows and the "
+            + "Grants screen is closed. While the switch is off a window confers nothing, and a "
+            + "window approved now would take effect unreviewed the moment it was turned back on, "
+            + "so no window can be requested or approved either. An administrator can turn it on "
+            + "with \"Enable change control\" in the Batch Control section of Manage Jenkins > "
+            + "System. Nothing has been deleted from the audit trail: windows that existed, and "
+            + "the changes made under them, are still on the Change Records and History screens.";
 
     /** Lazily computed, per-request cached sorted snapshot of grant requests. */
     private List<GrantRequest> sortedRequests;
@@ -73,6 +97,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                 BatchControlPermissions.REQUEST_GRANT,
                 BatchControlPermissions.APPROVE,
                 BatchControlPermissions.MANAGE);
+        // P-15 / SPEC item 1: with change control off, no change-control UI may appear. This whole
+        // subtree is change-control UI, so it closes with the switch. GrantRequestService refuses
+        // create and approve independently — this is the screen half of the same gate, not a
+        // replacement for it, and the permission check above stays first so only a caller who
+        // would otherwise be let in learns which switch is off.
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            throw new Failure(CHANGE_CONTROL_OFF_MESSAGE);
+        }
         return this;
     }
 
@@ -237,23 +269,71 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /**
      * Jelly helper: how much of a grant window is left ({@code 12 min 30 sec}), so the user does
-     * not have to subtract the absolute expiry time from the current time (UX-11). Read through
-     * {@link BatchClock} like every other time read in the plugin.
+     * not have to subtract the absolute expiry time from the current time (UX-11).
      *
      * @return the remaining span, or {@code "expired"} once the window has closed (a grant can
      *         still be listed for the moment between expiry and the sweeper run)
      */
     public String remaining(@CheckForNull Instant expiresAt) {
-        if (expiresAt == null) {
-            return "";
-        }
-        long millis = expiresAt.toEpochMilli() - BatchClock.now().toEpochMilli();
-        return millis <= 0 ? "expired" : Util.getTimeSpanString(millis);
+        return Dates.until(expiresAt);
     }
 
     /** Jelly helper: {@code 1 minute} / {@code 15 minutes} for the duration select (UX-12). */
     public String minutesLabel(int minutes) {
         return minutes == 1 ? "1 minute" : minutes + " minutes";
+    }
+
+    // ------------------------------------------------------- new-request prefill (U-01)
+
+    /**
+     * Scope type the new-request form starts on, from {@code ?scopeType=}; {@code JOB} otherwise.
+     *
+     * <p>The value is matched against {@link GrantScope.Type} and anything else falls back to
+     * {@code JOB}, so a hand-edited query string cannot put an unknown string into the form.
+     */
+    public String getPrefillScopeType() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("scopeType");
+        if (raw != null) {
+            try {
+                return GrantScope.Type.valueOf(raw.trim()).name();
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the default.
+            }
+        }
+        return GrantScope.Type.JOB.name();
+    }
+
+    /**
+     * Full name the new-request form starts with, from {@code ?scopeFullName=} — how
+     * {@link JobGrantRequestAction} hands the job over, so a user who arrives from a job page
+     * does not have to retype its path (U-01).
+     *
+     * <p>The parameter is <em>resolved</em>, never echoed: the name is looked up through
+     * {@link Visibility#findVisibleItem} and what the form receives is the model object's own
+     * {@code getFullName()}. An item that does not exist, or that the caller cannot see, yields
+     * an empty field, so this cannot be used to reflect arbitrary text into the page or to probe
+     * for names — it renders exactly what a caller could already read from the item's own URL.
+     *
+     * @return the canonical full name, or an empty string when there is nothing to prefill
+     */
+    public String getPrefillScopeFullName() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("scopeFullName");
+        if (raw == null || raw.trim().isEmpty()) {
+            return "";
+        }
+        Item item = Visibility.findVisibleItem(raw.trim());
+        return item == null ? "" : item.getFullName();
+    }
+
+    /**
+     * Whether the form was opened for a specific item, in which case CONFIGURE starts checked:
+     * the only entry point that prefills is the job sidebar's "Request Change Permission", and
+     * the user who followed it is trying to change that job's configuration.
+     */
+    public boolean isPrefilled() {
+        return !getPrefillScopeFullName().isEmpty();
     }
 
     /** Jelly helper: comma-joined action list ("CREATE, CONFIGURE"). */

@@ -4,6 +4,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -14,6 +15,13 @@ import org.springframework.security.core.Authentication;
  * permissions (Item/Create, Item/Configure, Item/Delete) an active JIT grant is consulted
  * first; every other decision — and every miss — goes to the wrapped delegate ACL unchanged,
  * so with no active grant the behavior is exactly the delegate's.
+ *
+ * <p>S-15: a grant is consulted only while the change-control switch is on. With the switch off no
+ * grant confers anything — every decision is the delegate's, exactly as before the plugin was
+ * installed — which is what makes the switch a kill switch rather than a label. See
+ * {@link #grantConfers} for why the check sits where it does, and
+ * {@link GrantService#revokeAllActive} for the windows that are already open when the switch is
+ * turned off.
  *
  * <p>A permission is not only conferred when the grant names it literally: Jenkins resolves a
  * permission against the {@link Permission#impliedBy} chain, so holding Item/Configure also
@@ -99,6 +107,20 @@ final class GrantAwareACL extends ACL {
      * grantable permission actually found on the chain.
      */
     private boolean grantConfers(String user, Permission permission) {
+        // S-15: the change-control switch is a kill switch. While it is off a grant confers
+        // nothing, so the answer is the delegate's alone and the instance behaves exactly like the
+        // strategy the administrator actually configured (CLAUDE.md: "a new feature does not change
+        // existing Jenkins behaviour while the global switch is off"; SPEC item 1).
+        //
+        // The guard sits ahead of the implication walk rather than inside it, and that placement is
+        // the point: every "return true" below is inside the loop, so one check before the loop is
+        // entered cannot be walked around by an impliedBy chain (Item.EXTENDED_READ reaching
+        // Item.CONFIGURE, say). It is also the cheapest step in the method — an extension-list
+        // singleton lookup in front of the synchronized grant scan it now skips — so on an instance
+        // that does not use change control this makes the permission hot path faster, not slower.
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            return false;
+        }
         for (Permission p = permission; p != null; p = p.impliedBy) {
             if (!p.getEnabled()) {
                 continue;
