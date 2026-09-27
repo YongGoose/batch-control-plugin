@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONNull;
 import net.sf.json.JSONObject;
@@ -51,6 +54,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  */
 @Restricted(NoExternalUse.class)
 public final class FileStore implements Store {
+
+    private static final Logger LOGGER = Logger.getLogger(FileStore.class.getName());
 
     private static final FileStore INSTANCE = new FileStore();
 
@@ -199,11 +204,7 @@ public final class FileStore implements Store {
 
     @Override
     public List<RunRecord> listRunRecords(YearMonth month) {
-        List<RunRecord> records = new ArrayList<>();
-        for (String line : readLines(runsDir(), month)) {
-            records.add(runRecordFromJson(JSONObject.fromObject(line)));
-        }
-        return records;
+        return parseLines(runsDir(), month, FileStore::runRecordFromJson);
     }
 
     @Override
@@ -223,8 +224,7 @@ public final class FileStore implements Store {
     @Override
     public List<ChangeRecord> listChangeRecords(YearMonth month) {
         List<ChangeRecord> records = new ArrayList<>();
-        for (String line : readLines(changesDir(), month)) {
-            ChangeRecord record = changeRecordFromJson(JSONObject.fromObject(line));
+        for (ChangeRecord record : parseLines(changesDir(), month, FileStore::changeRecordFromJson)) {
             if (record.getDiff() == null) {
                 record.setDiff(readTextOrNull(
                         PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
@@ -261,11 +261,7 @@ public final class FileStore implements Store {
     @Override
     public List<Incident> listIncidents(YearMonth month) {
         List<Incident> incidents = new ArrayList<>();
-        for (String line : readLines(incidentIndexDir(), month)) {
-            String id = optString(JSONObject.fromObject(line), "id");
-            if (id == null) {
-                continue;
-            }
+        for (String id : parseLines(incidentIndexDir(), month, json -> optString(json, "id"))) {
             Incident incident = loadIncident(id);
             if (incident != null) {
                 incidents.add(incident);
@@ -307,11 +303,8 @@ public final class FileStore implements Store {
         try {
             boolean deleted = false;
             // Incident XMLs first (found through the index), then the index file itself.
-            for (String line : readLines(incidentIndexDir(), month)) {
-                String id = optString(JSONObject.fromObject(line), "id");
-                if (id != null) {
-                    deleted |= Files.deleteIfExists(PathCodec.resolveUnder(incidentDir(), id + ".xml"));
-                }
+            for (String id : parseLines(incidentIndexDir(), month, json -> optString(json, "id"))) {
+                deleted |= Files.deleteIfExists(PathCodec.resolveUnder(incidentDir(), id + ".xml"));
             }
             deleted |= Files.deleteIfExists(
                     PathCodec.resolveUnder(incidentIndexDir(), monthFileName(month)));
@@ -411,6 +404,10 @@ public final class FileStore implements Store {
                 // Deleted between listing and reading; skip.
             } catch (IOException e) {
                 throw new UncheckedIOException("Failed to load " + what + " file " + file, e);
+            } catch (RuntimeException e) {
+                // One corrupt file (XStream conversion error, wrong type) must not break every
+                // reader of the directory -- for grants that would be every permission check.
+                LOGGER.log(Level.WARNING, "Skipping unreadable " + what + " file " + file, e);
             }
         }
         return entities;
@@ -469,19 +466,43 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * Parses every non-blank line of a month bucket. A line that is not valid JSON or does not
+     * map to a record (missing field, unknown enum constant) is skipped with a warning naming
+     * the file and line number, so one bad line cannot break the whole month.
+     */
+    private <T> List<T> parseLines(Path dir, YearMonth month, Function<JSONObject, T> parser) {
+        List<String> lines = readLines(dir, month);
+        List<T> result = new ArrayList<>(lines.size());
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line.isBlank()) {
+                continue;
+            }
+            T value;
+            try {
+                value = parser.apply(JSONObject.fromObject(line));
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Skipping unparseable line {0} of {1}: {2}",
+                        new Object[] {i + 1, PathCodec.resolveUnder(dir, monthFileName(month)),
+                            e.getClass().getName()});
+                continue;
+            }
+            if (value != null) {
+                result.add(value);
+            }
+        }
+        return result;
+    }
+
+    /** Raw lines of a month bucket (blank lines included, so indexes map to line numbers). */
     private List<String> readLines(Path dir, YearMonth month) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
         if (!Files.isRegularFile(file)) {
             return new ArrayList<>();
         }
         try {
-            List<String> lines = new ArrayList<>();
-            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                if (!line.isBlank()) {
-                    lines.add(line);
-                }
-            }
-            return lines;
+            return Files.readAllLines(file, StandardCharsets.UTF_8);
         } catch (NoSuchFileException e) {
             return new ArrayList<>();
         } catch (IOException e) {
