@@ -91,6 +91,8 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 통제 설정 변경(전역 스위치·잡 속성 토글), 대상 잡의 설정 변경, 권한 창 만료 중 어느 것도 이미 실행 중인 빌드를 중단시키지 않는다. 차단은 큐 진입 단계에서만 일어난다. (D-27)
 - 수용 기준: 차단 시 사용자에게 "승인 필요" 안내와 요청 화면 링크가 표시된다(조용한 실패 금지).
 - 수용 기준: 승인 대상 잡의 사이드바에서 "Build Now"가 "Request Run"으로 대체된다.
+- Acceptance: the guarantees above hold when other plugins that add build buttons or triggers are installed and configured on the job (customize-build-now, rebuild, parameterized-trigger, build-token-root, naginator): a manual run of an approval-required job does not reach the queue without an approved request, and an approved run is queued exactly once. An automatic retry (for example naginator) is judged by the causes of the build it retries: a retry of an approved manual run is refused like any other re-use of the approval, and the way to run it again is a new request (for example the incident rerun request); a retry of a timer or upstream run follows the timer and upstream rules. Where another plugin replaces or relabels the build link, the job page still offers "Request Run". (hosting review, #34, #36)
+- Acceptance: with queue plugins installed (lockable-resources, throttle-concurrents) the gate still refuses unapproved manual runs and an approved run still starts. With authorize-project configured, a build authorised as another user does not bypass the gate. (#36)
 
 **7. 요청 만료와 취소**
 승인 대기 요청은 설정된 기간이 지나면 자동 만료되고, 요청자는 결재 전까지 취소할 수 있습니다.
@@ -129,6 +131,9 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: CONFIGURE 변경에 unified diff가 저장된다(비밀값은 마스킹).
 - 수용 기준: 변경 시각에 변경자의 활성 Grant가 있으면 `grantId`가 연결되고, 없으면 `grantId=null`로 남아 "권한 부여 없는 변경"으로 조회된다.
 - 수용 기준: 변경 통제 스위치가 꺼져 있어도 실행 통제가 켜져 있으면 변경 기록은 남는다(기록은 어느 스위치든 켜지면 활성).
+- Acceptance: a save that changes no user-editable configuration writes no CONFIGURE record. The comparison ignores the `plugin="name@version"` attributes, so saving an unchanged job after a plugin upgrade records nothing. (hosting review, #20)
+- Acceptance: a computed folder (multibranch project, organization folder) saving itself during indexing writes no CONFIGURE record unless its user-editable configuration changed. (#20)
+- Acceptance: with jobConfigHistory installed, each configuration save still produces exactly one CONFIGURE record. (#36)
 
 ### 운영 관리
 
