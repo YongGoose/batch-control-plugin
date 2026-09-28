@@ -12,9 +12,10 @@ import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -151,13 +152,11 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             }
             sids.add(user.getId());
         }
-        for (Object raw : enumerateStrategySids(delegate)) {
+        for (String sid : delegatePermissionSids(delegate)) {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
-            String sid = sidOf(raw);
-            if (sid != null && !sid.isEmpty()
-                    && !ACL.ANONYMOUS_USERNAME.equals(sid) && !"authenticated".equals(sid)) {
+            if (!sid.isEmpty() && !ACL.ANONYMOUS_USERNAME.equals(sid) && !"authenticated".equals(sid)) {
                 sids.add(sid);
             }
         }
@@ -165,47 +164,62 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
     }
 
     /**
-     * Reads the delegate's granted sids without a compile-time matrix-auth dependency: tries
-     * {@code getAllSIDs()} (collection of strings) and {@code getGrantedPermissionEntries()}
-     * (map of permission to entries carrying {@code getSid()}). Anything that fails just
-     * contributes nothing.
+     * Reads the delegate's granted permission entries without a compile-time matrix-auth
+     * dependency: tries {@code getAllPermissionEntries()}, a {@code List} of entries each
+     * carrying a {@code getSid()} and a {@code getType()} of {@code USER}/{@code GROUP}/
+     * {@code EITHER} (matrix-auth 3.0+; supersedes the deprecated {@code getAllSIDs()}, which
+     * collapsed both kinds into one list of plain strings and is what this method replaces).
+     *
+     * <p>Entries of type {@code GROUP} are skipped: a group's sid names a security-realm group,
+     * not an account, and {@link #authenticate(String)} impersonates by username — trying to
+     * impersonate a group as if it were a user could either fail harmlessly or, worse, collide
+     * with an unrelated user of the same name and read that user's rights as the group's.
+     * {@code USER} and legacy {@code EITHER} entries are both kept, since either may name a real
+     * account. A delegate without the method, or any failure resolving it, contributes nothing:
+     * this is a best-effort warning, never an enforcement point.
      */
-    private static Collection<?> enumerateStrategySids(AuthorizationStrategy delegate) {
-        Set<Object> raw = new LinkedHashSet<>();
+    private static Collection<String> delegatePermissionSids(AuthorizationStrategy delegate) {
+        List<String> sids = new ArrayList<>();
         try {
-            Method method = delegate.getClass().getMethod("getAllSIDs");
+            Method method = delegate.getClass().getMethod("getAllPermissionEntries");
             Object result = method.invoke(delegate);
             if (result instanceof Collection) {
-                raw.addAll((Collection<?>) result);
-            }
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            LOGGER.log(Level.FINE, "No getAllSIDs() on " + delegate.getClass().getName(), e);
-        }
-        try {
-            Method method = delegate.getClass().getMethod("getGrantedPermissionEntries");
-            Object result = method.invoke(delegate);
-            if (result instanceof Map) {
-                for (Object value : ((Map<?, ?>) result).values()) {
-                    if (value instanceof Collection) {
-                        raw.addAll((Collection<?>) value);
+                for (Object entry : (Collection<?>) result) {
+                    if (isGroupEntry(entry)) {
+                        continue;
+                    }
+                    String sid = sidOf(entry);
+                    if (sid != null) {
+                        sids.add(sid);
                     }
                 }
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             LOGGER.log(Level.FINE,
-                    "No getGrantedPermissionEntries() on " + delegate.getClass().getName(), e);
+                    "No getAllPermissionEntries() on " + delegate.getClass().getName(), e);
         }
-        return raw;
+        return sids;
     }
 
-    /** A sid string as-is, or a permission entry's {@code getSid()} (reflective), else null. */
-    @CheckForNull
-    private static String sidOf(Object raw) {
-        if (raw instanceof String) {
-            return (String) raw;
-        }
+    /**
+     * Whether a (reflectively read) permission entry's {@code getType()} is matrix-auth's
+     * {@code GROUP} constant; {@code false} for {@code USER}, {@code EITHER}, or anything
+     * reflection cannot resolve.
+     */
+    private static boolean isGroupEntry(Object entry) {
         try {
-            Object sid = raw.getClass().getMethod("getSid").invoke(raw);
+            Object type = entry.getClass().getMethod("getType").invoke(entry);
+            return type instanceof Enum && "GROUP".equals(((Enum<?>) type).name());
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** A permission entry's {@code getSid()} (reflective), or {@code null} if it cannot be read. */
+    @CheckForNull
+    private static String sidOf(Object entry) {
+        try {
+            Object sid = entry.getClass().getMethod("getSid").invoke(entry);
             return sid == null ? null : sid.toString();
         } catch (ReflectiveOperationException | RuntimeException e) {
             return null;

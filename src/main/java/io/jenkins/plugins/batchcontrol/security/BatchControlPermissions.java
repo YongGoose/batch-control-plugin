@@ -23,9 +23,17 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public class BatchControlPermissions {
 
-    /** The "Batch Control" permission group shown on the authorization matrix screen. */
-    public static final PermissionGroup GROUP =
-            new PermissionGroup(BatchControlPermissions.class, Messages._BatchControlPermissions_Title());
+    /**
+     * The "Batch Control" permission group shown on the authorization matrix screen.
+     *
+     * <p>D-41: the group id is pinned to {@code "BatchControl"} via the three-argument
+     * {@link PermissionGroup} constructor, so the permission names JCasC and scripts use
+     * (e.g. {@code BatchControl/Request}) are stable and independent of the display title
+     * ({@link Messages#_BatchControlPermissions_Title()}, which stays "Batch Control"). Stored
+     * matrix entries key on {@link Permission#getId()}, which is unaffected by the group id.
+     */
+    public static final PermissionGroup GROUP = new PermissionGroup(
+            "BatchControl", BatchControlPermissions.class, Messages._BatchControlPermissions_Title());
 
     /** Manage the plugin: global configuration, approver list, revoking grants. */
     public static final Permission MANAGE = new Permission(GROUP, "Manage",
