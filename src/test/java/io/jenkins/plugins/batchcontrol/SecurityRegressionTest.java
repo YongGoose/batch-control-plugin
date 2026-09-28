@@ -8,7 +8,6 @@ import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.security.AbstractPasswordBasedSecurityRealm;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.security.GroupDetails;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
@@ -23,7 +22,7 @@ import io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
@@ -54,7 +53,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,7 +65,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - S-06: incident rerun requires Item/Read on the incident's job.
  * - S-07: the per-job request form requires BatchControl/Request.
  * - S-03: empty-string scope names are rejected (no root-scope grants).
- * - S-11: the wrapper strategy refuses to nest itself as delegate.
+ * - S-11: (retired by D-35a, see the comment where its test used to be; now T-02-29).
  * - S-05: the configure-without-grant monitor is consistent across calls, its scan result is
  *   really cached (measured with a lookup-counting security realm) and the cache is
  *   invalidated by a change-control toggle.
@@ -304,13 +302,10 @@ public class SecurityRegressionTest {
         assertTrue(GrantRequestService.get().list().isEmpty(), "no grant request may be stored after the rejected creations");
     }
 
-    /** T-SEC-13 (S-11): the wrapper strategy refuses another wrapper as its delegate. */
-    @Test
-    public void s_11_selfNestingWrapperStrategyIsRejected() {
-        BatchControlAuthorizationStrategy inner =
-                new BatchControlAuthorizationStrategy(new MockAuthorizationStrategy());
-        assertThrows(IllegalArgumentException.class, () -> new BatchControlAuthorizationStrategy(inner), "nesting the wrapper inside itself must be rejected at construction (S-11)");
-    }
+    // T-SEC-13 (S-11, self-nesting wrapper rejected at construction) was retired by D-35a: the
+    // delegating wrapper is withdrawn and can no longer be constructed, only loaded from a saved
+    // config.xml. The nesting case now lives at load time as T-02-29
+    // (StrategyUpgradeTest#t_02_29_nestedLegacyWrapperLoadsAsSingleSubclass). Matrix note 51.
 
     /**
      * T-SEC-14 (S-05): the configure-without-grant monitor answers consistently on
@@ -334,13 +329,13 @@ public class SecurityRegressionTest {
 
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        GlobalMatrixAuthorizationStrategy withDirectConfigure = new GlobalMatrixAuthorizationStrategy();
+        BatchControlMatrixAuthorizationStrategy withDirectConfigure = new BatchControlMatrixAuthorizationStrategy();
         withDirectConfigure.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         withDirectConfigure.add(Jenkins.READ, PermissionEntry.user("u3"));
         withDirectConfigure.add(Item.READ, PermissionEntry.user("u3"));
         withDirectConfigure.add(Item.CONFIGURE, PermissionEntry.user("u3"));
         j.jenkins.setAuthorizationStrategy(
-                new BatchControlAuthorizationStrategy(withDirectConfigure));
+                withDirectConfigure);
 
         // 1. first render: the scan runs and consults the security realm.
         int beforeFirst = realm.lookups.get();

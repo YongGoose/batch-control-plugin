@@ -6,7 +6,6 @@ import hudson.model.Item;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
@@ -17,7 +16,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
@@ -71,16 +70,16 @@ public class GrantWindowAbuseTest {
         this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
-        GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
-        delegate.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         for (String userId : new String[] {"u1", "a1"}) {
-            delegate.add(Jenkins.READ, PermissionEntry.user(userId));
-            delegate.add(Item.READ, PermissionEntry.user(userId));
+            strategy.add(Jenkins.READ, PermissionEntry.user(userId));
+            strategy.add(Item.READ, PermissionEntry.user(userId));
         }
-        delegate.add(Item.BUILD, PermissionEntry.user("u1"));
-        delegate.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
-        delegate.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
-        j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(delegate));
+        strategy.add(Item.BUILD, PermissionEntry.user("u1"));
+        strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
+        strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
+        j.jenkins.setAuthorizationStrategy(strategy);
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(true);

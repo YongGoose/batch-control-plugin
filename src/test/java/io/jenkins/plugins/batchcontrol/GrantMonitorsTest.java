@@ -7,7 +7,7 @@ import hudson.security.GlobalMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor;
 import io.jenkins.plugins.batchcontrol.ops.RoleStrategyNoticeMonitor;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,18 +56,18 @@ public class GrantMonitorsTest {
         cfg.save();
 
         // change control on, but only the admin exists -> quiet (admin bypass is out of scope)
-        GlobalMatrixAuthorizationStrategy adminOnly = new GlobalMatrixAuthorizationStrategy();
+        BatchControlMatrixAuthorizationStrategy adminOnly = new BatchControlMatrixAuthorizationStrategy();
         adminOnly.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
-        j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(adminOnly));
+        j.jenkins.setAuthorizationStrategy(adminOnly);
         assertFalse(monitor.isActivated(), "only the admin holds Configure: the monitor must stay quiet");
 
         // a non-admin with direct Item/Configure appears -> warning
-        GlobalMatrixAuthorizationStrategy withDirectConfigure = new GlobalMatrixAuthorizationStrategy();
+        BatchControlMatrixAuthorizationStrategy withDirectConfigure = new BatchControlMatrixAuthorizationStrategy();
         withDirectConfigure.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         withDirectConfigure.add(Jenkins.READ, PermissionEntry.user("u3"));
         withDirectConfigure.add(Item.READ, PermissionEntry.user("u3"));
         withDirectConfigure.add(Item.CONFIGURE, PermissionEntry.user("u3"));
-        j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(withDirectConfigure));
+        j.jenkins.setAuthorizationStrategy(withDirectConfigure);
         assertTrue(monitor.isActivated(), "a non-admin holding direct Item/Configure while change control is on "
                 + "must activate the warning monitor");
 

@@ -7,7 +7,6 @@ import hudson.model.Item;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -18,7 +17,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.ops.ExpiryPeriodicWork;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
@@ -54,9 +53,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (T-08-04 and T-08-07 need a restart and live in GrantRestartTest; T-08-06 and T-08-08
  * are AdministrativeMonitor rows and live in GrantMonitorsTest.)
  *
- * The delegate is a persistable GlobalMatrixAuthorizationStrategy wrapped in the plugin's
- * delegating BatchControlAuthorizationStrategy (ARCHITECTURE section 4): with no active
- * grant it must behave exactly like the delegate; grants apply only through the wrapper.
+ * The strategy is the plugin's BatchControlMatrixAuthorizationStrategy, a subclass of
+ * matrix-auth's ProjectMatrixAuthorizationStrategy (D-35a, ARCHITECTURE section 4): with no
+ * active grant it must behave exactly like its parent; grants apply only through the subclass.
+ * (Comments below still say "the delegate" for the parent's own matrix entries.)
  *
  * Time never passes for real: BatchClock is fixed/moved (matrix note 1) and
  * ExpiryPeriodicWork.doRun() is invoked directly (matrix note 2).
@@ -79,18 +79,18 @@ public class GrantServiceTest {
         this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
 
-        GlobalMatrixAuthorizationStrategy delegate = new GlobalMatrixAuthorizationStrategy();
-        delegate.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         for (String userId : new String[] {"u1", "u2", "a1", "m1"}) {
-            delegate.add(Jenkins.READ, PermissionEntry.user(userId));
-            delegate.add(Item.READ, PermissionEntry.user(userId));
+            strategy.add(Jenkins.READ, PermissionEntry.user(userId));
+            strategy.add(Item.READ, PermissionEntry.user(userId));
         }
-        delegate.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
-        delegate.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
-        delegate.add(BatchControlPermissions.MANAGE, PermissionEntry.user("m1"));
+        strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
+        strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
+        strategy.add(BatchControlPermissions.MANAGE, PermissionEntry.user("m1"));
         // u2 holds a direct Item/Delete from the delegate: the delete-veto row (T-08-10)
-        delegate.add(Item.DELETE, PermissionEntry.user("u2"));
-        j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(delegate));
+        strategy.add(Item.DELETE, PermissionEntry.user("u2"));
+        j.jenkins.setAuthorizationStrategy(strategy);
 
         cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(true);
