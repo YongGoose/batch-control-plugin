@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Incident;
@@ -11,13 +12,14 @@ import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.ui.CsvWriter;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FilterParser;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -63,8 +65,8 @@ import org.kohsuke.stapler.StaplerResponse2;
  * </ul>
  *
  * <p>Everything under this section requires {@code ViewHistory}; {@link #getTarget()} rejects
- * the whole subtree with 403 otherwise (T-12-01, T-12-05). All URLs are read-only: non-GET
- * verbs get 405. Query parsing and validation live in {@link FilterParser}.
+ * the whole subtree with 403 otherwise (T-12-01, T-12-05). All URLs are read-only: PUT/DELETE/PATCH
+ * get 405 everywhere, and the JSON and CSV exports refuse every verb except GET/HEAD. Query parsing and validation live in {@link FilterParser}.
  */
 @Restricted(NoExternalUse.class)
 public class HistorySection implements ModelObject, StaplerProxy {
@@ -88,7 +90,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
     public Object getTarget() {
         // Gate the entire /batch-control/history/** subtree, CSV and JSON included
         // (SPEC item 12: without ViewHistory every history screen and CSV is 403).
-        Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
+        Jenkins.get().checkAnyPermission(SectionAccess.history());
+        HttpVerbs.refuseUnsupported();
         return this;
     }
 
@@ -97,18 +100,15 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return "History";
     }
 
-    /**
-     * Serves the index URL {@code /batch-control/history/}. The whole section is read-only, so
-     * every verb except GET/HEAD is refused with 405.
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        if (refuseNonGet(req, rsp)) {
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.history();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- monthly aggregate JSON

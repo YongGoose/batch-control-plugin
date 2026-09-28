@@ -1,15 +1,10 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Incident ${it.id}">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-arrow-left" title="Back to Incidents"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Incident ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Incident ${it.id}</h1>
+      <l:app-bar title="Incident ${it.id}"/>
 
-      <table class="jenkins-table">
+      <table class="jenkins-table jenkins-table--small">
         <tbody>
           <tr>
             <th style="text-align: left; width: 12rem;">Run</th>
@@ -43,8 +38,17 @@
             <tr>
               <th style="text-align: left;">Rerun requests</th>
               <td>
+                <!-- Linked only for a user who may open the Run Requests screen (SPEC item 2). -->
+                <j:set var="requestLinks" value="${it.links.requests}"/>
                 <j:forEach var="rid" items="${it.incident.rerunRequestIds}">
-                  <a href="${rootURL}/batch-control/requests/${rid}/" style="margin-right: 0.5rem;">${rid}</a>
+                  <j:choose>
+                    <j:when test="${requestLinks}">
+                      <a href="${rootURL}/batch-control/requests/${rid}/" style="margin-right: 0.5rem;">${rid}</a>
+                    </j:when>
+                    <j:otherwise>
+                      <span style="margin-right: 0.5rem;">${rid}</span>
+                    </j:otherwise>
+                  </j:choose>
                 </j:forEach>
               </td>
             </tr>
@@ -158,11 +162,13 @@
           <j:otherwise>
             <f:form method="post" action="rerun" name="rerun">
               <f:entry title="Approver">
-                <select name="approver" class="jenkins-select__input">
-                  <j:forEach var="a" items="${it.approverOptions}">
-                    <option value="${a}">${a}</option>
-                  </j:forEach>
-                </select>
+                <div class="jenkins-select">
+                  <select name="approver" class="jenkins-select__input">
+                    <j:forEach var="a" items="${it.approverOptions}">
+                      <option value="${a}">${a}</option>
+                    </j:forEach>
+                  </select>
+                </div>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Request Rerun"/>

@@ -1,20 +1,15 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Change Records">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Change Records" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Change Records</h1>
+      <l:app-bar title="Change Records"/>
       <p class="jenkins-description">
-        Automatic audit trail of job creation, configuration, deletion, rename and move events
-        (SPEC item 9). Records are read-only.
+        Automatic audit trail of job creation, configuration, deletion, rename and move events.
+        Records are read-only.
       </p>
 
       <!-- Month selector: a plain GET form; changing the month never changes state. -->
-      <form method="get" action="." style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+      <form method="get" action="." class="jenkins-buttons-row" style="margin-bottom: 1rem;">
         <a class="jenkins-button" href="?month=${it.previousMonth}">&#171; ${it.previousMonth}</a>
         <input type="month" name="month" value="${it.monthValue}" class="jenkins-input" style="width: auto;"/>
         <button type="submit" class="jenkins-button">Show</button>
@@ -23,6 +18,7 @@
         </j:if>
       </form>
 
+      <j:set var="grantLinks" value="${it.links.grants}"/>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No change records in ${it.monthValue}.</p>
@@ -48,9 +44,11 @@
                   <td>${it.format(r.at)}</td>
                   <td>
                     <j:choose>
-                      <j:when test="${r.grantId != null}">
+                      <!-- Linked only for a user who may open the Grants screen (SPEC item 2). -->
+                      <j:when test="${r.grantId != null and grantLinks}">
                         <a href="${rootURL}/batch-control/grants/${r.grantId}/">${r.grantId}</a>
                       </j:when>
+                      <j:when test="${r.grantId != null}">${r.grantId}</j:when>
                       <j:otherwise>
                         <span class="jenkins-label jenkins-label--tertiary" title="This change was made without an active grant.">no grant</span>
                       </j:otherwise>
@@ -79,7 +77,7 @@
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page - 1}">Newer</a>
             </j:if>

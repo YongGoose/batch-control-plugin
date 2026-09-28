@@ -9,6 +9,7 @@ import hudson.model.Job;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
+import hudson.security.Permission;
 import hudson.util.Secret;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
@@ -28,7 +29,6 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -40,12 +40,13 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * {@link RunRequestService#create}.
  *
  * <p>The sidebar link is only visible when run control is on, the job requires approval and the
- * user holds {@code BatchControl/Request}. The URL space itself is gated on
- * {@code BatchControl/Request} too ({@link #getTarget()}, S-07): the form exposes the eligible
- * approver user-id list, which is not for plain {@code Item/Read} holders.
+ * user holds {@code BatchControl/Request}. Without {@code BatchControl/Request} the action is
+ * absent altogether ({@link #getUrlName()} returns {@code null}, SPEC item 2, #31, S-07): the
+ * form exposes the eligible approver user-id list, which is not for plain {@code Item/Read}
+ * holders, so {@code /job/<name>/batch-control/} and every URL beneath it answer 404.
  */
 @Restricted(NoExternalUse.class)
-public class JobRequestAction implements Action, StaplerProxy {
+public class JobRequestAction implements Action {
 
     private final Job<?, ?> job;
 
@@ -57,24 +58,20 @@ public class JobRequestAction implements Action, StaplerProxy {
         return job;
     }
 
-    @Override
-    public Object getTarget() {
-        // Gate the whole /job/<name>/batch-control/** subtree (S-07): the request form and the
-        // data it exposes (approver ids) require BatchControl/Request, not just Item/Read.
-        // doSubmit re-checks on top of this.
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        return this;
-    }
-
     // ---------------------------------------------------------------- Action
 
     @Override
     @CheckForNull
     public String getIconFileName() {
-        if (!isActive() || !Jenkins.get().hasPermission(BatchControlPermissions.REQUEST)) {
+        if (!isActive() || !canRequest()) {
             return null;
         }
-        return "symbol-paper-plane-outline";
+        return "symbol-paper-plane-outline plugin-ionicons-api";
+    }
+
+    /** Whether the current user may use this action at all ({@code BatchControl/Request}). */
+    private static boolean canRequest() {
+        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
     }
 
     /**
@@ -87,9 +84,20 @@ public class JobRequestAction implements Action, StaplerProxy {
         return RequestRunUiDecorator.REQUEST_RUN_LABEL;
     }
 
+    /**
+     * {@code null} without {@code BatchControl/Request}: per {@link Action#getUrlName()} that makes
+     * the action unreachable, so its whole URL space answers 404 (absent, not refused).
+     * {@link #doSubmit} re-checks the permission on top of this.
+     */
     @Override
+    @CheckForNull
     public String getUrlName() {
-        return "batch-control";
+        return canRequest() ? "batch-control" : null;
+    }
+
+    /** Permissions for the request form's {@code l:layout}. */
+    public Permission[] getViewPermissions() {
+        return new Permission[] {BatchControlPermissions.REQUEST};
     }
 
     // ---------------------------------------------------------------- view model

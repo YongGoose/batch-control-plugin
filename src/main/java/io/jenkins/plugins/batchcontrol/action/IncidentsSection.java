@@ -2,16 +2,15 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
@@ -32,7 +31,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * {@value #PAGE_SIZE} ({@code ?page=N}).
  *
  * <p>Viewing requires {@code ViewHistory}, enforced for the whole subtree by
- * {@link #getTarget()}. The list itself is read-only (405 on non-GET); the state-changing
+ * {@link #getTarget()}. The list itself is read-only (PUT/DELETE/PATCH are 405); the state-changing
  * endpoints live on {@link IncidentItem} under {@code /batch-control/incidents/<id>/}.
  */
 @Restricted(NoExternalUse.class)
@@ -47,7 +46,8 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     @Override
     public Object getTarget() {
         // Gate the entire /batch-control/incidents/** subtree.
-        Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
+        Jenkins.get().checkAnyPermission(SectionAccess.history());
+        HttpVerbs.refuseUnsupported();
         return this;
     }
 
@@ -56,23 +56,15 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return "Incidents";
     }
 
-    /**
-     * Serves the list URL {@code /batch-control/incidents/}. State transitions happen only on
-     * the per-incident endpoints; the list URL itself never changes state, so every verb except
-     * GET/HEAD is refused with 405.
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "The incident list is read-only; only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.history();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     /** Stapler: serves {@code /batch-control/incidents/<id>/}; {@code null} renders a 404. */

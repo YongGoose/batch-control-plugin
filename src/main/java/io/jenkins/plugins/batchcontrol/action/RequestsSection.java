@@ -2,14 +2,13 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,10 +43,8 @@ public class RequestsSection implements ModelObject, StaplerProxy {
     public Object getTarget() {
         // Gate the entire /batch-control/requests/** subtree (list, details, POST endpoints go
         // through their own additional checks in RequestItem).
-        Jenkins.get().checkAnyPermission(
-                BatchControlPermissions.REQUEST,
-                BatchControlPermissions.APPROVE,
-                BatchControlPermissions.MANAGE);
+        Jenkins.get().checkAnyPermission(SectionAccess.requests());
+        HttpVerbs.refuseUnsupported();
         return this;
     }
 
@@ -56,23 +53,15 @@ public class RequestsSection implements ModelObject, StaplerProxy {
         return "Run Requests";
     }
 
-    /**
-     * Serves the list URL {@code /batch-control/requests/}. The request history is append-only
-     * (SPEC item 4): there is no modify/delete HTTP API, so every verb except GET/HEAD is
-     * refused with 405.
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Run requests are append-only; only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.requests();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     /**

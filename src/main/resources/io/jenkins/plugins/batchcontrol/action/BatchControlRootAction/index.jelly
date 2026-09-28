@@ -1,36 +1,38 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Batch Control">
+  <l:layout title="Batch Control" permissions="${it.viewPermissions}">
+    <j:set var="links" value="${it.links}"/>
     <l:side-panel>
+      <!-- Each entry is shown only to a user who may open it (SPEC item 2): the predicates are the
+           same permission sets the section gates check. The Grants entry also needs change
+           control on, because that subtree closes while the switch is off. -->
       <l:tasks>
-        <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list" title="Run Requests"/>
-        <!-- P-15: the Grants subtree closes while change control is off, so it is not offered
-             either. The audit screens below stay: the switch governs what windows confer, not
-             what history may be read. -->
-        <j:if test="${it.grantsAvailable}">
-          <l:task href="${rootURL}/batch-control/grants/" icon="symbol-lock-closed" title="Grants"/>
+        <j:if test="${links.requests}">
+          <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list-outline plugin-ionicons-api" title="Run Requests"/>
         </j:if>
-        <l:task href="${rootURL}/batch-control/changes/" icon="symbol-clock" title="Change Records"/>
-        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
-        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
-        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
+        <j:if test="${links.grants}">
+          <l:task href="${rootURL}/batch-control/grants/" icon="symbol-key-outline plugin-ionicons-api" title="Grants"/>
+        </j:if>
+        <j:if test="${links.history}">
+          <l:task href="${rootURL}/batch-control/changes/" icon="symbol-document-text-outline plugin-ionicons-api" title="Change Records"/>
+          <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-speedometer-outline plugin-ionicons-api" title="Dashboard"/>
+          <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning-outline plugin-ionicons-api" title="Incidents"/>
+          <l:task href="${rootURL}/batch-control/history/" icon="symbol-search-outline plugin-ionicons-api" title="History"/>
+        </j:if>
       </l:tasks>
     </l:side-panel>
     <l:main-panel>
-      <h1>Batch Control</h1>
+      <l:app-bar title="Batch Control"/>
       <p class="jenkins-description">
-        Run approval and audit history for jobs under batch control.
+        Run approval and audit history for jobs under batch control. Use the side panel to open
+        a screen.
       </p>
-      <p>
-        <a class="jenkins-button jenkins-button--primary" href="requests/">Run Requests</a>
-        <j:if test="${it.grantsAvailable}">
-          <a class="jenkins-button" href="grants/">Grants</a>
-        </j:if>
-        <a class="jenkins-button" href="changes/">Change Records</a>
-        <a class="jenkins-button" href="dashboard/">Dashboard</a>
-        <a class="jenkins-button" href="incidents/">Incidents</a>
-        <a class="jenkins-button" href="history/">History</a>
-      </p>
+      <j:if test="${!links.requests and !links.grants and !links.history}">
+        <p>
+          None of the Batch Control screens is available to you right now. Grant requests can
+          only be made while change control is enabled.
+        </p>
+      </j:if>
     </l:main-panel>
   </l:layout>
 </j:jelly>

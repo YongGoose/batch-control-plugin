@@ -1,13 +1,8 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Grants">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Grants" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Grants</h1>
+      <l:app-bar title="Grants"/>
       <p class="jenkins-description">
         Temporary (just-in-time) permission requests for creating, configuring or deleting jobs,
         and the grants currently active.
@@ -47,7 +42,7 @@
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?page=${it.page - 1}&amp;activePage=${it.activePage}">Newer</a>
             </j:if>
@@ -106,7 +101,7 @@
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasActivePrevious}">
               <a class="jenkins-button" href="?activePage=${it.activePage - 1}&amp;page=${it.page}">Newer</a>
             </j:if>
@@ -131,42 +126,39 @@
         </j:if>
         <f:form method="post" action="create" name="createGrantRequest">
           <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
-            <select name="scopeType" class="jenkins-select__input">
-              <option value="JOB" selected="${it.prefillScopeType == 'JOB' ? 'true' : null}">Job (exact full name)</option>
-              <option value="FOLDER" selected="${it.prefillScopeType == 'FOLDER' ? 'true' : null}">Folder (the folder and everything below it)</option>
-            </select>
+            <div class="jenkins-select">
+              <select name="scopeType" class="jenkins-select__input">
+                <option value="JOB" selected="${it.prefillScopeType == 'JOB' ? 'true' : null}">Job (exact full name)</option>
+                <option value="FOLDER" selected="${it.prefillScopeType == 'FOLDER' ? 'true' : null}">Folder (the folder and everything below it)</option>
+              </select>
+            </div>
           </f:entry>
           <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
             <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
                    value="${it.prefillScopeFullName}"/>
           </f:entry>
           <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
-            <div class="jenkins-checkbox-help-wrapper">
-              <span class="jenkins-checkbox">
-                <input type="checkbox" name="actions" value="CREATE" id="grant-action-create"/>
-                <label for="grant-action-create" class="attach-previous">Create</label>
-              </span>
+            <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
+                 GrantsSection#doCreate reads with getParameterValues("actions"). -->
+            <div class="jenkins-!-margin-bottom-1">
+              <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"/>
             </div>
-            <div class="jenkins-checkbox-help-wrapper">
-              <span class="jenkins-checkbox">
-                <input type="checkbox" name="actions" value="CONFIGURE" id="grant-action-configure"
-                       checked="${it.prefilled ? 'true' : null}"/>
-                <label for="grant-action-configure" class="attach-previous">Configure</label>
-              </span>
+            <div class="jenkins-!-margin-bottom-1">
+              <f:checkbox name="actions" value="CONFIGURE" id="grant-action-configure" title="Configure"
+                          checked="${it.prefilled}"/>
             </div>
-            <div class="jenkins-checkbox-help-wrapper">
-              <span class="jenkins-checkbox">
-                <input type="checkbox" name="actions" value="DELETE" id="grant-action-delete"/>
-                <label for="grant-action-delete" class="attach-previous">Delete</label>
-              </span>
+            <div>
+              <f:checkbox name="actions" value="DELETE" id="grant-action-delete" title="Delete"/>
             </div>
           </f:entry>
           <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
-            <select name="durationMinutes" class="jenkins-select__input">
-              <j:forEach var="d" items="${it.durationOptions}">
-                <option value="${d}">${it.minutesLabel(d)}</option>
-              </j:forEach>
-            </select>
+            <div class="jenkins-select">
+              <select name="durationMinutes" class="jenkins-select__input">
+                <j:forEach var="d" items="${it.durationOptions}">
+                  <option value="${d}">${it.minutesLabel(d)}</option>
+                </j:forEach>
+              </select>
+            </div>
           </f:entry>
           <f:entry title="Custom duration (minutes)"
                    description="Optional. Overrides the preset above when set. Maximum: ${it.maxGrantMinutes} minutes.">
@@ -185,11 +177,13 @@
             </j:when>
             <j:otherwise>
               <f:entry title="Approver" help="/plugin/batch-control/help/grant-approver.html">
-                <select name="approver" class="jenkins-select__input">
-                  <j:forEach var="a" items="${it.approverOptions}">
-                    <option value="${a}">${a}</option>
-                  </j:forEach>
-                </select>
+                <div class="jenkins-select">
+                  <select name="approver" class="jenkins-select__input">
+                    <j:forEach var="a" items="${it.approverOptions}">
+                      <option value="${a}">${a}</option>
+                    </j:forEach>
+                  </select>
+                </div>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Request Grant"/>

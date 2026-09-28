@@ -77,7 +77,7 @@ public class JobGrantRequestAction implements Action {
             // Already able to change this job (standing permission, or a window open right now).
             return null;
         }
-        return "symbol-key-outline";
+        return "symbol-key-outline plugin-ionicons-api";
     }
 
     @Override
