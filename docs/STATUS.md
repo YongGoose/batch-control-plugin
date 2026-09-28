@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-28 (night) — PR 3 (#20, #34, #36) ready
+- PR 2 (#30) merged as #38.
+- #36: nine plugin-interaction test classes (customize-build-now, rebuild, parameterized-trigger, build-token-root, naginator, lockable-resources, throttle-concurrents, authorize-project, jobConfigHistory). 29 of 30 held on the existing gate; the naginator automatic retry of an approved run was the gap. Ruling in SPEC item 6: a retry is judged by the causes of the build it retries. Fixed in the queue gate.
+- #34: customize-build-now does not bypass the gate and the job page still offers Request Run. No code change was needed beyond the tests.
+- #20: configuration comparison ignores `plugin="…@version"` and the root `<actions>`, and computed-folder children are not recorded as CONFIGURE. The snapshot lock is striped.
+- Gate: 300 tests, 0 failures, SpotBugs 0, but **1 h 13 min** (was 22 min). Every JenkinsRule now loads the nine extra plugins. Parallel forks go into the next PR, whose gate validates them.
+
 ## 2026-09-28 (evening) — PR 2 (#30 per-strategy subclasses) ready
 - PR 1 (#31) merged as #37 after security-04 (0 blocker / 0 high).
 - #30: D-35a (option A from PoC-5) implemented: `BatchControlMatrixAuthorizationStrategy`, `BatchControlRoleBasedAuthorizationStrategy`, converters, JCasC configurators, legacy wrapper load shim, `batch-control-strategy` monitor with migrate/revert, D-35b self-grant guard, D-35c created-item Configure. matrix-auth, role-strategy and JCasC are optional dependencies.
