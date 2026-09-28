@@ -7,31 +7,46 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.Incident;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
+import java.lang.ref.WeakReference;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.DirectoryStream;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -44,12 +59,19 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * File-based {@link Store} rooted at {@code $JENKINS_HOME/batch-control/}.
  *
  * <ul>
- *   <li>Entities with state (run requests) are XStream XML files, rewritten atomically
- *       (temp file, then {@code ATOMIC_MOVE}).</li>
+ *   <li>Entities with state (requests, grants, incidents) are XStream XML files, rewritten
+ *       atomically (temp file, then {@code ATOMIC_MOVE}).</li>
  *   <li>Append-only records (runs, changes) are monthly JSONL files, written with
  *       append + flush; Instants are stored as epoch milliseconds.</li>
- *   <li>All writes are serialized by one {@link ReentrantLock}.</li>
- *   <li>File names derived from identifiers are validated through {@link PathCodec}.</li>
+ *   <li>Writes are serialized <em>per target file</em> (a fixed set of lock stripes, #18): an
+ *       append to this month's bucket never waits for anything but another single write that
+ *       happens to share its stripe, and no operation holds a lock across more than one file
+ *       write or deletion. In particular retention, which deletes old months and closed
+ *       entities file by file, cannot stall the queue gate or build completion.</li>
+ *   <li>Page loads read JSONL buckets newest first and stop at a record cap (#13); the month
+ *       summary counters and the entity index are derived in-memory caches, never files.</li>
+ *   <li>File names derived from identifiers are validated through {@link PathCodec}; month and
+ *       id names use ASCII digits whatever the default locale (#17).</li>
  * </ul>
  */
 @Restricted(NoExternalUse.class)
@@ -59,14 +81,39 @@ public final class FileStore implements Store {
 
     private static final FileStore INSTANCE = new FileStore();
 
-    private final ReentrantLock writeLock = new ReentrantLock();
+    /** Number of write-lock stripes; a power of two. */
+    private static final int LOCK_STRIPES = 64;
+
+    /** Bound on the month-summary cache entries (one per month file ever summarised). */
+    private static final int MAX_STATS_ENTRIES = 256;
+
+    /** Chunk size of the incremental month-summary reader. */
+    private static final int STATS_CHUNK = 64 * 1024;
+
+    private final ReentrantLock[] writeLocks = new ReentrantLock[LOCK_STRIPES];
     private final XStream2 xstream = new XStream2();
 
+    /** Guards the lazy (re)build of {@link #index}. */
+    private final Object indexMonitor = new Object();
+    private volatile EntityIndex index;
+    private volatile WeakReference<Jenkins> indexFor = new WeakReference<>(null);
+
+    /** Month file to its incremental summary; guarded by itself. */
+    private final Map<Path, StatsEntry> statsCache = new HashMap<>();
+
     private FileStore() {
+        for (int i = 0; i < LOCK_STRIPES; i++) {
+            writeLocks[i] = new ReentrantLock();
+        }
     }
 
     public static FileStore get() {
         return INSTANCE;
+    }
+
+    /** The write lock of one target file (#18: per-file, never store-wide). */
+    private ReentrantLock lockFor(Path file) {
+        return writeLocks[file.toAbsolutePath().normalize().hashCode() & (LOCK_STRIPES - 1)];
     }
 
     /** Resolved on every call: the Jenkins home changes between test sessions in one JVM. */
@@ -110,8 +157,9 @@ public final class FileStore implements Store {
         return incidentDir().resolve("index");
     }
 
-    private static String monthFileName(YearMonth month) {
-        return String.format("%04d-%02d.jsonl", month.getYear(), month.getMonthValue());
+    /** {@code YYYY-MM.jsonl} in ASCII digits whatever the default locale (#17). */
+    static String monthFileName(YearMonth month) {
+        return String.format(Locale.ROOT, "%04d-%02d.jsonl", month.getYear(), month.getMonthValue());
     }
 
     /** Month bucketing follows the {@link BatchClock} zone, like every other time judgment. */
@@ -119,10 +167,13 @@ public final class FileStore implements Store {
         return YearMonth.from(instant.atZone(BatchClock.clock().getZone()));
     }
 
+    // ---------------------------------------------------------------- run requests
+
     @Override
     public void saveRunRequest(RunRequest request) {
         Objects.requireNonNull(request, "request");
         saveXmlEntity(runRequestDir(), request.getId(), request, "run request");
+        index().put(request);
     }
 
     @Override
@@ -136,9 +187,49 @@ public final class FileStore implements Store {
     }
 
     @Override
+    public List<RunRequest> listOpenRunRequests() {
+        EntityIndex idx = index();
+        List<String> ids = new ArrayList<>();
+        for (EntityIndex.RunEntry entry : idx.runRequests.values()) {
+            if (entry.summary().isOpen()) {
+                ids.add(entry.summary().id());
+            }
+        }
+        ids.sort(Comparator.naturalOrder());
+        List<RunRequest> open = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            RunRequest request = loadRunRequest(id);
+            if (request == null) {
+                idx.runRequests.remove(id);
+                continue;
+            }
+            if (RequestSummary.of(request).isOpen()) {
+                open.add(request);
+            } else {
+                // Closed behind a stale entry; closed statuses are terminal, so this is safe.
+                idx.put(request);
+            }
+        }
+        return open;
+    }
+
+    @Override
+    public List<RequestSummary> listRunRequestSummaries() {
+        List<RequestSummary> summaries = new ArrayList<>();
+        for (EntityIndex.RunEntry entry : index().runRequests.values()) {
+            summaries.add(entry.summary());
+        }
+        summaries.sort(Comparator.comparing(RequestSummary::id));
+        return summaries;
+    }
+
+    // ---------------------------------------------------------------- grant requests, grants
+
+    @Override
     public void saveGrantRequest(GrantRequest request) {
         Objects.requireNonNull(request, "request");
         saveXmlEntity(grantRequestDir(), request.getId(), request, "grant request");
+        index().put(request);
     }
 
     @Override
@@ -152,9 +243,36 @@ public final class FileStore implements Store {
     }
 
     @Override
+    public List<GrantRequest> listOpenGrantRequests() {
+        EntityIndex idx = index();
+        List<String> ids = new ArrayList<>();
+        for (EntityIndex.GrantRequestEntry entry : idx.grantRequests.values()) {
+            if (EntityIndex.isOpen(entry)) {
+                ids.add(entry.id());
+            }
+        }
+        ids.sort(Comparator.naturalOrder());
+        List<GrantRequest> open = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            GrantRequest request = loadGrantRequest(id);
+            if (request == null) {
+                idx.grantRequests.remove(id);
+                continue;
+            }
+            if (request.getStatus() == RequestStatus.PENDING) {
+                open.add(request);
+            } else {
+                idx.put(request);
+            }
+        }
+        return open;
+    }
+
+    @Override
     public void saveGrant(Grant grant) {
         Objects.requireNonNull(grant, "grant");
         saveXmlEntity(grantDir(), grant.getId(), grant, "grant");
+        index().put(grant);
     }
 
     @Override
@@ -167,34 +285,106 @@ public final class FileStore implements Store {
         return listXmlEntities(grantDir(), Grant.class, "grant");
     }
 
+    // ---------------------------------------------------------------- config snapshots (#25)
+
     @Override
     public void saveConfigSnapshot(String jobFullName, String configXml) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Objects.requireNonNull(configXml, "configXml");
         writeTextAtomically(snapshotDir(), PathCodec.encode(jobFullName) + ".xml", configXml,
                 "config snapshot of " + jobFullName);
+        // The current file now exists, so a file under the pre-#25 shortened form is obsolete.
+        deleteLegacySnapshot(jobFullName);
     }
 
     @Override
     public String loadConfigSnapshot(String jobFullName) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
-        return readTextOrNull(file);
+        String text = readTextOrNull(file);
+        if (text == null) {
+            // Written by a version before #25 and not yet migrated at startup.
+            String legacy = PathCodec.legacyShortened(jobFullName);
+            if (legacy != null) {
+                text = readTextOrNull(PathCodec.resolveUnder(snapshotDir(), legacy + ".xml"));
+            }
+        }
+        return text;
     }
 
     @Override
     public void deleteConfigSnapshot(String jobFullName) {
         Objects.requireNonNull(jobFullName, "jobFullName");
-        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
-        writeLock.lock();
-        try {
-            Files.deleteIfExists(file);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to delete config snapshot of " + jobFullName, e);
-        } finally {
-            writeLock.unlock();
+        deleteFile(PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml"),
+                "config snapshot of " + jobFullName);
+        deleteLegacySnapshot(jobFullName);
+    }
+
+    private void deleteLegacySnapshot(String jobFullName) {
+        String legacy = PathCodec.legacyShortened(jobFullName);
+        if (legacy != null) {
+            deleteFile(PathCodec.resolveUnder(snapshotDir(), legacy + ".xml"),
+                    "legacy config snapshot of " + jobFullName);
         }
     }
+
+    /**
+     * One-time migration of config snapshots written under the pre-#25 shortened form (called at
+     * startup with the full name of every loaded item). A legacy file is renamed to the current
+     * form, unless another live item's plain encoding equals the legacy name: then both items
+     * shared the file and nobody can tell whose configuration it holds, so it is deleted and both
+     * items start from a fresh baseline (a missing baseline is safe, a wrong one is not).
+     *
+     * @return the number of legacy files renamed or deleted
+     */
+    public int migrateLegacySnapshots(Collection<String> liveFullNames) {
+        Path dir = snapshotDir();
+        if (!Files.isDirectory(dir)) {
+            return 0;
+        }
+        Set<String> liveEncodings = new HashSet<>();
+        for (String name : liveFullNames) {
+            liveEncodings.add(PathCodec.encode(name));
+        }
+        int migrated = 0;
+        for (String name : liveFullNames) {
+            String legacy = PathCodec.legacyShortened(name);
+            if (legacy == null) {
+                continue;
+            }
+            Path legacyFile = PathCodec.resolveUnder(dir, legacy + ".xml");
+            if (!Files.isRegularFile(legacyFile)) {
+                continue;
+            }
+            Path current = PathCodec.resolveUnder(dir, PathCodec.encode(name) + ".xml");
+            try {
+                if (liveEncodings.contains(legacy)) {
+                    LOGGER.warning(() -> "Deleting config snapshot " + legacyFile.getFileName()
+                            + ": it was shared by the long-named item '" + name + "' and another"
+                            + " item whose name encodes identically under the pre-#25 scheme;"
+                            + " both start from a fresh baseline");
+                    deleteFile(legacyFile, "shared legacy config snapshot");
+                } else if (Files.exists(current)) {
+                    deleteFile(legacyFile, "obsolete legacy config snapshot");
+                } else {
+                    ReentrantLock lock = lockFor(current);
+                    lock.lock();
+                    try {
+                        moveAtomically(legacyFile, current);
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+                migrated++;
+            } catch (IOException | UncheckedIOException e) {
+                LOGGER.log(Level.WARNING, e, () -> "Could not migrate legacy config snapshot "
+                        + legacyFile.getFileName());
+            }
+        }
+        return migrated;
+    }
+
+    // ---------------------------------------------------------------- run and change records
 
     @Override
     public void appendRunRecord(RunRecord record) {
@@ -205,6 +395,100 @@ public final class FileStore implements Store {
     @Override
     public List<RunRecord> listRunRecords(YearMonth month) {
         return parseLines(runsDir(), month, FileStore::runRecordFromJson);
+    }
+
+    @Override
+    public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months,
+                                                Predicate<? super RunRecord> filter,
+                                                int offset, int limit, int maxScanned) {
+        Comparator<RunRecord> newestFirst = Comparator.comparing(RunRecord::getStartedAt)
+                .thenComparing(RunRecord::getRunId).reversed();
+        return page(runsDir(), months, FileStore::runRecordFromJson, filter, newestFirst,
+                offset, limit, maxScanned);
+    }
+
+    @Override
+    public RunMonthStats runMonthStats(YearMonth month) {
+        Path file = PathCodec.resolveUnder(runsDir(), monthFileName(month));
+        synchronized (statsCache) {
+            BasicFileAttributes attrs;
+            try {
+                attrs = Files.readAttributes(file, BasicFileAttributes.class);
+            } catch (NoSuchFileException e) {
+                statsCache.remove(file);
+                return RunMonthStats.EMPTY;
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to read " + file, e);
+            }
+            Object identity = attrs.fileKey() != null ? attrs.fileKey() : attrs.creationTime();
+            StatsEntry entry = statsCache.get(file);
+            if (entry == null || !Objects.equals(entry.identity, identity) || attrs.size() < entry.offset) {
+                entry = new StatsEntry(identity);
+            }
+            if (attrs.size() > entry.offset) {
+                readAppendedStats(file, entry);
+            }
+            if (statsCache.size() >= MAX_STATS_ENTRIES && !statsCache.containsKey(file)) {
+                statsCache.clear();
+            }
+            statsCache.put(file, entry);
+            return entry.stats;
+        }
+    }
+
+    /** Folds the complete lines appended since {@code entry.offset} into the counters. */
+    private static void readAppendedStats(Path file, StatsEntry entry) {
+        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            channel.position(entry.offset);
+            ByteBuffer buffer = ByteBuffer.allocate(STATS_CHUNK);
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            long consumed = entry.offset;
+            long position = entry.offset;
+            RunMonthStats stats = entry.stats;
+            int read;
+            while ((read = channel.read(buffer)) > 0) {
+                byte[] bytes = buffer.array();
+                for (int i = 0; i < read; i++) {
+                    position++;
+                    if (bytes[i] != '\n') {
+                        line.write(bytes[i]);
+                        continue;
+                    }
+                    String text = line.toString(StandardCharsets.UTF_8).trim();
+                    line.reset();
+                    consumed = position;
+                    if (text.isEmpty()) {
+                        continue;
+                    }
+                    try {
+                        stats = stats.plus(optString(JSONObject.fromObject(text), "result"));
+                    } catch (RuntimeException e) {
+                        LOGGER.log(Level.WARNING, "Skipping unparseable line of {0} in the month summary: {1}",
+                                new Object[] {file, e.getClass().getName()});
+                    }
+                }
+                buffer.clear();
+            }
+            // A trailing line without its separator is still being written; it is read next time.
+            entry.offset = consumed;
+            entry.stats = stats;
+        } catch (NoSuchFileException e) {
+            entry.offset = 0;
+            entry.stats = RunMonthStats.EMPTY;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read " + file, e);
+        }
+    }
+
+    /** Incremental month summary: the counters of the bytes before {@link #offset}. */
+    private static final class StatsEntry {
+        private final Object identity;
+        private long offset;
+        private RunMonthStats stats = RunMonthStats.EMPTY;
+
+        StatsEntry(Object identity) {
+            this.identity = identity;
+        }
     }
 
     @Override
@@ -223,28 +507,38 @@ public final class FileStore implements Store {
 
     @Override
     public List<ChangeRecord> listChangeRecords(YearMonth month) {
-        List<ChangeRecord> records = new ArrayList<>();
-        for (ChangeRecord record : parseLines(changesDir(), month, FileStore::changeRecordFromJson)) {
-            if (record.getDiff() == null) {
-                record.setDiff(readTextOrNull(
-                        PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
-            }
-            records.add(record);
-        }
+        List<ChangeRecord> records = parseLines(changesDir(), month, FileStore::changeRecordFromJson);
+        records.forEach(this::attachDiff);
         return records;
     }
 
     @Override
+    public RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months,
+                                                      Predicate<? super ChangeRecord> filter,
+                                                      int offset, int limit, int maxScanned) {
+        Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
+                .thenComparing(ChangeRecord::getId).reversed();
+        RecordPage<ChangeRecord> page = page(changesDir(), months, FileStore::changeRecordFromJson,
+                filter, newestFirst, offset, limit, maxScanned);
+        // Patches only for the rendered rows (the filter never looks at the diff text).
+        page.getItems().forEach(this::attachDiff);
+        return page;
+    }
+
+    private void attachDiff(ChangeRecord record) {
+        if (record.getDiff() == null) {
+            record.setDiff(readTextOrNull(PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
+        }
+    }
+
+    // ---------------------------------------------------------------- incidents
+
+    @Override
     public void createIncident(Incident incident) {
         Objects.requireNonNull(incident, "incident");
-        writeLock.lock();
-        try {
-            saveXmlEntity(incidentDir(), incident.getId(), incident, "incident");
-            appendLine(incidentIndexDir(), monthOf(incident.getCreatedAt()),
-                    incidentIndexToJson(incident));
-        } finally {
-            writeLock.unlock();
-        }
+        // XML first, then the index line: a reader that finds the line always finds the XML.
+        saveXmlEntity(incidentDir(), incident.getId(), incident, "incident");
+        appendLine(incidentIndexDir(), monthOf(incident.getCreatedAt()), incidentIndexToJson(incident));
     }
 
     @Override
@@ -270,66 +564,193 @@ public final class FileStore implements Store {
         return incidents;
     }
 
+    @Override
+    public RecordPage<Incident> pageIncidents(Collection<YearMonth> months,
+                                              Predicate<? super Incident> filter,
+                                              int offset, int limit, int maxScanned) {
+        Comparator<Incident> newestFirst = Comparator
+                .comparing((Incident i) -> i.getCreatedAt() == null ? Instant.EPOCH : i.getCreatedAt())
+                .thenComparing(Incident::getId).reversed();
+        Function<JSONObject, Incident> parser = json -> {
+            String id = optString(json, "id");
+            return id == null ? null : loadIncident(id);
+        };
+        return page(incidentIndexDir(), months, parser, filter, newestFirst, offset, limit, maxScanned);
+    }
+
     // ---------------------------------------------------------------- retention (SPEC item 12)
 
     @Override
     public List<YearMonth> listStoredMonths() {
-        java.util.TreeSet<YearMonth> months = new java.util.TreeSet<>();
-        for (Path dir : new Path[] {runsDir(), changesDir(), incidentIndexDir()}) {
-            if (!Files.isDirectory(dir)) {
-                continue;
-            }
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.jsonl")) {
-                for (Path file : stream) {
-                    Path name = file.getFileName();
-                    YearMonth month = name == null ? null : parseMonthFileName(name.toString());
-                    if (month != null) {
-                        months.add(month);
-                    }
+        TreeSet<YearMonth> months = new TreeSet<>();
+        for (Path dir : monthDirs()) {
+            for (Path file : listMonthFiles(dir)) {
+                Path name = file.getFileName();
+                YearMonth month = name == null ? null : parseMonthFileName(name.toString());
+                if (month != null) {
+                    months.add(month);
                 }
-            } catch (NoSuchFileException e) {
-                // Nothing stored there yet.
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to list month files in " + dir, e);
             }
         }
         return new ArrayList<>(months);
     }
 
+    private Path[] monthDirs() {
+        return new Path[] {runsDir(), changesDir(), incidentIndexDir()};
+    }
+
+    private static List<Path> listMonthFiles(Path dir) {
+        List<Path> files = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return files;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.jsonl")) {
+            for (Path file : stream) {
+                files.add(file);
+            }
+        } catch (NoSuchFileException e) {
+            // Nothing stored there yet.
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to list month files in " + dir, e);
+        }
+        return files;
+    }
+
+    /**
+     * Deletes one month bucket file by file (#18): every incident XML, patch and bucket file is
+     * deleted under its own lock stripe, and the lock is released before the next one, so no
+     * writer waits behind more than a single deletion. Incident XMLs and patches go first and
+     * the JSONL files last, so an interrupted pass leaves the index in place and the next pass
+     * finishes it.
+     */
     @Override
     public boolean deleteMonth(YearMonth month) {
         Objects.requireNonNull(month, "month");
-        writeLock.lock();
+        boolean deleted = false;
         try {
-            boolean deleted = false;
-            // Incident XMLs first (found through the index), then the index file itself.
-            for (String id : parseLines(incidentIndexDir(), month, json -> optString(json, "id"))) {
-                deleted |= Files.deleteIfExists(PathCodec.resolveUnder(incidentDir(), id + ".xml"));
+            Path indexFile = PathCodec.resolveUnder(incidentIndexDir(), monthFileName(month));
+            if (Files.isRegularFile(indexFile)) {
+                try (BufferedReader reader = Files.newBufferedReader(indexFile, StandardCharsets.UTF_8)) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String id = incidentIdOrNull(line);
+                        if (id != null) {
+                            deleted |= deleteFile(PathCodec.resolveUnder(incidentDir(), id + ".xml"), "incident " + id);
+                        }
+                    }
+                } catch (NoSuchFileException e) {
+                    // Deleted concurrently.
+                }
             }
-            deleted |= Files.deleteIfExists(
-                    PathCodec.resolveUnder(incidentIndexDir(), monthFileName(month)));
-            deleted |= Files.deleteIfExists(PathCodec.resolveUnder(runsDir(), monthFileName(month)));
+            deleted |= deleteFile(indexFile, "incident index of " + month);
+            deleted |= deleteFile(PathCodec.resolveUnder(runsDir(), monthFileName(month)), "runs of " + month);
             // Diff patches are named <id>.patch and ids start with yyyyMMdd, so the month
             // bucket of a patch is recoverable from its file-name prefix.
-            String idMonthPrefix = String.format("%04d%02d", month.getYear(), month.getMonthValue());
+            String idMonthPrefix = String.format(Locale.ROOT, "%04d%02d", month.getYear(), month.getMonthValue());
             if (Files.isDirectory(diffDir())) {
-                try (DirectoryStream<Path> stream = Files.newDirectoryStream(
-                        diffDir(), idMonthPrefix + "*.patch")) {
+                try (DirectoryStream<Path> stream = Files.newDirectoryStream(diffDir(), idMonthPrefix + "*.patch")) {
                     for (Path patch : stream) {
-                        deleted |= Files.deleteIfExists(patch);
+                        deleted |= deleteFile(patch, "diff patch");
                     }
                 }
             }
-            deleted |= Files.deleteIfExists(
-                    PathCodec.resolveUnder(changesDir(), monthFileName(month)));
-            return deleted;
+            deleted |= deleteFile(PathCodec.resolveUnder(changesDir(), monthFileName(month)), "changes of " + month);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to delete month bucket " + month, e);
         } finally {
-            writeLock.unlock();
+            synchronized (statsCache) {
+                statsCache.remove(PathCodec.resolveUnder(runsDir(), monthFileName(month)));
+            }
+        }
+        return deleted;
+    }
+
+    private static String incidentIdOrNull(String line) {
+        if (line.isBlank()) {
+            return null;
+        }
+        try {
+            return optString(JSONObject.fromObject(line), "id");
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
+    @Override
+    public RetentionResult deleteClosedEntitiesBefore(Instant cutoff) {
+        Objects.requireNonNull(cutoff, "cutoff");
+        EntityIndex idx = index();
+        int runRequests = 0;
+        for (EntityIndex.RunEntry entry : new ArrayList<>(idx.runRequests.values())) {
+            if (entry.summary().isOpen() || !entry.lastActivity().isBefore(cutoff)) {
+                continue;
+            }
+            // Confirm against the file: the index is derived data.
+            String id = entry.summary().id();
+            RunRequest request = loadRunRequest(id);
+            if (request != null) {
+                idx.put(request);
+                EntityIndex.RunEntry fresh = idx.runRequests.get(id);
+                if (fresh == null || fresh.summary().isOpen() || !fresh.lastActivity().isBefore(cutoff)) {
+                    continue;
+                }
+                if (deleteFile(PathCodec.resolveUnder(runRequestDir(), id + ".xml"), "run request " + id)) {
+                    runRequests++;
+                }
+            }
+            idx.runRequests.remove(id);
+        }
+        List<String> grantIds = new ArrayList<>();
+        for (EntityIndex.GrantEntry entry : new ArrayList<>(idx.grants.values())) {
+            if (!entry.endedAt().isBefore(cutoff)) {
+                continue;
+            }
+            String id = entry.id();
+            Grant grant = loadGrant(id);
+            if (grant != null) {
+                idx.put(grant);
+                EntityIndex.GrantEntry fresh = idx.grants.get(id);
+                if (fresh == null || !fresh.endedAt().isBefore(cutoff)) {
+                    continue;
+                }
+                if (deleteFile(PathCodec.resolveUnder(grantDir(), id + ".xml"), "grant " + id)) {
+                    grantIds.add(id);
+                }
+            }
+            idx.grants.remove(id);
+        }
+        Set<String> referenced = new HashSet<>();
+        for (EntityIndex.GrantEntry entry : idx.grants.values()) {
+            referenced.add(entry.requestId());
+        }
+        int grantRequests = 0;
+        for (EntityIndex.GrantRequestEntry entry : new ArrayList<>(idx.grantRequests.values())) {
+            if (EntityIndex.isOpen(entry) || !entry.lastActivity().isBefore(cutoff)
+                    || referenced.contains(entry.id())) {
+                continue;
+            }
+            String id = entry.id();
+            GrantRequest request = loadGrantRequest(id);
+            if (request != null) {
+                idx.put(request);
+                EntityIndex.GrantRequestEntry fresh = idx.grantRequests.get(id);
+                if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
+                    continue;
+                }
+                if (deleteFile(PathCodec.resolveUnder(grantRequestDir(), id + ".xml"), "grant request " + id)) {
+                    grantRequests++;
+                }
+            }
+            idx.grantRequests.remove(id);
+        }
+        return new RetentionResult(runRequests, grantRequests, grantIds);
+    }
+
+    /**
+     * Month bucket names are ASCII ({@code \d} in Java regex is ASCII-only), so a file written
+     * under a default locale with other digits (before #17) is not recognised here; see
+     * {@link #normalizeMonthFileNames()}.
+     */
     private static YearMonth parseMonthFileName(String fileName) {
         if (!fileName.endsWith(".jsonl")) {
             return null;
@@ -345,12 +766,129 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * One-time repair of month buckets written before #17 under a default locale whose digits are
+     * not ASCII (e.g. {@code ٢٠٢٦-٠٩.jsonl}): each is renamed to its ASCII name, or appended to
+     * the ASCII bucket when that exists too, so retention and the screens see those records again.
+     *
+     * @return the number of bucket files repaired
+     */
+    public int normalizeMonthFileNames() {
+        int repaired = 0;
+        for (Path dir : monthDirs()) {
+            for (Path file : listMonthFiles(dir)) {
+                Path fileName = file.getFileName();
+                String name = fileName == null ? "" : fileName.toString();
+                if (parseMonthFileName(name) != null) {
+                    continue;
+                }
+                YearMonth month = parseAnyDigitMonth(name);
+                if (month == null) {
+                    continue;
+                }
+                Path target = PathCodec.resolveUnder(dir, monthFileName(month));
+                ReentrantLock lock = lockFor(target);
+                lock.lock();
+                try {
+                    if (Files.exists(target)) {
+                        byte[] content = Files.readAllBytes(file);
+                        byte[] separator = System.lineSeparator().getBytes(StandardCharsets.UTF_8);
+                        Files.write(target, separator, StandardOpenOption.APPEND);
+                        Files.write(target, content, StandardOpenOption.APPEND);
+                        Files.delete(file);
+                    } else {
+                        moveAtomically(file, target);
+                    }
+                    repaired++;
+                    LOGGER.info(() -> "Renamed month bucket " + name + " to " + target.getFileName()
+                            + " (written under a non-ASCII-digit default locale)");
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, e, () -> "Could not repair month bucket " + file);
+                } finally {
+                    lock.unlock();
+                }
+            }
+        }
+        return repaired;
+    }
+
+    /** {@code YYYY-MM.jsonl} with digits of any script, or {@code null}. */
+    private static YearMonth parseAnyDigitMonth(String fileName) {
+        if (!fileName.endsWith(".jsonl")) {
+            return null;
+        }
+        String base = fileName.substring(0, fileName.length() - ".jsonl".length());
+        if (base.length() != 7 || base.charAt(4) != '-') {
+            return null;
+        }
+        int year = 0;
+        int monthValue = 0;
+        for (int i = 0; i < 7; i++) {
+            if (i == 4) {
+                continue;
+            }
+            int digit = Character.digit(base.charAt(i), 10);
+            if (digit < 0) {
+                return null;
+            }
+            if (i < 4) {
+                year = year * 10 + digit;
+            } else {
+                monthValue = monthValue * 10 + digit;
+            }
+        }
+        if (monthValue < 1 || monthValue > 12) {
+            return null;
+        }
+        return YearMonth.of(year, monthValue);
+    }
+
+    // ---------------------------------------------------------------- entity index (#13)
+
+    /**
+     * The entity index of the current Jenkins session, built on first use by reading every
+     * request and grant XML once (startup recovery triggers that before the queue runs).
+     */
+    private EntityIndex index() {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        Path root = root();
+        EntityIndex current = index;
+        if (current != null && current.root.equals(root) && indexFor.get() == jenkins) {
+            return current;
+        }
+        synchronized (indexMonitor) {
+            current = index;
+            if (current != null && current.root.equals(root) && indexFor.get() == jenkins) {
+                return current;
+            }
+            EntityIndex built = new EntityIndex(root);
+            for (RunRequest request : listRunRequests()) {
+                built.put(request);
+            }
+            for (GrantRequest request : listGrantRequests()) {
+                built.put(request);
+            }
+            for (Grant grant : listGrants()) {
+                built.put(grant);
+            }
+            indexFor = new WeakReference<>(jenkins);
+            index = built;
+            return built;
+        }
+    }
+
+    /** Builds the entity index now (startup), so no later save pays for it. */
+    public void warmUp() {
+        index();
+    }
+
     // ---------------------------------------------------------------- I/O helpers
 
     /** Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}). */
     private void saveXmlEntity(Path dir, String id, Object entity, String what) {
         Path target = PathCodec.resolveUnder(dir, id + ".xml");
-        writeLock.lock();
+        ReentrantLock lock = lockFor(target);
+        lock.lock();
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, id, ".tmp");
@@ -361,7 +899,7 @@ public final class FileStore implements Store {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to save " + what + " " + id, e);
         } finally {
-            writeLock.unlock();
+            lock.unlock();
         }
     }
 
@@ -416,7 +954,8 @@ public final class FileStore implements Store {
     /** Writes a plain-text file atomically (temp file, then {@code ATOMIC_MOVE}). */
     private void writeTextAtomically(Path dir, String fileName, String text, String what) {
         Path target = PathCodec.resolveUnder(dir, fileName);
-        writeLock.lock();
+        ReentrantLock lock = lockFor(target);
+        lock.lock();
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, "write", ".tmp");
@@ -425,7 +964,20 @@ public final class FileStore implements Store {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write " + what, e);
         } finally {
-            writeLock.unlock();
+            lock.unlock();
+        }
+    }
+
+    /** Deletes one file under its own lock stripe; {@code true} if it existed. */
+    private boolean deleteFile(Path file, String what) {
+        ReentrantLock lock = lockFor(file);
+        lock.lock();
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to delete " + what, e);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -453,7 +1005,8 @@ public final class FileStore implements Store {
     private void appendLine(Path dir, YearMonth month, JSONObject json) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
         String line = json.toString() + System.lineSeparator();
-        writeLock.lock();
+        ReentrantLock lock = lockFor(file);
+        lock.lock();
         try {
             Files.createDirectories(dir);
             // Files.write opens, writes, flushes and closes in one call.
@@ -462,52 +1015,116 @@ public final class FileStore implements Store {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to append record to " + file, e);
         } finally {
-            writeLock.unlock();
+            lock.unlock();
         }
     }
 
     /**
-     * Parses every non-blank line of a month bucket. A line that is not valid JSON or does not
-     * map to a record (missing field, unknown enum constant) is skipped with a warning naming
-     * the file and line number, so one bad line cannot break the whole month.
+     * Parses every non-blank line of a month bucket, streaming the file (no list of raw lines).
+     * A line that is not valid JSON or does not map to a record (missing field, unknown enum
+     * constant) is skipped with a warning naming the file and line number, so one bad line cannot
+     * break the whole month.
      */
     private <T> List<T> parseLines(Path dir, YearMonth month, Function<JSONObject, T> parser) {
-        List<String> lines = readLines(dir, month);
-        List<T> result = new ArrayList<>(lines.size());
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i);
-            if (line.isBlank()) {
-                continue;
+        Path file = PathCodec.resolveUnder(dir, monthFileName(month));
+        List<T> result = new ArrayList<>();
+        if (!Files.isRegularFile(file)) {
+            return result;
+        }
+        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            String line;
+            int lineNumber = 0;
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                if (line.isBlank()) {
+                    continue;
+                }
+                T value;
+                try {
+                    value = parser.apply(JSONObject.fromObject(line));
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.WARNING, "Skipping unparseable line {0} of {1}: {2}",
+                            new Object[] {lineNumber, file, e.getClass().getName()});
+                    continue;
+                }
+                if (value != null) {
+                    result.add(value);
+                }
             }
-            T value;
-            try {
-                value = parser.apply(JSONObject.fromObject(line));
-            } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, "Skipping unparseable line {0} of {1}: {2}",
-                        new Object[] {i + 1, PathCodec.resolveUnder(dir, monthFileName(month)),
-                            e.getClass().getName()});
-                continue;
-            }
-            if (value != null) {
-                result.add(value);
-            }
+        } catch (NoSuchFileException e) {
+            return result;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read " + file, e);
         }
         return result;
     }
 
-    /** Raw lines of a month bucket (blank lines included, so indexes map to line numbers). */
-    private List<String> readLines(Path dir, YearMonth month) {
-        Path file = PathCodec.resolveUnder(dir, monthFileName(month));
-        if (!Files.isRegularFile(file)) {
-            return new ArrayList<>();
+    /**
+     * The bounded page query behind the {@code page*} methods (#13). Months are read newest
+     * first and every file from its end, so the newest records are read first; reading stops at
+     * {@code maxScanned} records. Only the {@code offset + limit} newest matches are held (a
+     * bounded heap), sorted exactly by {@code newestFirst}.
+     */
+    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Function<JSONObject, T> parser,
+                                   Predicate<? super T> filter, Comparator<T> newestFirst,
+                                   int offset, int limit, int maxScanned) {
+        int from = Math.max(0, offset);
+        int size = Math.max(0, limit);
+        int cap = Math.max(0, maxScanned);
+        int keep = (int) Math.min((long) from + size, cap);
+        PriorityQueue<T> newest = new PriorityQueue<>(Math.max(1, Math.min(keep, 1024)), newestFirst.reversed());
+        int scanned = 0;
+        int matched = 0;
+        boolean truncated = false;
+        List<YearMonth> ordered = new ArrayList<>(new TreeSet<>(months).descendingSet());
+        scan:
+        for (YearMonth month : ordered) {
+            Path file = PathCodec.resolveUnder(dir, monthFileName(month));
+            if (!Files.isRegularFile(file)) {
+                continue;
+            }
+            try (ReverseLineReader reader = new ReverseLineReader(file)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.isBlank()) {
+                        continue;
+                    }
+                    if (scanned >= cap) {
+                        truncated = true;
+                        break scan;
+                    }
+                    scanned++;
+                    T value;
+                    try {
+                        value = parser.apply(JSONObject.fromObject(line));
+                    } catch (RuntimeException e) {
+                        LOGGER.log(Level.WARNING, "Skipping unparseable line of {0}: {1}",
+                                new Object[] {file, e.getClass().getName()});
+                        continue;
+                    }
+                    if (value == null || !filter.test(value)) {
+                        continue;
+                    }
+                    matched++;
+                    if (keep > 0) {
+                        newest.add(value);
+                        if (newest.size() > keep) {
+                            newest.poll();
+                        }
+                    }
+                }
+            } catch (NoSuchFileException e) {
+                // Deleted by retention between the check and the read.
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to read " + file, e);
+            }
         }
-        try {
-            return Files.readAllLines(file, StandardCharsets.UTF_8);
-        } catch (NoSuchFileException e) {
-            return new ArrayList<>();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read " + file, e);
-        }
+        List<T> sorted = new ArrayList<>(newest);
+        sorted.sort(newestFirst);
+        List<T> items = from >= sorted.size()
+                ? new ArrayList<>()
+                : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
+        return new RecordPage<>(items, from, matched, scanned, truncated);
     }
 
     // ---------------------------------------------------------------- JSON codecs

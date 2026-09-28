@@ -436,7 +436,7 @@ public final class RunRequestService {
      */
     public void expireOverdue(Set<String> queuedRequestIds, Instant queueSnapshotAt) {
         Instant now = BatchClock.now();
-        for (RunRequest snapshot : store.listRunRequests()) {
+        for (RunRequest snapshot : store.listOpenRunRequests()) {
             RequestStatus status = snapshot.getStatus();
             if (status != RequestStatus.PENDING && status != RequestStatus.APPROVED) {
                 continue;
@@ -478,7 +478,7 @@ public final class RunRequestService {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
                 BatchControlGlobalConfiguration.get().getNotifyBeforeExpiryMinutes());
-        for (RunRequest snapshot : store.listRunRequests()) {
+        for (RunRequest snapshot : store.listOpenRunRequests()) {
             if (snapshot.getStatus() != RequestStatus.PENDING || snapshot.isExpiringNotified()) {
                 continue;
             }
@@ -525,7 +525,7 @@ public final class RunRequestService {
      */
     public List<String> invalidateForJob(String oldFullName, String reason) {
         List<String> invalidated = new ArrayList<>();
-        for (RunRequest snapshot : store.listRunRequests()) {
+        for (RunRequest snapshot : store.listOpenRunRequests()) {
             if (!oldFullName.equals(snapshot.getJobFullName())) {
                 continue;
             }
@@ -590,7 +590,7 @@ public final class RunRequestService {
         }
         Set<String> queuedIds = queuedMarkerRequestIds(jenkins);
         Instant now = BatchClock.now();
-        for (RunRequest snapshot : store.listRunRequests()) {
+        for (RunRequest snapshot : store.listOpenRunRequests()) {
             if (snapshot.getStatus() != RequestStatus.APPROVED || snapshot.getExecutedRunId() != null) {
                 continue;
             }

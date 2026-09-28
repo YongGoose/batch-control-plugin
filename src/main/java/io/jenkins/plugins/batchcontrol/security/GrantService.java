@@ -77,6 +77,17 @@ public final class GrantService {
         cache = null;
     }
 
+    /**
+     * Drops grants that retention has deleted from the store (#13). They ended before the
+     * retention cut-off, so none of them can be active; this only keeps the cache from holding
+     * them until the next restart.
+     */
+    public synchronized void forgetDeleted(java.util.Collection<String> grantIds) {
+        if (cache != null && !grantIds.isEmpty()) {
+            cache.removeIf(grant -> grantIds.contains(grant.getId()));
+        }
+    }
+
     // ---------------------------------------------------------------- queries
 
     /**

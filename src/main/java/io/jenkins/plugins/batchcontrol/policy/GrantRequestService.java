@@ -354,7 +354,7 @@ public final class GrantRequestService {
      */
     public void expireOverduePending() {
         Instant now = BatchClock.now();
-        for (GrantRequest snapshot : store.listGrantRequests()) {
+        for (GrantRequest snapshot : store.listOpenGrantRequests()) {
             if (snapshot.getStatus() != RequestStatus.PENDING) {
                 continue;
             }
@@ -384,7 +384,7 @@ public final class GrantRequestService {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
                 BatchControlGlobalConfiguration.get().getNotifyBeforeExpiryMinutes());
-        for (GrantRequest snapshot : store.listGrantRequests()) {
+        for (GrantRequest snapshot : store.listOpenGrantRequests()) {
             if (snapshot.getStatus() != RequestStatus.PENDING || snapshot.isExpiringNotified()) {
                 continue;
             }

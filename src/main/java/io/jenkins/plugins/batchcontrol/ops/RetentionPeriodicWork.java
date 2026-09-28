@@ -7,6 +7,9 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.RetentionResult;
+import java.time.Instant;
 import java.time.YearMonth;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -23,7 +26,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p>A month is deleted when it lies strictly before {@code currentMonth - retentionMonths},
  * so the current (partial) month plus the last {@code retentionMonths} full months are always
- * kept (conservative deletion).
+ * kept (conservative deletion). Closed requests and ended grants last active before that month
+ * are deleted too (#13). Every deletion holds only the lock of the file it deletes, so the sweep
+ * never stalls the queue gate or build completion (#18).
  *
  * <p>This is a synchronous {@link PeriodicWork} (not {@code AsyncPeriodicWork}, whose
  * {@code doRun()} is {@code public final} and merely starts a background thread): the test
@@ -72,6 +77,34 @@ public class RetentionPeriodicWork extends PeriodicWork {
                 LOGGER.log(Level.WARNING, e, () -> "Retention cleanup failed for month " + month
                         + "; it will be retried on the next run");
             }
+        }
+        deleteClosedEntities(store, oldestKept, retentionMonths);
+    }
+
+    /**
+     * #13: closed run requests, closed grant requests and ended grants whose last activity lies
+     * before the first kept month go the same way as the month buckets, so {@code requests/} and
+     * {@code grants/} no longer grow for the life of the installation. One RETENTION record per
+     * pass that deleted anything.
+     */
+    private static void deleteClosedEntities(FileStore store, YearMonth oldestKept, int retentionMonths) {
+        Instant cutoff = oldestKept.atDay(1).atStartOfDay(BatchClock.clock().getZone()).toInstant();
+        try {
+            RetentionResult result = store.deleteClosedEntitiesBefore(cutoff);
+            GrantService.get().forgetDeleted(result.grantIds());
+            if (result.isEmpty()) {
+                return;
+            }
+            String detail = "Deleted " + result.runRequests() + " closed run requests, "
+                    + result.grantRequests() + " closed grant requests and " + result.grantIds().size()
+                    + " ended grants last active before " + oldestKept + ": older than retentionMonths="
+                    + retentionMonths;
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.RETENTION, "requests",
+                    Jenkins.getAuthentication2().getName(), detail));
+            LOGGER.info(() -> "Retention cleanup: " + detail);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Retention cleanup of closed requests and grants failed;"
+                    + " it will be retried on the next run");
         }
     }
 }
