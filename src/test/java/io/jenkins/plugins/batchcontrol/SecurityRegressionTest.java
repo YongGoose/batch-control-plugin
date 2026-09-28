@@ -105,6 +105,7 @@ public class SecurityRegressionTest {
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
                 .grant(Jenkins.READ, BatchControlPermissions.REQUEST).everywhere().to("u1", "u2", "u3")
                 .grant(Item.READ).onItems(jobA).to("u1", "u3") // u2 deliberately has NO Item/Read
+                .grant(Item.BUILD).onItems(jobA).to("u1") // D-38 (#24): the requester files the request
                 .grant(Jenkins.READ, BatchControlPermissions.APPROVE).everywhere().to("a1")
                 .grant(Jenkins.READ, BatchControlPermissions.MANAGE).everywhere().to("m1"));
 
@@ -197,8 +198,9 @@ public class SecurityRegressionTest {
         job.getBuildersList().add(new FailureBuilder());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
-                // vr may view incidents and create requests, but cannot read inc-job (S-06)
-                .grant(Jenkins.READ, BatchControlPermissions.VIEW_HISTORY,
+                // vr may view incidents and create requests, but cannot read inc-job (S-06);
+                // vr holds Item/Build (D-38, #24) so the refusal measures the missing Item/Read
+                .grant(Jenkins.READ, Item.BUILD, BatchControlPermissions.VIEW_HISTORY,
                         BatchControlPermissions.REQUEST).everywhere().to("vr")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
 

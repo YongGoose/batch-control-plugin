@@ -66,7 +66,7 @@ public class OwnerScenarioApproverDelegationTest {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to(ADMIN)
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST)
+                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST) // D-38 (#24): requesters need Item/Build
                         .everywhere().to(REQUESTER)
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
                         .everywhere().to(DESIGNATED_APPROVER, STAND_IN_APPROVER, UNRELATED_APPROVER));

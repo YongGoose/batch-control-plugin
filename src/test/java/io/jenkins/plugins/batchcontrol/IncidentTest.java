@@ -77,7 +77,7 @@ public class IncidentTest {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST,
+                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST, // D-38 (#24): requesters need Item/Build
                         BatchControlPermissions.VIEW_HISTORY).everywhere().to("u1")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.VIEW_HISTORY)
                         .everywhere().to("u2")
