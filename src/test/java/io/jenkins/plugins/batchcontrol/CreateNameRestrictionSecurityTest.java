@@ -155,11 +155,26 @@ public class CreateNameRestrictionSecurityTest {
     }
 
     /**
+     * Hostile name length for T-SEC-37. With an unbounded backtracking match the cost of
+     * {@code (a|a)*\1b} against {@code a}xN doubles per character; security-08 S-03 measured
+     * ~53 s for N = 30 on the reviewed build, so N = 40 is ~2^10 times that (hours).
+     */
+    private static final int HOSTILE_LENGTH = 40;
+
+    /**
+     * Upper bound for each T-SEC-37 call. Deliberately generous (10 s) so that CPU contention
+     * from parallel surefire forks cannot make a bounded implementation fail, while an
+     * exponential blow-up on {@link #HOSTILE_LENGTH} characters still exceeds it by orders of
+     * magnitude (see TEST-MATRIX note 61).
+     */
+    private static final long STALL_BOUND_MS = 10_000;
+
+    /**
      * T-SEC-37 (S-03): a catastrophic-backtracking pattern cannot stall the instance. Either the
      * pattern is refused at submission (nothing stored), or with the grant active a REST
-     * {@code createItem} and a CLI {@code create-job} with a hostile 30-character name both
-     * finish in under a second and are refused, and an Item/Read check by another user made
-     * while the REST call is in flight is not delayed.
+     * {@code createItem} and a CLI {@code create-job} with a hostile 40-character name both
+     * finish within {@link #STALL_BOUND_MS} and are refused, and an Item/Read check by another
+     * user made while the REST call is in flight is not delayed beyond the same bound.
      */
     @Test
     public void t_sec_37_backtrackingPatternCannotStallTheInstance() throws Exception {
@@ -179,7 +194,7 @@ public class CreateNameRestrictionSecurityTest {
         assertEquals(1, after.size(), "fixture: one grant request stored");
         assertSuccess(decideGrant(j, "a1", after.iterator().next(), "approve", "ok"), "fixture: approval by a1");
 
-        String hostile = "a".repeat(30);
+        String hostile = "a".repeat(HOSTILE_LENGTH);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             long start = System.nanoTime();
@@ -193,7 +208,8 @@ public class CreateNameRestrictionSecurityTest {
             }
             long readMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - readStart);
             assertTrue(visible, "fixture: a1 can read team/existing");
-            assertTrue(readMs < 1000, "an Item/Read check by another user must not wait for the hostile match, took " + readMs + " ms");
+            assertTrue(readMs < STALL_BOUND_MS, "an Item/Read check by another user must not wait for the hostile match, took "
+                    + readMs + " ms (bound " + STALL_BOUND_MS + " ms)");
 
             int code;
             try {
@@ -205,20 +221,30 @@ public class CreateNameRestrictionSecurityTest {
             }
             long restMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             assertTrue(code >= 400 && code < 500, "the hostile name does not match and must be refused with 4xx, got " + code);
-            assertTrue(restMs < 1000, "the REST createItem must finish in under 1 s, took " + restMs + " ms");
+            assertTrue(restMs < STALL_BOUND_MS, "the REST createItem must finish within " + STALL_BOUND_MS + " ms, took "
+                    + restMs + " ms");
             assertNull(team.getItem(hostile), "no item may be left behind");
+
+            long cliStart = System.nanoTime();
+            Future<CLICommandInvoker.Result> cliCall = executor.submit(() -> new CLICommandInvoker(j, "create-job").asUser("u1")
+                    .withStdin(new ByteArrayInputStream(MINIMAL_JOB_XML.getBytes(StandardCharsets.UTF_8)))
+                    .invokeWithArgs("team/" + hostile));
+            CLICommandInvoker.Result cli;
+            try {
+                cli = cliCall.get(60, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                cliCall.cancel(true);
+                fail("the CLI create-job with a hostile name did not return within 60 s: the match is unbounded");
+                return;
+            }
+            long cliMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - cliStart);
+            assertNotEquals(0, cli.returnCode(), "the CLI create-job with a hostile name must be refused");
+            assertTrue(cliMs < STALL_BOUND_MS, "the CLI create-job must finish within " + STALL_BOUND_MS + " ms, took "
+                    + cliMs + " ms");
+            assertNull(team.getItem(hostile), "no item may be left behind by the CLI");
         } finally {
             executor.shutdownNow();
         }
-
-        long cliStart = System.nanoTime();
-        CLICommandInvoker.Result cli = new CLICommandInvoker(j, "create-job").asUser("u1")
-                .withStdin(new ByteArrayInputStream(MINIMAL_JOB_XML.getBytes(StandardCharsets.UTF_8)))
-                .invokeWithArgs("team/" + hostile);
-        long cliMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - cliStart);
-        assertNotEquals(0, cli.returnCode(), "the CLI create-job with a hostile name must be refused");
-        assertTrue(cliMs < 1000, "the CLI create-job must finish in under 1 s, took " + cliMs + " ms");
-        assertNull(team.getItem(hostile), "no item may be left behind by the CLI");
     }
 
     /**

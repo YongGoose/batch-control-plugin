@@ -61,6 +61,11 @@ public class OptionalDependencyWithoutMatrixAuthTest {
     @Test
     public void t_02_43_withoutMatrixAuthRolePathWorks() throws Throwable {
         rr.then(OptionalDependencyWithoutMatrixAuthTest::bootAndUpgrade);
+        // The fixture pins the restart to the port the first boot was given, which was released
+        // when that JVM stopped; under parallel surefire forks another process can take it in
+        // between and the restart fails with "Failed to start Jetty". Ask for a fresh ephemeral
+        // port instead: the restart still reuses the same JENKINS_HOME, which is what it measures.
+        rr.withPort(0);
         rr.then(OptionalDependencyWithoutMatrixAuthTest::legacyWrapperSurvivesRestart);
     }
 
