@@ -2,13 +2,18 @@ package io.jenkins.plugins.batchcontrol.config;
 
 import hudson.Extension;
 import hudson.ExtensionList;
+import hudson.model.listeners.SaveableListener;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import jenkins.model.GlobalConfiguration;
 import jenkins.model.Jenkins;
@@ -32,8 +37,12 @@ import org.kohsuke.stapler.StaplerRequest2;
 @Restricted(NoExternalUse.class) // configured via the global form / JCasC, not a code-level API
 public class BatchControlGlobalConfiguration extends GlobalConfiguration {
 
-    private boolean runControlEnabled;
-    private boolean changeControlEnabled;
+    private static final Logger LOGGER = Logger.getLogger(BatchControlGlobalConfiguration.class.getName());
+
+    // volatile: read lock-free by the queue gate and the ACL on other threads; written under
+    // this instance's monitor (#19).
+    private volatile boolean runControlEnabled;
+    private volatile boolean changeControlEnabled;
     private List<String> approvers = new ArrayList<>();
     private boolean allowAdminSelfApproval = true;
     private int pendingTimeoutHours = 72;
@@ -47,8 +56,21 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     /** D-36: how long before an expiry the EXPIRING / GRANT_EXPIRING notification fires. */
     private int notifyBeforeExpiryMinutes = 10;
 
+    /**
+     * #19: set only on the throw-away copy {@link #configure} binds the form into. On a candidate
+     * the switch setters are plain assignments: no toggle record and no side effect happen until
+     * the bound state has been written to disk.
+     */
+    private transient boolean candidate;
+
     public BatchControlGlobalConfiguration() {
         load();
+    }
+
+    /** Detached copy for transactional binding (#19); never registered, never loaded from disk. */
+    private BatchControlGlobalConfiguration(BatchControlGlobalConfiguration source) {
+        this.candidate = true;
+        copyFrom(source);
     }
 
     public static BatchControlGlobalConfiguration get() {
@@ -60,12 +82,29 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         return Messages.BatchControlGlobalConfiguration_DisplayName();
     }
 
+    /**
+     * #19: the form submission is a transaction. The form is bound into a detached copy (the
+     * setters still validate), the copy is written to {@code config.xml}, and only after that
+     * write succeeded is the new state applied to this instance, followed by the CONFIG_TOGGLE
+     * records and the side effects (cache invalidation, revoking active grants when change control
+     * goes off). If the write fails nothing in memory has changed and the error is surfaced.
+     */
     @Override
-    public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
-        // Binding goes through the setters below, so validation (non-positive numbers ignored)
-        // and CONFIG_TOGGLE change records apply to form submissions too.
-        req.bindJSON(this, json);
-        save();
+    public synchronized boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
+        BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
+        req.bindJSON(bound, json);
+        try {
+            bound.writeConfigFile();
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to save the Batch Control configuration; nothing was applied", e);
+            throw new FormException("The Batch Control configuration could not be saved, so no "
+                    + "change was applied: " + e.getMessage(), e, "");
+        }
+        boolean previousRun = runControlEnabled;
+        boolean previousChange = changeControlEnabled;
+        copyFrom(bound);
+        SaveableListener.fireOnChange(this, getConfigFile());
+        afterSwitchesChanged(previousRun, previousChange);
         return true;
     }
 
@@ -75,13 +114,27 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         return runControlEnabled;
     }
 
+    /**
+     * Programmatic / JCasC switch change. Same transaction as {@link #configure}: the new value
+     * is written to disk first; on failure the field is rolled back and the error is thrown, so no
+     * toggle record is written.
+     */
     public void setRunControlEnabled(boolean runControlEnabled) {
         if (this.runControlEnabled == runControlEnabled) {
             return;
         }
-        boolean previous = this.runControlEnabled;
-        this.runControlEnabled = runControlEnabled;
-        recordToggle("runControlEnabled", previous, runControlEnabled);
+        if (candidate) {
+            this.runControlEnabled = runControlEnabled;
+            return;
+        }
+        synchronized (this) {
+            boolean previous = this.runControlEnabled;
+            if (previous == runControlEnabled) {
+                return;
+            }
+            persistSwitches(runControlEnabled, changeControlEnabled);
+            afterSwitchesChanged(previous, changeControlEnabled);
+        }
     }
 
     public boolean isChangeControlEnabled() {
@@ -91,30 +144,94 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     /**
      * S-15: turning change control off is a kill switch, not just a stop on new windows. Setting
      * the field false makes {@code security.GrantAwareACL} stop consulting grants immediately, and
-     * the revocation below closes the windows that are already open, so they cannot come back to
-     * life when the switch is turned on again.
+     * the revocation in {@link #afterSwitchesChanged} closes the windows that are already open, so
+     * they cannot come back to life when the switch is turned on again.
      *
      * <p>The accepted cost, and the owner's deliberate choice: every change that is underway inside
      * a permission window right now is cut off with no warning. A switch that instead left windows
      * quietly conferring {@code Item/Configure} for up to {@code maxGrantMinutes} afterwards was
      * judged the worse of the two, so long as the cut is recorded — which
      * {@code GrantService#revokeAllActive} does, one {@code GRANT_REVOKE} record per closed window.
+     *
+     * <p>#19: the revocation runs only once the new value is durable (see
+     * {@link #setRunControlEnabled} for the transaction).
      */
     public void setChangeControlEnabled(boolean changeControlEnabled) {
         if (this.changeControlEnabled == changeControlEnabled) {
             return;
         }
-        boolean previous = this.changeControlEnabled;
-        this.changeControlEnabled = changeControlEnabled;
-        // Written before the revocations, so the audit history reads in causal order: the switch
-        // went off, and then these windows were closed.
-        recordToggle("changeControlEnabled", previous, changeControlEnabled);
-        // S-05: the standing-permission warning caches its expensive scan; a toggle must show
-        // the fresh state on the next admin page render, not after the TTL.
-        io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
-        if (!changeControlEnabled) {
-            io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
+        if (candidate) {
+            this.changeControlEnabled = changeControlEnabled;
+            return;
         }
+        synchronized (this) {
+            boolean previous = this.changeControlEnabled;
+            if (previous == changeControlEnabled) {
+                return;
+            }
+            persistSwitches(runControlEnabled, changeControlEnabled);
+            afterSwitchesChanged(runControlEnabled, previous);
+        }
+    }
+
+    /**
+     * Writes the configuration with the given switch values, then applies them in memory. The
+     * write goes through a detached copy, so a failed write leaves this instance untouched.
+     */
+    private void persistSwitches(boolean run, boolean change) {
+        BatchControlGlobalConfiguration next = new BatchControlGlobalConfiguration(this);
+        next.runControlEnabled = run;
+        next.changeControlEnabled = change;
+        try {
+            next.writeConfigFile();
+        } catch (IOException e) {
+            throw new UncheckedIOException("The Batch Control configuration could not be saved, "
+                    + "so the switch change was not applied", e);
+        }
+        this.runControlEnabled = run;
+        this.changeControlEnabled = change;
+        SaveableListener.fireOnChange(this, getConfigFile());
+    }
+
+    /**
+     * Toggle records and side effects of a durable switch change (#19: never called before the
+     * new state is on disk). The toggle record is written before the revocations, so the audit
+     * history reads in causal order: the switch went off, and then these windows were closed.
+     */
+    private void afterSwitchesChanged(boolean previousRun, boolean previousChange) {
+        if (previousRun != runControlEnabled) {
+            recordToggle("runControlEnabled", previousRun, runControlEnabled);
+        }
+        if (previousChange != changeControlEnabled) {
+            recordToggle("changeControlEnabled", previousChange, changeControlEnabled);
+            // S-05: the standing-permission warning caches its expensive scan; a toggle must show
+            // the fresh state on the next admin page render, not after the TTL.
+            io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
+            if (!changeControlEnabled) {
+                io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
+            }
+        }
+    }
+
+    /** Writes this instance to {@code config.xml}, throwing instead of logging on failure. */
+    private void writeConfigFile() throws IOException {
+        getConfigFile().write(this);
+    }
+
+    /** Copies every persisted setting from {@code source} (lists are copied, not shared). */
+    private void copyFrom(BatchControlGlobalConfiguration source) {
+        this.runControlEnabled = source.runControlEnabled;
+        this.changeControlEnabled = source.changeControlEnabled;
+        this.approvers = new ArrayList<>(source.approvers);
+        this.allowAdminSelfApproval = source.allowAdminSelfApproval;
+        this.pendingTimeoutHours = source.pendingTimeoutHours;
+        this.approvedRunTimeoutMinutes = source.approvedRunTimeoutMinutes;
+        this.grantDurationOptions = new ArrayList<>(source.grantDurationOptions);
+        this.maxGrantMinutes = source.maxGrantMinutes;
+        this.incidentResults = new ArrayList<>(source.incidentResults);
+        this.retentionMonths = source.retentionMonths;
+        this.emailNotifications = source.emailNotifications;
+        this.notifyBeforeExpiryMinutes = source.notifyBeforeExpiryMinutes;
     }
 
     private static void recordToggle(String key, boolean previous, boolean current) {
