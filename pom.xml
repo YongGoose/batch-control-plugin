@@ -90,8 +90,25 @@
       <optional>true</optional>
     </dependency>
     <dependency>
+      <!-- BOM-managed (io.jenkins.tools.bom:bom-2.568.x). Optional: notification mail is
+           only sent when the Mailer plugin is installed alongside batch-control (#32). -->
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>mailer</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>job-dsl</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <!-- Not BOM-managed. mailer 534.v1b_36f5864073 pulls in io.jenkins.plugins:jakarta-mail-api
+           (jakarta.mail-api 2.1.5), so mock-javamail must be a Jakarta Mail (2.x) release, not the
+           legacy javax.mail 1.x line. 2.2 is the latest published to repo.jenkins-ci.org and depends
+           on jakarta.mail-api 2.1.3, which resolves cleanly alongside 2.1.5 on the classpath (#32). -->
+      <groupId>org.jvnet.mock-javamail</groupId>
+      <artifactId>mock-javamail</artifactId>
+      <version>2.2</version>
       <scope>test</scope>
     </dependency>
     <dependency>
