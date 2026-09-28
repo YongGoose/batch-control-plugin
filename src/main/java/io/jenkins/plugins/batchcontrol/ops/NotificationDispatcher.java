@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.ops;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
+import hudson.init.Terminator;
 import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -40,11 +41,47 @@ public final class NotificationDispatcher {
      * bounded, so a hung mail server or a flood of approver changes cannot grow memory without
      * limit; on overflow the notification is dropped and logged.
      */
-    private static final ExecutorService EXECUTOR = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(QUEUE_CAPACITY),
-            new NamingThreadFactory(new DaemonThreadFactory(), "BatchControlNotifier"),
-            (task, executor) -> LOGGER.warning("Notification queue full (" + QUEUE_CAPACITY
-                    + " pending); dropping a notification (D-36)"));
+    private static ExecutorService executor;
+
+    /** Created on first use in a Jenkins session; shut down by {@link #shutdown()}. */
+    private static synchronized ExecutorService executor() {
+        if (executor == null) {
+            executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                    new ArrayBlockingQueue<>(QUEUE_CAPACITY),
+                    new NamingThreadFactory(new DaemonThreadFactory(), "BatchControlNotifier"),
+                    (task, pool) -> LOGGER.warning("Notification queue full or shutting down; dropping a "
+                            + "notification (D-36)"));
+        }
+        return executor;
+    }
+
+    /**
+     * Stops the notifier thread when Jenkins shuts down: no new work is accepted, pending
+     * notifications are discarded, and a running delivery gets a short grace period before it is
+     * interrupted. The next Jenkins session in the same JVM (tests) gets a fresh executor.
+     */
+    @Terminator
+    public static void shutdown() {
+        ExecutorService pool;
+        synchronized (NotificationDispatcher.class) {
+            pool = executor;
+            executor = null;
+        }
+        if (pool == null) {
+            return;
+        }
+        List<Runnable> dropped = pool.shutdownNow();
+        if (!dropped.isEmpty()) {
+            LOGGER.info(() -> "Jenkins is shutting down; " + dropped.size() + " pending notifications dropped");
+        }
+        try {
+            if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warning("The notifier thread did not stop within 5 seconds of shutdown");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     private NotificationDispatcher() {
     }
@@ -125,8 +162,12 @@ public final class NotificationDispatcher {
         if (notifiers.isEmpty() || notification.getRecipients().isEmpty()) {
             return;
         }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null || jenkins.isTerminating()) {
+            return; // never start background work once shutdown has begun
+        }
         try {
-            EXECUTOR.execute(() -> deliver(notifiers, event, notification));
+            executor().execute(() -> deliver(notifiers, event, notification));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not queue the " + event + " notification " + notification, e);
         }
@@ -135,6 +176,9 @@ public final class NotificationDispatcher {
     private static void deliver(List<BatchControlNotifier> notifiers, NotificationEvent event,
                                 Notification notification) {
         for (BatchControlNotifier notifier : notifiers) {
+            if (Thread.currentThread().isInterrupted()) {
+                return; // shutting down
+            }
             try {
                 notifier.notify(event, notification);
             } catch (RuntimeException | LinkageError e) {
