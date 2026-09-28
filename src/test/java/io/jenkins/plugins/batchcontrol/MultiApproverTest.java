@@ -51,10 +51,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Matrix rows T-03-07 .. T-03-20. The legacy single-{@code approver} load is T-03-21 in
  * {@link MultiApproverLegacyLoadTest} (it needs a restart).
  *
- * <p>T-03-22 .. T-03-25 (D-37, D-26; matrix note 59) extend the requester-driven designation
- * change to grant requests through {@code POST batch-control/grants/<id>/changeApprover}: the
- * requester may edit a still-PENDING grant request's set, another permission holder may not
- * (403), the endpoint refuses GET (405), and a decided request may no longer be changed.
+ * <p>T-03-22 .. T-03-26 (D-37, D-26, P-09; matrix note 59) extend the requester-driven
+ * designation change to grant requests through {@code POST batch-control/grants/<id>/changeApprover}:
+ * the requester may edit a still-PENDING grant request's set; a holder who cannot see the
+ * request at all is refused with 404 (P-09), while a designated approver who can see it but is
+ * not the requester is refused with 403; the endpoint refuses GET (405); and a decided request
+ * may no longer be changed.
  *
  * <p>Every creation, decision and designation change goes through the frozen HTTP form
  * contract (field {@code approvers}, one user id per value; see {@link ApproverFormFixtures}).
@@ -392,19 +394,41 @@ public class MultiApproverTest {
     }
 
     /**
-     * T-03-23: only the requester may change a grant request's designation. u2 holds
-     * {@code BatchControl/RequestGrant} but is not the requester of this request and is
-     * refused with 403; the set and the (empty) change history are unchanged.
+     * T-03-23 (P-09): u2 holds {@code BatchControl/RequestGrant} but is neither this request's
+     * requester, a designated approver, nor a {@code Manage} holder, so the request is not
+     * visible to u2 at all (DECISIONS P-09): the action answers 404, like any other URL beneath
+     * a request u2 cannot see, and the set and the (empty) change history are unchanged.
      */
     @Test
-    public void t_03_23_grantChangeApproverByAnotherHolderIsForbidden() throws Exception {
+    public void t_03_23_grantChangeApproverByNonVisibleHolderIsNotFound() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
         String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
 
-        assertEquals(403, changeGrantApprovers(j, "u2", id, "a3").getStatusCode(),
-                "u2 holds BatchControl/RequestGrant but is not the requester of this request");
+        assertEquals(404, changeGrantApprovers(j, "u2", id, "a3").getStatusCode(),
+                "u2 cannot see this request at all (P-09), so its action URL must answer 404");
+
+        GrantRequest reloaded = GrantRequestService.get().load(id);
+        assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged");
+        assertTrue(reloaded.getApproverChanges() == null || reloaded.getApproverChanges().isEmpty(),
+                "a refused change must not be recorded");
+    }
+
+    /**
+     * T-03-26 (P-09 pairing): a1 is a designated approver of this request, so P-09 makes it
+     * visible to a1 (unlike u2 in T-03-23) — but a1 still is not its requester, so the
+     * ownership check on top of visibility refuses with 403, not 404.
+     */
+    @Test
+    public void t_03_26_grantChangeApproverByDesignatedApproverIsForbidden() throws Exception {
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+                "fix the cron expression", null, "a1", "a2");
+
+        assertEquals(403, changeGrantApprovers(j, "a1", id, "a3").getStatusCode(),
+                "a1 can see this request (a designated approver) but is not its requester");
 
         GrantRequest reloaded = GrantRequestService.get().load(id);
         assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged");
