@@ -95,3 +95,100 @@
 - 요청: `docs/DECISIONS.md` — 제안 C-2(Role Strategy 지원 수준: 문서화/업스트림 기여/Matrix만 공식 지원)를 결정 항목으로 등록. 사람 결정 필요.
 - 요청: `pom.xml` (release-manager 소유) — Phase 3에서 `build` 스텝 관련 테스트를 작성하려면 루트 pom 테스트 의존성에 `org.jenkins-ci.plugins:pipeline-build-step` 추가 필요 (`workflow-basic-steps`에는 `build` 스텝이 없음).
 - 요청: `docs/STATUS.md` (메인 세션 소유) — Phase 1 완료 기록 갱신.
+
+---
+
+## PoC-5 authorization mechanism (#30)
+
+Question from D-35 and issue #30: which mechanism keeps matrix-auth and role-strategy per-item
+configuration working while no grant outlives its window, with the least coupling.
+
+- Environment: Jenkins 2.568.3, BOM `bom-2.568.x:7093.v37de7b_4a_8a_4f` (same as root pom): matrix-auth 3.3,
+  role-strategy 898.vc050ed2424ca_, cloudbees-folder 6.1106.v3a_d9a_6d2465e, configuration-as-code 2121.v86fe99d4b_b_a_b_.
+  Run on Java 26.0.2 (no JDK 21 on the PoC machine; nothing here is JDK-specific).
+- Command: in `poc/`, `mvn test -Dtest='Poc5*Test'`: **30 tests, all pass**. Each test asserts the behaviour
+  it names, including the leaks. A passing "leak" test means the leak was reproduced.
+- Code: `poc/src/main/java/io/jenkins/plugins/batchcontrol/poc/auth/`, tests: `poc/src/test/java/io/jenkins/plugins/batchcontrol/poc/auth/`.
+  - W = `PocWrapperStrategy`: same shape as the current `BatchControlAuthorizationStrategy` (all overloads delegate). The type checks are `instanceof`, so any non-subclass wrapper gives the same results.
+  - A = `PocGrantMatrixStrategy extends ProjectMatrixAuthorizationStrategy`, `PocGrantRoleStrategy extends RoleBasedAuthorizationStrategy` (neither class is final).
+  - B = `PocNativeGrants`: writes a ledger line, then the native entry (job `AuthorizationMatrixProperty` entry, or item role `bc-<id>` assigned to the user). `sweep()` removes it again, and an `@Initializer(after=JOB_CONFIG_ADAPTED, before=COMPLETED)` runs a sweep at boot.
+- All `poc/src/main` code passes the `access-modifier-checker`, so no `@Restricted` API of the other plugins is used.
+
+### Summary table
+
+Test classes: `Poc5BaselineWrapperTest` (W), `Poc5OptionASubclassTest` (A), `Poc5OptionBNativeTest` (B), `Poc5RestartTest` (restart/crash, A and B).
+
+| # | Scenario | W: current wrapper | A: subclass | B: native entries |
+|---|---|---|---|---|
+| 1 | matrix-auth job/folder/agent property configurable (descriptor `isApplicable`, section on the configure page) | **fail** `wrapper_matrix_folderJobAgentPropertiesNotConfigurable` | pass `subclass_matrix_typeChecksPassAndPropertiesEffective` | pass (plain strategy stays installed) |
+| 2 | Existing per-item property effective and kept by a UI save of the job | **fail**: it takes effect, but a job UI save **drops it silently** `wrapper_matrix_existingJobPropertyEffectiveButDroppedByUiSave` | pass `subclass_matrix_uiSavesKeepPropertyAndSubclass` | pass |
+| 3 | role-strategy Manage/Assign Roles link, `RoleBasedAuthorizationStrategy.getInstance()` (REST API, pipeline steps) | **fail** `wrapper_role_itemRolesEffectiveButManagementAndApisGone` | pass `subclass_role_typeChecksPassAndGrantLayered` | pass |
+| 4 | role-strategy item and agent roles effective | pass (same W test) | pass | pass |
+| 5 | role-strategy pattern-based root Item/Create + `RoleBasedProjectNamingStrategy` | **fail**: Create lost, name rule not enforced `wrapper_role_patternBasedCreateAndNamingStrategyBroken` | pass `subclass_role_typeChecksPassAndGrantLayered` | pass |
+| 6 | Mechanism survives the other plugin's own save path | pass | matrix pass (security form uses `create()` hook). **role fail**: Manage Roles save installs plain `RoleBasedAuthorizationStrategy`, so open grants stop working (fail-safe) `subclass_role_manageRolesSaveReplacesSubclass` | role: a stale Manage Roles form ends an open window early `native_role_staleManageRolesFormDropsOpenWindow` |
+| 7 | config.xml persistence / restart | pass | pass **only with our own XStream converter**. Without it, `Jenkins.save()` throws (first run). `subclass_matrix_xmlRoundTripKeepsClassAndEntries`, `subclass_role_xmlRoundTrip`, `Poc5RestartTest.subclass_matrix_restartKeepsSubclassEntriesAndItemProperty`, `subclass_role_restartKeepsSubclassAndRoles` | pass |
+| 8 | JCasC export/apply | (not measured) | pass **only with our own configurator**. Without it: "Configuration-as-Code can't handle type", not exported. `subclass_matrix_cascExportAndApply`, `subclass_role_cascExportAndApply` | pass |
+| 9 | Expiry precision | exact, judged at check time | exact `subclass_matrix_grantLayeredOnPerItemAclAndExpires` | **only at the next sweep**: the entry still answers after expiry `native_matrix_grantAndSweep_keepsAdminEntriesAndPreExisting` |
+| 10 | Window expired while Jenkins was down | pass (nothing written into the auth config; main plugin `GrantService` judges by clock) | pass (same) | pass with the boot sweep `native_matrix_expiredWhileDown_removedBeforeCompletedInit`, `native_role_expiredWhileDown_removedAtBoot` |
+| 11 | Crash between "add permission" and "record it" | n/a: one write, the grant record *is* the permission | n/a | record-first: pass `native_matrix_crashAfterRecordBeforeAdd_isHarmless`. add-first: **permanent leak** `native_matrix_crashAfterAddBeforeRecord_leaksPermanently` |
+| 12 | Concurrent admin edit of the same matrix/roles | no interaction | no interaction | **matrix fail**: a configure page opened during the window and saved after the sweep **brings back the expired entry for good, and nothing records it** `native_matrix_staleAdminFormResurrectsExpiredEntry`. Opened before and saved during: window ends early `native_matrix_staleAdminFormDropsOpenWindow`. Role: one stale page alone is safe, both pages in order resurrect it `native_role_staleFormsAfterExpiryDoNotResurrect`. Rebuild-and-replace also loses a concurrent `doAssignSubmit` (source: it mutates the instance fetched at its start) |
+| 13 | config.xml churn / audit clarity | none | none | 3 job saves per grant+expiry. The grant is written into the job's config.xml (job-config-history, SCM sync, Batch Control's own change records all see it as a config change) `native_matrix_configChurnIsVisible`. Role: 2 full `config.xml` rewrites |
+| 14 | Grantee with a temporary Item/Configure writes itself a permanent matrix entry (POST `config.xml`) | **fail** `wrapper_matrix_granteeCanSelfGrantThroughConfigXml` | **fail** `subclass_matrix_granteeCanSelfGrantPermanently` | fail (same matrix-auth path, not tested separately) |
+| 15 | matrix-auth `ItemListenerImpl` gives the creator permanent Read/Configure on a job created in a Create-only window | not triggered (its `instanceof` fails) | **fail** `subclass_matrix_creatorAutoGrantOutlivesCreateWindow` | fail (plain strategy, same listener, not tested separately) |
+| 16 | Migration from an existing matrix-auth configuration | n/a | one call, reversible, per-item properties untouched `subclass_matrix_migrationFromExistingMatrixIsOneCall` | none needed |
+
+### Findings
+
+- **Baseline (question 0):** besides what #30 reports, a UI save of a job **deletes its existing
+  `AuthorizationMatrixProperty`** (`DescribableList.rebuild` keeps only applicable descriptors).
+  role-strategy has 18 `getAuthorizationStrategy() instanceof RoleBasedAuthorizationStrategy` call sites.
+  Behind the wrapper they turn off: the management link and page (`RoleStrategyConfig`, `RoleStrategyRootAction`),
+  the REST API and pipeline steps (`getInstance()`, `AbstractUserRolesStep`, `UserItemRoles`), root Item/Create through item roles
+  (`RoleMap.AclImpl`), `RoleBasedProjectNamingStrategy.checkName` (now allows any name), `NamingStrategyAdministrativeMonitor`, `PermissionTemplate`, and `validateConfig` at boot.
+  matrix-auth has 9 such sites: the shared property descriptor check (job, folder and node), the three creator listeners (job, folder, node), `AmbiguityMonitor` (3), `PermissionAdderImpl` and `FolderContributor`.
+- **A, matrix-auth:** every type check passes. What the subclass needs:
+  - A named `DescriptorImpl extends GlobalMatrixAuthorizationStrategy.DescriptorImpl` that overrides `create()`, so the security form keeps the subclass.
+  - A nested `ConverterImpl`. matrix-auth's converter is `@Restricted` and checks the exact class, so the PoC re-implements the `<permission>TYPE:id:sid</permission>` format in about 30 lines of public API.
+  - A JCasC `Configurator` under a new symbol (`batchControlProjectMatrix`). It looks matrix-auth's configurator up **by type at runtime** and converts to and from a plain instance, so it has no compile-time reference to restricted code.
+- **A, role-strategy:** every type check passes. The public `RoleBasedAuthorizationStrategy.ConverterImpl` can be subclassed, with a copy on unmarshal. There is one hard limit: `DescriptorImpl.newInstance`, run by the Manage Roles save, always builds `new RoleBasedAuthorizationStrategy()`. It fails safe (no permission leaks, grants just stop working), but it is silent.
+- **B** fails criterion 2 on its own evidence. An administrator's ordinary stale form brings back an expired permission for good, and the ledger no longer knows about it. Safety also depends on exact write ordering and on sweep frequency. It churns the item's history, and role-strategy can only be changed by rebuilding and replacing the whole strategy.
+
+### Recommendation
+
+**Option A (subclasses).** It is the only option that passes criterion 1 (per-item configuration
+configurable and effective) and criterion 2 (no grant outlives its window: nothing grant-related
+is written into another plugin's data) together. It uses only public API. Support levels:
+matrix-auth fully supported. role-strategy supported with one documented limitation (row 6), plus an
+administrative monitor that detects "change control on, but the installed strategy is the plain class" and offers re-installing the subclass.
+
+Dependencies of the recommended option on other plugins (all public, checked by the access-modifier-checker):
+- matrix-auth: `ProjectMatrixAuthorizationStrategy` (subclassed; `getACL(Job)`, `getACL(AbstractItem)`),
+  `GlobalMatrixAuthorizationStrategy.DescriptorImpl` (`create()` hook), `GlobalMatrixAuthorizationStrategy#getGrantedPermissionEntries`/`add(Permission, PermissionEntry)`,
+  `org.jenkinsci.plugins.matrixauth.PermissionEntry`, `AuthorizationType#toPrefix`/`valueOf`, the on-disk `<permission>` line format, and at runtime the JCasC configurator registered for `ProjectMatrixAuthorizationStrategy`.
+- role-strategy: `RoleBasedAuthorizationStrategy` (subclassed; `getACL(AbstractItem)`, constructor `(Map<String, RoleMap>, Set<PermissionTemplate>)`, `GLOBAL`/`PROJECT`/`SLAVE`, `getGrantedRolesEntries(RoleType)`, `getPermissionTemplates()`),
+  `RoleBasedAuthorizationStrategy.ConverterImpl` (subclassed), `RoleMap(SortedMap)`, `RoleType`, and at runtime the JCasC configurator registered for `RoleBasedAuthorizationStrategy`.
+- JCasC (optional dependency): `io.jenkins.plugins.casc.Configurator`, `ConfigurationContext#lookupOrFail`.
+
+**Migration path:** `PocGrantMatrixStrategy.from(existing)` copies the global matrix. Per-item
+properties live on the items and need nothing. Copying back to a plain `ProjectMatrixAuthorizationStrategy` is the uninstall path.
+In the product this becomes a `@RequirePOST` + Overall/Administer "Enable Batch Control on the current matrix / roles" action, and the same copy from `BatchControlAuthorizationStrategy#getDelegate()` for existing installs.
+
+### Design change proposals (DECISIONS proposal format)
+
+- **Proposal D-35a (amendment of D-35)** | The authorization mechanism is a Batch Control subclass per supported strategy (`ProjectMatrixAuthorizationStrategy`, `RoleBasedAuthorizationStrategy`), each with its own descriptor, XStream converter and JCasC configurator. The generic wrapper is withdrawn. Matrix-auth is fully supported. For role-strategy, a Manage Roles save reinstalls the plain class; this is detected by an administrative monitor and documented in LIMITATIONS | (B) native entries: rejected, a stale admin form resurrects an expired permission unrecorded (PoC-5 row 12), crash ordering is fragile (row 11), expiry is only at sweep time (row 9). (C) keep the wrapper: rejected by D-35 itself.
+- **Proposal D-35b** | Open finding, not caused by the choice (the current wrapper has it too): matrix-auth lets anyone with Item/Configure edit that item's authorization property. A Configure grant can therefore be turned into a permanent entry (row 14). Proposed: Batch Control compares the item's `AuthorizationMatrixProperty` before and after each save by a grant holder who has no native Configure. On a change it restores the previous property and records a violation in the audit | Rejected: excluding Configure from grants (it is the main use case).
+- **Proposal D-35c** | Under A, matrix-auth's creator listener gives permanent Read/Configure on items created in a Create-only window (row 15). Proposed: a Create grant also covers Configure on items created inside its scope for the window, so the listener finds the creator already holds the permission and adds nothing. Alternatively, Batch Control removes the entries the listener added when the window closes | Leaving it: rejected, it breaks criterion 2.
+
+### Recommended next steps
+
+1. Owner decision on D-35a..c. Then core-dev replaces `BatchControlAuthorizationStrategy` with the two subclasses and the migration action, and test-author ports rows 1–8, 14 and 15 into `src/test`.
+2. Consider an upstream PR to role-strategy so that `DescriptorImpl.newInstance` keeps `oldStrategy`'s class (for example a protected factory method). That would close row 6.
+3. Re-run this PoC on JDK 21 in CI (the PoC machine had only JDK 17 and 26).
+
+### Requests
+
+- Request: `docs/DECISIONS.md` (humans), record the D-35 amendment and D-35b/c above.
+- Request: `docs/ARCHITECTURE.md` section 4 (humans), replace the delegating-wrapper design with the subclass design (descriptor + converter + JCasC configurator per strategy, and the migration action).
+- Request: `docs/LIMITATIONS.md` (release-manager), add the role-strategy Manage Roles limitation (row 6) and, until D-35b is implemented, the self-grant limitation (row 14).
+- Request: `pom.xml` (release-manager), role-strategy and configuration-as-code become optional (non-test) dependencies and matrix-auth a regular one, if D-35a is accepted.
+- Note: `mvn verify` in `poc/` fails SpotBugs on two **pre-existing** Phase 1 fields (`PocDeleteVetoListener.vetoEnabled`, `PocQueueDecisionHandler.throwFailure`, `PA_PUBLIC_PRIMITIVE_ATTRIBUTE`). They were not changed here. The PoC-5 code is clean.
