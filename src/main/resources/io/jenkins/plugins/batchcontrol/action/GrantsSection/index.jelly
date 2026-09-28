@@ -23,7 +23,7 @@
                 <th>Duration</th>
                 <th>Reason</th>
                 <th>Requester</th>
-                <th>Approver</th>
+                <th>Approvers</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -36,7 +36,7 @@
                   <td>${r.durationMinutes} min</td>
                   <td>${r.reason}</td>
                   <td>${r.requester}</td>
-                  <td>${r.approver}</td>
+                  <td>${it.join(r.approvers)}</td>
                   <td>${r.status}</td>
                 </tr>
               </j:forEach>
@@ -121,7 +121,7 @@
         <j:if test="${it.prefilled}">
           <p class="jenkins-description">
             Prefilled for <strong>${it.prefillScopeFullName}</strong>. Check the actions you need,
-            say why, and pick an approver.
+            say why, and check one or more approvers.
           </p>
         </j:if>
         <f:form method="post" action="create" name="createGrantRequest">
@@ -151,6 +151,15 @@
               <f:checkbox name="actions" value="DELETE" id="grant-action-delete" title="Delete"/>
             </div>
           </f:entry>
+          <!-- D-40: optional, CREATE only. Length-bounded here and in GrantsSection#doCreate;
+               syntax is validated by the service at submission. -->
+          <f:entry title="New job name restriction (Create only)"
+                   description="Optional. An exact job name, or a regular expression between slashes that must match the whole name."
+                   help="/plugin/batch-control/help/grant-create-name-pattern.html">
+            <input type="text" name="createNamePattern" class="jenkins-input"
+                   placeholder="nightly-report or /report-[0-9]+/"
+                   maxlength="${it.createNamePatternMaxLength}"/>
+          </f:entry>
           <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
             <div class="jenkins-select">
               <select name="durationMinutes" class="jenkins-select__input">
@@ -176,14 +185,16 @@
               </div>
             </j:when>
             <j:otherwise>
-              <f:entry title="Approver" help="/plugin/batch-control/help/grant-approver.html">
-                <div class="jenkins-select">
-                  <select name="approver" class="jenkins-select__input">
-                    <j:forEach var="a" items="${it.approverOptions}">
-                      <option value="${a}">${a}</option>
-                    </j:forEach>
-                  </select>
-                </div>
+              <!-- D-37: repeated "approvers" fields, one user id per checked box. -->
+              <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                       help="/plugin/batch-control/help/approvers.html">
+                <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
+                <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                  <div class="jenkins-!-margin-bottom-1">
+                    <f:checkbox name="approvers" value="${a}" id="grant-approver-${s.index}"
+                                title="${a}" checked="${singleApprover}"/>
+                  </div>
+                </j:forEach>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Request Grant"/>

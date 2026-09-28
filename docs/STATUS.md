@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-09-29 — PR 4 (#32, #33, #35, #23, #11) ready
+- PR 3 merged as #39.
+- D-37 several approvers (any one decides, first decision wins), D-36 notifications (`ops.BatchControlNotifier` extension point, optional Mailer e-mail, off by default), D-40 CREATE name restriction (exact name or `/regex/`, enforced before the item exists on every creation path).
+- security-08: **BLOCKER 1 / HIGH 2 / MEDIUM 1 / LOW 9**: rename bypass of the name restriction, name taken from the wrong parameter, ReDoS in user regex, attacker-chosen host in the mail link, plus the pre-existing #23. Rulings D-40a; all fixed except S-07 (computed-folder children, documented) and S-13 (not reachable, excluded with a reason). Regression rows T-SEC-35..51.
+- GitHub Actions `build` workflow (#11) added: `mvn clean verify` on pull requests and main, read-only token, no secrets. Branch protection deliberately not enabled until after the jenkinsci fork (owner).
+- Gate: 369 tests, 0 failures, SpotBugs 0, 6 min. One earlier run had two timing failures under parallel forks (a 1 s bound in T-SEC-37, a RealJenkinsRule start in T-02-42); stabilising them without weakening them.
+- Next (owner-approved): two parallel lanes, A storage (#13, #17, #18, #25) and B policy (#24, #26, #19); then #21/#22, #15, and the final detailed e2e.
+
 ## 2026-09-28 (night) — PR 3 (#20, #34, #36) ready
 - PR 2 (#30) merged as #38.
 - #36: nine plugin-interaction test classes (customize-build-now, rebuild, parameterized-trigger, build-token-root, naginator, lockable-resources, throttle-concurrents, authorize-project, jobConfigHistory). 29 of 30 held on the existing gate; the naginator automatic retry of an approved run was the gap. Ruling in SPEC item 6: a retry is judged by the causes of the build it retries. Fixed in the queue gate.

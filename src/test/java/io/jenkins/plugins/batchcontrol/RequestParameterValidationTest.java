@@ -175,7 +175,7 @@ public class RequestParameterValidationTest {
         parameter.put("value", parameterValue);
         JSONObject form = new JSONObject();
         form.put("reason", reason);
-        form.put("approver", approver);
+        form.put("approvers", approver); // SPEC 3 (D-37): the field is `approvers`
         form.put("parameter", parameter);
 
         WebRequest request = new WebRequest(

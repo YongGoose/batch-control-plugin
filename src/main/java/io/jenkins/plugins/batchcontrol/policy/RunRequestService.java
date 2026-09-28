@@ -14,9 +14,12 @@ import hudson.model.StringParameterValue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
+import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedRunAction;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -95,16 +98,31 @@ public final class RunRequestService {
      */
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
                              String approver) {
-        return create(job, parameters, reason, approver, null);
+        return create(job, parameters, reason, Approvers.of(approver), null);
+    }
+
+    /**
+     * Creates a PENDING run request designating an approver set (D-37); any member may decide.
+     * Same validation as {@link #create(Job, Map, String, List, String)}.
+     */
+    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
+                             List<String> approvers) {
+        return create(job, parameters, reason, approvers, null);
+    }
+
+    /** Single-approver form of {@link #create(Job, Map, String, List, String)}. */
+    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
+                             String approver, String incidentId) {
+        return create(job, parameters, reason, Approvers.of(approver), incidentId);
     }
 
     /**
      * Creates a PENDING run request linked to an incident (SPEC item 11: a rerun request
      * carries {@code incidentId} so the run listener can auto-link a successful rerun back
-     * to the incident). Same validation as {@link #create(Job, Map, String, String)}.
+     * to the incident). Every designated approver must pass the SPEC item 3 checks (D-37).
      */
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
-                             String approver, String incidentId) {
+                             List<String> approvers, String incidentId) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
@@ -124,10 +142,10 @@ public final class RunRequestService {
                         + "' exceeds " + MAX_PARAMETER_VALUE_LENGTH + " characters.");
             }
         }
-        ApprovalPolicy.checkDesignation(requester, approver, job);
+        List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
 
         RunRequest request = RunRequest.create(job.getFullName(), parameters, reason,
-                requester, approver);
+                requester, designated);
         if (incidentId != null) {
             request.setIncidentId(incidentId);
         }
@@ -137,6 +155,7 @@ public final class RunRequestService {
         } finally {
             lock.unlock();
         }
+        NotificationDispatcher.run(NotificationEvent.REQUEST_CREATED, request);
         return request;
     }
 
@@ -169,6 +188,7 @@ public final class RunRequestService {
             }
             request.setStatus(RequestStatus.APPROVED);
             request.setDecidedAt(now);
+            request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
             request.setSelfApproved(selfApproval);
             request.setExpiryBase(now);
@@ -176,6 +196,7 @@ public final class RunRequestService {
         } finally {
             lock.unlock();
         }
+        NotificationDispatcher.run(NotificationEvent.APPROVED, request);
         // Submission happens outside the lock; the queue gate claims the consumption ticket.
         submitApproved(request);
         RunRequest reloaded = load(id);
@@ -187,9 +208,10 @@ public final class RunRequestService {
         if (comment == null || comment.trim().isEmpty()) {
             throw new IllegalArgumentException("A comment is required to reject a request.");
         }
+        RunRequest request;
         lock.lock();
         try {
-            RunRequest request = require(id);
+            request = require(id);
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "
                         + request.getStatus() + " and can no longer be rejected.");
@@ -197,12 +219,14 @@ public final class RunRequestService {
             ApprovalPolicy.checkDecision(request);
             request.setStatus(RequestStatus.REJECTED);
             request.setDecidedAt(BatchClock.now());
+            request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
             store.saveRunRequest(request);
-            return request;
         } finally {
             lock.unlock();
         }
+        NotificationDispatcher.run(NotificationEvent.REJECTED, request);
+        return request;
     }
 
     /** Cancels a PENDING request; requester or a Manage holder only (SPEC 7). */
@@ -211,7 +235,7 @@ public final class RunRequestService {
         lock.lock();
         try {
             RunRequest request = require(id);
-            if (!caller.equals(request.getRequester())
+            if (!Approvers.sameUser(caller, request.getRequester())
                     && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
                 throw new AccessDeniedException(
                         "Only the requester or a Manage holder may cancel request " + id + ".");
@@ -228,31 +252,43 @@ public final class RunRequestService {
         }
     }
 
-    /** Changes the designated approver of a PENDING request; requester only (SPEC 3). */
+    /** Single-approver form of {@link #changeApprovers(String, List)}. */
     public RunRequest changeApprover(String id, String newApprover) {
+        return changeApprovers(id, Approvers.of(newApprover));
+    }
+
+    /**
+     * Replaces the designated approver set of a PENDING request; requester only (SPEC item 3,
+     * D-26, D-37). Every new member must pass the designation checks; the change is recorded as
+     * (previous set, new set, changed by, time).
+     */
+    public RunRequest changeApprovers(String id, List<String> newApprovers) {
         String caller = Jenkins.getAuthentication2().getName();
+        RunRequest request;
         lock.lock();
         try {
-            RunRequest request = require(id);
-            if (!caller.equals(request.getRequester())) {
+            request = require(id);
+            if (!Approvers.sameUser(caller, request.getRequester())) {
                 throw new AccessDeniedException(
-                        "Only the requester may change the approver of request " + id + ".");
+                        "Only the requester may change the approvers of request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "
-                        + request.getStatus() + "; the approver can only be changed while PENDING.");
+                        + request.getStatus() + "; the approvers can only be changed while PENDING.");
             }
-            Job<?, ?> job = Jenkins.get().getItemByFullName(request.getJobFullName(), Job.class);
-            ApprovalPolicy.checkDesignation(request.getRequester(), newApprover, job);
-            String previous = request.getApprover();
+            // #23: resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
+            Job<?, ?> job = ApprovalPolicy.jobForPolicy(request.getJobFullName());
+            List<String> designated = ApprovalPolicy.checkDesignation(request.getRequester(), newApprovers, job);
+            List<String> previous = request.getApprovers();
             request.addApproverChange(new RunRequest.ApproverChange(
-                    previous, newApprover, caller, BatchClock.now()));
-            request.setApprover(newApprover);
+                    previous, designated, caller, BatchClock.now()));
+            request.setApprovers(designated);
             store.saveRunRequest(request);
-            return request;
         } finally {
             lock.unlock();
         }
+        NotificationDispatcher.run(NotificationEvent.APPROVERS_CHANGED, request);
+        return request;
     }
 
     // ---------------------------------------------------------------- queue gate integration
@@ -428,6 +464,42 @@ public final class RunRequestService {
     }
 
     /**
+     * D-36: sends {@link NotificationEvent#EXPIRING} once for every PENDING request whose pending
+     * timeout falls within {@code notifyBeforeExpiryMinutes} from now. The "notified" flag is
+     * persisted before dispatch, so a restart never resends. Expiry itself stays the clock
+     * comparison of {@link #expireOverdue}.
+     */
+    public void notifyExpiring() {
+        Instant now = BatchClock.now();
+        Duration lead = Duration.ofMinutes(
+                BatchControlGlobalConfiguration.get().getNotifyBeforeExpiryMinutes());
+        for (RunRequest snapshot : store.listRunRequests()) {
+            if (snapshot.getStatus() != RequestStatus.PENDING || snapshot.isExpiringNotified()) {
+                continue;
+            }
+            RunRequest notified = null;
+            lock.lock();
+            try {
+                RunRequest request = store.loadRunRequest(snapshot.getId());
+                if (request != null && request.getStatus() == RequestStatus.PENDING
+                        && !request.isExpiringNotified()) {
+                    Instant expiresAt = pendingExpiry(request);
+                    if (now.isBefore(expiresAt) && !now.isBefore(expiresAt.minus(lead))) {
+                        request.setExpiringNotified(true);
+                        store.saveRunRequest(request);
+                        notified = request;
+                    }
+                }
+            } finally {
+                lock.unlock();
+            }
+            if (notified != null) {
+                NotificationDispatcher.run(NotificationEvent.EXPIRING, notified);
+            }
+        }
+    }
+
+    /**
      * Whether the queue snapshot is authoritative for this request: true when the ticket was
      * never claimed, or was claimed strictly before the snapshot was taken (absent from the
      * snapshot then really means gone — e.g. the queue item was cleared). A ticket claimed at
@@ -585,9 +657,13 @@ public final class RunRequestService {
     }
 
     private static boolean pendingExpired(RunRequest request, Instant now) {
+        return now.isAfter(pendingExpiry(request));
+    }
+
+    private static Instant pendingExpiry(RunRequest request) {
         Duration timeout = Duration.ofHours(
                 BatchControlGlobalConfiguration.get().getPendingTimeoutHours());
-        return now.isAfter(request.getCreatedAt().plus(timeout));
+        return request.getCreatedAt().plus(timeout);
     }
 
     private static boolean approvedExpired(RunRequest request, Instant now) {
@@ -635,8 +711,11 @@ public final class RunRequestService {
         if (!values.isEmpty()) {
             actions.add(new ParametersAction(values));
         }
+        // D-37: the cause names the approver who decided (the first member for requests
+        // approved before decidedBy was recorded).
+        String decider = request.getDecidedBy() != null ? request.getDecidedBy() : request.getApprover();
         actions.add(new CauseAction(new ApprovedCause(
-                request.getId(), request.getRequester(), request.getApprover())));
+                request.getId(), request.getRequester(), decider)));
         actions.add(new ApprovedRunAction(request.getId()));
         // ACL.SYSTEM2 switch: permission checks are complete (see method javadoc).
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {

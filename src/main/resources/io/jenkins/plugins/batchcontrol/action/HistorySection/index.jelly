@@ -156,7 +156,7 @@
             <j:when test="${it.kind == 'requests'}">
               <table class="jenkins-table">
                 <thead>
-                  <tr><th>Request</th><th>Job</th><th>Requester</th><th>Approver</th><th>Status</th><th>Created</th><th>Decided</th></tr>
+                  <tr><th>Request</th><th>Job</th><th>Requester</th><th>Approvers</th><th>Decided by</th><th>Status</th><th>Created</th><th>Decided</th></tr>
                 </thead>
                 <tbody>
                   <j:forEach var="q" items="${it.pageItems}">
@@ -171,7 +171,8 @@
                       </td>
                       <td>${q.jobFullName}</td>
                       <td>${q.requester}</td>
-                      <td>${q.approver}</td>
+                      <td>${it.join(q.approvers)}</td>
+                      <td>${q.decidedBy}</td>
                       <td>${q.status}</td>
                       <td>${it.format(q.createdAt)}</td>
                       <td>${it.format(q.decidedAt)}</td>

@@ -360,18 +360,23 @@ public class SecretParameterMaskingTest {
                 + " form was: " + excerpt(form.asXml()));
     }
 
-    /** Selects the approver if the form offers a choice; a single-option control needs nothing. */
+    /**
+     * Selects the approver if the form offers a choice; a single-option control needs nothing.
+     * The field is {@code approvers} (SPEC 3, D-37: one user id per entry), rendered as a
+     * (multi-)select, radio buttons or checkboxes.
+     */
     private static void selectApprover(HtmlForm form, String approver) {
         for (DomElement element : form.getElementsByTagName("select")) {
-            if (element instanceof HtmlSelect && "approver".equals(element.getAttribute("name"))) {
+            if (element instanceof HtmlSelect && "approvers".equals(element.getAttribute("name"))) {
                 ((HtmlSelect) element).setSelectedAttribute(approver, true);
                 return;
             }
         }
         for (DomElement element : form.getElementsByTagName("input")) {
-            if (element instanceof HtmlInput && "approver".equals(element.getAttribute("name"))) {
+            if (element instanceof HtmlInput && "approvers".equals(element.getAttribute("name"))) {
                 HtmlInput input = (HtmlInput) element;
-                if ("radio".equalsIgnoreCase(input.getTypeAttribute())) {
+                if ("radio".equalsIgnoreCase(input.getTypeAttribute())
+                        || "checkbox".equalsIgnoreCase(input.getTypeAttribute())) {
                     if (approver.equals(input.getValue())) {
                         input.setChecked(true);
                     }

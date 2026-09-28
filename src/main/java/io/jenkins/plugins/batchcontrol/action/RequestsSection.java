@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -125,6 +126,11 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     public boolean isHasNext() {
         return getPage() * PAGE_SIZE < getTotal();
+    }
+
+    /** Jelly helper: an approver set for display ({@code a1, a2}). */
+    public String join(@CheckForNull List<String> approvers) {
+        return Approvers.display(approvers);
     }
 
     /** Jelly helper: human-readable timestamp. */

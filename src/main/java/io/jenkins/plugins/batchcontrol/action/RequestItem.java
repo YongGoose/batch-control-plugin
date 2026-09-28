@@ -8,10 +8,12 @@ import hudson.model.Result;
 import hudson.model.Run;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
@@ -249,9 +251,26 @@ public class RequestItem implements ModelObject {
         return requester != null && requester.equals(Jenkins.getAuthentication2().getName());
     }
 
-    /** View gating for the approve/reject forms; the endpoints re-check for real. */
+    /**
+     * View gating for the approve/reject forms: only a member of the designated set sees them
+     * (D-29, D-37). The endpoints and the service re-check for real.
+     */
     public boolean isCanDecide() {
-        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE);
+        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
+                && request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
+    }
+
+    /** Jelly helper: an approver set for display ({@code a1, a2}); empty for none. */
+    public String join(@CheckForNull List<String> approvers) {
+        return Approvers.display(approvers);
+    }
+
+    /**
+     * Whether the change-approver picker starts with this candidate checked: the current
+     * members, so the form edits the set rather than retyping it.
+     */
+    public boolean isDesignated(String approver) {
+        return request.isDesignatedApprover(approver);
     }
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
@@ -310,12 +329,15 @@ public class RequestItem implements ModelObject {
         rsp.sendRedirect2(".");
     }
 
-    /** POST {@code changeApprover?approver=...} — service enforces requester-only + eligibility. */
+    /**
+     * POST {@code changeApprover} with the repeated {@code approvers} field — replaces the
+     * designated set (D-26, D-37); the service enforces requester-only, PENDING and eligibility.
+     */
     @RequirePOST
-    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp,
-            @QueryParameter String approver) throws IOException {
+    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        call(() -> RunRequestService.get().changeApprover(request.getId(), approver));
+        List<String> approvers = ApproverInput.read(req, null);
+        call(() -> RunRequestService.get().changeApprovers(request.getId(), approvers));
         rsp.sendRedirect2(".");
     }
 

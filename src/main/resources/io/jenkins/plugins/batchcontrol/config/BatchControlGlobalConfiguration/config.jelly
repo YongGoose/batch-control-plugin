@@ -34,6 +34,16 @@
     <f:entry title="Retention period (months)" field="retentionMonths">
       <f:number min="1"/>
     </f:entry>
+    <!-- D-36: notifications. The e-mail option exists only while the Mailer plugin is active, so
+         an instance without Mailer never sees a switch that could do nothing. -->
+    <f:entry title="Notify before expiry (minutes)" field="notifyBeforeExpiryMinutes">
+      <f:number min="1"/>
+    </f:entry>
+    <j:if test="${instance.mailerAvailable}">
+      <f:entry field="emailNotifications">
+        <f:checkbox title="Send e-mail notifications"/>
+      </f:entry>
+    </j:if>
     <!-- Not a form field: a Batch Control strategy is installed/reverted through the
          batch-control-strategy administrative monitor, never through this form's own submit
          (D-35a). Shown only while that strategy is actually installed. -->

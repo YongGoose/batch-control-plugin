@@ -301,6 +301,23 @@ code does on purpose.
     administrative monitor's prompt, and both say plainly that per-item
     properties become effective from that point.
 
+## Notifications and computed folders
+
+36. **A CREATE name restriction does not cover children a computed folder
+    creates during indexing.** Branch jobs a multibranch project generates and
+    child projects an organization folder generates are created by the system
+    while it re-indexes, not by the holder of the restricted `Item/Create`
+    grant, so the exact name or pattern given under D-40 does not apply to
+    them (security-08 S-07, D-40a). This follows the same boundary as item 6:
+    those children are generated rather than authored, and only their runs are
+    recorded.
+37. **A notification e-mail includes a link back to the request only when the
+    Jenkins URL is configured.** Set it under Manage Jenkins → System
+    (Jenkins Location). Without it, a `REQUEST_CREATED`, `APPROVERS_CHANGED`,
+    `APPROVED`, `REJECTED` or `GRANT_EXPIRING` message still carries its
+    subject and reason text but no link, rather than guessing one from the
+    request that triggered it (security-08 S-04, D-36).
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting

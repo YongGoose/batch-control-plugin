@@ -23,28 +23,86 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class GrantRequest {
 
+    /**
+     * One approver change entry of a grant request: (previous set, new set, changed by, at)
+     * (SPEC section 3, D-37). Same shape as {@link RunRequest.ApproverChange}.
+     */
+    public static final class ApproverChange {
+        private final List<String> fromApprovers;
+        private final List<String> toApprovers;
+        private final String by;
+        private final long atMillis;
+
+        public ApproverChange(List<String> from, List<String> to, String by, Instant at) {
+            this.fromApprovers = from == null ? new ArrayList<>() : new ArrayList<>(from);
+            this.toApprovers = to == null ? new ArrayList<>() : new ArrayList<>(to);
+            this.by = by;
+            this.atMillis = Objects.requireNonNull(at, "at").toEpochMilli();
+        }
+
+        /** The previous designated set. */
+        public List<String> getFromApprovers() {
+            return fromApprovers == null ? new ArrayList<>() : new ArrayList<>(fromApprovers);
+        }
+
+        /** The new designated set. */
+        public List<String> getToApprovers() {
+            return toApprovers == null ? new ArrayList<>() : new ArrayList<>(toApprovers);
+        }
+
+        /** Compatibility view: the first member of the previous set, or {@code null}. */
+        public String getFrom() {
+            return fromApprovers == null || fromApprovers.isEmpty() ? null : fromApprovers.get(0);
+        }
+
+        /** Compatibility view: the first member of the new set, or {@code null}. */
+        public String getTo() {
+            return toApprovers == null || toApprovers.isEmpty() ? null : toApprovers.get(0);
+        }
+
+        public String getBy() {
+            return by;
+        }
+
+        public Instant getAt() {
+            return Instant.ofEpochMilli(atMillis);
+        }
+    }
+
     private final String id;
     private final GrantScope scope;
     private final List<GrantAction> actions;
     private final int durationMinutes;
     private final String reason;
     private final String requester;
-    private final String approver;
+    /** Legacy single approver (pre D-37); migrated to {@link #approvers} by {@link #readResolve()}. */
+    private String approver;
+    /** The designated approver set (D-37); any member may decide. */
+    private List<String> approvers;
+    /** The approver who approved or rejected the request (D-37); {@code null} until decided. */
+    private String decidedBy;
+    /** D-40: optional CREATE name restriction (exact name or {@code /regex/}); {@code null} for none. */
+    private String createNamePattern;
+    /** D-37: approver changes, as for run requests; {@code null} in files written before D-37. */
+    private List<ApproverChange> approverChanges;
+    /** D-36: the EXPIRING notification was sent (persisted so a restart does not resend). */
+    private boolean expiringNotified;
     private RequestStatus status;
     private final long createdAtMillis;
     private Long decidedAtMillis;
     private String decisionComment;
 
     private GrantRequest(String id, GrantScope scope, List<GrantAction> actions, int durationMinutes,
-                         String reason, String requester, String approver, RequestStatus status,
-                         Instant createdAt) {
+                         String reason, String requester, List<String> approvers,
+                         String createNamePattern, RequestStatus status, Instant createdAt) {
         this.id = id;
         this.scope = scope;
         this.actions = new ArrayList<>(actions);
         this.durationMinutes = durationMinutes;
         this.reason = reason;
         this.requester = requester;
-        this.approver = approver;
+        this.approvers = Approvers.normalize(approvers);
+        this.createNamePattern = CreateNamePattern.normalize(createNamePattern);
         this.status = status;
         this.createdAtMillis = createdAt.toEpochMilli();
     }
@@ -55,12 +113,28 @@ public final class GrantRequest {
      * Duplicate actions are collapsed while preserving order.
      */
     public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
-                                      String reason, String requester, String approver) {
+                                      String reason, String requester, List<String> approvers,
+                                      String createNamePattern) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(actions, "actions");
         List<GrantAction> distinct = new ArrayList<>(new LinkedHashSet<>(actions));
         return new GrantRequest(Ids.newId(), scope, distinct, durationMinutes, reason,
-                requester, approver, RequestStatus.PENDING, BatchClock.now());
+                requester, approvers, createNamePattern, RequestStatus.PENDING, BatchClock.now());
+    }
+
+    /** Single-approver form without a name restriction, kept for callers written before D-37. */
+    public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
+                                      String reason, String requester, String approver) {
+        return create(scope, actions, durationMinutes, reason, requester, Approvers.of(approver), null);
+    }
+
+    /** D-37 migration: a request stored with a single {@code approver} loads as a one-element set. */
+    private Object readResolve() {
+        if (approvers == null) {
+            approvers = Approvers.of(approver);
+        }
+        approver = null;
+        return this;
     }
 
     public String getId() {
@@ -88,8 +162,38 @@ public final class GrantRequest {
         return requester;
     }
 
+    /** The designated approver set (D-37), in designation order. */
+    public List<String> getApprovers() {
+        return approvers == null ? new ArrayList<>() : new ArrayList<>(approvers);
+    }
+
+    /** Compatibility view (D-37): the first designated approver, or {@code null} with none. */
     public String getApprover() {
-        return approver;
+        return approvers == null || approvers.isEmpty() ? null : approvers.get(0);
+    }
+
+    /** Whether {@code userId} is a member of the designated set. */
+    public boolean isDesignatedApprover(String userId) {
+        return Approvers.contains(approvers, userId);
+    }
+
+    /** The approver who decided (approved or rejected), or {@code null} while undecided. */
+    public String getDecidedBy() {
+        return decidedBy;
+    }
+
+    /** D-40: the CREATE name restriction as written ({@code /regex/} or exact name), or {@code null}. */
+    public String getCreateNamePattern() {
+        return createNamePattern;
+    }
+
+    public List<ApproverChange> getApproverChanges() {
+        return approverChanges == null ? new ArrayList<>() : new ArrayList<>(approverChanges);
+    }
+
+    /** Whether the D-36 EXPIRING notification was already sent. */
+    public boolean isExpiringNotified() {
+        return expiringNotified;
     }
 
     public RequestStatus getStatus() {
@@ -119,5 +223,28 @@ public final class GrantRequest {
 
     public void setDecisionComment(String decisionComment) {
         this.decisionComment = decisionComment;
+    }
+
+    /** Only the policy services change the designated set. */
+    public void setApprovers(List<String> approvers) {
+        this.approvers = Approvers.normalize(approvers);
+    }
+
+    /** Only the policy services record the deciding approver. */
+    public void setDecidedBy(String decidedBy) {
+        this.decidedBy = decidedBy;
+    }
+
+    /** Only the policy services record approver changes. */
+    public void addApproverChange(ApproverChange change) {
+        if (approverChanges == null) {
+            approverChanges = new ArrayList<>();
+        }
+        approverChanges.add(Objects.requireNonNull(change, "change"));
+    }
+
+    /** Only the policy services mark the D-36 EXPIRING notification as sent. */
+    public void setExpiringNotified(boolean expiringNotified) {
+        this.expiringNotified = expiringNotified;
     }
 }

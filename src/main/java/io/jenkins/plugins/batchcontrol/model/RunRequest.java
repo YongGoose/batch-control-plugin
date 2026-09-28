@@ -24,26 +24,65 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class RunRequest {
 
-    /** One approver change entry: (from, to, by, at). */
+    /**
+     * One approver change entry: (previous set, new set, changed by, at) (SPEC item 3, D-37).
+     *
+     * <p>Entries written before D-37 carry a single {@code from}/{@code to} user id; they load
+     * as one-element sets through {@link #readResolve()}.
+     */
     public static final class ApproverChange {
-        private final String from;
-        private final String to;
+        /** Legacy single previous approver (pre D-37); migrated by {@link #readResolve()}. */
+        private String from;
+        /** Legacy single new approver (pre D-37); migrated by {@link #readResolve()}. */
+        private String to;
+        private List<String> fromApprovers;
+        private List<String> toApprovers;
         private final String by;
         private final long atMillis;
 
-        public ApproverChange(String from, String to, String by, Instant at) {
-            this.from = from;
-            this.to = to;
+        public ApproverChange(List<String> from, List<String> to, String by, Instant at) {
+            this.fromApprovers = from == null ? new ArrayList<>() : new ArrayList<>(from);
+            this.toApprovers = to == null ? new ArrayList<>() : new ArrayList<>(to);
             this.by = by;
             this.atMillis = Objects.requireNonNull(at, "at").toEpochMilli();
         }
 
-        public String getFrom() {
-            return from;
+        /** Single-approver form, kept for callers written before D-37. */
+        public ApproverChange(String from, String to, String by, Instant at) {
+            this(Approvers.of(from), Approvers.of(to), by, at);
         }
 
+        /** Migrates a pre-D-37 entry (single {@code from}/{@code to}) to the set form. */
+        private Object readResolve() {
+            if (fromApprovers == null) {
+                fromApprovers = Approvers.of(from);
+            }
+            if (toApprovers == null) {
+                toApprovers = Approvers.of(to);
+            }
+            from = null;
+            to = null;
+            return this;
+        }
+
+        /** The previous designated set. */
+        public List<String> getFromApprovers() {
+            return fromApprovers == null ? new ArrayList<>() : new ArrayList<>(fromApprovers);
+        }
+
+        /** The new designated set. */
+        public List<String> getToApprovers() {
+            return toApprovers == null ? new ArrayList<>() : new ArrayList<>(toApprovers);
+        }
+
+        /** Compatibility view: the first member of the previous set, or {@code null}. */
+        public String getFrom() {
+            return fromApprovers == null || fromApprovers.isEmpty() ? null : fromApprovers.get(0);
+        }
+
+        /** Compatibility view: the first member of the new set, or {@code null}. */
         public String getTo() {
-            return to;
+            return toApprovers == null || toApprovers.isEmpty() ? null : toApprovers.get(0);
         }
 
         public String getBy() {
@@ -60,7 +99,14 @@ public final class RunRequest {
     private final Map<String, String> parameters;
     private final String reason;
     private final String requester;
+    /** Legacy single approver (pre D-37); migrated to {@link #approvers} by {@link #readResolve()}. */
     private String approver;
+    /** The designated approver set (D-37); any member may decide. */
+    private List<String> approvers;
+    /** The approver who approved or rejected the request (D-37); {@code null} until decided. */
+    private String decidedBy;
+    /** D-36: the EXPIRING notification was sent (persisted so a restart does not resend). */
+    private boolean expiringNotified;
     private RequestStatus status;
     private final long createdAtMillis;
     private Long decidedAtMillis;
@@ -85,13 +131,13 @@ public final class RunRequest {
     private String invalidationReason;
 
     private RunRequest(String id, String jobFullName, Map<String, String> parameters, String reason,
-                       String requester, String approver, RequestStatus status, Instant createdAt) {
+                       String requester, List<String> approvers, RequestStatus status, Instant createdAt) {
         this.id = id;
         this.jobFullName = jobFullName;
         this.parameters = new LinkedHashMap<>(parameters);
         this.reason = reason;
         this.requester = requester;
-        this.approver = approver;
+        this.approvers = Approvers.normalize(approvers);
         this.status = status;
         this.createdAtMillis = createdAt.toEpochMilli();
     }
@@ -101,11 +147,32 @@ public final class RunRequest {
      * {@link BatchClock} (id format {@code yyyyMMdd-HHmmss-<6 random alnum>}).
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
-                                    String requester, String approver) {
+                                    String requester, List<String> approvers) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Objects.requireNonNull(parameters, "parameters");
-        return new RunRequest(Ids.newId(), jobFullName, parameters, reason, requester, approver,
+        return new RunRequest(Ids.newId(), jobFullName, parameters, reason, requester, approvers,
                 RequestStatus.PENDING, BatchClock.now());
+    }
+
+    /** Single-approver form, kept for callers written before D-37. */
+    public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
+                                    String requester, String approver) {
+        return create(jobFullName, parameters, reason, requester, Approvers.of(approver));
+    }
+
+    /**
+     * D-37 migration: a request stored with a single {@code approver} loads as a one-element
+     * set. The legacy field is cleared so the next write stores only the set.
+     */
+    private Object readResolve() {
+        if (approvers == null) {
+            approvers = Approvers.of(approver);
+        }
+        approver = null;
+        if (approverChanges == null) {
+            approverChanges = new ArrayList<>();
+        }
+        return this;
     }
 
     public String getId() {
@@ -129,8 +196,32 @@ public final class RunRequest {
         return requester;
     }
 
+    /** The designated approver set (D-37), in designation order. */
+    public List<String> getApprovers() {
+        return approvers == null ? new ArrayList<>() : new ArrayList<>(approvers);
+    }
+
+    /**
+     * Compatibility view (D-37): the first designated approver, or {@code null} with none.
+     * New code uses {@link #getApprovers()} and {@link #getDecidedBy()}.
+     */
     public String getApprover() {
-        return approver;
+        return approvers == null || approvers.isEmpty() ? null : approvers.get(0);
+    }
+
+    /** Whether {@code userId} is a member of the designated set. */
+    public boolean isDesignatedApprover(String userId) {
+        return Approvers.contains(approvers, userId);
+    }
+
+    /** The approver who decided (approved or rejected), or {@code null} while undecided. */
+    public String getDecidedBy() {
+        return decidedBy;
+    }
+
+    /** Whether the D-36 EXPIRING notification was already sent. */
+    public boolean isExpiringNotified() {
+        return expiringNotified;
     }
 
     public RequestStatus getStatus() {
@@ -170,8 +261,19 @@ public final class RunRequest {
         this.status = Objects.requireNonNull(status, "status");
     }
 
-    public void setApprover(String approver) {
-        this.approver = approver;
+    /** Only the policy services change the designated set. */
+    public void setApprovers(List<String> approvers) {
+        this.approvers = Approvers.normalize(approvers);
+    }
+
+    /** Only the policy services record the deciding approver. */
+    public void setDecidedBy(String decidedBy) {
+        this.decidedBy = decidedBy;
+    }
+
+    /** Only the policy services mark the D-36 EXPIRING notification as sent. */
+    public void setExpiringNotified(boolean expiringNotified) {
+        this.expiringNotified = expiringNotified;
     }
 
     public void setDecidedAt(Instant decidedAt) {

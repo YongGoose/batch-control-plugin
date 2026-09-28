@@ -16,6 +16,7 @@ import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.StaplerRequest2;
 
 /**
@@ -41,6 +42,10 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     private int maxGrantMinutes = 240;
     private List<String> incidentResults = new ArrayList<>(Arrays.asList("FAILURE", "UNSTABLE"));
     private int retentionMonths = 24;
+    /** D-36: send notification e-mail through Mailer (off by default, so an upgrade changes nothing). */
+    private boolean emailNotifications;
+    /** D-36: how long before an expiry the EXPIRING / GRANT_EXPIRING notification fires. */
+    private int notifyBeforeExpiryMinutes = 10;
 
     public BatchControlGlobalConfiguration() {
         load();
@@ -239,6 +244,41 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         if (retentionMonths > 0) {
             this.retentionMonths = retentionMonths;
         }
+    }
+
+    // ---------------------------------------------------------------- notifications (D-36)
+
+    public boolean isEmailNotifications() {
+        return emailNotifications;
+    }
+
+    @DataBoundSetter
+    public void setEmailNotifications(boolean emailNotifications) {
+        this.emailNotifications = emailNotifications;
+    }
+
+    public int getNotifyBeforeExpiryMinutes() {
+        return notifyBeforeExpiryMinutes;
+    }
+
+    @DataBoundSetter
+    public void setNotifyBeforeExpiryMinutes(int notifyBeforeExpiryMinutes) {
+        if (notifyBeforeExpiryMinutes > 0) {
+            this.notifyBeforeExpiryMinutes = notifyBeforeExpiryMinutes;
+        }
+    }
+
+    /**
+     * Whether the Mailer plugin is installed and active; the configuration page shows the
+     * {@code emailNotifications} option only then (D-36).
+     */
+    public boolean isMailerAvailable() {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null) {
+            return false;
+        }
+        hudson.PluginWrapper mailer = jenkins.getPluginManager().getPlugin("mailer");
+        return mailer != null && mailer.isActive();
     }
 
     // ---------------------------------------------------------------- helpers

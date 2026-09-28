@@ -7,8 +7,14 @@ import hudson.model.Item;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.io.File;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
@@ -53,6 +59,8 @@ import org.springframework.security.core.Authentication;
  */
 @Restricted(NoExternalUse.class)
 final class GrantAwareACL extends ACL {
+
+    private static final Logger LOGGER = Logger.getLogger(GrantAwareACL.class.getName());
 
     private static final GrantAwareACL DENY_ALL = new GrantAwareACL(null, (String) null);
 
@@ -122,9 +130,12 @@ final class GrantAwareACL extends ACL {
         if (a.equals(SYSTEM2)) {
             return true;
         }
-        if (itemFullName != null && !ACL.isAnonymous2(a) && !suspended()
-                && grantConfers(a.getName(), permission)) {
-            return true;
+        Decision decision = Decision.NONE;
+        if (itemFullName != null && !ACL.isAnonymous2(a) && !suspended()) {
+            decision = grantConfers(a.getName(), permission);
+            if (decision.confers) {
+                return true;
+            }
         }
         // D-35d (1): the parent's decision is taken with every grant layer switched off. matrix-auth
         // resolves an item without its own property through the parent folder's ACL, which is a
@@ -134,7 +145,77 @@ final class GrantAwareACL extends ACL {
         // FOLDER scope already matches descendants by path above, and D-35c answers for exactly
         // the items the holder created.
         ACL parent = delegate;
-        return parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
+        boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
+        if (!allowed && decision.refusedName != null && decision.recordable) {
+            decision.recordRefusal(a.getName());
+        }
+        return allowed;
+    }
+
+    /**
+     * D-40: a Create refused only because the new item's name is outside the restriction of every
+     * active Create grant covering the group. Recorded as {@code GRANT_VIOLATION} when the
+     * installed strategy refuses too, i.e. the attempt is actually denied. Repeats of the same
+     * attempt within a minute are merged ({@link BlockedAttemptAudit}), since core and the UI may
+     * evaluate the same check more than once per request.
+     */
+    private static final class Decision {
+        /** The grant layer confers the permission. */
+        static final Decision CONFERS = new Decision(true, null, null, null, false, null);
+        /** The grant layer does not confer it; the delegate decides. */
+        static final Decision NONE = new Decision(false, null, null, null, false, null);
+
+        final boolean confers;
+        /** D-40: the refused new name, or {@code null} when no named creation/rename was refused. */
+        @CheckForNull
+        final String refusedName;
+        /** The group the item would have been created or renamed in. */
+        @CheckForNull
+        final String groupFullName;
+        @CheckForNull
+        final Grant grant;
+        /** S-05: whether the refusal is an actual attempt (not a validation or read-only request). */
+        final boolean recordable;
+        /** The operation that was refused; part of the merge key, so each operation is recorded. */
+        @CheckForNull
+        final String operation;
+
+        private Decision(boolean confers, @CheckForNull String refusedName, @CheckForNull String groupFullName,
+                         @CheckForNull Grant grant, boolean recordable, @CheckForNull String operation) {
+            this.confers = confers;
+            this.refusedName = refusedName;
+            this.groupFullName = groupFullName;
+            this.grant = grant;
+            this.recordable = recordable;
+            this.operation = operation;
+        }
+
+        static Decision refused(String itemName, String groupFullName, Grant grant, NewItemName context) {
+            return new Decision(false, itemName, groupFullName, grant, context.isRecordable(),
+                    context.getOperation());
+        }
+
+        void recordRefusal(String user) {
+            String itemName = refusedName;
+            Grant grant = this.grant;
+            String group = groupFullName;
+            if (itemName == null || grant == null || group == null) {
+                return;
+            }
+            String target = group.isEmpty() ? itemName : group + "/" + itemName;
+            try {
+                String attemptKey = (operation == null ? "" : operation + " ") + target;
+                BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION, attemptKey, target, user,
+                        "Refused to create or rename to '" + itemName + "' in '" + group + "': the name is "
+                                + "outside the name restriction '" + grant.getCreateNamePattern() + "' of grant "
+                                + grant.getId() + " (D-40)", grant.getId());
+            } catch (RuntimeException e) {
+                // The refusal stands whatever happens to the record.
+                LOGGER.log(Level.WARNING, "Could not record the refused name '" + target + "'", e);
+            }
+            LOGGER.info(() -> "Refused the name '" + itemName + "' in '" + group + "' for '" + user
+                    + "': outside the name restriction of grant " + grant.getId() + " (D-40)");
+        }
     }
 
     /**
@@ -169,7 +250,7 @@ final class GrantAwareACL extends ACL {
      * {@link GrantService#hasActiveGrant} is still asked about this item only, and about the
      * grantable permission actually found on the chain.
      */
-    private boolean grantConfers(String user, Permission permission) {
+    private Decision grantConfers(String user, Permission permission) {
         // S-15: the change-control switch is a kill switch. While it is off a grant confers
         // nothing, so the answer is the delegate's alone and the instance behaves exactly like the
         // strategy the administrator actually configured (CLAUDE.md: "a new feature does not change
@@ -182,8 +263,9 @@ final class GrantAwareACL extends ACL {
         // singleton lookup in front of the synchronized grant scan it now skips — so on an instance
         // that does not use change control this makes the permission hot path faster, not slower.
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
-            return false;
+            return Decision.NONE;
         }
+        Decision result = Decision.NONE;
         boolean createdChecked = false;
         for (Permission p = permission; p != null; p = p.impliedBy) {
             if (!p.getEnabled()) {
@@ -193,17 +275,97 @@ final class GrantAwareACL extends ACL {
                 // D-35c: Read and Configure on an item the holder created through an active Create
                 // grant. Looked up once per walk; the same enabled-link rule applies.
                 createdChecked = true;
-                if (GrantService.get().findCreatingGrant(user, itemFullName, itemRootDir) != null) {
-                    return true;
+                Grant creating = GrantService.get().findCreatingGrant(user, itemFullName, itemRootDir);
+                if (creating != null) {
+                    Decision rename = p == Item.CONFIGURE ? renameUnderRestriction(creating) : null;
+                    if (rename == null) {
+                        return Decision.CONFERS;
+                    }
+                    result = rename; // refused; a CONFIGURE grant may still confer below
                 }
             }
             if (GrantAction.fromPermission(p) == null) {
                 continue;
             }
+            if (p == Item.CREATE) {
+                Decision create = createConfers(user);
+                if (create.confers) {
+                    return create;
+                }
+                if (create.refusedName != null && result.refusedName == null) {
+                    result = create;
+                }
+                continue;
+            }
             if (GrantService.get().hasActiveGrant(user, itemFullName, p)) {
-                return true;
+                return Decision.CONFERS;
             }
         }
-        return false;
+        return result;
+    }
+
+    /**
+     * D-40: whether an active Create grant confers Item/Create on this group for the item being
+     * created. A grant without a name restriction always does. A restricted grant does only when
+     * the new item's name ({@link NewItemName}) matches in full, or when the check is a read-only
+     * page view that cannot create anything. Where the name cannot be determined, a restricted
+     * grant confers nothing (fail-safe), so no item with another name can come into existence.
+     *
+     * @return {@link Decision#CONFERS}, {@link Decision#NONE}, or a refusal naming the item when a
+     *         named creation was refused only because of the restriction
+     */
+    private Decision createConfers(String user) {
+        List<Grant> grants = GrantService.get().findActiveGrants(user, itemFullName, GrantAction.CREATE);
+        if (grants.isEmpty()) {
+            return Decision.NONE;
+        }
+        for (Grant grant : grants) {
+            if (grant.getCreateNamePattern() == null) {
+                return Decision.CONFERS;
+            }
+        }
+        NewItemName context = NewItemName.forCreate(itemFullName);
+        switch (context.getKind()) {
+            case UNNAMED:
+                return Decision.CONFERS;
+            case NAMED:
+                String name = context.getName();
+                // Matched here, outside every lock: the grants are a copy (security-08 S-03).
+                for (Grant grant : grants) {
+                    if (grant.allowsCreateName(name)) {
+                        return Decision.CONFERS;
+                    }
+                }
+                return name == null ? Decision.NONE
+                        : Decision.refused(name, itemFullName, grants.get(0), context);
+            default:
+                return Decision.NONE;
+        }
+    }
+
+    /**
+     * D-40a (security-08 S-01): the D-35c Configure on an item created through a name-restricted
+     * Create grant would let its holder rename the item to any name. When the current request
+     * renames this item, the new name must satisfy the restriction.
+     *
+     * @return {@code null} when the D-35c Configure may be conferred (no restriction, not a rename,
+     *         or a matching new name); otherwise the refusal
+     */
+    @CheckForNull
+    private Decision renameUnderRestriction(Grant creating) {
+        if (creating.getCreateNamePattern() == null) {
+            return null;
+        }
+        NewItemName context = NewItemName.forRename(itemFullName);
+        if (context == null) {
+            return null;
+        }
+        String name = context.getName();
+        if (context.getKind() == NewItemName.Kind.NAMED && creating.allowsCreateName(name)) {
+            return null;
+        }
+        String parent = itemFullName.contains("/") ? itemFullName.substring(0, itemFullName.lastIndexOf('/')) : "";
+        return name == null ? Decision.NONE
+                : Decision.refused(name, parent, creating, context);
     }
 }

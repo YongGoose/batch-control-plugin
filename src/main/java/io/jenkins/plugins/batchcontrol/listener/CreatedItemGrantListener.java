@@ -8,11 +8,14 @@ import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
 import hudson.security.AccessControlled;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -52,7 +55,7 @@ public class CreatedItemGrantListener extends ItemListener {
         }
         String user = auth.getName();
         String fullName = item.getFullName();
-        if (GrantService.get().findActiveGrant(user, fullName, GrantAction.CREATE) == null) {
+        if (GrantService.get().findActiveGrants(user, fullName, GrantAction.CREATE).isEmpty()) {
             return;
         }
         ItemGroup<? extends Item> parent = item.getParent();
@@ -60,6 +63,20 @@ public class CreatedItemGrantListener extends ItemListener {
                 && GrantLayer.hasPermissionWithoutGrants((AccessControlled) parent, auth, Item.CREATE)) {
             // The holder could create here without the grant: matrix-auth's native behaviour
             // (a permanent creator entry) is not Batch Control's to change.
+            return;
+        }
+        if (GrantService.get().findActiveCreateGrant(user, fullName, item.getName()) == null) {
+            // D-40 defence in depth: the grant layer refuses a restricted Create before the item
+            // exists (security.GrantAwareACL), so reaching this means the item came in through a
+            // path that check did not see. It is not deleted here (that would take a SYSTEM
+            // switch this plugin does not make outside its two documented places); it confers
+            // nothing through the grant, and the record makes it visible to an administrator.
+            LOGGER.severe(() -> "Item '" + fullName + "' was created by '" + user + "' although its name "
+                    + "is outside the name restriction of every active Create grant (D-40)");
+            ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
+                    "The item was created under a Create grant whose name restriction does not allow the name '"
+                            + item.getName() + "'; an administrator must check it (D-40).");
+            FileStore.get().appendChangeRecord(record);
             return;
         }
         Grant grant = GrantService.get().recordCreatedItem(user, fullName,

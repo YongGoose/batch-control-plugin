@@ -266,7 +266,7 @@ public class SecurityRegressionTest {
                 wcCrumbed(u1, "job/batch-x/batch-control/submit"), HttpMethod.POST);
         submit.setRequestParameters(Arrays.asList(
                 new NameValuePair("reason", "direct submit without the Request permission"),
-                new NameValuePair("approver", "a1")));
+                new NameValuePair("approvers", "a1")));
 
         assertEquals(404, u1.getPage(submit).getWebResponse().getStatusCode(), "a POST to the per-job submit endpoint without BatchControl/Request must be 404 (the action is absent at every URL beneath it - SPEC 2, #31)");
 

@@ -211,19 +211,29 @@ public class DiscoverOnlyRequestScreenTest {
                         .filter(a -> a.getHrefAttribute().endsWith("/" + jobK.getUrl() + "1/"))
                         .findFirst().orElse(null), "the recent-run row must link to build #1 of the job");
 
-        HtmlSelect approvers = page.getForms().stream()
+        // SPEC 3 (D-37): the change form edits the designated set through the repeated field
+        // `approvers`, rendered either as a (multi-)select or as one checkbox per approver.
+        List<org.htmlunit.html.HtmlForm> changeForms = page.getForms().stream()
                 .filter(f -> f.getActionAttribute().contains("changeApprover"))
-                .flatMap(f -> f.getElementsByTagName("select").stream())
-                .filter(HtmlSelect.class::isInstance)
-                .map(HtmlSelect.class::cast)
-                .filter(s -> "approver".equals(s.getAttribute("name")))
-                .findFirst().orElse(null);
-        assertNotNull(approvers, "the requester's approver dropdown must be rendered; forms on the page: "
+                .collect(Collectors.toList());
+        List<String> options = new ArrayList<>();
+        for (org.htmlunit.html.HtmlForm form : changeForms) {
+            for (DomElement element : form.getElementsByTagName("select")) {
+                if (element instanceof HtmlSelect && "approvers".equals(element.getAttribute("name"))) {
+                    ((HtmlSelect) element).getOptions().forEach(o -> options.add(o.getValueAttribute()));
+                }
+            }
+            for (DomElement element : form.getElementsByTagName("input")) {
+                if ("approvers".equals(element.getAttribute("name"))
+                        && "checkbox".equalsIgnoreCase(element.getAttribute("type"))) {
+                    options.add(element.getAttribute("value"));
+                }
+            }
+        }
+        assertFalse(options.isEmpty(), "the requester's approver control (field `approvers`) must be rendered; forms on the page: "
                 + page.getForms().stream().map(f -> f.getActionAttribute())
                         .collect(Collectors.toList()));
-        List<String> options = approvers.getOptions().stream()
-                .map(HtmlOption::getValueAttribute).collect(Collectors.toList());
-        assertTrue(options.containsAll(Arrays.asList("a1", "a2")), "the dropdown must offer the configured approvers, but offered " + options);
+        assertTrue(options.containsAll(Arrays.asList("a1", "a2")), "the approver control must offer the configured approvers, but offered " + options);
     }
 
     /**

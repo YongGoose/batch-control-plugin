@@ -19,9 +19,12 @@
           </tr>
           <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
           <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
-          <tr><th style="text-align: left;">Approver</th><td>${it.request.approver}</td></tr>
+          <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
           <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
+          <j:if test="${it.request.decidedBy != null}">
+            <tr><th style="text-align: left;">Decided by</th><td>${it.request.decidedBy}</td></tr>
+          </j:if>
           <j:if test="${it.request.decisionComment != null}">
             <tr><th style="text-align: left;">Decision comment</th><td>${it.request.decisionComment}</td></tr>
           </j:if>
@@ -148,8 +151,8 @@
           <tbody>
             <j:forEach var="c" items="${it.request.approverChanges}">
               <tr>
-                <td>${c.from}</td>
-                <td>${c.to}</td>
+                <td>${it.join(c.fromApprovers)}</td>
+                <td>${it.join(c.toApprovers)}</td>
                 <td>${c.by}</td>
                 <td>${it.format(c.at)}</td>
               </tr>
@@ -195,7 +198,7 @@
       </j:if>
 
       <j:if test="${it.canChangeApprover}">
-        <h2>Change Approver</h2>
+        <h2>Change Approvers</h2>
         <j:choose>
           <j:when test="${empty(it.approverOptions)}">
             <div class="jenkins-alert jenkins-alert-warning">
@@ -203,18 +206,20 @@
             </div>
           </j:when>
           <j:otherwise>
+            <!-- D-26, D-37: the picker starts on the current set, so unchecking one member and
+                 checking another edits the set; the change is recorded as (previous set, new set). -->
             <f:form method="post" action="changeApprover" name="changeApprover">
-              <f:entry title="New approver">
-                <div class="jenkins-select">
-                  <select name="approver" class="jenkins-select__input">
-                    <j:forEach var="a" items="${it.approverOptions}">
-                      <option value="${a}">${a}</option>
-                    </j:forEach>
-                  </select>
-                </div>
+              <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                       help="/plugin/batch-control/help/approvers.html">
+                <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                  <div class="jenkins-!-margin-bottom-1">
+                    <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
+                                title="${a}" checked="${it.isDesignated(a)}"/>
+                  </div>
+                </j:forEach>
               </f:entry>
               <f:bottomButtonBar>
-                <f:submit value="Change Approver"/>
+                <f:submit value="Change Approvers"/>
               </f:bottomButtonBar>
             </f:form>
           </j:otherwise>

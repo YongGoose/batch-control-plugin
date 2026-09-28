@@ -355,8 +355,11 @@ behind any of them.
   else; if a line does not apply to your change, delete it rather than ticking
   it.
 - **The gate is the whole suite green and SpotBugs reporting zero.** Please run
-  `mvn -ntp clean verify` yourself before opening the PR; ci.jenkins.io builds
-  both Linux and Windows on JDK 21.
+  `mvn -ntp clean verify` yourself before opening the PR. Every pull request and
+  every push to `main` runs the same command in GitHub Actions
+  (`.github/workflows/build.yml`, Linux, JDK 21, job `build`); `build` is the
+  required status check for merging. After the move to jenkinsci, ci.jenkins.io also builds both
+  Linux and Windows on JDK 21 from the `Jenkinsfile`.
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins

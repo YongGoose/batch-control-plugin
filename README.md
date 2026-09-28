@@ -31,9 +31,11 @@ they are turned on independently.
 **Run control** governs starting a build. With it on and "Require approval to
 run" set on a job, whoever wants to run that job submits the parameters and a
 reason; the designated approver sees exactly those parameters and approves, or
-rejects with a reason the requester can read. Only that one approver can decide
-the request, not the rest of the approver list and not an administrator, though
-the requester may swap the approver while it is still pending. On approval the
+rejects with a reason the requester can read. A request may name more than one
+eligible approver; whichever of them decides first closes it, and nobody
+outside that set, not the rest of the approver list and not an administrator,
+can still decide it afterwards, though the requester may change the designated
+approver(s) while it is still pending. On approval the
 plugin queues the build with the stored parameters. No path edits parameters
 after approval, and the approval is consumed by a single queue submission, so it
 cannot be replayed, re-queued or rebuilt; the attempt is blocked and recorded.
@@ -270,6 +272,35 @@ Records live in `$JENKINS_HOME/batch-control/`, separately from builds, so they
 outlive build rotation. They are append-only: no edit or delete API exists, only
 retention expiry.
 
+## Notifications and approver sets
+
+**Notifications.** Batch Control sends e-mail through an optional dependency on
+the Mailer plugin, so an instance without Mailer installed is unaffected, when a
+request is created, its approver set changes, it is approved or rejected, or an
+active grant window is about to expire. The message carries the reason and,
+only when the Jenkins URL is configured under **Manage Jenkins → System**, a
+link back to the request; without that URL set, the message is sent with no
+link rather than one guessed from the request itself
+([Limitations](docs/LIMITATIONS.md#notifications-and-computed-folders)). Other
+channels (Slack and the like) can be added by another plugin against the same
+extension point.
+
+**More than one approver.** A run request or a grant request may designate
+several eligible approvers instead of one. Any one of them may decide, whichever
+decides first closes the request, and both the self-approval ban and the
+designated-set-only rule still apply to every member of the set. The requester
+may change the set at any time before a decision is made.
+
+**Restricting the name a CREATE window may create.** A `CREATE` permission
+window request may optionally carry an exact job name or a regular expression.
+When one is given, the window confers `Item/Create` only for a new item whose
+name matches it; left empty, the window behaves as before, any name in the
+scope folder. The pattern is validated at submission and shown to the approver
+before they decide. It does not reach a child that a computed folder (a
+multibranch project or an organization folder) creates while indexing, since
+that child is created by the system rather than through the window
+([Limitations](docs/LIMITATIONS.md#notifications-and-computed-folders)).
+
 ## Limitations
 
 What follows is the part that changes decisions. The complete list is in
@@ -378,10 +409,10 @@ approved window.
 
 ## Roadmap
 
-Deliberately not in this release: notifications on requests, decisions, imminent
-expiry and failures; a REST API, JCasC support for the global configuration, and
-approval events exported to the Audit Log plugin; multi-stage approval chains
-beyond the single designated approver.
+Deliberately not in this release: a REST API, JCasC support for the global
+configuration, and approval events exported to the Audit Log plugin; sequential
+multi-stage approval chains (today's designated set is decided by whichever
+member acts first, not a sequence of stages).
 
 ## Contributing
 

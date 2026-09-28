@@ -154,6 +154,10 @@ public class RunRequestServiceTest {
                     }
                 });
         assertEquals("a1", RunRequestService.get().load(request.getId()).getApprover(), "the designated approver must stay unchanged");
+
+        // the approval above queued a build; let it finish before JenkinsRule tears down
+        // JENKINS_HOME, otherwise the build's own record save races the teardown.
+        j.waitUntilNoActivity();
     }
 
     /**
