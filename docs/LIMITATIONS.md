@@ -45,20 +45,30 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 
 ## The authorization strategy
 
-8. **JIT change control works only with matrix-family authorization
-   strategies.** With **Role-Based Authorization Strategy** as the strategy, only
-   **run control and recording** work; permission windows do not. Wrapping Role
-   Strategy leaves permission decisions correct but breaks its own role
-   management screens, so it is not supported. An administrative monitor says so
-   when Role Strategy is in use. Support for it is a possible future item, not a
-   present one.
-9. **Change control is permission-based, not save-based.** Jenkins offers no way
-   to intercept the job configuration "Save" itself, so if the wrapping strategy
-   is not selected, change control has no effect at all, and only the monitor
-   warning tells you.
-10. **A wrapping strategy saved without a delegate locks everyone out**,
-    including administrators, and is recoverable only by editing
-    `$JENKINS_HOME/config.xml` on disk.
+8. **Batch Control's grants work with matrix-auth and role-strategy through
+    Batch Control's own strategy variants**, `Batch Control: Matrix-based
+    security` and `Batch Control: Role-Based Strategy`. Each is a subclass of
+    the corresponding upstream strategy, so the upstream's own per-item
+    configuration (folder, job and agent authorization properties, item and
+    agent roles, pattern-based naming) stays configurable and effective. Any
+    other authorization strategy is not a supported grant target: on upgrade
+    from an older release, a saved variant whose delegate was neither
+    matrix-auth nor role-strategy is unwrapped back to a plain instance of that
+    strategy, and grants stop conferring anything from that point. Selecting a
+    strategy that is not one of the two variants gets you run control and
+    recording only, with an administrative monitor saying so.
+9. **role-strategy's own "Manage Roles" save reinstalls the plain
+    `RoleBasedAuthorizationStrategy`**, replacing the Batch Control variant.
+    From that save onward, grants stop conferring until an administrator
+    re-installs the Batch Control variant. This is deliberately fail-safe:
+    no permission is left standing that nobody can see, the role page itself
+    keeps working, and an administrative monitor detects the swap and offers a
+    one-click reinstall of the variant, carrying over every role and
+    assignment.
+10. **Change control is permission-based, not save-based.** Jenkins offers no way
+    to intercept the job configuration "Save" itself, so if the applicable
+    Batch Control strategy variant is not selected, change control has no
+    effect at all, and only the monitor warning tells you.
 11. **Grants must name a concrete job or folder.** There is no instance-wide
     grant, which means a grant can confer `Item/Create` only inside a named
     folder, never at the Jenkins root.
@@ -263,6 +273,33 @@ code does on purpose.
     period accumulates nothing that could take effect later, because a window can
     neither be requested nor approved during it (item 29), and it removes nothing
     from the audit history of the windows that did exist.
+
+## SYSTEM builds and the global-matrix upgrade
+
+35. **A build that runs as SYSTEM can still write a permanent authorization
+    entry.** A Pipeline `properties([authorizationMatrix(...)])` step, or a Job
+    DSL seed job, executes as SYSTEM unless the instance runs builds under a
+    real user; the guard that reverts a grant holder's self-escalating edit to
+    a job's authorization property looks at who saved the item, and SYSTEM is
+    not a grant holder, so nothing is reverted or recorded. This is not new
+    exposure: any user who already holds standing `Item/Configure` on that job
+    has the identical path today, with or without Batch Control, since Jenkins
+    itself does not distinguish a script's save from a human one. Installing
+    **Authorize Project** so the build runs as the configuring user brings
+    that save under the same guard as a manual one. While change control is
+    on, an administrative monitor warns when no build authenticator (a
+    `QueueItemAuthenticator`) is configured.
+36. **A legacy wrapper around the global matrix strategy is unwrapped on
+    upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
+    per-item ACLs, so converting it straight into the Batch Control matrix
+    strategy would make every stale job, folder and agent
+    `AuthorizationMatrixProperty` effective at once and let any native
+    Configure holder start editing item ACLs. Upgrading from an older release
+    therefore leaves the plain global matrix strategy installed. Moving to
+    **Batch Control: Matrix-based security** afterwards is a separate action
+    an administrator takes explicitly, from the migration button or the
+    administrative monitor's prompt, and both say plainly that per-item
+    properties become effective from that point.
 
 ## Out of scope by design
 

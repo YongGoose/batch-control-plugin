@@ -1,0 +1,54 @@
+<?jelly escape-by-default='true'?>
+<!--
+  D-35a (ARCHITECTURE section 4): change control is on, but the installed authorization
+  strategy is not a Batch Control strategy, so active grants confer nothing. Covers an
+  instance that never migrated and a role-strategy Manage Roles save, which reinstalls the
+  plain class. This text and the migration control only show while it.strategyUnsupported.
+  The migration button itself only shows when the installed strategy is a plain matrix-auth
+  or role-strategy configuration this plugin can copy (it.migratable). When the installed
+  strategy is matrix-auth's global matrix, converting makes per-item authorization properties
+  effective again (D-35d (3), it.perItemWidening), so the control warns about that before the
+  migrate button.
+
+  D-35d (2): change control is on but no build authenticator is configured, so builds run as
+  SYSTEM and can change authorization outside the self-grant guard (it.buildAuthenticatorMissing).
+  This condition is independent of strategyUnsupported and shows in its own paragraph.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <j:set var="controls">
+    <j:if test="${it.strategyUnsupported}">
+      <j:if test="${it.perItemWidening}">
+        <p>
+          Converting from the installed global matrix strategy makes per-item authorization
+          properties effective: any per-item authorization property already present on a
+          folder, job or agent will start granting the permissions it lists.
+        </p>
+      </j:if>
+      <j:if test="${it.migratable}">
+        <form method="post" action="${rootURL}/${it.url}/migrate">
+          <f:submit value="Install the Batch Control variant"/>
+        </form>
+      </j:if>
+    </j:if>
+  </j:set>
+  <l:adminMonitor severity="warning" controls="${controls}">
+    <j:if test="${it.strategyUnsupported}">
+      <p>
+        <strong>Batch Control:</strong> change control is enabled, but the installed authorization
+        strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
+        grants do not confer any permission. Install the matching Batch Control strategy to restore
+        just-in-time change control.
+      </p>
+    </j:if>
+    <j:if test="${it.buildAuthenticatorMissing}">
+      <p>
+        <strong>Batch Control:</strong> change control is enabled, but no build authenticator is
+        configured, so builds run as SYSTEM. A build (for example a Pipeline <code>properties</code>
+        step or a Job DSL seed job) can then change authorization outside Batch Control's
+        self-grant guard. Install and configure
+        <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a> under
+        <a href="${rootURL}/manage/configureSecurity">Security</a>.
+      </p>
+    </j:if>
+  </l:adminMonitor>
+</j:jelly>

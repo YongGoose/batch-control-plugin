@@ -146,8 +146,8 @@ list, and `BatchControl/Approve` is checked on them again at the moment they
 decide.
 
 **Turning change control off is a kill switch, and it is abrupt.** While the switch
-is off no window confers anything, so every permission decision is the delegate
-strategy's alone, exactly as before the plugin was installed. Flipping it off also
+is off no window confers anything, so every permission decision is the installed
+strategy's own, exactly as before the plugin was installed. Flipping it off also
 *revokes* every window that is open at that moment, writing one revocation record
 per closure naming the account that flipped it. Anyone in the middle of a change
 loses the permission to finish it, with no warning and no way back but a new
@@ -162,30 +162,36 @@ changed instead of meeting a dead link. The audit trail is untouched throughout:
 History and Change Records go on showing the windows that did exist and the changes
 made under them whichever way the switch is set.
 
-### 2. Select the wrapping authorization strategy
+### 2. Select a Batch Control authorization strategy
 
 Change control does nothing until this is done, and it is the step most easily
 missed: windows get approved and then have no effect at all.
 
-Under **Manage Jenkins → Security → Authorization**, choose **Batch Control
-(wrapping)** and select your real strategy, Project-based Matrix Authorization
-for instance, as its delegate. Your existing matrix configuration stays inside
-the delegate. While an approved window is open the wrapper *adds* that window's
-actions, `Item/Create`, `Item/Configure` or `Item/Delete`, on that window's scope,
-and passes every other decision through unchanged, so with no active window it
-behaves exactly like the delegate alone. It resolves a permission the way Jenkins
-itself does, by walking the `impliedBy` chain, so a window also answers the
-permissions Jenkins treats as implied by the granted action: on the plugin set this
-project is built against, a `CONFIGURE` window additionally confers
-`Item/ExtendedRead`, `Credentials/UseItem` and `Run/Replay`, which is worth
-knowing before approving one ([Limitations](#limitations)). An administrative
-monitor warns if change control is on without this strategy. Run control and
-recording do not need it. A window confers its permissions only when both this
-strategy is selected *and* change control is on.
-
-> **Do not save the wrapping strategy without a delegate.** It fails closed,
-> denies every permission to everyone including administrators, and the only way
-> back is editing `$JENKINS_HOME/config.xml` on disk.
+Under **Manage Jenkins → Security → Authorization**, choose **Batch Control:
+Matrix-based security** if you use (or want) Project-based Matrix Authorization,
+or **Batch Control: Role-Based Strategy** if you use role-strategy. Each is a
+drop-in variant of the corresponding upstream strategy: matrix, folder and agent
+authorization properties, and role assignments, all stay configurable and
+effective exactly as they are on the plain strategy. Already running the plain
+strategy? Use the **migration button** on the Authorization page (or the
+administrative monitor's prompt) to convert your existing configuration into the
+matching Batch Control variant in one click, with every entry kept; the same
+button converts back. While an approved window is open, the selected variant
+*adds* that window's actions, `Item/Create`, `Item/Configure` or `Item/Delete`,
+on that window's scope, and passes every other decision through unchanged, so
+with no active window it behaves exactly like the plain strategy. It resolves a
+permission the way Jenkins itself does, by walking the `impliedBy` chain, so a
+window also answers the permissions Jenkins treats as implied by the granted
+action: on the plugin set this project is built against, a `CONFIGURE` window
+additionally confers `Item/ExtendedRead`, `Credentials/UseItem` and
+`Run/Replay`, which is worth knowing before approving one
+([Limitations](#limitations)). An administrative monitor warns if change control
+is on without one of these two variants installed, and separately if
+role-strategy's own **Manage Roles** save has reinstalled the plain
+`RoleBasedAuthorizationStrategy` (it offers a one-click reinstall of the
+variant either way). Run control and recording do not need any of this. A window
+confers its permissions only when a Batch Control variant is selected *and*
+change control is on.
 
 ### 3. Assign the permissions
 
@@ -302,14 +308,24 @@ that requires approval, so it is not a way around the run gate there, but on a j
 without run control a window holder can replay a build with a modified Pipeline
 script.
 
-**JIT change control works only with matrix-family authorization strategies.**
-With **Role-Based Authorization Strategy** selected you get run control and
-recording, and no permission windows: wrapping Role Strategy would keep
-permission decisions correct but break its own role management screens, so it is
-not supported, and an administrative monitor says so when it is in use. Saving
-the wrapping strategy **without** a delegate is worse, locking out everyone
-including administrators, recoverable only by editing
-`$JENKINS_HOME/config.xml` on disk.
+**Grants work through Batch Control's own strategy variants.** Selecting
+**Batch Control: Matrix-based security** or **Batch Control: Role-Based
+Strategy** keeps that plugin's own per-item configuration (folder, job and
+agent authorization properties, item and agent roles) configurable and
+effective, since each variant is a subclass of the corresponding upstream
+strategy. Selecting any other strategy gets you run control and recording only,
+and an administrative monitor says so. One fail-safe limitation with
+role-strategy: its own **Manage Roles** save reinstalls the plain
+`RoleBasedAuthorizationStrategy`, so grants stop conferring until an
+administrator re-installs the Batch Control variant from the monitor's prompt.
+
+**A legacy wrapper around the global matrix strategy is unwrapped, not
+converted, on upgrade.** Converting it directly would make every stale
+per-item authorization property effective at once, so upgrading from an
+older release leaves the plain global matrix strategy installed instead.
+Moving to **Batch Control: Matrix-based security** afterwards is a separate,
+explicit step, from the migration button or the monitor's prompt, and both
+say plainly that per-item properties become effective from that point.
 
 **A protected job refused at queue entry fails its caller.** A Pipeline `build`
 step that hits the gate ends the upstream job as `FAILURE`, even with
@@ -356,17 +372,16 @@ diffs with the user who made them, and AuditFlow adds a searchable store and an
 export. What none of them puts in front of the record is a control plane: a
 request, a designated approver, a decision, and a permission that ends by itself.
 And matrix and role-based authorization decide a permission by who you are rather
-than for how long, where Batch Control wraps whichever of them you configured and
-adds permissions that exist only inside an approved window.
+than for how long, where Batch Control layers over whichever of matrix-auth or
+role-strategy you install and adds permissions that exist only inside an
+approved window.
 
 ## Roadmap
 
 Deliberately not in this release: notifications on requests, decisions, imminent
 expiry and failures; a REST API, JCasC support for the global configuration, and
 approval events exported to the Audit Log plugin; multi-stage approval chains
-beyond the single designated approver; and JIT change control for Role-Based
-Authorization Strategy, which needs a different mechanism from the wrapping
-strategy.
+beyond the single designated approver.
 
 ## Contributing
 

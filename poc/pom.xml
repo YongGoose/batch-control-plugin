@@ -33,7 +33,7 @@
       <dependency>
         <groupId>io.jenkins.tools.bom</groupId>
         <artifactId>bom-${jenkins.baseline}.x</artifactId>
-        <version>7046.v43536164769c</version>
+        <version>7093.v37de7b_4a_8a_4f</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
@@ -70,7 +70,20 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>matrix-auth</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>role-strategy</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>cloudbees-folder</artifactId>
       <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.jenkins</groupId>
+      <artifactId>configuration-as-code</artifactId>
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

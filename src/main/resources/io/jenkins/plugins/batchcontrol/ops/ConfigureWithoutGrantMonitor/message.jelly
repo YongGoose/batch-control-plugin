@@ -6,7 +6,7 @@
   <l:adminMonitor severity="warning" controls="${controls}">
     <strong>Batch Control:</strong> change control is enabled, but some users hold direct
     Item Create/Configure/Delete permissions outside the just-in-time grant flow (or the
-    Batch Control wrapping authorization strategy is not selected). Changes made by those
+    installed authorization strategy is not a Batch Control strategy). Changes made by those
     users bypass grant control and are only recorded in the audit history.
   </l:adminMonitor>
 </j:jelly>

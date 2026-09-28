@@ -48,34 +48,36 @@ io.jenkins.plugins.batchcontrol
 소유권: `model, store, config, security, policy, queue, listener, ops` → core-dev / `action, ui, resources` → ui-dev.
 경계 규칙: `action`은 `policy`·`store`의 공개 메서드만 호출한다. 상태 전이 로직을 `action`에 두지 않는다.
 
-## 4. 위임형 권한 전략
+## 4. Grant-aware authorization strategies (D-35a; replaces the delegating wrapper)
 
 ```
-BatchControlAuthorizationStrategy extends AuthorizationStrategy
-  - delegate: AuthorizationStrategy   (관리자가 선택한 원래 전략, Matrix/Role 등)
-  - getRootACL(): new GrantAwareACL(delegate.getRootACL(), scope=null)
-  - getACL(Job|Item|...): new GrantAwareACL(delegate.getACL(item), item)
-  - getGroups(): delegate.getGroups()
+BatchControlMatrixAuthorizationStrategy extends ProjectMatrixAuthorizationStrategy
+BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthorizationStrategy
+  - getRootACL() / getACL(Job|AbstractItem|ItemGroup|Computer|...):
+        new GrantAwareACL(super.getACL(...), item)
+  - own Descriptor (listed on the security page), XStream converter, JCasC configurator
+  - the parent's instanceof checks pass, so per-item properties and role pages keep working
 
-GrantAwareACL extends ACL
+GrantAwareACL extends ACL            (unchanged logic)
   - hasPermission2(auth, perm):
       if auth == SYSTEM: return true
-      if item != null and auth is not anonymous:
-          if changeControlEnabled:                       # 변경 통제 게이트가 먼저 (S-15)
-              for p = perm; p != null; p = p.impliedBy:  # impliedBy 체인 순회
-                  if p.enabled and GrantAction.fromPermission(p) != null
-                     and GrantService.hasActiveGrant(auth.getName(), item.getFullName(), p):
-                      return true
-      return delegateACL.hasPermission2(auth, perm)
+      if item != null and auth is not anonymous and changeControlEnabled:
+          for p = perm; p != null; p = p.impliedBy:
+              if p.enabled and GrantAction.fromPermission(p) != null
+                 and GrantService.hasActiveGrant(auth.getName(), item.getFullName(), p):
+                  return true
+      return parentACL.hasPermission2(auth, perm)
 ```
 
-- 위임: `getRootACL()`뿐 아니라 **모든 `getACL` 오버로드**(Job, AbstractItem, ItemGroup, Computer, Node, View, User, Cloud 등)를 delegate에 위임한다. Role Strategy 등 다른 전략이 이 오버로드들을 재정의하기 때문이다. (Phase 1 PoC 발견 사항)
-- 만료: `hasActiveGrant`가 `expiresAt > now && revokedAt == null`을 검사. 타이머 없음.
-- 범위: `scope.type == FOLDER`면 `item.getFullName()`이 폴더 경로로 시작하는지, `JOB`이면 정확히 일치.
-- CREATE는 폴더(ItemGroup)의 ACL에서 검사되므로 FOLDER 범위 Grant만 CREATE를 부여할 수 있다.
-- 성능: GrantService는 모든 Grant(활성·만료·회수 포함)를 하나의 평면 목록으로 메모리에 유지하고 조회 시 순회한다. 파일이 원본.
-- JCasC/설정 화면: `delegate`를 Describable로 선택. 기존 Matrix/Role 설정은 delegate 안에 그대로 유지.
-- 이 전략은 변경 통제 스위치와 무관하게 설치·선택 가능해야 하며, 활성 Grant가 없으면 delegate와 완전히 동일하게 동작한다.
+- Every `getACL` overload the parent overrides is wrapped, so the parent's own per-item logic runs first underneath the grant layer. The root ACL carries no grant scope, so a subclass may leave `getRootACL` unwrapped, and matrix-auth's `getACL(ItemGroup)` resolves to an already wrapped item or root ACL (security-05 S-08).
+- Expiry: `hasActiveGrant` checks `expiresAt > now && revokedAt == null`. No timer, nothing written into the other plugin's data.
+- Scope: FOLDER scope matches the folder path prefix, JOB scope the exact full name. CREATE is checked on the folder's ACL, so only FOLDER-scope grants confer it. A Create grant also confers Configure on items its holder created inside the scope during the window (D-35c).
+- Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
+- Upgrade: the legacy `BatchControlAuthorizationStrategy` class stays only as a load-time shim. Its `readResolve` returns the matching subclass (matrix-auth or role-strategy delegate) or the unwrapped delegate otherwise.
+- Migration: a security-page action copies a plain matrix-auth or role-strategy configuration into the subclass and back.
+- Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (covers the role-strategy Manage Roles save, which reinstalls the plain class).
+- With no active grant the subclass behaves exactly like its parent.
+- matrix-auth and role-strategy are optional dependencies; each subclass is an `@Extension(optional = true)` in its own class so a missing plugin never breaks class loading.
 
 ## 5. 저장소 (FileStore)
 

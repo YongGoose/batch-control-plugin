@@ -18,15 +18,18 @@
       Permission</b>, which opens the window request form with that job filled in.</li>
   </ul>
   <p>
-    A window confers its permissions only when <b>both</b> this switch is on <b>and</b> the
-    <b>Batch Control (wrapping)</b> authorization strategy is selected under
-    <i>Manage Jenkins &#8594; Security &#8594; Authorization</i>. Selecting that strategy is the step
-    most easily missed: without it, windows get approved and then have no effect at all.
+    A window confers its permissions only when <b>both</b> this switch is on <b>and</b> a Batch
+    Control authorization strategy &#8212; <b>Batch Control: Matrix-based security</b> or
+    <b>Batch Control: Role-Based Strategy</b> &#8212; is selected under
+    <i>Manage Jenkins &#8594; Security &#8594; Authorization</i>. Selecting one of those strategies
+    is the step most easily missed: without it, windows get approved and then have no effect at
+    all. An administrative monitor detects the mismatch and offers to install the matching
+    strategy in place of a plain matrix-auth or role-strategy configuration.
   </p>
   <p>
     <b>Turning this switch off is a kill switch, and it is abrupt.</b> While it is off no window
-    confers anything, so every permission decision is the delegate strategy's alone, exactly as
-    before the plugin was installed. Turning it off also <b>revokes every window that is open at
+    confers anything, so every permission decision is the installed strategy's own logic alone,
+    exactly as before the plugin was installed. Turning it off also <b>revokes every window that is open at
     that moment</b>, writing one revocation record per closure naming the account that flipped it,
     so anyone part-way through a change loses the permission to finish and needs a new window once
     the control is back on. No new window can be requested or approved while it is off either, and

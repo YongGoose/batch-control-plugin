@@ -19,7 +19,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.io.ByteArrayInputStream;
@@ -39,7 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -66,12 +66,16 @@ public class ChangeRecordTest {
     public void setUp(JenkinsRule rule) throws Exception {
         this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
-        MockAuthorizationStrategy delegate = new MockAuthorizationStrategy()
-                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST_GRANT)
-                        .everywhere().to("u1")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1");
-        j.jenkins.setAuthorizationStrategy(new BatchControlAuthorizationStrategy(delegate));
+        // D-35a: the grant-aware strategy is the matrix-auth subclass (was a wrapper around a mock).
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        for (String userId : new String[] {"u1", "a1"}) {
+            strategy.add(Jenkins.READ, PermissionEntry.user(userId));
+            strategy.add(Item.READ, PermissionEntry.user(userId));
+        }
+        strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
+        strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
+        j.jenkins.setAuthorizationStrategy(strategy);
 
         cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(true);
