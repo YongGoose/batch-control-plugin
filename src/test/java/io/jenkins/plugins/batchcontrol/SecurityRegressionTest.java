@@ -224,7 +224,10 @@ public class SecurityRegressionTest {
         assertEquals(requestsBefore, RunRequestService.get().list().size(), "no run request may have been created by the rejected rerun");
     }
 
-    /** T-SEC-11 (S-07): the per-job request form requires BatchControl/Request. */
+    /**
+     * T-SEC-11 (S-07, tightened by SPEC item 2 / #31): the per-job request form requires
+     * BatchControl/Request, and for a user without it the action is absent (404), not refused.
+     */
     @Test
     public void s_07_requestFormRequiresRequestPermission() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("batch-x");
@@ -235,7 +238,7 @@ public class SecurityRegressionTest {
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST)
                         .everywhere().to("u1"));
 
-        assertEquals(403, get(webClient("ro"), "job/batch-x/batch-control/").getStatusCode(), "an Item/Read-only user must get 403 on the request form (S-07)");
+        assertEquals(404, get(webClient("ro"), "job/batch-x/batch-control/").getStatusCode(), "an Item/Read-only user must get 404 on the request form (S-07; absent, not refused - SPEC item 2, #31)");
         assertEquals(200, get(webClient("u1"), "job/batch-x/batch-control/").getStatusCode(), "a Request holder must still reach the form");
     }
 
