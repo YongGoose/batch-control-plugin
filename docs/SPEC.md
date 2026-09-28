@@ -195,7 +195,8 @@ RunRequest        id, jobFullName, parameters(Map), reason, requester, approvers
                   approverChanges[{from[],to[],by,at}], incidentId?, executedRunId?
 GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGURE|DELETE],
                   durationMinutes, reason, requester, approvers[], decidedBy?, createNamePattern?,
-                  status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment
+                  status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment,
+                  approverChanges[{from[],to[],by,at}]
 Grant             id, grantRequestId, user, scope, actions, grantedAt, expiresAt,
                   revokedAt?, revokedBy?
 RunRecord         runId(jobFullName#number), jobFullName, number, causeType, user?,
