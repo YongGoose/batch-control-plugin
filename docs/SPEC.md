@@ -53,7 +53,8 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 결재 시점에 결재자가 `Approve` 권한을 잃었으면 결재가 거부된다(목록 등재 + 권한 보유 둘 다 필요).
 - 수용 기준: 요청자 본인을 결재자로 지정할 수 없다(관리자 자가 결재 허용 시 관리자 예외).
 - 수용 기준: 결재자 변경 시 요청 이력에 (이전 결재자, 새 결재자, 변경자, 시각)이 남는다.
-- 수용 기준: 그 요청의 지정 결재자만 결재할 수 있다. 결재자 목록에 등재된 다른 사용자나 관리자도 대신 결재할 수 없다. 지정 결재자가 부재일 때는 결재 전까지 요청자가 결재자를 변경해 처리한다. (D-29)
+- Acceptance: the requester designates one or more approvers (form field `approvers`, one user id per entry). Every designated approver must pass the checks above, and the requester may not be among them (administrator exception as above). Any one of them may approve or reject; the first decision closes the request and the record names who decided (`decidedBy`). Changing the designation edits the set and is recorded as (previous set, new set, changed by, time). A request stored before this change, with a single `approver`, loads as a one-element set, and the REST/JSON view keeps an `approver` field holding the first member for compatibility. (D-37)
+- 수용 기준(D-37로 집합에 적용): 그 요청의 지정 결재자만 결재할 수 있다. 결재자 목록에 등재된 다른 사용자나 관리자도 대신 결재할 수 없다. 지정 결재자가 부재일 때는 결재 전까지 요청자가 결재자를 변경해 처리한다. (D-29)
 
 **4. 이력 저장소**
 요청·결재·권한·실행·변경·오류를 빌드와 독립된 저장소(`$JENKINS_HOME/batch-control/`)에 기록해, 빌드가 삭제되어도 남습니다.
@@ -113,6 +114,7 @@ cron 정기 실행과 상위 잡 연쇄 실행은 통과가 기본이며, 잡별
 - 수용 기준: 승인 즉시 요청자가 지정 범위에서 지정 행위의 Jenkins 권한(Item/Create, Item/Configure, Item/Delete)을 얻는다.
 - 수용 기준: 권한 창 만료 후의 거부 화면은 Jenkins 코어의 것을 그대로 쓴다(코어가 그 화면의 확장점을 제공하지 않으며, 가로채는 구현은 인스턴스 전체의 권한 거부에 영향을 준다). 만료 안내와 재요청 동선은 권한 화면에서 제공한다: 활성 창의 남은 시간, 만료된 창의 이력, 재요청 링크. 편집 중이던 설정 값의 복원은 제공하지 않는다. (D-33)
 - 수용 기준: 지정 범위 밖 잡에는 권한이 생기지 않는다.
+- Acceptance: a CREATE request may carry an optional name restriction (form field `createNamePattern`): an exact item name, or a Java regular expression written as `/regex/`. It is validated at submission (an invalid regex is refused) and shown to the approver. With a restriction, the grant lets its holder create only items in the scope whose name matches in full; an attempt with another name is refused with HTTP 4xx, leaves no item, and is recorded as GRANT_VIOLATION. Without a restriction the grant behaves as before. The restriction does not affect CONFIGURE or DELETE. (D-40)
 - 수용 기준: 만료 시각 경과 후 첫 권한 검사부터 거부된다(타이머 의존 없음).
 - 수용 기준: 활성 권한이 있는 상태에서 재시작해도 만료 전이면 유지, 만료 후면 즉시 없음.
 - 수용 기준: `Manage` 권한자는 활성 권한을 즉시 회수(revoke)할 수 있고 이력에 남는다.
@@ -172,6 +174,9 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 **13. 알림**
 요청 발생, 결재 완료, 권한 만료 임박, 오류 발생 시 관련자에게 알립니다.
 이메일을 기본으로 하고 Slack 등은 확장 포인트로 붙입니다.
+- Acceptance: an extension point `io.jenkins.plugins.batchcontrol.ops.BatchControlNotifier` (events in `ops.NotificationEvent`` receives events `REQUEST_CREATED`, `APPROVERS_CHANGED`, `APPROVED`, `REJECTED`, `EXPIRING` for run and change requests, and `GRANT_EXPIRING` for an active change window. Recipients: the designated approvers for `REQUEST_CREATED`/`APPROVERS_CHANGED`, the requester for the others. `EXPIRING`/`GRANT_EXPIRING` fire once, `notifyBeforeExpiryMinutes` (global, default 10) before the expiry. A notifier failure never fails or delays the request action. (D-36)
+- Acceptance: the shipped e-mail notifier uses the Mailer plugin, an optional dependency, and the recipient's Mailer e-mail address. It sends nothing unless the global option `emailNotifications` (default false) is on, so an upgrade changes nothing. Without Mailer the option is absent and nothing breaks. Messages contain the request id, job or scope, requester, reason and a link, all plain text. (D-36)
+- Acceptance: CSV exports keep their existing columns; the `approver` column holds the designated set joined by `;`, and a `decidedBy` column is appended at the end. (D-37)
 
 **14. REST API와 외부 연동**
 요청·결재·이력 조회를 API로 제공해 사내 결재 시스템과 연동할 수 있게 합니다.
@@ -184,12 +189,12 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 ## 3. 데이터 모델 (MVP)
 
 ```
-RunRequest        id, jobFullName, parameters(Map), reason, requester, approver,
+RunRequest        id, jobFullName, parameters(Map), reason, requester, approvers[], decidedBy?,
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED|EXECUTED|INVALIDATED),
                   createdAt, decidedAt, decisionComment, selfApproved,
-                  approverChanges[{from,to,by,at}], incidentId?, executedRunId?
+                  approverChanges[{from[],to[],by,at}], incidentId?, executedRunId?
 GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGURE|DELETE],
-                  durationMinutes, reason, requester, approver,
+                  durationMinutes, reason, requester, approvers[], decidedBy?, createNamePattern?,
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment
 Grant             id, grantRequestId, user, scope, actions, grantedAt, expiresAt,
                   revokedAt?, revokedBy?
