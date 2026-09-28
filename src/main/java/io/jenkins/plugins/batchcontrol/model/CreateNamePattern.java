@@ -2,6 +2,8 @@ package io.jenkins.plugins.batchcontrol.model;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import jenkins.model.Jenkins;
@@ -16,8 +18,16 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class CreateNamePattern {
 
+    private static final Logger LOGGER = Logger.getLogger(CreateNamePattern.class.getName());
+
     /** Upper bound on the stored restriction, so a request cannot carry an unbounded regex. */
     public static final int MAX_LENGTH = 1000;
+
+    /** D-40a (security-08 S-03): a longer new name never matches a restriction. */
+    public static final int MAX_NAME_LENGTH = 255;
+
+    /** D-40a (security-08 S-03): how long one regular-expression match may run before it fails. */
+    static final long MATCH_DEADLINE_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
 
     private final String source;
     @CheckForNull
@@ -69,6 +79,10 @@ public final class CreateNamePattern {
                         + "expression: " + e.getDescription(), e);
             }
         }
+        if (text.length() > MAX_NAME_LENGTH) {
+            throw new IllegalArgumentException("An exact name restriction must not exceed "
+                    + MAX_NAME_LENGTH + " characters.");
+        }
         try {
             Jenkins.checkGoodName(text);
         } catch (Failure e) {
@@ -90,13 +104,75 @@ public final class CreateNamePattern {
         }
     }
 
-    /** Whether the new item's name (not its full name) satisfies the restriction. */
+    /**
+     * Whether the new item's name (not its full name) satisfies the restriction. The name is
+     * matched exactly as submitted, untrimmed (S-06). A name over {@value #MAX_NAME_LENGTH}
+     * characters never matches, and a regular-expression match that runs longer than the deadline
+     * fails (S-03), so no pattern can stall the calling thread.
+     */
     public boolean matches(@CheckForNull String itemName) {
-        if (itemName == null) {
+        if (itemName == null || itemName.isEmpty() || itemName.length() > MAX_NAME_LENGTH) {
             return false;
         }
-        String name = itemName.trim();
-        return regex != null ? regex.matcher(name).matches() : source.equals(name);
+        if (regex == null) {
+            return source.equals(itemName);
+        }
+        try {
+            return regex.matcher(new DeadlineCharSequence(itemName,
+                    System.nanoTime() + MATCH_DEADLINE_NANOS)).matches();
+        } catch (MatchTimeout e) {
+            LOGGER.warning(() -> "The name restriction " + source + " took longer than "
+                    + TimeUnit.NANOSECONDS.toMillis(MATCH_DEADLINE_NANOS) + " ms on a name of "
+                    + itemName.length() + " characters; treated as no match (D-40a)");
+            return false;
+        }
+    }
+
+    /** Thrown by {@link DeadlineCharSequence} when a match overruns its deadline. */
+    private static final class MatchTimeout extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        MatchTimeout() {
+            super("regular expression match deadline exceeded", null, false, false);
+        }
+    }
+
+    /**
+     * A character sequence that fails the regex engine once a deadline has passed. The engine reads
+     * characters continually while backtracking, so every read checks elapsed monotonic time (a
+     * duration bound, not a wall-clock judgement, so it does not use the plugin clock).
+     */
+    private static final class DeadlineCharSequence implements CharSequence {
+        private final String text;
+        private final long deadline;
+
+        DeadlineCharSequence(String text, long deadline) {
+            this.text = text;
+            this.deadline = deadline;
+        }
+
+        @Override
+        public char charAt(int index) {
+            if (System.nanoTime() - deadline > 0) {
+                throw new MatchTimeout();
+            }
+            return text.charAt(index);
+        }
+
+        @Override
+        public int length() {
+            return text.length();
+        }
+
+        @Override
+        public CharSequence subSequence(int start, int end) {
+            return new DeadlineCharSequence(text.substring(start, end), deadline);
+        }
+
+        @Override
+        public String toString() {
+            return text;
+        }
     }
 
     public String getSource() {

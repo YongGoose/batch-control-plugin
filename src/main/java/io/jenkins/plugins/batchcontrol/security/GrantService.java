@@ -139,7 +139,9 @@ public final class GrantService {
      * restriction (if any) allows {@code itemName}, or {@code null}.
      */
     @CheckForNull
-    public synchronized Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
+    public Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
+        // Not synchronized: the list is a copy, and a user-supplied pattern is never matched while
+        // this monitor is held, since every permission check passes through it (security-08 S-03).
         for (Grant grant : findActiveGrants(user, itemFullName, GrantAction.CREATE)) {
             if (grant.allowsCreateName(itemName)) {
                 return grant;
@@ -254,15 +256,23 @@ public final class GrantService {
      *         {@code user} covers the item
      */
     @CheckForNull
-    public synchronized Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
-        // D-40: the grant whose name restriction admits the item (its name, not the full name).
+    public Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
+        // D-40: the grant whose name restriction admits the item (its name, not the full name),
+        // chosen outside the monitor (S-03), then recorded under it.
         String itemName = itemFullName.substring(itemFullName.lastIndexOf('/') + 1);
         Grant active = findActiveCreateGrant(user, itemFullName, itemName);
         if (active == null) {
             return null;
         }
-        Grant grant = store.loadGrant(active.getId());
-        if (grant == null) {
+        return recordCreatedItemIn(active.getId(), user, itemFullName, identity);
+    }
+
+    @CheckForNull
+    private synchronized Grant recordCreatedItemIn(String grantId, String user, String itemFullName,
+                                                   @CheckForNull String identity) {
+        Grant grant = store.loadGrant(grantId);
+        if (grant == null || !grant.isActiveAt(BatchClock.now()) || !user.equals(grant.getUser())
+                || !grant.getScope().includes(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
             return null;
         }
         List<String> items = grant.getCreatedItems();

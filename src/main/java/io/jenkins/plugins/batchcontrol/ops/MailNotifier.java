@@ -102,8 +102,15 @@ public class MailNotifier extends BatchControlNotifier {
                 .append(grant ? " (change request)" : " (run request)").append('\n');
         text.append(grant ? "Scope: " : "Job: ").append(nullToEmpty(n.getSubject())).append('\n');
         text.append("Requester: ").append(nullToEmpty(n.getRequester())).append('\n');
-        text.append("Reason: ").append(nullToEmpty(n.getReason())).append('\n');
-        text.append("Link: ").append(nullToEmpty(n.getUrl())).append('\n');
+        // security-08 S-08: the link comes before the free-text reason, and every reason line is
+        // quoted, so a multi-line reason cannot pose as another field (such as a forged link).
+        if (n.getUrl() != null) {
+            text.append("Link: ").append(n.getUrl()).append('\n');
+        }
+        text.append("Reason:\n");
+        for (String line : nullToEmpty(n.getReason()).split("\\r\\n|\\r|\\n", -1)) {
+            text.append("> ").append(line).append('\n');
+        }
         return text.toString();
     }
 

@@ -1,8 +1,10 @@
 package io.jenkins.plugins.batchcontrol.model;
 
+import hudson.model.User;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -36,6 +38,30 @@ public final class Approvers {
             list.add(approver.trim());
         }
         return list;
+    }
+
+    /**
+     * Whether two user ids name the same user under Jenkins' configured user id strategy
+     * (SPEC item 3, #23; security-08 S-12), for example case-insensitively by default.
+     */
+    public static boolean sameUser(String a, String b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        return Jenkins.getInstanceOrNull() == null ? a.equals(b) : User.idStrategy().equals(a, b);
+    }
+
+    /** Whether {@code userId} is a member of {@code ids} under the user id strategy. */
+    public static boolean contains(List<String> ids, String userId) {
+        if (ids == null || userId == null) {
+            return false;
+        }
+        for (String id : ids) {
+            if (sameUser(id, userId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Members joined by {@code ", "} for display; empty string for an empty set. */

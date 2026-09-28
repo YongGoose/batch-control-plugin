@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol.ops;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
 import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -8,11 +10,14 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.model.JenkinsLocationConfiguration;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -27,9 +32,19 @@ public final class NotificationDispatcher {
 
     private static final Logger LOGGER = Logger.getLogger(NotificationDispatcher.class.getName());
 
-    /** One daemon thread keeps events in order and never holds up a request thread. */
-    private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(
-            new NamingThreadFactory(new DaemonThreadFactory(), "BatchControlNotifier"));
+    /** Pending notifications beyond this are dropped and logged (security-08 S-09). */
+    static final int QUEUE_CAPACITY = 1000;
+
+    /**
+     * One daemon thread keeps events in order and never holds up a request thread. The queue is
+     * bounded, so a hung mail server or a flood of approver changes cannot grow memory without
+     * limit; on overflow the notification is dropped and logged.
+     */
+    private static final ExecutorService EXECUTOR = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(QUEUE_CAPACITY),
+            new NamingThreadFactory(new DaemonThreadFactory(), "BatchControlNotifier"),
+            (task, executor) -> LOGGER.warning("Notification queue full (" + QUEUE_CAPACITY
+                    + " pending); dropping a notification (D-36)"));
 
     private NotificationDispatcher() {
     }
@@ -81,10 +96,21 @@ public final class NotificationDispatcher {
         return requester == null ? Collections.emptyList() : List.of(requester);
     }
 
+    /**
+     * The link to the request page from the configured Jenkins URL only, or {@code null} when none
+     * is configured (security-08 S-04): {@code Jenkins#getRootUrl()} would fall back to the current
+     * request's {@code Host}/{@code X-Forwarded-Host}, which the requester controls.
+     */
+    @CheckForNull
     private static String url(String path) {
-        Jenkins jenkins = Jenkins.getInstanceOrNull();
-        String root = jenkins == null ? null : jenkins.getRootUrl();
-        return root == null ? "/" + path : root + path;
+        if (Jenkins.getInstanceOrNull() == null) {
+            return null;
+        }
+        String root = Util.fixEmptyAndTrim(JenkinsLocationConfiguration.get().getUrl());
+        if (root == null) {
+            return null;
+        }
+        return (root.endsWith("/") ? root : root + "/") + path;
     }
 
     /** Submits the event to every notifier on the background thread. */

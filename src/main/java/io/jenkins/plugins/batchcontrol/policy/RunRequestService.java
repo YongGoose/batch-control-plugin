@@ -235,7 +235,7 @@ public final class RunRequestService {
         lock.lock();
         try {
             RunRequest request = require(id);
-            if (!caller.equals(request.getRequester())
+            if (!Approvers.sameUser(caller, request.getRequester())
                     && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
                 throw new AccessDeniedException(
                         "Only the requester or a Manage holder may cancel request " + id + ".");
@@ -268,7 +268,7 @@ public final class RunRequestService {
         lock.lock();
         try {
             request = require(id);
-            if (!caller.equals(request.getRequester())) {
+            if (!Approvers.sameUser(caller, request.getRequester())) {
                 throw new AccessDeniedException(
                         "Only the requester may change the approvers of request " + id + ".");
             }
@@ -276,7 +276,8 @@ public final class RunRequestService {
                 throw new IllegalStateException("Request " + id + " is "
                         + request.getStatus() + "; the approvers can only be changed while PENDING.");
             }
-            Job<?, ?> job = Jenkins.get().getItemByFullName(request.getJobFullName(), Job.class);
+            // #23: resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
+            Job<?, ?> job = ApprovalPolicy.jobForPolicy(request.getJobFullName());
             List<String> designated = ApprovalPolicy.checkDesignation(request.getRequester(), newApprovers, job);
             List<String> previous = request.getApprovers();
             request.addApproverChange(new RunRequest.ApproverChange(

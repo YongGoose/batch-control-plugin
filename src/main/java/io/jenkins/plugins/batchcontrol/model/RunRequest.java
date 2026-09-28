@@ -211,7 +211,7 @@ public final class RunRequest {
 
     /** Whether {@code userId} is a member of the designated set. */
     public boolean isDesignatedApprover(String userId) {
-        return userId != null && approvers != null && approvers.contains(userId);
+        return Approvers.contains(approvers, userId);
     }
 
     /** The approver who decided (approved or rejected), or {@code null} while undecided. */

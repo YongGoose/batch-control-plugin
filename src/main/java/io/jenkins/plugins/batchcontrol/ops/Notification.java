@@ -65,7 +65,7 @@ public final class Notification {
         return recipients;
     }
 
-    /** Absolute link to the request page when the Jenkins URL is configured, else a root-relative path. */
+    /** Absolute link to the request page from the configured Jenkins URL, or {@code null} when none is configured. */
     public String getUrl() {
         return url;
     }

@@ -302,7 +302,7 @@ public final class GrantRequestService {
         lock.lock();
         try {
             request = require(id);
-            if (!caller.equals(request.getRequester())) {
+            if (!Approvers.sameUser(caller, request.getRequester())) {
                 throw new AccessDeniedException(
                         "Only the requester may change the approvers of grant request " + id + ".");
             }
@@ -328,7 +328,7 @@ public final class GrantRequestService {
         lock.lock();
         try {
             GrantRequest request = require(id);
-            if (!caller.equals(request.getRequester())
+            if (!Approvers.sameUser(caller, request.getRequester())
                     && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
                 throw new AccessDeniedException(
                         "Only the requester or a Manage holder may cancel grant request " + id + ".");

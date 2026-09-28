@@ -7,6 +7,8 @@ import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import java.util.List;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -31,8 +33,7 @@ public final class ApprovalPolicy {
 
     /** Whether the user id is on the global approver list. */
     public static boolean isListedApprover(String userId) {
-        return userId != null
-                && BatchControlGlobalConfiguration.get().getApprovers().contains(userId);
+        return Approvers.contains(BatchControlGlobalConfiguration.get().getApprovers(), userId);
     }
 
     /** The job-level approver restriction, or an empty list when the job does not narrow it. */
@@ -44,6 +45,26 @@ public final class ApprovalPolicy {
             }
         }
         return List.of();
+    }
+
+    /**
+     * Resolves the job a request targets, for applying its approver policy (#23, security-08
+     * S-11). Callers must have finished their own permission checks first (requester identity for
+     * a designation change, designated membership plus Approve for a decision).
+     *
+     * <p>ACL.SYSTEM2 switch, with its reason: the job's own approver list must bind the designation
+     * and the decision even when the acting user cannot read the job (a requester who lost
+     * Item/Read would otherwise get {@code null} and skip {@code jobApprovers}). The lookup only
+     * reads the job's property; nothing is done on the job as SYSTEM.
+     */
+    public static Job<?, ?> jobForPolicy(String jobFullName) {
+        if (jobFullName == null) {
+            return null;
+        }
+        // ACL.SYSTEM2 switch: the caller's permission checks are complete (see javadoc).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return Jenkins.get().getItemByFullName(jobFullName, Job.class);
+        }
     }
 
     /** Whether the current caller is an administrator (Overall/Administer). */
@@ -82,11 +103,11 @@ public final class ApprovalPolicy {
                 throw new IllegalArgumentException(
                         "User '" + approver + "' is not on the configured approver list.");
             }
-            if (!restriction.isEmpty() && !restriction.contains(approver)) {
+            if (!restriction.isEmpty() && !Approvers.contains(restriction, approver)) {
                 throw new IllegalArgumentException("User '" + approver
                         + "' is not an allowed approver for this job.");
             }
-            if (approver.equals(requester) && !selfApprovalAllowedForCaller()) {
+            if (Approvers.sameUser(approver, requester) && !selfApprovalAllowedForCaller()) {
                 throw new IllegalArgumentException(
                         "You cannot designate yourself as an approver of your own request.");
             }
@@ -103,7 +124,16 @@ public final class ApprovalPolicy {
      * @throws AccessDeniedException if the caller may not decide the request
      */
     public static boolean checkDecision(RunRequest request) {
-        return checkDecision(request.getId(), request.getRequester(), request.getApprovers());
+        boolean selfApproval = checkDecision(request.getId(), request.getRequester(), request.getApprovers());
+        // #23: the job's approver list in force at decision time binds the deciding approver.
+        // Resolved after the caller checks above (designated member, Approve, listed).
+        List<String> restriction = jobApproverRestriction(jobForPolicy(request.getJobFullName()));
+        String caller = Jenkins.getAuthentication2().getName();
+        if (!restriction.isEmpty() && !Approvers.contains(restriction, caller)) {
+            throw new AccessDeniedException("User '" + caller
+                    + "' is not an allowed approver for job '" + request.getJobFullName() + "'.");
+        }
+        return selfApproval;
     }
 
     /**
@@ -120,7 +150,7 @@ public final class ApprovalPolicy {
      */
     public static boolean checkDecision(String requestId, String requester, List<String> designatedApprovers) {
         String caller = Jenkins.getAuthentication2().getName();
-        if (designatedApprovers == null || !designatedApprovers.contains(caller)) {
+        if (!Approvers.contains(designatedApprovers, caller)) {
             throw new AccessDeniedException(
                     "Only a designated approver may decide request " + requestId + ".");
         }
@@ -130,7 +160,7 @@ public final class ApprovalPolicy {
             throw new AccessDeniedException(
                     "User '" + caller + "' is no longer on the configured approver list.");
         }
-        boolean selfApproval = caller.equals(requester);
+        boolean selfApproval = Approvers.sameUser(caller, requester);
         if (selfApproval && !selfApprovalAllowedForCaller()) {
             throw new AccessDeniedException(
                     "Separation of duties: you may not decide your own request.");
