@@ -48,19 +48,32 @@ final class NewItemName {
         UNKNOWN
     }
 
-    private static final NewItemName UNNAMED = new NewItemName(Kind.UNNAMED, null, false);
-    private static final NewItemName UNKNOWN = new NewItemName(Kind.UNKNOWN, null, false);
+    private static final NewItemName UNNAMED = new NewItemName(Kind.UNNAMED, null, false, null);
+    private static final NewItemName UNKNOWN = new NewItemName(Kind.UNKNOWN, null, false, null);
 
     private final Kind kind;
     @CheckForNull
     private final String name;
     /** Whether a refusal in this context is an actual attempt worth a GRANT_VIOLATION record. */
     private final boolean recordable;
+    /** The operation that would create or rename (endpoint or CLI command), for the record key. */
+    @CheckForNull
+    private final String operation;
 
-    private NewItemName(Kind kind, @CheckForNull String name, boolean recordable) {
+    private NewItemName(Kind kind, @CheckForNull String name, boolean recordable, @CheckForNull String operation) {
         this.kind = kind;
         this.name = name;
         this.recordable = recordable;
+        this.operation = operation;
+    }
+
+    /**
+     * The operation (for example {@code createItem} or {@code cli:copy-job}); two refusals of the
+     * same name through different operations are separate attempts and each is recorded.
+     */
+    @CheckForNull
+    String getOperation() {
+        return operation;
     }
 
     Kind getKind() {
@@ -87,9 +100,9 @@ final class NewItemName {
         if (command != null) {
             return fromCli(command, groupFullName);
         }
-        String cliTarget = CliCreateContext.currentTarget(groupFullName);
+        String[] cliTarget = CliCreateContext.currentTarget(groupFullName);
         if (cliTarget != null) {
-            return named(cliTarget, true);
+            return named(cliTarget[1], true, "cli:" + cliTarget[0]);
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         if (req == null) {
@@ -101,7 +114,7 @@ final class NewItemName {
             if (groupFullName.equals(groupOf(req))) {
                 String value = req.getParameter("createItem".equals(endpoint) ? "name" : "value");
                 if (value != null) {
-                    return named(value, !readOnly && "createItem".equals(endpoint));
+                    return named(value, !readOnly && "createItem".equals(endpoint), endpoint);
                 }
             }
         } else if (isRenameEndpoint(endpoint)) {
@@ -109,7 +122,7 @@ final class NewItemName {
             if (renamed != null && groupFullName.equals(renamed.getParent().getFullName())) {
                 String value = renameValue(req);
                 if (value != null) {
-                    return named(value, !readOnly && "confirmRename".equals(endpoint));
+                    return named(value, !readOnly && "confirmRename".equals(endpoint), endpoint);
                 }
             }
         }
@@ -134,7 +147,7 @@ final class NewItemName {
         if (value == null) {
             return UNKNOWN;
         }
-        return named(value, !readOnly(req) && "confirmRename".equals(endpoint(req)));
+        return named(value, !readOnly(req) && "confirmRename".equals(endpoint(req)), endpoint(req));
     }
 
     private static boolean isRenameEndpoint(@CheckForNull String endpoint) {
@@ -188,10 +201,10 @@ final class NewItemName {
         if (slash >= 0 && !groupFullName.equals(target.substring(0, slash))) {
             return UNKNOWN;
         }
-        return named(target, true);
+        return named(target, true, "cli:" + command.getName());
     }
 
-    private static NewItemName named(String target, boolean recordable) {
-        return new NewItemName(Kind.NAMED, target.substring(target.lastIndexOf('/') + 1), recordable);
+    private static NewItemName named(String target, boolean recordable, @CheckForNull String operation) {
+        return new NewItemName(Kind.NAMED, target.substring(target.lastIndexOf('/') + 1), recordable, operation);
     }
 }

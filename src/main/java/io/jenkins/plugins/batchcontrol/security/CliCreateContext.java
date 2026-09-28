@@ -28,11 +28,13 @@ public class CliCreateContext implements CLIListener {
     private static final ThreadLocal<Captured> TARGET = new ThreadLocal<>();
 
     private static final class Captured {
+        final String command;
         final String target;
         @CheckForNull
         final String user;
 
-        Captured(String target, @CheckForNull String user) {
+        Captured(String command, String target, @CheckForNull String user) {
+            this.command = command;
             this.target = target;
             this.user = user;
         }
@@ -45,7 +47,7 @@ public class CliCreateContext implements CLIListener {
         if (("create-job".equals(command) || "copy-job".equals(command)) && args != null && !args.isEmpty()) {
             Authentication auth = context.getAuth();
             // create-job NAME, copy-job SRC DST: the new item's full name is the last argument.
-            TARGET.set(new Captured(args.get(args.size() - 1), auth == null ? null : auth.getName()));
+            TARGET.set(new Captured(command, args.get(args.size() - 1), auth == null ? null : auth.getName()));
         } else {
             TARGET.remove();
         }
@@ -62,11 +64,12 @@ public class CliCreateContext implements CLIListener {
     }
 
     /**
-     * The target (full name) of the create-job/copy-job command running on this thread, when it was
-     * issued by the current user into {@code groupFullName}; otherwise {@code null}.
+     * The command name and target (full name) of the create-job/copy-job command running on this
+     * thread, as {@code {command, target}}, when it was issued by the current user into
+     * {@code groupFullName}; otherwise {@code null}.
      */
     @CheckForNull
-    static String currentTarget(String groupFullName) {
+    static String[] currentTarget(String groupFullName) {
         Captured captured = TARGET.get();
         if (captured == null) {
             return null;
@@ -77,6 +80,6 @@ public class CliCreateContext implements CLIListener {
         }
         int slash = captured.target.lastIndexOf('/');
         String folder = slash < 0 ? "" : captured.target.substring(0, slash);
-        return folder.equals(groupFullName) ? captured.target : null;
+        return folder.equals(groupFullName) ? new String[] {captured.command, captured.target} : null;
     }
 }

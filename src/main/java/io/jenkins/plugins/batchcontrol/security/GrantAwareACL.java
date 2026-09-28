@@ -161,9 +161,9 @@ final class GrantAwareACL extends ACL {
      */
     private static final class Decision {
         /** The grant layer confers the permission. */
-        static final Decision CONFERS = new Decision(true, null, null, null, false);
+        static final Decision CONFERS = new Decision(true, null, null, null, false, null);
         /** The grant layer does not confer it; the delegate decides. */
-        static final Decision NONE = new Decision(false, null, null, null, false);
+        static final Decision NONE = new Decision(false, null, null, null, false, null);
 
         final boolean confers;
         /** D-40: the refused new name, or {@code null} when no named creation/rename was refused. */
@@ -176,18 +176,23 @@ final class GrantAwareACL extends ACL {
         final Grant grant;
         /** S-05: whether the refusal is an actual attempt (not a validation or read-only request). */
         final boolean recordable;
+        /** The operation that was refused; part of the merge key, so each operation is recorded. */
+        @CheckForNull
+        final String operation;
 
         private Decision(boolean confers, @CheckForNull String refusedName, @CheckForNull String groupFullName,
-                         @CheckForNull Grant grant, boolean recordable) {
+                         @CheckForNull Grant grant, boolean recordable, @CheckForNull String operation) {
             this.confers = confers;
             this.refusedName = refusedName;
             this.groupFullName = groupFullName;
             this.grant = grant;
             this.recordable = recordable;
+            this.operation = operation;
         }
 
-        static Decision refused(String itemName, String groupFullName, Grant grant, boolean recordable) {
-            return new Decision(false, itemName, groupFullName, grant, recordable);
+        static Decision refused(String itemName, String groupFullName, Grant grant, NewItemName context) {
+            return new Decision(false, itemName, groupFullName, grant, context.isRecordable(),
+                    context.getOperation());
         }
 
         void recordRefusal(String user) {
@@ -199,7 +204,8 @@ final class GrantAwareACL extends ACL {
             }
             String target = group.isEmpty() ? itemName : group + "/" + itemName;
             try {
-                BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION, target, target, user,
+                String attemptKey = (operation == null ? "" : operation + " ") + target;
+                BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION, attemptKey, target, user,
                         "Refused to create or rename to '" + itemName + "' in '" + group + "': the name is "
                                 + "outside the name restriction '" + grant.getCreateNamePattern() + "' of grant "
                                 + grant.getId() + " (D-40)", grant.getId());
@@ -331,7 +337,7 @@ final class GrantAwareACL extends ACL {
                     }
                 }
                 return name == null ? Decision.NONE
-                        : Decision.refused(name, itemFullName, grants.get(0), context.isRecordable());
+                        : Decision.refused(name, itemFullName, grants.get(0), context);
             default:
                 return Decision.NONE;
         }
@@ -360,6 +366,6 @@ final class GrantAwareACL extends ACL {
         }
         String parent = itemFullName.contains("/") ? itemFullName.substring(0, itemFullName.lastIndexOf('/')) : "";
         return name == null ? Decision.NONE
-                : Decision.refused(name, parent, creating, context.isRecordable());
+                : Decision.refused(name, parent, creating, context);
     }
 }
