@@ -4,13 +4,16 @@ import hudson.Extension;
 import hudson.model.User;
 import hudson.tasks.Mailer;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import jakarta.mail.Address;
+import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.MimeMessage;
 import java.io.UnsupportedEncodingException;
+import java.util.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import jenkins.plugins.mailer.tasks.MimeMessageBuilder;
+import jenkins.model.JenkinsLocationConfiguration;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -26,6 +29,8 @@ public class MailNotifier extends BatchControlNotifier {
 
     private static final Logger LOGGER = Logger.getLogger(MailNotifier.class.getName());
 
+    private static final String UTF_8 = "UTF-8";
+
     @Override
     public void notify(NotificationEvent event, Notification notification) {
         if (!BatchControlGlobalConfiguration.get().isEmailNotifications()) {
@@ -40,18 +45,37 @@ public class MailNotifier extends BatchControlNotifier {
                 continue;
             }
             try {
-                MimeMessage message = new MimeMessageBuilder()
-                        .setMimeType("text/plain")
-                        .setSubject(subject)
-                        .setBody(body)
-                        .addRecipients(address)
-                        .buildMimeMessage();
+                MimeMessage message = buildMessage(address, subject, body);
                 Transport.send(message);
             } catch (MessagingException | UnsupportedEncodingException | RuntimeException e) {
                 LOGGER.log(Level.WARNING, "Could not send the " + event + " e-mail for request "
                         + notification.getRequestId() + " to user '" + userId + "'", e);
             }
         }
+    }
+
+    /**
+     * A single-part {@code text/plain; charset=UTF-8} message (SPEC item 13: plain text), built on
+     * Mailer's session with the sender and reply-to Mailer's own builder would use: the Jenkins
+     * administrator address and Mailer's configured reply-to address.
+     */
+    static MimeMessage buildMessage(String address, String subject, String body)
+            throws MessagingException, UnsupportedEncodingException {
+        Mailer.DescriptorImpl mailer = Mailer.descriptor();
+        MimeMessage message = new MimeMessage(mailer.createSession());
+        String from = JenkinsLocationConfiguration.get().getAdminAddress();
+        if (from != null && !from.trim().isEmpty()) {
+            message.setFrom(Mailer.stringToAddress(from.trim(), UTF_8));
+        }
+        String replyTo = mailer.getReplyToAddress();
+        if (replyTo != null && !replyTo.trim().isEmpty()) {
+            message.setReplyTo(new Address[] {Mailer.stringToAddress(replyTo.trim(), UTF_8)});
+        }
+        message.setRecipient(Message.RecipientType.TO, Mailer.stringToAddress(address, UTF_8));
+        message.setSubject(subject, UTF_8);
+        message.setText(body, UTF_8);
+        message.setSentDate(new Date());
+        return message;
     }
 
     private static String addressOf(String userId) {
