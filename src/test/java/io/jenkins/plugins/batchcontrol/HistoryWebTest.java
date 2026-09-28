@@ -280,12 +280,16 @@ public class HistoryWebTest {
         assertSummaryCount(body, "requestsRejected", 1);
     }
 
-    /** T-12-05: every CSV export answers 403 without ViewHistory. */
+    /**
+     * T-12-05 (sharpened by SPEC 2 / #31): "nohist" holds none of the Batch Control
+     * permissions at all, so the root action and every URL beneath it (the CSV exports
+     * included) are absent, not merely refused -&gt; 404 (was 403).
+     */
     @Test
     public void t_12_05_csvExportsWithoutViewHistoryAre403() throws Exception {
         JenkinsRule.WebClient noHistory = webClient("nohist");
         for (String path : CSV_PATHS) {
-            assertEquals(403, get(noHistory, path).getStatusCode(), path + " without ViewHistory must be 403");
+            assertEquals(404, get(noHistory, path).getStatusCode(), path + " for a user with no Batch Control permission at all must be 404, not 403 (SPEC 2, #31)");
         }
     }
 

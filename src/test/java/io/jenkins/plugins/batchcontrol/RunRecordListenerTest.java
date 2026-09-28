@@ -199,14 +199,18 @@ public class RunRecordListenerTest {
         assertEquals("appr-x#1", reloaded.getExecutedRunId(), "the request must carry the executed run id");
     }
 
-    /** T-10-05: the dashboard is gated by ViewHistory (403 without, 200 with). */
+    /**
+     * T-10-05 (sharpened by SPEC 2 / #31): "nohist" holds none of the Batch Control
+     * permissions at all, so the root action and every URL beneath it are absent, not
+     * merely refused -&gt; 404 (was 403); a ViewHistory holder still gets 200.
+     */
     @Test
     public void t_10_05_dashboardWithoutViewHistoryIs403() throws Exception {
         JenkinsRule.WebClient noHistory = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false).login("nohist");
         Page denied = noHistory.getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/dashboard/"), HttpMethod.GET));
-        assertEquals(403, denied.getWebResponse().getStatusCode(), "without ViewHistory the dashboard must answer 403");
+        assertEquals(404, denied.getWebResponse().getStatusCode(), "a user with no Batch Control permission at all must get 404, not 403 (SPEC 2, #31)");
 
         JenkinsRule.WebClient viewer = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false).login("viewer");
