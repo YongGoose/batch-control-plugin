@@ -22,7 +22,9 @@ import org.kohsuke.stapler.StaplerRequest2;
  *       the {@code name} parameter of the same request, and fails without one. The parameter is
  *       used when the request is aimed at the group being checked. The name check of the new-item
  *       page ({@code checkJobName?value=}) is treated the same way.</li>
- *   <li><b>CLI</b> {@code create-job} and {@code copy-job}: the command's target name field.</li>
+ *   <li><b>CLI</b> {@code create-job} and {@code copy-job}: the command's target name field, or,
+ *       where the transport does not publish the current command, the last argument captured by
+ *       {@link CliCreateContext}.</li>
  * </ul>
  *
  * <p>Anything else is {@link Kind#UNKNOWN} and a restricted grant does not confer Create there
@@ -73,6 +75,10 @@ final class NewItemName {
         CLICommand command = CLICommand.getCurrent();
         if (command != null) {
             return fromCli(command);
+        }
+        String cliTarget = CliCreateContext.currentTarget();
+        if (cliTarget != null) {
+            return named(cliTarget);
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         if (req != null) {

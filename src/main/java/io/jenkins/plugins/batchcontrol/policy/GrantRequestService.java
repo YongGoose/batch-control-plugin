@@ -13,7 +13,6 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
-import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -312,7 +311,7 @@ public final class GrantRequestService {
                         + request.getStatus() + "; the approvers can only be changed while PENDING.");
             }
             List<String> designated = ApprovalPolicy.checkDesignation(request.getRequester(), newApprovers, null);
-            request.addApproverChange(new RunRequest.ApproverChange(
+            request.addApproverChange(new GrantRequest.ApproverChange(
                     request.getApprovers(), designated, caller, BatchClock.now()));
             request.setApprovers(designated);
             store.saveGrantRequest(request);

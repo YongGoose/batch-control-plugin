@@ -23,6 +23,52 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class GrantRequest {
 
+    /**
+     * One approver change entry of a grant request: (previous set, new set, changed by, at)
+     * (SPEC section 3, D-37). Same shape as {@link RunRequest.ApproverChange}.
+     */
+    public static final class ApproverChange {
+        private final List<String> fromApprovers;
+        private final List<String> toApprovers;
+        private final String by;
+        private final long atMillis;
+
+        public ApproverChange(List<String> from, List<String> to, String by, Instant at) {
+            this.fromApprovers = from == null ? new ArrayList<>() : new ArrayList<>(from);
+            this.toApprovers = to == null ? new ArrayList<>() : new ArrayList<>(to);
+            this.by = by;
+            this.atMillis = Objects.requireNonNull(at, "at").toEpochMilli();
+        }
+
+        /** The previous designated set. */
+        public List<String> getFromApprovers() {
+            return fromApprovers == null ? new ArrayList<>() : new ArrayList<>(fromApprovers);
+        }
+
+        /** The new designated set. */
+        public List<String> getToApprovers() {
+            return toApprovers == null ? new ArrayList<>() : new ArrayList<>(toApprovers);
+        }
+
+        /** Compatibility view: the first member of the previous set, or {@code null}. */
+        public String getFrom() {
+            return fromApprovers == null || fromApprovers.isEmpty() ? null : fromApprovers.get(0);
+        }
+
+        /** Compatibility view: the first member of the new set, or {@code null}. */
+        public String getTo() {
+            return toApprovers == null || toApprovers.isEmpty() ? null : toApprovers.get(0);
+        }
+
+        public String getBy() {
+            return by;
+        }
+
+        public Instant getAt() {
+            return Instant.ofEpochMilli(atMillis);
+        }
+    }
+
     private final String id;
     private final GrantScope scope;
     private final List<GrantAction> actions;
@@ -38,7 +84,7 @@ public final class GrantRequest {
     /** D-40: optional CREATE name restriction (exact name or {@code /regex/}); {@code null} for none. */
     private String createNamePattern;
     /** D-37: approver changes, as for run requests; {@code null} in files written before D-37. */
-    private List<RunRequest.ApproverChange> approverChanges;
+    private List<ApproverChange> approverChanges;
     /** D-36: the EXPIRING notification was sent (persisted so a restart does not resend). */
     private boolean expiringNotified;
     private RequestStatus status;
@@ -141,7 +187,7 @@ public final class GrantRequest {
         return createNamePattern;
     }
 
-    public List<RunRequest.ApproverChange> getApproverChanges() {
+    public List<ApproverChange> getApproverChanges() {
         return approverChanges == null ? new ArrayList<>() : new ArrayList<>(approverChanges);
     }
 
@@ -190,7 +236,7 @@ public final class GrantRequest {
     }
 
     /** Only the policy services record approver changes. */
-    public void addApproverChange(RunRequest.ApproverChange change) {
+    public void addApproverChange(ApproverChange change) {
         if (approverChanges == null) {
             approverChanges = new ArrayList<>();
         }
