@@ -70,6 +70,7 @@ public class StrategyUpgradeTest {
         this.j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
+        StrategyFixtures.configureBuildAuthenticator(); // D-35d: isolate the strategy half of the monitor (note 53)
     }
 
     @AfterEach
@@ -204,32 +205,44 @@ public class StrategyUpgradeTest {
     }
 
     /**
-     * T-02-36 (SPEC 8 Implementation line, D-35a): a saved wrapper around matrix-auth's
-     * GlobalMatrixAuthorizationStrategy loads as BatchControlMatrixAuthorizationStrategy with
-     * every entry kept, grants confer, the monitor is quiet and the next save writes the subclass.
+     * T-02-36 (rewritten by D-35d / security-05 S-04; SPEC 8 Implementation line): a saved wrapper
+     * around matrix-auth's GlobalMatrixAuthorizationStrategy is unwrapped to exactly that class
+     * with every entry kept, NOT converted. A stale job property (carol Item/Configure) therefore
+     * stays ineffective. With change control on, the batch-control-strategy monitor is activated,
+     * offers the migration, and warns that per-item properties become effective. The next save
+     * writes the global matrix, not the wrapper.
      */
     @Test
-    public void t_02_36_legacyGlobalMatrixWrapperLoadsAsMatrixSubclass() throws Exception {
+    public void t_02_36_legacyGlobalMatrixWrapperIsUnwrappedNotConverted() throws Exception {
         hudson.security.GlobalMatrixAuthorizationStrategy plain =
                 StrategyFixtures.matrix(new hudson.security.GlobalMatrixAuthorizationStrategy());
         Set<String> before = StrategyFixtures.describeMatrix(plain.getGrantedPermissionEntries());
-        j.createFreeStyleProject("job");
+        FreeStyleProject p = j.createFreeStyleProject("job");
+        AuthorizationMatrixProperty stale = new AuthorizationMatrixProperty(new HashMap<>(), new InheritParentStrategy());
+        stale.add(Item.CONFIGURE, PermissionEntry.user("carol"));
+        p.addProperty(stale);
 
         loadAsLegacyWrapper(plain, 1);
 
-        assertSame(BatchControlMatrixAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),
-                "a legacy wrapper around the global matrix must load as the Batch Control matrix strategy");
+        assertSame(hudson.security.GlobalMatrixAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),
+                "a legacy wrapper around the global matrix must be unwrapped to exactly GlobalMatrixAuthorizationStrategy");
         assertEquals(before, StrategyFixtures.describeMatrix(
-                ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).getGrantedPermissionEntries()),
+                ((hudson.security.GlobalMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).getGrantedPermissionEntries()),
                 "every global entry must be kept");
         FreeStyleProject reloaded = j.jenkins.getItemByFullName("job", FreeStyleProject.class);
+        assertFalse(has(reloaded, "carol", Item.CONFIGURE),
+                "S-04: the stale per-item property must stay ineffective until the administrator converts");
+        assertTrue(has(j.jenkins, "admin", Jenkins.ADMINISTER));
+
         StrategyFixtures.changeControlOn();
-        assertFalse(has(reloaded, "bob", Item.CONFIGURE), "premise: bob has no Configure before a grant");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
-        assertTrue(has(reloaded, "bob", Item.CONFIGURE), "grants must confer after the upgrade");
-        assertFalse(has(reloaded, "carol", Item.CONFIGURE), "guard: carol holds no grant");
-        assertFalse(StrategyFixtures.strategyMonitor().isActivated(), "the monitor must stay quiet after a supported upgrade");
-        assertSavedWithoutLegacyClass(BatchControlMatrixAuthorizationStrategy.class);
+        assertTrue(StrategyFixtures.strategyMonitor().isActivated(),
+                "with change control on, the monitor must offer the conversion for the unwrapped global matrix");
+        String manage = j.createWebClient().login("admin").goTo("manage/").getWebResponse().getContentAsString();
+        assertTrue(manage.contains("administrativeMonitor/" + StrategyFixtures.MONITOR_ID + "/migrate"),
+                "the monitor must offer the migration action");
+        assertTrue(manage.toLowerCase(java.util.Locale.ROOT).contains("per-item"),
+                "the monitor must warn that per-item properties become effective on conversion");
+        assertSavedWithoutLegacyClass(hudson.security.GlobalMatrixAuthorizationStrategy.class);
     }
 
     /**

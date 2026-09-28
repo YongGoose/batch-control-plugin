@@ -180,6 +180,7 @@ public class RoleStrategyTest {
         install();
         BatchControlGlobalConfiguration cfg = StrategyFixtures.changeControlOn();
         AdministrativeMonitor monitor = StrategyFixtures.strategyMonitor();
+        StrategyFixtures.configureBuildAuthenticator(); // D-35d: isolate the strategy half of the monitor (note 53)
         FreeStyleProject q = j.createFreeStyleProject("other");
         StrategyFixtures.grant("carol", GrantScope.Type.JOB, "other", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(q, "carol", Item.CONFIGURE), "premise: the grant confers under the subclass");

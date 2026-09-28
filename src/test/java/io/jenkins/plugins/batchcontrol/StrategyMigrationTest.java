@@ -64,6 +64,7 @@ public class StrategyMigrationTest {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
         cfg = StrategyFixtures.changeControlOn();
+        StrategyFixtures.configureBuildAuthenticator(); // D-35d: isolate the strategy half of the monitor (note 53)
     }
 
     @AfterEach

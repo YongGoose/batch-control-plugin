@@ -163,6 +163,19 @@ final class StrategyFixtures {
         return out;
     }
 
+    /**
+     * Configures a build authenticator (the harness's MockQueueItemAuthenticator, standing in for
+     * Authorize Project). Since D-35d the {@code batch-control-strategy} monitor also warns when
+     * change control is on and no authenticator is configured; rows that measure the strategy
+     * half of the monitor call this so that the other half cannot mask them (note 53).
+     */
+    static void configureBuildAuthenticator() {
+        jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators()
+                .add(new org.jvnet.hudson.test.MockQueueItemAuthenticator());
+        assertTrue(!jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators().isEmpty(),
+                "fixture: a QueueItemAuthenticator must be configured");
+    }
+
     static AdministrativeMonitor strategyMonitor() {
         AdministrativeMonitor monitor = Jenkins.get().getAdministrativeMonitor(MONITOR_ID);
         assertNotNull(monitor, "the administrative monitor '" + MONITOR_ID + "' must be registered (D-35a)");

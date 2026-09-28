@@ -292,6 +292,138 @@ public class GrantSelfGrantGuardTest {
         assertFalse(has(created, "bob", Item.CONFIGURE), "past the window bob must hold no Configure on " + fullName);
     }
 
+    /** Adds a whole AuthorizationMatrixProperty giving {@code sid} Item/Configure to a job config that has none. */
+    private static String withNewPropertyFor(String xml, String sid) {
+        String prop = "<hudson.security.AuthorizationMatrixProperty>"
+                + "<inheritanceStrategy class=\"org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy\"/>"
+                + "<permission>USER:hudson.model.Item.Configure:" + sid + "</permission>"
+                + "</hudson.security.AuthorizationMatrixProperty>";
+        assertFalse(xml.contains("<hudson.security.AuthorizationMatrixProperty"), "fixture: the job must start without a property");
+        String out;
+        if (xml.contains("<properties/>")) {
+            out = xml.replace("<properties/>", "<properties>" + prop + "</properties>");
+        } else if (xml.contains("<properties>")) {
+            out = xml.replaceFirst("<properties>", "<properties>" + java.util.regex.Matcher.quoteReplacement(prop));
+        } else {
+            out = xml.replaceFirst("<project(\\s[^>]*)?>", "$0<properties>" + java.util.regex.Matcher.quoteReplacement(prop) + "</properties>");
+        }
+        assertTrue(out.contains(":" + sid + "</permission>"), "fixture: the payload must carry the property, got:\n" + out);
+        return out;
+    }
+
+    /**
+     * T-02-38 (security-05 S-01, D-35d(1)): carol holds Item/Configure on {@code S/F/j} only
+     * through a FOLDER {@code S} CONFIGURE grant, inherited through {@code S/F}; the job has no
+     * property of its own. carol POSTs {@code S/F/j/config.xml} adding a property that gives
+     * herself Item/Configure. The property is removed (memory and disk), one GRANT_VIOLATION
+     * names carol, {@code S/F/j} and the grant, and past the window carol has no Configure.
+     * Guard: c1 (native Configure) is not affected (T-02-23).
+     */
+    @Test
+    public void t_02_38_inheritedFolderGrantCannotWriteAuthorizationEntry() throws Exception {
+        Folder s = j.jenkins.createProject(Folder.class, "S");
+        Folder f = s.createProject(Folder.class, "F");
+        FreeStyleProject job = f.createProject(FreeStyleProject.class, "j");
+        assertFalse(has(job, "carol", Item.CONFIGURE), "premise: carol holds no native Configure");
+        Grant grant = StrategyFixtures.grant("carol", GrantScope.Type.FOLDER, "S", Arrays.asList(GrantAction.CONFIGURE));
+        assertTrue(has(job, "carol", Item.CONFIGURE), "premise: the folder grant reaches S/F/j by inheritance");
+
+        postConfigXml("carol", job, withNewPropertyFor(job.getConfigFile().asString(), "carol"));
+
+        FreeStyleProject current = j.jenkins.getItemByFullName("S/F/j", FreeStyleProject.class);
+        AuthorizationMatrixProperty amp = current.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || !mentions(amp.getGrantedPermissionEntries(), "carol"),
+                "the authorization property added through an inherited grant must be reverted");
+        assertFalse(current.getConfigFile().asString().contains(":carol</permission>"), "the revert must be persisted on disk");
+        List<ChangeRecord> violations = StrategyFixtures.records(ChangeType.GRANT_VIOLATION);
+        assertEquals(1, violations.size(), "exactly one GRANT_VIOLATION record must be written, got " + violations.size());
+        assertEquals("carol", violations.get(0).getUser());
+        assertEquals("S/F/j", violations.get(0).getTarget());
+        assertTrue(violations.get(0).getDetail().contains(grant.getId()), "the record must name the (ancestor-scoped) grant");
+
+        afterWindow();
+        assertFalse(has(current, "carol", Item.CONFIGURE), "past the window carol must hold no Configure on S/F/j");
+    }
+
+    /**
+     * T-02-39 (security-05 S-01, D-35d(1)): bob holds only a FOLDER {@code S} CREATE grant and
+     * creates folder {@code S/F}; the administrator creates {@code S/F/j} inside it. D-35c confers
+     * Configure on exactly what bob created: {@code S/F} yes, {@code S/F/j} no. bob's POST of
+     * {@code S/F/j/config.xml} adding a property for himself leaves no entry. The positive twin:
+     * bob creates {@code S/F/mine} himself and may configure it, but a property he adds to it is
+     * reverted and recorded (Configure there comes only from the grant). Past the window bob has
+     * Configure on none of them.
+     */
+    @Test
+    public void t_02_39_createGrantConfigureDoesNotReachOthersChildren() throws Exception {
+        Folder s = j.jenkins.createProject(Folder.class, "S");
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "S", Arrays.asList(GrantAction.CREATE));
+        Folder f = StrategyFixtures.as("bob", () -> s.createProject(Folder.class, "F"));
+        assertTrue(has(f, "bob", Item.CONFIGURE), "premise (D-35c): bob configures the folder he created");
+        FreeStyleProject others = f.createProject(FreeStyleProject.class, "j"); // created by the administrator (SYSTEM)
+
+        assertFalse(has(others, "bob", Item.CONFIGURE),
+                "D-35d: Create-grant Configure must not reach a child of S/F that bob did not create");
+        postConfigXml("bob", others, withNewPropertyFor(others.getConfigFile().asString(), "bob"));
+        FreeStyleProject othersNow = j.jenkins.getItemByFullName("S/F/j", FreeStyleProject.class);
+        AuthorizationMatrixProperty amp = othersNow.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || !mentions(amp.getGrantedPermissionEntries(), "bob"), "bob must not be able to write S/F/j's property");
+
+        FreeStyleProject mine = StrategyFixtures.as("bob", () -> f.createProject(FreeStyleProject.class, "mine"));
+        assertTrue(has(mine, "bob", Item.CONFIGURE), "guard: bob configures the job he created (D-35c)");
+        postConfigXml("bob", mine, withNewPropertyFor(mine.getConfigFile().asString(), "bob"));
+        FreeStyleProject mineNow = j.jenkins.getItemByFullName("S/F/mine", FreeStyleProject.class);
+        AuthorizationMatrixProperty mineAmp = mineNow.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(mineAmp == null || !mentions(mineAmp.getGrantedPermissionEntries(), "bob"),
+                "a property bob adds to his own created job must be reverted (grant-only Configure)");
+        assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).stream().anyMatch(
+                rec -> "bob".equals(rec.getUser()) && "S/F/mine".equals(rec.getTarget())),
+                "the revert on S/F/mine must be recorded as GRANT_VIOLATION");
+
+        afterWindow();
+        assertFalse(has(othersNow, "bob", Item.CONFIGURE));
+        assertFalse(has(mineNow, "bob", Item.CONFIGURE));
+        assertFalse(has(j.jenkins.getItemByFullName("S/F", Folder.class), "bob", Item.CONFIGURE));
+    }
+
+    /**
+     * T-02-40 (security-05 S-05, D-35d(4)): job {@code j}'s property gives carol Item/Build (and
+     * alice Configure). The administrator removes carol's entry on disk and reloads the item
+     * (POST {@code job/j/reload}). bob, with a Configure grant, then saves a description-only
+     * change. carol's entry must not come back and no GRANT_VIOLATION is recorded.
+     */
+    @Test
+    public void t_02_40_reloadFromDiskDoesNotMakeGuardRestoreStaleProperty() throws Exception {
+        FreeStyleProject p = jobWithAliceProperty("j");
+        p.getProperty(AuthorizationMatrixProperty.class).add(Item.BUILD, PermissionEntry.user("carol"));
+        p.save();
+        assertTrue(has(p, "carol", Item.BUILD), "premise: carol builds through the job property");
+        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "j", Arrays.asList(GrantAction.CONFIGURE));
+
+        java.nio.file.Path file = p.getConfigFile().getFile().toPath();
+        String disk = java.nio.file.Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+        String line = "<permission>USER:hudson.model.Item.Build:carol</permission>";
+        assertTrue(disk.contains(line), "fixture: carol's entry must be on disk, got:\n" + disk);
+        java.nio.file.Files.writeString(file, disk.replace(line, ""), java.nio.charset.StandardCharsets.UTF_8);
+        JenkinsRule.WebClient admin = j.createWebClient().login("admin");
+        admin.getPage(new WebRequest(admin.createCrumbedUrl(p.getUrl() + "reload"), HttpMethod.POST));
+        FreeStyleProject reloaded = j.jenkins.getItemByFullName("j", FreeStyleProject.class);
+        assertFalse(has(reloaded, "carol", Item.BUILD), "premise: the reload from disk removed carol's entry");
+
+        String xml = reloaded.getConfigFile().asString();
+        String changed = xml.replaceAll("<description/>|<description>[^<]*</description>", "")
+                .replaceFirst("<project(\\s[^>]*)?>", "$0<description>after-reload</description>");
+        assertEquals(200, postConfigXml("bob", reloaded, changed), "bob's description-only save must succeed");
+
+        FreeStyleProject now = j.jenkins.getItemByFullName("j", FreeStyleProject.class);
+        assertEquals("after-reload", now.getDescription(), "premise: bob's save took effect");
+        assertFalse(has(now, "carol", Item.BUILD), "the guard must not restore the pre-reload entry for carol");
+        assertFalse(now.getConfigFile().asString().contains(":carol</permission>"), "carol's entry must not return on disk");
+        assertTrue(has(now, "alice", Item.CONFIGURE), "the rest of the property is untouched");
+        assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(),
+                "a description-only save after a reload is not a violation");
+    }
+
     /**
      * T-02-34 (D-35c, creation payload): bob holds only a FOLDER CREATE grant on {@code team} and
      * POSTs {@code job/team/createItem} with a config.xml carrying an AuthorizationMatrixProperty

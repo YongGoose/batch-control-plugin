@@ -91,6 +91,7 @@ public class GrantMonitorsTest {
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(true);
+        StrategyFixtures.configureBuildAuthenticator(); // D-35d: isolate the strategy half of the monitor (note 53)
         cfg.save();
 
         j.jenkins.setAuthorizationStrategy(new BatchControlRoleBasedAuthorizationStrategy(
