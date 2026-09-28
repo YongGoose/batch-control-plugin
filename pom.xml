@@ -110,6 +110,56 @@
       <artifactId>ionicons-api</artifactId>
       <scope>runtime</scope>
     </dependency>
+
+    <!-- Test-only dependencies for plugin interaction tests (#36). -->
+    <!-- BOM-managed (versions supplied by io.jenkins.tools.bom:bom-2.568.x via bom-weekly). -->
+    <dependency>
+      <groupId>com.sonyericsson.hudson.plugins.rebuild</groupId>
+      <artifactId>rebuild</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>parameterized-trigger</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>build-token-root</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>naginator</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.6wind.jenkins</groupId>
+      <artifactId>lockable-resources</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>throttle-concurrents</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>authorize-project</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>jobConfigHistory</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Not BOM-managed; pinned to latest release supporting jenkins.baseline 2.568 (requiredCore 2.516.3). -->
+    <dependency>
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>customize-build-now</artifactId>
+      <version>53.v64eb_d7d017d2</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <repositories>
