@@ -53,7 +53,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 결재 시점에 결재자가 `Approve` 권한을 잃었으면 결재가 거부된다(목록 등재 + 권한 보유 둘 다 필요).
 - 수용 기준: 요청자 본인을 결재자로 지정할 수 없다(관리자 자가 결재 허용 시 관리자 예외).
 - 수용 기준: 결재자 변경 시 요청 이력에 (이전 결재자, 새 결재자, 변경자, 시각)이 남는다.
-- Acceptance: the requester designates one or more approvers (form field `approvers`, one user id per entry). Every designated approver must pass the checks above, and the requester may not be among them (administrator exception as above). Any one of them may approve or reject; the first decision closes the request and the record names who decided (`decidedBy`). Changing the designation edits the set and is recorded as (previous set, new set, changed by, time). A request stored before this change, with a single `approver`, loads as a one-element set, and the REST/JSON view keeps an `approver` field holding the first member for compatibility. (D-37)
+- Acceptance: the requester designates one or more approvers (form field `approvers`, one user id per entry). Every designated approver must pass the checks above, and the requester may not be among them (administrator exception as above). Any one of them may approve or reject; the first decision closes the request and the record names who decided (`decidedBy`). Changing the designation edits the set and is recorded as (previous set, new set, changed by, time). A request stored before this change, with a single `approver`, loads as a one-element set, and the model keeps `getApprover()` returning the first member for compatibility (there is no REST/JSON view yet; item 14). (D-37)
 - 수용 기준(D-37로 집합에 적용): 그 요청의 지정 결재자만 결재할 수 있다. 결재자 목록에 등재된 다른 사용자나 관리자도 대신 결재할 수 없다. 지정 결재자가 부재일 때는 결재 전까지 요청자가 결재자를 변경해 처리한다. (D-29)
 
 **4. 이력 저장소**
