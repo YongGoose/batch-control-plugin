@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:l="/lib/layout">
   <f:section title="Batch Control">
     <!-- No <f:description> here: inside a title-less <f:entry> it is laid out on the checkbox
          caption's line and renders as one run-together string (E2E-D4). The wording lives in
@@ -34,5 +34,22 @@
     <f:entry title="Retention period (months)" field="retentionMonths">
       <f:number min="1"/>
     </f:entry>
+    <!-- Not a form field: a Batch Control strategy is installed/reverted through the
+         batch-control-strategy administrative monitor, never through this form's own submit
+         (D-35a). Shown only while that strategy is actually installed. -->
+    <j:set var="strategyMonitor" value="${app.getAdministrativeMonitor('batch-control-strategy')}"/>
+    <j:if test="${strategyMonitor != null and strategyMonitor.revertable}">
+      <f:entry title="Batch Control strategy">
+        <div>
+          A Batch Control authorization strategy is installed. Reverting stops active grants
+          from conferring any permission immediately.
+        </div>
+        <l:confirmationLink href="${rootURL}/manage/administrativeMonitor/batch-control-strategy/revert"
+                             post="true" title="Revert to the plain strategy?"
+                             message="Active grants stop conferring any permission immediately. This cannot be undone from here.">
+          Revert to the plain strategy
+        </l:confirmationLink>
+      </f:entry>
+    </j:if>
   </f:section>
 </j:jelly>
