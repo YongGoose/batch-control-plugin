@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.policy;
 
 import hudson.model.Action;
 import hudson.model.CauseAction;
+import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
@@ -126,6 +127,10 @@ public final class RunRequestService {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38 (#24): a request only adds an approval on top of what the requester could already
+        // do, so the requester must be able to build the job. Checked before anything is stored;
+        // AccessDeniedException3 answers 403 on the web layer.
+        job.checkPermission(Item.BUILD);
         String requester = Jenkins.getAuthentication2().getName();
 
         if (reason == null || reason.trim().isEmpty()) {
@@ -694,31 +699,39 @@ public final class RunRequestService {
      * not depend on the transient thread identity. The queue gate still validates and consumes
      * the marker. A refused or failed submission leaves the request APPROVED (quiet-down
      * tolerance); expiry or recovery handle it later.
+     *
+     * <p>#26: the job lookup is inside the SYSTEM2 block as well. Whether an approver may decide
+     * is the approval policy's call alone; an approver holding only Item/Discover (lookup throws
+     * AccessDeniedException) or no job permission at all (lookup returns null) must not turn a
+     * committed approval into a 403 or a silently dropped run.
      */
     private void submitApproved(RunRequest request) {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins == null) {
             return;
         }
-        Job<?, ?> job = jenkins.getItemByFullName(request.getJobFullName(), Job.class);
-        if (job == null) {
-            LOGGER.warning(() -> "Approved run request " + request.getId()
-                    + " targets missing job '" + request.getJobFullName() + "'; not submitted");
-            return;
-        }
-        List<Action> actions = new ArrayList<>();
-        List<ParameterValue> values = parameterValues(job, request.getParameters());
-        if (!values.isEmpty()) {
-            actions.add(new ParametersAction(values));
-        }
-        // D-37: the cause names the approver who decided (the first member for requests
-        // approved before decidedBy was recorded).
-        String decider = request.getDecidedBy() != null ? request.getDecidedBy() : request.getApprover();
-        actions.add(new CauseAction(new ApprovedCause(
-                request.getId(), request.getRequester(), decider)));
-        actions.add(new ApprovedRunAction(request.getId()));
-        // ACL.SYSTEM2 switch: permission checks are complete (see method javadoc).
+        // ACL.SYSTEM2 switch: permission checks are complete (see method javadoc) — the
+        // requester's REQUEST + Item/Build at creation, the approver's ApprovalPolicy decision
+        // before the APPROVED commit. Lookup, parameter reconstruction and scheduling run as
+        // SYSTEM so none of them depends on the approver's access to the job.
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            Job<?, ?> job = jenkins.getItemByFullName(request.getJobFullName(), Job.class);
+            if (job == null) {
+                LOGGER.warning(() -> "Approved run request " + request.getId()
+                        + " targets missing job '" + request.getJobFullName() + "'; not submitted");
+                return;
+            }
+            List<Action> actions = new ArrayList<>();
+            List<ParameterValue> values = parameterValues(job, request.getParameters());
+            if (!values.isEmpty()) {
+                actions.add(new ParametersAction(values));
+            }
+            // D-37: the cause names the approver who decided (the first member for requests
+            // approved before decidedBy was recorded).
+            String decider = request.getDecidedBy() != null ? request.getDecidedBy() : request.getApprover();
+            actions.add(new CauseAction(new ApprovedCause(
+                    request.getId(), request.getRequester(), decider)));
+            actions.add(new ApprovedRunAction(request.getId()));
             Queue.Item item = ParameterizedJobMixIn.scheduleBuild2(job, 0,
                     actions.toArray(new Action[0]));
             if (item == null) {
