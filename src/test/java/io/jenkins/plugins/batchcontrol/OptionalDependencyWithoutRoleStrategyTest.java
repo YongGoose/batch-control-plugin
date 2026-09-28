@@ -57,7 +57,7 @@ public class OptionalDependencyWithoutRoleStrategyTest {
 
     private static void bootAndUpgrade(JenkinsRule r) throws Throwable {
         assertTrue(Jenkins.get().getPlugin("role-strategy") == null, "premise: role-strategy must not be installed");
-        r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
+        r.jenkins.setSecurityRealm(privateRealm()); // the real Jenkins JVM has no JenkinsRule$DummySecurityRealm
 
         ProjectMatrixAuthorizationStrategy plain = new ProjectMatrixAuthorizationStrategy();
         plain.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
@@ -94,7 +94,7 @@ public class OptionalDependencyWithoutRoleStrategyTest {
         assertNotNull(grant);
         assertTrue(has(p, "bob", Item.CONFIGURE), "the Batch Control matrix strategy must confer the grant without role-strategy");
 
-        JenkinsRule.WebClient wc = r.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        JenkinsRule.WebClient wc = r.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin", "admin");
         Page manage = wc.goTo("manage/");
         assertEquals(200, manage.getWebResponse().getStatusCode(), "/manage must render without role-strategy");
         assertFalse(manage.getWebResponse().getContentAsString().contains("NoClassDefFoundError"),
@@ -110,6 +110,15 @@ public class OptionalDependencyWithoutRoleStrategyTest {
         assertTrue(((BatchControlMatrixAuthorizationStrategy) r.jenkins.getAuthorizationStrategy())
                 .getGrantedPermissionEntries().get(Jenkins.ADMINISTER).contains(PermissionEntry.user("admin")),
                 "the global entries must be kept through the boot");
+    }
+
+    /** A persistable realm with the fixture's users (password = user id). */
+    private static hudson.security.HudsonPrivateSecurityRealm privateRealm() throws Exception {
+        hudson.security.HudsonPrivateSecurityRealm realm = new hudson.security.HudsonPrivateSecurityRealm(false, false, null);
+        for (String u : new String[] {"admin", "bob", "a1"}) {
+            realm.createAccount(u, u);
+        }
+        return realm;
     }
 
     private static boolean has(hudson.security.AccessControlled o, String user, hudson.security.Permission p) {

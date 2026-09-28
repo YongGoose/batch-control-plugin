@@ -84,7 +84,7 @@ public class OptionalDependencyWithoutMatrixAuthTest {
 
     private static void bootAndUpgrade(JenkinsRule r) throws Throwable {
         assertTrue(Jenkins.get().getPlugin("matrix-auth") == null, "premise: matrix-auth must not be installed");
-        r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
+        r.jenkins.setSecurityRealm(privateRealm()); // the real Jenkins JVM has no JenkinsRule$DummySecurityRealm
         r.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy(roles(), Collections.emptySet()));
         r.jenkins.save();
         LegacyWrapperXml.write(r.jenkins);
@@ -113,7 +113,7 @@ public class OptionalDependencyWithoutMatrixAuthTest {
         assertNotNull(grant);
         assertTrue(has(p, "bob", Item.CONFIGURE), "the Batch Control role strategy must confer the grant without matrix-auth");
 
-        JenkinsRule.WebClient wc = r.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        JenkinsRule.WebClient wc = r.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin", "admin");
         Page manage = wc.goTo("manage/");
         assertEquals(200, manage.getWebResponse().getStatusCode(), "/manage must render without matrix-auth");
         assertFalse(manage.getWebResponse().getContentAsString().contains("NoClassDefFoundError"),
@@ -126,6 +126,15 @@ public class OptionalDependencyWithoutMatrixAuthTest {
         assertSame(BatchControlRoleBasedAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
                 "Jenkins must boot from a legacy wrapper config.xml without matrix-auth");
         assertTrue(has(r.jenkins.getItemByFullName("team-a"), "bob", Item.CONFIGURE), "roles must be kept through the boot");
+    }
+
+    /** A persistable realm with the fixture's users (password = user id). */
+    private static hudson.security.HudsonPrivateSecurityRealm privateRealm() throws Exception {
+        hudson.security.HudsonPrivateSecurityRealm realm = new hudson.security.HudsonPrivateSecurityRealm(false, false, null);
+        for (String u : new String[] {"admin", "bob", "a1"}) {
+            realm.createAccount(u, u);
+        }
+        return realm;
     }
 
     private static boolean has(hudson.security.AccessControlled o, String user, Permission p) {
