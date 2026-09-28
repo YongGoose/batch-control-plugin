@@ -36,6 +36,10 @@
     <jenkins.baseline>2.568</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
+    <!-- Parallelize surefire across whole test classes (reuseForks stays as the parent
+         POM defines, i.e. false: a fresh JVM per test class); this only widens how many
+         of those per-class forks run concurrently. -->
+    <forkCount>1C</forkCount>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
