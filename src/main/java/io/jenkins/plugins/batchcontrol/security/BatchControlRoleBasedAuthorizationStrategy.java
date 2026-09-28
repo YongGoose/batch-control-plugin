@@ -66,19 +66,19 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
     @NonNull
     @Override
     public ACL getACL(@NonNull AbstractItem item) {
-        return new GrantAwareACL(super.getACL(item), item.getFullName());
+        return new GrantAwareACL(super.getACL(item), item);
     }
 
     @NonNull
     @Override
     public ACL getACL(@NonNull Computer computer) {
-        return new GrantAwareACL(super.getACL(computer), null);
+        return new GrantAwareACL(super.getACL(computer), (String) null);
     }
 
     @NonNull
     @Override
     public ACL getACL(@NonNull Node node) {
-        return new GrantAwareACL(super.getACL(node), null);
+        return new GrantAwareACL(super.getACL(node), (String) null);
     }
 
     @NonNull

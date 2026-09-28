@@ -2,11 +2,13 @@ package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.AbstractItem;
 import hudson.model.Item;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import java.io.File;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
@@ -52,7 +54,7 @@ import org.springframework.security.core.Authentication;
 @Restricted(NoExternalUse.class)
 final class GrantAwareACL extends ACL {
 
-    private static final GrantAwareACL DENY_ALL = new GrantAwareACL(null, null);
+    private static final GrantAwareACL DENY_ALL = new GrantAwareACL(null, (String) null);
 
     /** Depth of {@link #withoutGrants} calls on this thread; grants confer nothing while positive. */
     private static final ThreadLocal<Integer> SUSPENDED = new ThreadLocal<>();
@@ -69,9 +71,23 @@ final class GrantAwareACL extends ACL {
     @CheckForNull
     private final String itemFullName;
 
+    /** The directory of the item this ACL guards (S-09 identity check); {@code null} with no item. */
+    @CheckForNull
+    private final File itemRootDir;
+
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName) {
+        this(delegate, itemFullName, null);
+    }
+
+    GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull AbstractItem item) {
+        this(delegate, item == null ? null : item.getFullName(), item == null ? null : item.getRootDir());
+    }
+
+    private GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName,
+                          @CheckForNull File itemRootDir) {
         this.delegate = delegate;
         this.itemFullName = itemFullName;
+        this.itemRootDir = itemRootDir;
     }
 
     /** The deny-all-but-SYSTEM ACL used when no parent ACL is available. */
@@ -177,7 +193,7 @@ final class GrantAwareACL extends ACL {
                 // D-35c: Read and Configure on an item the holder created through an active Create
                 // grant. Looked up once per walk; the same enabled-link rule applies.
                 createdChecked = true;
-                if (GrantService.get().findCreatingGrant(user, itemFullName) != null) {
+                if (GrantService.get().findCreatingGrant(user, itemFullName, itemRootDir) != null) {
                     return true;
                 }
             }

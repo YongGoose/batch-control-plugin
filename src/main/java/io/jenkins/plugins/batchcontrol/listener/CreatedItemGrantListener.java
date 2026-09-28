@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import hudson.Extension;
+import hudson.model.AbstractItem;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.listeners.ItemListener;
@@ -11,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -60,7 +62,8 @@ public class CreatedItemGrantListener extends ItemListener {
             // (a permanent creator entry) is not Batch Control's to change.
             return;
         }
-        Grant grant = GrantService.get().recordCreatedItem(user, fullName);
+        Grant grant = GrantService.get().recordCreatedItem(user, fullName,
+                item instanceof AbstractItem ? ItemIdentity.of(((AbstractItem) item).getRootDir()) : null);
         if (grant != null) {
             LOGGER.fine(() -> "Item '" + fullName + "' created by '" + user + "' through grant "
                     + grant.getId() + " (D-35c)");

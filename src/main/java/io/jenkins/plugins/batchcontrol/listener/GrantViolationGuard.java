@@ -16,6 +16,7 @@ import hudson.model.listeners.SaveableListener;
 import hudson.security.ACL;
 import hudson.security.AuthorizationMatrixProperty;
 import hudson.security.AuthorizationStrategy;
+import hudson.security.Permission;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -27,12 +28,19 @@ import io.jenkins.plugins.batchcontrol.store.FileStore;
 import com.thoughtworks.xstream.io.xml.DomReader;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import jenkins.util.xml.XMLUtils;
+import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy;
+import org.jenkinsci.plugins.matrixauth.inheritance.InheritanceStrategy;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
@@ -66,8 +74,9 @@ import org.xml.sax.SAXException;
  * restored file, so the CONFIGURE record shows what actually stays. The restoring save itself is
  * suppressed from recording.
  *
- * <p>matrix-auth is optional: this class and its nested listener are optional extensions and
- * are simply not loaded without it.
+ * <p>matrix-auth is optional. This class does not link without it, so its optional extension is
+ * skipped. The nested {@link Baseline} listener does load (its own code uses core types only), so
+ * its callbacks that reach this class first check {@link Baseline#matrixAuthActive()} (S-03).
  */
 @Extension(optional = true, ordinal = 1000)
 @Restricted(NoExternalUse.class)
@@ -115,12 +124,31 @@ public class GrantViolationGuard extends SaveableListener {
             if (!holdsActiveGrant(user)) {
                 return; // without any active grant the save cannot have been made possible by one
             }
+            // D-35d (4): only what this save added is taken back. Entries missing from the saved
+            // property are never re-added, so a stale baseline cannot bring an entry back.
+            String reverted;
+            try {
+                reverted = withoutAdditions(item, before, now);
+            } catch (RuntimeException e) {
+                // S-06: never guess (restoring the baseline could bring removed entries back).
+                LOGGER.log(Level.SEVERE, "Cannot compare the authorization property of '" + fullName
+                        + "' with its baseline (D-35b)", e);
+                Grant grant = namedGrant(user, item);
+                appendViolation(fullName, user, grant,
+                        "The authorization property was changed by a user holding " + grantText(grant)
+                                + ", and comparing it with the previous property FAILED ("
+                                + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+                return;
+            }
+            if (reverted.equals(now)) {
+                return; // nothing was added: entries were only removed, or the save changed nothing else
+            }
             try {
                 // S-01, D-35d (1): "Configure only from a grant" is decided by permission, not by a
-                // grant lookup: with the previous property back in place, the strategy's ACL
-                // without the grant layer (inherited ACLs included) denies Configure, and with it
-                // allows Configure. Any other outcome means the change was not a grant's doing.
-                apply(item, before);
+                // grant lookup: with the additions taken back, the strategy's ACL without the
+                // grant layer (inherited ACLs included) denies Configure, and with it allows
+                // Configure. Any other outcome means the change was not a grant's doing.
+                apply(item, reverted);
                 boolean onlyFromGrant = !GrantLayer.hasPermissionWithoutGrants(item, auth, Item.CONFIGURE)
                         && item.hasPermission2(auth, Item.CONFIGURE);
                 if (!onlyFromGrant) {
@@ -130,24 +158,104 @@ public class GrantViolationGuard extends SaveableListener {
             } catch (IOException | RuntimeException e) {
                 // S-06: fail loudly. The change may still be in place, so it is recorded as a
                 // violation whose restore failed.
-                LOGGER.log(Level.SEVERE, "Could not restore the authorization property of '" + fullName
+                LOGGER.log(Level.SEVERE, "Could not revert the authorization property of '" + fullName
                         + "' after a change by '" + user + "' (D-35b)", e);
-                Grant grant = namedGrant(user, fullName);
+                Grant grant = namedGrant(user, item);
                 appendViolation(fullName, user, grant,
                         "The authorization property was changed by a user whose Item/Configure may come only "
-                                + "from " + grantText(grant) + "; restoring the previous property FAILED ("
+                                + "from " + grantText(grant) + "; removing the added entries FAILED ("
                                 + e.getClass().getSimpleName() + "), so an administrator must check the item.");
                 return;
             }
-            BASELINE.put(fullName, before);
-            Grant grant = namedGrant(user, fullName);
+            BASELINE.put(fullName, reverted);
+            Grant grant = namedGrant(user, item);
             appendViolation(fullName, user, grant,
                     "The authorization property was changed by a user whose Item/Configure comes only "
-                            + "from " + grantText(grant) + "; the previous property was restored.");
-            LOGGER.warning(() -> "Reverted a change of the authorization property of '" + fullName
+                            + "from " + grantText(grant) + "; the entries the change added were removed.");
+            LOGGER.warning(() -> "Reverted additions to the authorization property of '" + fullName
                     + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant)
                     + " (D-35b)");
         }
+    }
+
+    /**
+     * The property {@code now} without what it added relative to {@code before} (both in the form
+     * {@link #propertyXml} returns): every entry of {@code now} that {@code before} lacks is dropped,
+     * and the inheritance strategy is the baseline's (inheriting from the parent when the baseline
+     * had no property, which is how an item without a property behaves). Entries of {@code before}
+     * missing from {@code now} stay missing. {@code ""} when nothing is left and the baseline had no
+     * property.
+     */
+    static String withoutAdditions(AbstractItem item, String before, String now) {
+        Object nowProperty = parse(now);
+        if (nowProperty == null) {
+            return now; // the property was removed: nothing was added
+        }
+        Object beforeProperty = parse(before);
+        Map<Permission, Set<PermissionEntry>> beforeEntries = beforeProperty == null
+                ? Collections.emptyMap() : entries(beforeProperty);
+        Map<Permission, Set<PermissionEntry>> kept = new HashMap<>();
+        boolean added = false;
+        for (Map.Entry<Permission, Set<PermissionEntry>> e : entries(nowProperty).entrySet()) {
+            Set<PermissionEntry> previous = beforeEntries.getOrDefault(e.getKey(), Collections.emptySet());
+            for (PermissionEntry entry : e.getValue()) {
+                if (previous.contains(entry)) {
+                    kept.computeIfAbsent(e.getKey(), k -> new HashSet<>()).add(entry);
+                } else {
+                    added = true;
+                }
+            }
+        }
+        InheritanceStrategy inheritance = beforeProperty == null
+                ? new InheritParentStrategy() : inheritance(beforeProperty);
+        InheritanceStrategy nowInheritance = inheritance(nowProperty);
+        boolean sameInheritance = inheritance != null && nowInheritance != null
+                && inheritance.getClass() == nowInheritance.getClass();
+        if (!added && sameInheritance) {
+            return now;
+        }
+        if (beforeProperty == null && kept.isEmpty()) {
+            return "";
+        }
+        Object result;
+        if (item instanceof Job) {
+            AuthorizationMatrixProperty job = new AuthorizationMatrixProperty(new HashMap<>(), inheritance);
+            kept.forEach((permission, set) -> set.forEach(entry -> job.add(permission, entry)));
+            result = job;
+        } else {
+            com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty folder =
+                    new com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty(new HashMap<>());
+            folder.setInheritanceStrategy(inheritance);
+            kept.forEach((permission, set) -> set.forEach(entry -> folder.add(permission, entry)));
+            result = folder;
+        }
+        return Items.XSTREAM2.toXML(result);
+    }
+
+    @CheckForNull
+    private static Object parse(String xml) {
+        if (xml.isEmpty()) {
+            return null;
+        }
+        Object property = Items.XSTREAM2.fromXML(xml);
+        return property instanceof AuthorizationMatrixProperty
+                || property instanceof com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty
+                ? property : null;
+    }
+
+    private static Map<Permission, Set<PermissionEntry>> entries(Object property) {
+        return property instanceof AuthorizationMatrixProperty
+                ? ((AuthorizationMatrixProperty) property).getGrantedPermissionEntries()
+                : ((com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty) property)
+                        .getGrantedPermissionEntries();
+    }
+
+    @CheckForNull
+    private static InheritanceStrategy inheritance(Object property) {
+        return property instanceof AuthorizationMatrixProperty
+                ? ((AuthorizationMatrixProperty) property).getInheritanceStrategy()
+                : ((com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty) property)
+                        .getInheritanceStrategy();
     }
 
     private static boolean holdsActiveGrant(String user) {
@@ -165,8 +273,9 @@ public class GrantViolationGuard extends SaveableListener {
      * the user covering the item.
      */
     @CheckForNull
-    private static Grant namedGrant(String user, String fullName) {
-        Grant grant = GrantService.get().findConfigureGrant(user, fullName);
+    private static Grant namedGrant(String user, AbstractItem item) {
+        String fullName = item.getFullName();
+        Grant grant = GrantService.get().findConfigureGrant(user, fullName, item.getRootDir());
         return grant != null ? grant : GrantService.get().findActiveGrant(user, fullName, null);
     }
 
@@ -306,12 +415,27 @@ public class GrantViolationGuard extends SaveableListener {
     public static class Baseline extends ItemListener {
 
         /**
+         * S-03: whether matrix-auth is installed. The outer guard does not even link without it
+         * (its optional extension is skipped), but this listener's own code refers to core types
+         * only, so it loads; every callback that reaches the outer class, which refers to
+         * matrix-auth types, checks this first. Kept in this class so the check itself does not
+         * link the outer class.
+         */
+        static boolean matrixAuthActive() {
+            Jenkins jenkins = Jenkins.getInstanceOrNull();
+            return jenkins != null && jenkins.getPlugin("matrix-auth") != null;
+        }
+
+        /**
          * Fills the baseline once all items are loaded (startup and reload). This runs as SYSTEM
          * during startup, so {@code getAllItems} sees every item; on a reload the requesting
          * administrator sees every item as well.
          */
         @Override
         public void onLoaded() {
+            if (!matrixAuthActive()) {
+                return;
+            }
             synchronized (LOCK) {
                 BASELINE.clear();
                 for (AbstractItem item : Jenkins.get().getAllItems(AbstractItem.class)) {
@@ -331,7 +455,7 @@ public class GrantViolationGuard extends SaveableListener {
          */
         @Override
         public void onCreated(Item item) {
-            if (!(item instanceof Job || item instanceof AbstractFolder)) {
+            if (!(item instanceof Job || item instanceof AbstractFolder) || !matrixAuthActive()) {
                 return;
             }
             AbstractItem created = (AbstractItem) item;
@@ -361,7 +485,7 @@ public class GrantViolationGuard extends SaveableListener {
             if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
                 return null;
             }
-            return GrantService.get().findCreatingGrant(auth.getName(), item.getFullName());
+            return GrantService.get().findCreatingGrant(auth.getName(), item.getFullName(), item.getRootDir());
         }
 
         private static void stripPayload(AbstractItem item, Grant grant) {
@@ -390,6 +514,9 @@ public class GrantViolationGuard extends SaveableListener {
 
         @Override
         public void onLocationChanged(Item item, String oldFullName, String newFullName) {
+            if (!matrixAuthActive()) {
+                return;
+            }
             synchronized (LOCK) {
                 for (String name : BASELINE.keySet().toArray(new String[0])) {
                     if (name.equals(oldFullName) || name.startsWith(oldFullName + "/")) {
@@ -404,6 +531,9 @@ public class GrantViolationGuard extends SaveableListener {
 
         @Override
         public void onDeleted(Item item) {
+            if (!matrixAuthActive()) {
+                return;
+            }
             String fullName = item.getFullName();
             synchronized (LOCK) {
                 BASELINE.keySet().removeIf(name -> name.equals(fullName) || name.startsWith(fullName + "/"));

@@ -11,12 +11,16 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
+import java.io.File;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -113,19 +117,29 @@ public final class GrantService {
      * was created, or {@code null}. The item must still lie inside the grant's scope. While such a
      * grant is active its holder also holds Item/Read and Item/Configure on that item (see
      * {@code GrantAwareACL}), so matrix-auth's creator listener finds the permissions already
-     * held and writes no permanent entry; the permissions end with the window.
+     * held and writes no permanent entry; the permissions end with the window. S-09: when the
+     * record carries the item's identity, the item at {@code itemRootDir} must still have it.
      */
     @CheckForNull
-    public synchronized Grant findCreatingGrant(String user, String itemFullName) {
+    public synchronized Grant findCreatingGrant(String user, String itemFullName, @CheckForNull File itemRootDir) {
         if (user == null || itemFullName == null) {
             return null;
         }
         Instant now = BatchClock.now();
+        String[] identity = new String[1];
+        boolean[] computed = new boolean[1];
+        Supplier<String> current = () -> {
+            if (!computed[0]) {
+                identity[0] = ItemIdentity.of(itemRootDir);
+                computed[0] = true;
+            }
+            return identity[0];
+        };
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && grant.hasCreated(itemFullName)
-                    && grant.getScope().includes(itemFullName)) {
+                    && grant.getScope().includes(itemFullName)
+                    && grant.hasCreated(itemFullName, current)) {
                 return grant;
             }
         }
@@ -139,9 +153,9 @@ public final class GrantService {
      * grant a violation came from.
      */
     @CheckForNull
-    public synchronized Grant findConfigureGrant(String user, String itemFullName) {
+    public synchronized Grant findConfigureGrant(String user, String itemFullName, @CheckForNull File itemRootDir) {
         Grant grant = findActiveGrant(user, itemFullName, GrantAction.CONFIGURE);
-        return grant != null ? grant : findCreatingGrant(user, itemFullName);
+        return grant != null ? grant : findCreatingGrant(user, itemFullName, itemRootDir);
     }
 
     /** Every grant that is active right now (not expired, not revoked). */
@@ -179,7 +193,7 @@ public final class GrantService {
      *         {@code user} covers the item
      */
     @CheckForNull
-    public synchronized Grant recordCreatedItem(String user, String itemFullName) {
+    public synchronized Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
         Grant active = findActiveGrant(user, itemFullName, GrantAction.CREATE);
         if (active == null) {
             return null;
@@ -191,9 +205,15 @@ public final class GrantService {
         List<String> items = grant.getCreatedItems();
         if (!items.contains(itemFullName)) {
             items.add(itemFullName);
-            grant.setCreatedItems(items);
-            store.saveGrant(grant);
         }
+        Map<String, String> identities = grant.getCreatedItemIdentities();
+        identities.remove(itemFullName);
+        if (identity != null) {
+            identities.put(itemFullName, identity);
+        }
+        grant.setCreatedItems(items);
+        grant.setCreatedItemIdentities(identities);
+        store.saveGrant(grant);
         replaceInCache(grant);
         return grant;
     }
@@ -268,16 +288,11 @@ public final class GrantService {
             if (!cached.isActiveAt(now) || cached.getCreatedItems().isEmpty()) {
                 continue;
             }
-            List<String> updated = new ArrayList<>();
             boolean changed = false;
             for (String item : cached.getCreatedItems()) {
                 if (item.equals(fullName) || item.startsWith(fullName + "/")) {
                     changed = true;
-                    if (replacement != null) {
-                        updated.add(replacement + item.substring(fullName.length()));
-                    }
-                } else {
-                    updated.add(item);
+                    break;
                 }
             }
             if (!changed) {
@@ -287,7 +302,24 @@ public final class GrantService {
             if (grant == null) {
                 continue;
             }
+            List<String> updated = new ArrayList<>();
+            Map<String, String> identities = grant.getCreatedItemIdentities();
+            Map<String, String> updatedIdentities = new HashMap<>();
+            for (String item : grant.getCreatedItems()) {
+                String target = item;
+                if (item.equals(fullName) || item.startsWith(fullName + "/")) {
+                    target = replacement == null ? null : replacement + item.substring(fullName.length());
+                }
+                if (target != null) {
+                    updated.add(target);
+                    String identity = identities.get(item);
+                    if (identity != null) {
+                        updatedIdentities.put(target, identity);
+                    }
+                }
+            }
             grant.setCreatedItems(updated);
+            grant.setCreatedItemIdentities(updatedIdentities);
             store.saveGrant(grant);
             replaceInCache(grant);
         }

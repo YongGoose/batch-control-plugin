@@ -3,8 +3,11 @@ package io.jenkins.plugins.batchcontrol.model;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -40,6 +43,13 @@ public final class Grant {
      * {@code null} in grant files written before D-35c (XStream skips the initializer).
      */
     private List<String> createdItems;
+    /**
+     * S-09: the identity of each created item (full name to an opaque marker of its directory on
+     * disk, see {@code security.ItemIdentity}), so an item deleted and recreated under the same
+     * name by someone else is not taken for the created one. An item without an entry (grant files
+     * written before S-09, or no marker could be read) is matched by name alone.
+     */
+    private Map<String, String> createdItemIdentities;
 
     private Grant(String id, String grantRequestId, String user, GrantScope scope,
                   List<GrantAction> actions, Instant grantedAt, Instant expiresAt) {
@@ -120,11 +130,51 @@ public final class Grant {
     }
 
     /**
+     * Whether {@code itemFullName} was created through this grant's Create and is still the same
+     * item (S-09): when an identity was recorded for it, {@code currentIdentity} (evaluated only
+     * then) must return that identity.
+     */
+    public boolean hasCreated(String itemFullName, Supplier<String> currentIdentity) {
+        if (!hasCreated(itemFullName)) {
+            return false;
+        }
+        String recorded = createdItemIdentities == null ? null : createdItemIdentities.get(itemFullName);
+        return recorded == null || recorded.equals(currentIdentity.get());
+    }
+
+    /** S-09: the recorded identities of the created items (a copy; never {@code null}). */
+    public Map<String, String> getCreatedItemIdentities() {
+        return createdItemIdentities == null ? new HashMap<>() : new HashMap<>(createdItemIdentities);
+    }
+
+    /**
      * Replaces the created-items list (D-35c). Only {@code security.GrantService} calls this, when
-     * an item is created, relocated or deleted.
+     * an item is created, relocated or deleted. Identities of items no longer listed are dropped.
      */
     public void setCreatedItems(List<String> items) {
         this.createdItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
+        if (createdItemIdentities != null) {
+            createdItemIdentities.keySet().removeIf(name -> createdItems == null || !createdItems.contains(name));
+            if (createdItemIdentities.isEmpty()) {
+                createdItemIdentities = null;
+            }
+        }
+    }
+
+    /**
+     * Replaces the created-item identities (S-09); keys not in the created-items list are
+     * ignored. Only {@code security.GrantService} calls this.
+     */
+    public void setCreatedItemIdentities(Map<String, String> identities) {
+        Map<String, String> kept = new HashMap<>();
+        if (identities != null && createdItems != null) {
+            identities.forEach((name, identity) -> {
+                if (identity != null && createdItems.contains(name)) {
+                    kept.put(name, identity);
+                }
+            });
+        }
+        this.createdItemIdentities = kept.isEmpty() ? null : kept;
     }
 
     /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */

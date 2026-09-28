@@ -58,26 +58,26 @@ public class BatchControlMatrixAuthorizationStrategy extends ProjectMatrixAuthor
     @Override
     public ACL getRootACL() {
         // S-13: the root carries no grant scope; root-level Item/Create is the matrix's alone.
-        return new GrantAwareACL(super.getRootACL(), null);
+        return new GrantAwareACL(super.getRootACL(), (String) null);
     }
 
     @NonNull
     @Override
     public ACL getACL(@NonNull Job<?, ?> project) {
-        return new GrantAwareACL(super.getACL(project), project.getFullName());
+        return new GrantAwareACL(super.getACL(project), project);
     }
 
     @NonNull
     @Override
     public ACL getACL(@NonNull AbstractItem item) {
         // Folders are AbstractItems: Item/Create inside a folder is checked on this ACL.
-        return new GrantAwareACL(super.getACL(item), item.getFullName());
+        return new GrantAwareACL(super.getACL(item), item);
     }
 
     @NonNull
     @Override
     public ACL getACL(@NonNull Node node) {
-        return new GrantAwareACL(super.getACL(node), null);
+        return new GrantAwareACL(super.getACL(node), (String) null);
     }
 
     @NonNull
