@@ -343,7 +343,7 @@ public final class GrantRequestService {
         if (cfg.isRunControlEnabled()) {
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REQUEST_BLOCKED, target, user,
                     "A permission window for '" + target + "' could not be " + attemptedTransition
-                            + ": change control is off (S-15)");
+                            + ": change control is off");
             FileStore.get().appendChangeRecord(record);
         }
         LOGGER.info(() -> "Refused to let '" + user + "' have a permission window for '" + target
