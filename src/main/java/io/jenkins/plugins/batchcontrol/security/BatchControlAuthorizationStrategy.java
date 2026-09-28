@@ -17,8 +17,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p>{@link #readResolve()} converts it on load:
  * <ul>
- *   <li>a matrix-auth project matrix or role-strategy delegate becomes the matching Batch Control
- *       subclass with every entry kept;</li>
+ *   <li>a matrix-auth matrix (project-based or global) or role-strategy delegate becomes the
+ *       matching Batch Control subclass with every entry kept;</li>
  *   <li>any other delegate is installed unwrapped. Grants then stop conferring, and
  *       {@code ops.BatchControlStrategyMonitor} says that grants need a supported strategy;</li>
  *   <li>a missing delegate (the old deny-all state) stays deny-all: an empty Batch Control matrix
@@ -58,7 +58,7 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
             return this;
         }
         String savedClass = saved.getClass().getName();
-        AuthorizationStrategy converted = StrategyMigration.toBatchControl(saved);
+        AuthorizationStrategy converted = StrategyMigration.fromLegacyDelegate(saved);
         if (converted != null) {
             LOGGER.info(() -> "Converted the withdrawn Batch Control wrapper around "
                     + savedClass + " into " + converted.getClass().getName()

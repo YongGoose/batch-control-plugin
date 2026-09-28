@@ -9,12 +9,16 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.StrategyMigration;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
+import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
@@ -28,6 +32,12 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * is the reverse, the uninstall path. Neither touches per-item properties, which live on the
  * items. Neither switches to {@code ACL.SYSTEM2}: an administrator runs them and
  * {@link Jenkins#save()} needs no further permission.
+ *
+ * <p>Both actions work whether or not the monitor is activated: its URL
+ * ({@code /manage/administrativeMonitor/batch-control-strategy/}) only requires Overall/Administer,
+ * and the revert button lives on the Batch Control global configuration page, where a Batch
+ * Control strategy is installed and the monitor is therefore quiet. After success both redirect
+ * back to the referring page of this Jenkins, or to the global security page.
  *
  * <p>matrix-auth and role-strategy are optional: this class refers to neither, see
  * {@link StrategyMigration}.
@@ -93,7 +103,7 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         jenkins.save();
         LOGGER.info(() -> "Authorization strategy " + current.getClass().getName() + " migrated to "
                 + migrated.getClass().getName() + " by " + Jenkins.getAuthentication2().getName());
-        return HttpResponses.redirectViaContextPath("/manage");
+        return backToReferrer();
     }
 
     /**
@@ -114,6 +124,43 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         jenkins.save();
         LOGGER.info(() -> "Authorization strategy " + current.getClass().getName() + " reverted to "
                 + plain.getClass().getName() + " by " + Jenkins.getAuthentication2().getName());
-        return HttpResponses.redirectViaContextPath("/manage");
+        return backToReferrer();
+    }
+
+    /** Fallback target when there is no usable referrer. */
+    static final String FALLBACK = "/manage/configureSecurity";
+
+    /**
+     * Redirects to the path of the referring page when it belongs to this Jenkins, else to the
+     * global security page. Only a path below the context path is followed, never a host, so the
+     * redirect cannot leave this Jenkins (no open redirect through a forged {@code Referer}).
+     */
+    private static HttpResponse backToReferrer() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String target = req == null ? null : sameOriginPath(req.getHeader("Referer"), req.getContextPath());
+        return target == null ? HttpResponses.redirectViaContextPath(FALLBACK) : HttpResponses.redirectTo(target);
+    }
+
+    /**
+     * The path (and query) of {@code referer} if it is a path of this Jenkins below
+     * {@code contextPath}; {@code null} otherwise.
+     */
+    static String sameOriginPath(String referer, String contextPath) {
+        if (referer == null || referer.isEmpty()) {
+            return null;
+        }
+        URI uri;
+        try {
+            uri = new URI(referer);
+        } catch (URISyntaxException e) {
+            return null;
+        }
+        String path = uri.getRawPath();
+        String context = contextPath == null ? "" : contextPath;
+        if (path == null || !path.startsWith(context + "/") || path.startsWith("//")
+                || path.indexOf('\\') >= 0) {
+            return null;
+        }
+        return uri.getRawQuery() == null ? path : path + "?" + uri.getRawQuery();
     }
 }

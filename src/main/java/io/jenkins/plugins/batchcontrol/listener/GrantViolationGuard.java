@@ -175,10 +175,12 @@ public class GrantViolationGuard extends SaveableListener {
     }
 
     /**
-     * Keeps the baseline in step with item lifecycle events. Ahead of matrix-auth's creator
-     * listeners, so a property that listener adds is compared against the creation state.
+     * Keeps the baseline in step with item lifecycle events, and applies the payload half of
+     * D-35c. The ordinal puts it after {@link CreatedItemGrantListener} (which records a
+     * grant-only creation) and ahead of matrix-auth's creator listeners, so a property that
+     * listener adds is compared against the creation state.
      */
-    @Extension(optional = true, ordinal = 1000)
+    @Extension(optional = true, ordinal = 999)
     @Restricted(NoExternalUse.class)
     public static class Baseline extends ItemListener {
 
@@ -199,13 +201,70 @@ public class GrantViolationGuard extends SaveableListener {
             }
         }
 
+        /**
+         * D-35c, creation payload: an item created by a user whose Create comes only from a grant
+         * (a {@code createItem} with a config.xml payload, or a copy) keeps no authorization
+         * property it arrived with. The property is removed from the item and, for a folder, from
+         * every item inside it, each with a {@code GRANT_VIOLATION} record. Core's default
+         * {@code onCopied} calls this method, so copies are covered.
+         */
         @Override
         public void onCreated(Item item) {
-            if (item instanceof Job || item instanceof AbstractFolder) {
-                synchronized (LOCK) {
-                    BASELINE.putIfAbsent(item.getFullName(), propertyXml((AbstractItem) item));
-                }
+            if (!(item instanceof Job || item instanceof AbstractFolder)) {
+                return;
             }
+            AbstractItem created = (AbstractItem) item;
+            synchronized (LOCK) {
+                Grant grant = creationGrant(created);
+                if (grant != null) {
+                    stripPayload(created, grant);
+                    if (created instanceof AbstractFolder) {
+                        for (AbstractItem inner : ((AbstractFolder<?>) created).getAllItems(AbstractItem.class)) {
+                            if (inner instanceof Job || inner instanceof AbstractFolder) {
+                                stripPayload(inner, grant);
+                            }
+                        }
+                    }
+                }
+                BASELINE.putIfAbsent(created.getFullName(), propertyXml(created));
+            }
+        }
+
+        /** The grant through whose Create alone the current user created {@code item}, or {@code null}. */
+        @CheckForNull
+        private static Grant creationGrant(AbstractItem item) {
+            if (!guardApplies()) {
+                return null;
+            }
+            Authentication auth = Jenkins.getAuthentication2();
+            if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
+                return null;
+            }
+            return GrantService.get().findCreatingGrant(auth.getName(), item.getFullName());
+        }
+
+        private static void stripPayload(AbstractItem item, Grant grant) {
+            String fullName = item.getFullName();
+            if (property(item) == null) {
+                BASELINE.put(fullName, "");
+                return;
+            }
+            String user = Jenkins.getAuthentication2().getName();
+            try {
+                apply(item, "");
+            } catch (IOException | RuntimeException e) {
+                LOGGER.log(Level.SEVERE, "Could not remove the authorization property of '" + fullName
+                        + "' created by '" + user + "' under grant " + grant.getId() + " (D-35c)", e);
+                return;
+            }
+            BASELINE.put(fullName, "");
+            ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
+                    "The item was created by a user whose Item/Create comes only from grant "
+                            + grant.getId() + " and carried an authorization property; the property was removed.");
+            record.setGrantId(grant.getId());
+            FileStore.get().appendChangeRecord(record);
+            LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
+                    + user + "' through grant " + grant.getId() + " (D-35c)");
         }
 
         @Override

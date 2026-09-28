@@ -17,6 +17,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 public final class StrategyMigration {
 
     static final String PROJECT_MATRIX = "hudson.security.ProjectMatrixAuthorizationStrategy";
+    static final String GLOBAL_MATRIX = "hudson.security.GlobalMatrixAuthorizationStrategy";
     static final String ROLE_BASED =
             "com.michelin.cio.hudson.plugins.rolestrategy.RoleBasedAuthorizationStrategy";
 
@@ -53,6 +54,20 @@ public final class StrategyMigration {
             return BatchControlRoleBasedAuthorizationStrategy.copyOf(strategy);
         }
         return null;
+    }
+
+    /**
+     * The load conversion of the withdrawn wrapper's delegate (D-35a, SPEC item 8): what
+     * {@link #toBatchControl} converts, and additionally matrix-auth's global matrix, whose
+     * entries move into the Batch Control (project-based) matrix. {@code null} for any other
+     * strategy.
+     */
+    @CheckForNull
+    static AuthorizationStrategy fromLegacyDelegate(AuthorizationStrategy delegate) {
+        if (GLOBAL_MATRIX.equals(delegate.getClass().getName())) {
+            return BatchControlMatrixAuthorizationStrategy.copyOf(delegate);
+        }
+        return toBatchControl(delegate);
     }
 
     /** An empty Batch Control matrix (denies everyone but SYSTEM). Requires matrix-auth. */
