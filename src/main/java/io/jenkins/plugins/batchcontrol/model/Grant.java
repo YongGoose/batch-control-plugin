@@ -33,6 +33,13 @@ public final class Grant {
     private final long expiresAtMillis;
     private Long revokedAtMillis;
     private String revokedBy;
+    /**
+     * D-35c: full names of the items this grant's holder created inside the scope during the
+     * window, using the grant's Create. While the grant is active the holder also holds Item/Read
+     * and Item/Configure on them, so matrix-auth's creator listener adds no permanent entry.
+     * {@code null} in grant files written before D-35c (XStream skips the initializer).
+     */
+    private List<String> createdItems;
 
     private Grant(String id, String grantRequestId, String user, GrantScope scope,
                   List<GrantAction> actions, Instant grantedAt, Instant expiresAt) {
@@ -100,6 +107,24 @@ public final class Grant {
         return revokedAtMillis == null
                 && at.toEpochMilli() >= grantedAtMillis
                 && at.toEpochMilli() < expiresAtMillis;
+    }
+
+    /** D-35c: the items created through this grant's Create (a copy; never {@code null}). */
+    public List<String> getCreatedItems() {
+        return createdItems == null ? new ArrayList<>() : new ArrayList<>(createdItems);
+    }
+
+    /** Whether {@code itemFullName} was created through this grant's Create (D-35c). */
+    public boolean hasCreated(String itemFullName) {
+        return createdItems != null && itemFullName != null && createdItems.contains(itemFullName);
+    }
+
+    /**
+     * Replaces the created-items list (D-35c). Only {@code security.GrantService} calls this, when
+     * an item is created, relocated or deleted.
+     */
+    public void setCreatedItems(List<String> items) {
+        this.createdItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
     }
 
     /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */

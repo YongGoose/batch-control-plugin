@@ -60,5 +60,16 @@ public enum ChangeType {
      * job the run was aimed at, and {@code grantId}/{@code diff} stay {@code null} (a refused run
      * happens outside any change window and has no before/after configuration).
      */
-    REMOTE_RUN_BLOCKED
+    REMOTE_RUN_BLOCKED,
+    /**
+     * D-35b: a save by a user whose Item/Configure on the item came only from a grant changed the
+     * item's (or folder's) matrix-auth authorization property, and Batch Control put the previous
+     * property back. Without this, a temporary Configure could be turned into a permanent
+     * authorization entry that outlives the window.
+     *
+     * <p>{@code user} is the account that made the save, {@code target} the item full name,
+     * {@code grantId} the grant the Configure came from, and {@code detail} says that the
+     * authorization property was restored. {@code diff} stays {@code null}.
+     */
+    GRANT_VIOLATION
 }

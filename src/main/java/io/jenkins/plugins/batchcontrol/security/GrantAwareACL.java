@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.Item;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -11,10 +12,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
 
 /**
- * The ACL of the delegating strategy (ARCHITECTURE section 4). For the three grantable item
- * permissions (Item/Create, Item/Configure, Item/Delete) an active JIT grant is consulted
- * first; every other decision — and every miss — goes to the wrapped delegate ACL unchanged,
- * so with no active grant the behavior is exactly the delegate's.
+ * The grant layer of the Batch Control strategies (ARCHITECTURE section 4, D-35a): each of
+ * {@link BatchControlMatrixAuthorizationStrategy} and {@link BatchControlRoleBasedAuthorizationStrategy}
+ * wraps the parent strategy's ACL (the "delegate" below) in one of these. For the three grantable
+ * item permissions (Item/Create, Item/Configure, Item/Delete) an active JIT grant is consulted
+ * first; every other decision — and every miss — goes to the parent's ACL unchanged, so with no
+ * active grant the behavior is exactly the parent strategy's.
  *
  * <p>S-15: a grant is consulted only while the change-control switch is on. With the switch off no
  * grant confers anything — every decision is the delegate's, exactly as before the plugin was
@@ -33,13 +36,24 @@ import org.springframework.security.core.Authentication;
  * permission therefore let the requester save a configuration they could not open. See
  * {@link #grantConfers} for the walk and the rule it mirrors.
  *
- * <p>A {@code null} delegate ACL denies everything except SYSTEM (safe default while the
- * wrapper is misconfigured without a delegate strategy).
+ * <p>D-35c: an item its holder created through the Create of an active grant also answers
+ * Item/Read and Item/Configure (and what they imply) for the holder while the grant is active, so
+ * matrix-auth's creator listener finds both already held and writes no permanent entry.
+ *
+ * <p>{@link #withoutGrants} evaluates a check with the grant layer switched off on the current
+ * thread, which is how the listeners tell a permission that comes only from a grant from one the
+ * installed strategy gives natively (D-35b, D-35c).
+ *
+ * <p>A {@code null} delegate ACL denies everything except SYSTEM (safe default for a strategy
+ * that cannot be resolved).
  */
 @Restricted(NoExternalUse.class)
 final class GrantAwareACL extends ACL {
 
     private static final GrantAwareACL DENY_ALL = new GrantAwareACL(null, null);
+
+    /** Depth of {@link #withoutGrants} calls on this thread; grants confer nothing while positive. */
+    private static final ThreadLocal<Integer> SUSPENDED = new ThreadLocal<>();
 
     /** The delegate's ACL for the same object; {@code null} denies all but SYSTEM. */
     @CheckForNull
@@ -58,9 +72,31 @@ final class GrantAwareACL extends ACL {
         this.itemFullName = itemFullName;
     }
 
-    /** The deny-all-but-SYSTEM ACL used when the wrapper has no delegate. */
+    /** The deny-all-but-SYSTEM ACL used when no parent ACL is available. */
     static GrantAwareACL denyAll() {
         return DENY_ALL;
+    }
+
+    /**
+     * Runs {@code check} with every grant layer switched off on this thread, so the answer is the
+     * installed strategy's own (D-35b, D-35c). Nestable.
+     */
+    static boolean withoutGrants(java.util.function.BooleanSupplier check) {
+        Integer previous = SUSPENDED.get();
+        SUSPENDED.set(previous == null ? 1 : previous + 1);
+        try {
+            return check.getAsBoolean();
+        } finally {
+            if (previous == null) {
+                SUSPENDED.remove(); // pooled threads keep no entry behind
+            } else {
+                SUSPENDED.set(previous);
+            }
+        }
+    }
+
+    private static boolean suspended() {
+        return SUSPENDED.get() != null;
     }
 
     @Override
@@ -68,7 +104,8 @@ final class GrantAwareACL extends ACL {
         if (a.equals(SYSTEM2)) {
             return true;
         }
-        if (itemFullName != null && !ACL.isAnonymous2(a) && grantConfers(a.getName(), permission)) {
+        if (itemFullName != null && !ACL.isAnonymous2(a) && !suspended()
+                && grantConfers(a.getName(), permission)) {
             return true;
         }
         return delegate != null && delegate.hasPermission2(a, permission);
@@ -121,9 +158,18 @@ final class GrantAwareACL extends ACL {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             return false;
         }
+        boolean createdChecked = false;
         for (Permission p = permission; p != null; p = p.impliedBy) {
             if (!p.getEnabled()) {
                 continue;
+            }
+            if (!createdChecked && (p == Item.READ || p == Item.CONFIGURE)) {
+                // D-35c: Read and Configure on an item the holder created through an active Create
+                // grant. Looked up once per walk; the same enabled-link rule applies.
+                createdChecked = true;
+                if (GrantService.get().findCreatingGrant(user, itemFullName) != null) {
+                    return true;
+                }
             }
             if (GrantAction.fromPermission(p) == null) {
                 continue;

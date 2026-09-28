@@ -10,7 +10,7 @@ import hudson.security.AuthorizationStrategy;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,23 +28,26 @@ import org.springframework.security.core.userdetails.UserDetails;
 
 /**
  * Warns administrators when change control cannot actually control changes (SPEC item 8):
- * change control is on, but either the global authorization strategy is not the plugin's
- * delegating wrapper (so grants can never apply), or some known non-admin user holds
- * Item/Configure, Item/Create or Item/Delete directly from the delegate — a standing change
+ * change control is on, but either the global authorization strategy is not a Batch Control
+ * strategy (so grants can never apply, D-35a), or some known non-admin user holds
+ * Item/Configure, Item/Create or Item/Delete directly from the strategy — a standing change
  * permission that bypasses the JIT grant process.
  *
- * <p>Candidate users come from {@link User#getAll()} plus, for matrix-family delegates, the
+ * <p>The scan uses the strategy's root ACL, which carries no grant scope (S-13), so what it finds
+ * is always a native entry, never an open grant.
+ *
+ * <p>Candidate users come from {@link User#getAll()} plus, for matrix-family strategies, the
  * strategy's own granted sids (read reflectively — matrix-auth is an optional dependency).
  * The scan is capped at {@value #MAX_CANDIDATES} candidates and every impersonation failure is
  * swallowed: this is a best-effort warning, never an enforcement point.
  *
  * <p>S-05: {@code isActivated()} is evaluated by Jenkins on (almost) every admin page render,
  * and the candidate scan performs up to {@value #MAX_CANDIDATES} synchronous security-realm
- * lookups (remote round-trips on LDAP/AD). The scan result is therefore cached per delegate
- * instance with a {@value #CACHE_TTL_MINUTES}-minute TTL (monotonic {@link System#nanoTime}):
+ * lookups (remote round-trips on LDAP/AD). The scan result is therefore cached per strategy
+ * strategy instance with a {@value #CACHE_TTL_MINUTES}-minute TTL (monotonic {@link System#nanoTime}):
  * a strategy swap recomputes immediately (identity key), a change-control toggle invalidates
- * explicitly, and permission edits inside the same delegate show up within the TTL. The cheap
- * pre-checks (switch off, wrong strategy, missing delegate) are never cached.
+ * explicitly, and permission edits inside the same strategy show up within the TTL. The cheap
+ * pre-checks (switch off, wrong strategy) are never cached.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -64,13 +67,13 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     /** The cached result of one expensive candidate scan (immutable snapshot). */
     private static final class CachedScan {
-        final AuthorizationStrategy delegate; // identity key: a swapped delegate recomputes
+        final AuthorizationStrategy strategy; // identity key: a swapped strategy recomputes
         final boolean standingPermissionFound;
         final long computedAtNanos;
 
-        CachedScan(AuthorizationStrategy delegate, boolean standingPermissionFound,
+        CachedScan(AuthorizationStrategy strategy, boolean standingPermissionFound,
                    long computedAtNanos) {
-            this.delegate = delegate;
+            this.strategy = strategy;
             this.standingPermissionFound = standingPermissionFound;
             this.computedAtNanos = computedAtNanos;
         }
@@ -94,48 +97,43 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             return false;
         }
         AuthorizationStrategy strategy = Jenkins.get().getAuthorizationStrategy();
-        if (!(strategy instanceof BatchControlAuthorizationStrategy)) {
-            // Without the delegating wrapper, grants can never apply: change control is a no-op.
+        if (!GrantLayer.isGrantLayered(strategy)) {
+            // Without a Batch Control strategy, grants can never apply: change control is a no-op.
             return true;
         }
-        AuthorizationStrategy delegate = ((BatchControlAuthorizationStrategy) strategy).getDelegate();
-        if (delegate == null) {
-            // Deny-all safe default: nobody holds any change permission directly.
-            return false;
-        }
-        return cachedScanResult(delegate);
+        return cachedScanResult(strategy);
     }
 
     /**
-     * The TTL-cached scan result for the given delegate: serves the cached value while it is
-     * fresh and keyed to the same delegate instance, otherwise recomputes and stores. Static
+     * The TTL-cached scan result for the given strategy: serves the cached value while it is
+     * fresh and keyed to the same strategy instance, otherwise recomputes and stores. Static
      * because the cache is static — the monitor is an extension singleton either way.
      */
-    private static boolean cachedScanResult(AuthorizationStrategy delegate) {
+    private static boolean cachedScanResult(AuthorizationStrategy strategy) {
         CachedScan cached = cachedScan;
         long now = System.nanoTime();
-        if (cached != null && cached.delegate == delegate
+        if (cached != null && cached.strategy == strategy
                 && now - cached.computedAtNanos < CACHE_TTL_NANOS) {
             return cached.standingPermissionFound;
         }
-        boolean found = scanForStandingPermissions(delegate);
-        cachedScan = new CachedScan(delegate, found, now);
+        boolean found = scanForStandingPermissions(strategy);
+        cachedScan = new CachedScan(strategy, found, now);
         return found;
     }
 
-    /** The expensive part: impersonates candidate sids against the delegate's root ACL. */
-    private static boolean scanForStandingPermissions(AuthorizationStrategy delegate) {
-        ACL delegateRootAcl = delegate.getRootACL();
-        for (String sid : candidateSids(delegate)) {
+    /** The expensive part: impersonates candidate sids against the strategy's root ACL. */
+    private static boolean scanForStandingPermissions(AuthorizationStrategy strategy) {
+        ACL rootAcl = strategy.getRootACL();
+        for (String sid : candidateSids(strategy)) {
             Authentication auth = authenticate(sid);
             if (auth == null) {
                 continue;
             }
-            if (delegateRootAcl.hasPermission2(auth, Jenkins.ADMINISTER)) {
+            if (rootAcl.hasPermission2(auth, Jenkins.ADMINISTER)) {
                 continue; // admin bypass is out of scope (SPEC section 1)
             }
             for (Permission permission : CHANGE_PERMISSIONS) {
-                if (delegateRootAcl.hasPermission2(auth, permission)) {
+                if (rootAcl.hasPermission2(auth, permission)) {
                     return true;
                 }
             }
@@ -143,8 +141,8 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
         return false;
     }
 
-    /** Known users plus (reflectively) the sids a matrix-family delegate grants anything to. */
-    private static Set<String> candidateSids(AuthorizationStrategy delegate) {
+    /** Known users plus (reflectively) the sids a matrix-family strategy grants anything to. */
+    private static Set<String> candidateSids(AuthorizationStrategy strategy) {
         Set<String> sids = new LinkedHashSet<>();
         for (User user : User.getAll()) {
             if (sids.size() >= MAX_CANDIDATES) {
@@ -152,7 +150,7 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             }
             sids.add(user.getId());
         }
-        for (String sid : delegatePermissionSids(delegate)) {
+        for (String sid : strategyPermissionSids(strategy)) {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
@@ -164,7 +162,7 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
     }
 
     /**
-     * Reads the delegate's granted permission entries without a compile-time matrix-auth
+     * Reads the strategy's granted permission entries without a compile-time matrix-auth
      * dependency: tries {@code getAllPermissionEntries()}, a {@code List} of entries each
      * carrying a {@code getSid()} and a {@code getType()} of {@code USER}/{@code GROUP}/
      * {@code EITHER} (matrix-auth 3.0+; supersedes the deprecated {@code getAllSIDs()}, which
@@ -175,14 +173,14 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
      * impersonate a group as if it were a user could either fail harmlessly or, worse, collide
      * with an unrelated user of the same name and read that user's rights as the group's.
      * {@code USER} and legacy {@code EITHER} entries are both kept, since either may name a real
-     * account. A delegate without the method, or any failure resolving it, contributes nothing:
+     * account. A strategy without the method, or any failure resolving it, contributes nothing:
      * this is a best-effort warning, never an enforcement point.
      */
-    private static Collection<String> delegatePermissionSids(AuthorizationStrategy delegate) {
+    private static Collection<String> strategyPermissionSids(AuthorizationStrategy strategy) {
         List<String> sids = new ArrayList<>();
         try {
-            Method method = delegate.getClass().getMethod("getAllPermissionEntries");
-            Object result = method.invoke(delegate);
+            Method method = strategy.getClass().getMethod("getAllPermissionEntries");
+            Object result = method.invoke(strategy);
             if (result instanceof Collection) {
                 for (Object entry : (Collection<?>) result) {
                     if (isGroupEntry(entry)) {
@@ -196,7 +194,7 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             LOGGER.log(Level.FINE,
-                    "No getAllPermissionEntries() on " + delegate.getClass().getName(), e);
+                    "No getAllPermissionEntries() on " + strategy.getClass().getName(), e);
         }
         return sids;
     }
