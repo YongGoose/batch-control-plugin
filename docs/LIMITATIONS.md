@@ -45,20 +45,30 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 
 ## The authorization strategy
 
-8. **JIT change control works only with matrix-family authorization
-   strategies.** With **Role-Based Authorization Strategy** as the strategy, only
-   **run control and recording** work; permission windows do not. Wrapping Role
-   Strategy leaves permission decisions correct but breaks its own role
-   management screens, so it is not supported. An administrative monitor says so
-   when Role Strategy is in use. Support for it is a possible future item, not a
-   present one.
-9. **Change control is permission-based, not save-based.** Jenkins offers no way
-   to intercept the job configuration "Save" itself, so if the wrapping strategy
-   is not selected, change control has no effect at all, and only the monitor
-   warning tells you.
-10. **A wrapping strategy saved without a delegate locks everyone out**,
-    including administrators, and is recoverable only by editing
-    `$JENKINS_HOME/config.xml` on disk.
+8. **Batch Control's grants work with matrix-auth and role-strategy through
+    Batch Control's own strategy variants**, `Batch Control: Matrix-based
+    security` and `Batch Control: Role-Based Strategy`. Each is a subclass of
+    the corresponding upstream strategy, so the upstream's own per-item
+    configuration (folder, job and agent authorization properties, item and
+    agent roles, pattern-based naming) stays configurable and effective. Any
+    other authorization strategy is not a supported grant target: on upgrade
+    from an older release, a saved variant whose delegate was neither
+    matrix-auth nor role-strategy is unwrapped back to a plain instance of that
+    strategy, and grants stop conferring anything from that point. Selecting a
+    strategy that is not one of the two variants gets you run control and
+    recording only, with an administrative monitor saying so.
+9. **role-strategy's own "Manage Roles" save reinstalls the plain
+    `RoleBasedAuthorizationStrategy`**, replacing the Batch Control variant.
+    From that save onward, grants stop conferring until an administrator
+    re-installs the Batch Control variant. This is deliberately fail-safe:
+    no permission is left standing that nobody can see, the role page itself
+    keeps working, and an administrative monitor detects the swap and offers a
+    one-click reinstall of the variant, carrying over every role and
+    assignment.
+10. **Change control is permission-based, not save-based.** Jenkins offers no way
+    to intercept the job configuration "Save" itself, so if the applicable
+    Batch Control strategy variant is not selected, change control has no
+    effect at all, and only the monitor warning tells you.
 11. **Grants must name a concrete job or folder.** There is no instance-wide
     grant, which means a grant can confer `Item/Create` only inside a named
     folder, never at the Jenkins root.
