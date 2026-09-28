@@ -69,7 +69,7 @@ GrantAwareACL extends ACL            (unchanged logic)
       return parentACL.hasPermission2(auth, perm)
 ```
 
-- Every `getACL` overload the parent overrides is wrapped, so the parent's own per-item logic runs first underneath the grant layer.
+- Every `getACL` overload the parent overrides is wrapped, so the parent's own per-item logic runs first underneath the grant layer. The root ACL carries no grant scope, so a subclass may leave `getRootACL` unwrapped, and matrix-auth's `getACL(ItemGroup)` resolves to an already wrapped item or root ACL (security-05 S-08).
 - Expiry: `hasActiveGrant` checks `expiresAt > now && revokedAt == null`. No timer, nothing written into the other plugin's data.
 - Scope: FOLDER scope matches the folder path prefix, JOB scope the exact full name. CREATE is checked on the folder's ACL, so only FOLDER-scope grants confer it. A Create grant also confers Configure on items its holder created inside the scope during the window (D-35c).
 - Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
