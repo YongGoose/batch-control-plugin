@@ -136,6 +136,13 @@ public class JobRequestAction implements Action {
      * service's own validation throws. Parsing outside the {@code try} turned user-supplied
      * input into an uncaught exception and an HTTP 500 "Oops!" page while an empty reason
      * correctly answered 400; both are user input and both belong in the same 400 channel.
+     *
+     * <p>security-08 S-10: a scripted submission with no {@code json} field used to store an
+     * empty parameter map, so the later approved build ran with whatever defaults the job had at
+     * build time rather than the values the approver saw. {@link #parseRawParameters} now reads
+     * each defined parameter straight from the request the way core's
+     * {@code ParametersDefinitionProperty#_doBuild} / {@code buildWithParameters} do, so the
+     * stored map is complete either way.
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -153,7 +160,7 @@ public class JobRequestAction implements Action {
         RunRequest request;
         try {
             Map<String, String> parameters = formData == null
-                    ? new LinkedHashMap<>() : parseParameters(req, formData);
+                    ? parseRawParameters(req) : parseParameters(req, formData);
             request = RunRequestService.get().create(job, parameters, reason, approvers);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
@@ -195,6 +202,35 @@ public class JobRequestAction implements Action {
                 throw new Failure("No such parameter definition: " + name);
             }
             ParameterValue value = definition.createValue(req, jsonEntry);
+            if (value != null) {
+                parameters.put(value.getName(), flatten(value));
+            }
+        }
+        return parameters;
+    }
+
+    /**
+     * Parses parameter values for a scripted submission that carries no {@code json} form field
+     * (security-08 S-10). Each of the job's defined parameters reads its own raw request field
+     * through {@link ParameterDefinition#createValue(StaplerRequest2)} — the same call core's
+     * {@code buildWithParameters} makes — falling back explicitly to
+     * {@link ParameterDefinition#getDefaultParameterValue()} when the definition itself returns
+     * {@code null} for a missing field, so the stored map is complete rather than empty. Values
+     * still go through {@link #flatten}, so secrets are masked exactly as for the JSON path, and a
+     * definition's own {@link IllegalArgumentException} for a bad value propagates unchanged
+     * (N-01: caught by the caller's {@code try}).
+     */
+    private Map<String, String> parseRawParameters(StaplerRequest2 req) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
+        if (property == null) {
+            return parameters;
+        }
+        for (ParameterDefinition definition : property.getParameterDefinitions()) {
+            ParameterValue value = definition.createValue(req);
+            if (value == null) {
+                value = definition.getDefaultParameterValue();
+            }
             if (value != null) {
                 parameters.put(value.getName(), flatten(value));
             }
