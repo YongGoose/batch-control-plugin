@@ -107,16 +107,27 @@ public class HistoryWebTest {
         BatchClock.reset();
     }
 
-    /** T-12-01: without ViewHistory every query screen answers 403; with it, 200. */
+    /**
+     * T-12-01 (SPEC 12, sharpened by SPEC 2 / #31): without ViewHistory every query screen is
+     * refused. A user holding no Batch Control permission at all gets 404 (the root action is
+     * absent at every URL beneath it); a user holding another Batch Control permission (Request)
+     * but not ViewHistory gets 403; a ViewHistory holder gets 200.
+     */
     @Test
-    public void t_12_01_historyWithoutViewHistoryIs403() throws Exception {
-        JenkinsRule.WebClient noHistory = webClient("nohist");
-        assertEquals(403, get(noHistory, "batch-control/history/").getStatusCode(), "GET /batch-control/history without ViewHistory must be 403");
+    public void t_12_01_historyWithoutViewHistoryIsRefused() throws Exception {
+        JenkinsRule.WebClient noBatchControl = webClient("nohist");
+        assertEquals(404, get(noBatchControl, "batch-control/history/").getStatusCode(), "GET /batch-control/history by a user with no Batch Control permission must be 404 (SPEC 2, #31)");
         // SPEC item 12: EVERY query screen is gated, the incident screens included
-        assertEquals(403, get(noHistory, "batch-control/incidents/").getStatusCode(), "GET /batch-control/incidents without ViewHistory must be 403");
+        assertEquals(404, get(noBatchControl, "batch-control/incidents/").getStatusCode(), "GET /batch-control/incidents by a user with no Batch Control permission must be 404 (SPEC 2, #31)");
+
+        // counterpart: some Batch Control permission, but not ViewHistory -> the section refuses (403)
+        JenkinsRule.WebClient requester = webClient("u1");
+        assertEquals(403, get(requester, "batch-control/history/").getStatusCode(), "GET /batch-control/history by a Request holder without ViewHistory must be 403");
+        assertEquals(403, get(requester, "batch-control/incidents/").getStatusCode(), "GET /batch-control/incidents by a Request holder without ViewHistory must be 403");
 
         JenkinsRule.WebClient viewer = webClient("viewer");
         assertEquals(200, get(viewer, "batch-control/history/").getStatusCode(), "with ViewHistory the history screen must render");
+        assertEquals(200, get(viewer, "batch-control/incidents/").getStatusCode(), "with ViewHistory the incident screen must render");
     }
 
     /** T-12-02: the retention work deletes month files past retentionMonths and records it. */

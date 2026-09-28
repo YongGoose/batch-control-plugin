@@ -249,7 +249,7 @@ public class SecurityRegressionTest {
      * they cannot even load. "Every state change is POST + permission check" (SPEC §6).
      */
     @Test
-    public void t_sec_15_submitRunRequestWithoutRequestPermissionIs403() throws Exception {
+    public void t_sec_15_submitRunRequestWithoutRequestPermissionIs404() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("batch-x");
         job.addProperty(new BatchControlJobProperty(true));
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -270,7 +270,7 @@ public class SecurityRegressionTest {
                 new NameValuePair("reason", "direct submit without the Request permission"),
                 new NameValuePair("approver", "a1")));
 
-        assertEquals(403, u1.getPage(submit).getWebResponse().getStatusCode(), "a POST to the per-job submit endpoint without BatchControl/Request must be 403");
+        assertEquals(404, u1.getPage(submit).getWebResponse().getStatusCode(), "a POST to the per-job submit endpoint without BatchControl/Request must be 404 (the action is absent at every URL beneath it - SPEC 2, #31)");
 
         assertEquals(requestsBefore, RunRequestService.get().list().size(), "the rejected submit must not have created a run request");
         // the denial must not degrade into a silent no-op that still runs the job
