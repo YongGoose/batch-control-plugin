@@ -1,27 +1,21 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Run Dashboard">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
-        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Run Dashboard" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Run Dashboard</h1>
+      <l:app-bar title="Run Dashboard"/>
       <p class="jenkins-description">
-        Every build of every job with cause, user, parameters, result and duration (SPEC item 10).
+        Every build of every job with cause, user, parameters, result and duration.
         Showing the last ${it.days} day(s), newest first. Secret parameter values are stored masked.
       </p>
 
       <!-- Window selector: a plain GET form; changing the window never changes state. -->
-      <form method="get" action="." style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+      <form method="get" action="." class="jenkins-buttons-row" style="margin-bottom: 1rem;">
         <label for="days">Days:</label>
         <input type="number" id="days" name="days" min="1" max="365" value="${it.days}" class="jenkins-input" style="width: 6rem;"/>
         <button type="submit" class="jenkins-button">Show</button>
       </form>
 
+      <j:set var="requestLinks" value="${it.links.requests}"/>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No runs recorded in the last ${it.days} day(s).</p>
@@ -55,15 +49,19 @@
                   <td>${it.duration(r.durationMs)}</td>
                   <td>${r.abortedBy}</td>
                   <td>
-                    <j:if test="${r.runRequestId != null}">
-                      <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
-                    </j:if>
+                    <!-- Linked only for a user who may open the Run Requests screen (SPEC item 2). -->
+                    <j:choose>
+                      <j:when test="${r.runRequestId != null and requestLinks}">
+                        <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
+                      </j:when>
+                      <j:otherwise>${r.runRequestId}</j:otherwise>
+                    </j:choose>
                   </td>
                 </tr>
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page - 1}">Newer</a>
             </j:if>

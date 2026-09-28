@@ -2,14 +2,13 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.DiffSummary;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
@@ -45,7 +44,8 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     @Override
     public Object getTarget() {
         // Gate the entire /batch-control/changes/** subtree.
-        Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
+        Jenkins.get().checkAnyPermission(SectionAccess.history());
+        HttpVerbs.refuseUnsupported();
         return this;
     }
 
@@ -54,23 +54,15 @@ public class ChangesSection implements ModelObject, StaplerProxy {
         return "Change Records";
     }
 
-    /**
-     * Serves the list URL {@code /batch-control/changes/}. Change records are append-only
-     * (SPEC item 9): there is no HTTP API that modifies them, so every verb except GET/HEAD is
-     * refused with 405.
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Change records are append-only; only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.history();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- month selection

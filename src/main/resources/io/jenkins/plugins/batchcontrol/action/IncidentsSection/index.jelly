@@ -1,22 +1,15 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Incidents">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
-        <l:task href="${rootURL}/batch-control/history/" icon="symbol-search" title="History"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Incidents" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Incidents</h1>
+      <l:app-bar title="Incidents"/>
       <p class="jenkins-description">
-        Failed and unstable builds are registered automatically as incidents (SPEC item 11).
+        Failed and unstable builds are registered automatically as incidents.
         Open an incident to acknowledge, comment, resolve, or request a rerun.
       </p>
 
       <!-- Month selector: a plain GET form; changing the month never changes state. -->
-      <form method="get" action="." style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+      <form method="get" action="." class="jenkins-buttons-row" style="margin-bottom: 1rem;">
         <a class="jenkins-button" href="?month=${it.previousMonth}">&#171; ${it.previousMonth}</a>
         <input type="month" name="month" value="${it.monthValue}" class="jenkins-input" style="width: auto;"/>
         <button type="submit" class="jenkins-button">Show</button>
@@ -61,7 +54,7 @@
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page - 1}">Newer</a>
             </j:if>

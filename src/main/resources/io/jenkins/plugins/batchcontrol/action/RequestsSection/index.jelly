@@ -1,13 +1,8 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Run Requests">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Run Requests" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Run Requests</h1>
+      <l:app-bar title="Run Requests"/>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No run requests.</p>
@@ -37,7 +32,7 @@
               </j:forEach>
             </tbody>
           </table>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?page=${it.page - 1}">Newer</a>
             </j:if>

@@ -1,6 +1,8 @@
 package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.init.InitMilestone;
+import hudson.init.Initializer;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -9,7 +11,6 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
-import java.lang.ref.WeakReference;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,10 +26,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * backed by the file store ({@code grants/<id>.xml}), so the permission-check hot path
  * ({@link GrantAwareACL}) never touches disk.
  *
- * <p>Restart safety: the cache is keyed to the current Jenkins instance and reloaded from the
- * files whenever a new instance appears, so a grant that is still inside its window survives a
- * restart and one whose window ended during the downtime is gone from the very first check
- * (SPEC item 8). Activity is always judged by {@link Grant#isActiveAt} against
+ * <p>Restart safety: {@link Jenkins} is a singleton, so there is exactly one live cache to keep
+ * fresh; {@link #resetCacheOnStartup()} clears it unconditionally on every Jenkins startup, so
+ * the very first query after a restart reloads straight from the files instead of serving
+ * whatever happened to be in memory before. A grant that is still inside its window therefore
+ * survives a restart and one whose window ended during the downtime is gone from the very first
+ * check (SPEC item 8). Activity is always judged by {@link Grant#isActiveAt} against
  * {@link BatchClock} at check time — no timers.
  *
  * <p>S-15: the change-control switch gates whether a grant <em>confers</em> anything (that check is
@@ -47,14 +50,26 @@ public final class GrantService {
     /** All known grants (active or not); guarded by {@code this}. */
     private List<Grant> cache;
 
-    /** The Jenkins instance the cache was loaded for (weak: test harnesses boot several). */
-    private WeakReference<Jenkins> cacheFor = new WeakReference<>(null);
-
     private GrantService() {
     }
 
     public static GrantService get() {
         return INSTANCE;
+    }
+
+    /**
+     * Clears the in-memory cache. Jenkins is a singleton, so this is not about telling one
+     * running instance apart from another — it simply makes sure the first query after a fresh
+     * Jenkins startup (a real restart, or a test harness booting a new session) reloads from the
+     * files instead of serving a cache built for whatever was on disk before.
+     */
+    @Initializer(after = InitMilestone.PLUGINS_STARTED)
+    public static void resetCacheOnStartup() {
+        INSTANCE.clearCache();
+    }
+
+    private synchronized void clearCache() {
+        cache = null;
     }
 
     // ---------------------------------------------------------------- queries
@@ -229,16 +244,14 @@ public final class GrantService {
 
     // ---------------------------------------------------------------- cache
 
-    /** The live cache list, (re)loaded from the store for the current Jenkins instance. */
+    /** The live cache list, lazily loaded from the store and cleared at every startup. */
     private synchronized List<Grant> grants() {
-        Jenkins current = Jenkins.getInstanceOrNull();
-        if (current == null) {
+        if (Jenkins.getInstanceOrNull() == null) {
             // No Jenkins (shutdown window): answer from whatever is cached, never load.
             return cache != null ? cache : new ArrayList<>();
         }
-        if (cache == null || cacheFor.get() != current) {
+        if (cache == null) {
             cache = new ArrayList<>(store.listGrants());
-            cacheFor = new WeakReference<>(current);
         }
         return cache;
     }

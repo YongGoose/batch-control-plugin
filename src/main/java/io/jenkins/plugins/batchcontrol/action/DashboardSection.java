@@ -1,15 +1,14 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -33,7 +32,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * <p>Default view: the last {@value #DEFAULT_DAYS} days, newest first, pages of
  * {@value #PAGE_SIZE} ({@code ?page=N}). The window can be widened with {@code ?days=N}
  * (validated, capped at {@value #MAX_DAYS}). Requires {@code ViewHistory} for the whole subtree
- * ({@link #getTarget()}); records are read-only, so every verb except GET/HEAD is 405.
+ * ({@link #getTarget()}); records are read-only, so PUT/DELETE/PATCH are 405 ({@code HttpVerbs}).
  */
 @Restricted(NoExternalUse.class)
 public class DashboardSection implements ModelObject, StaplerProxy {
@@ -53,7 +52,8 @@ public class DashboardSection implements ModelObject, StaplerProxy {
     @Override
     public Object getTarget() {
         // Gate the entire /batch-control/dashboard/** subtree (SPEC item 12: 403 without it).
-        Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
+        Jenkins.get().checkAnyPermission(SectionAccess.history());
+        HttpVerbs.refuseUnsupported();
         return this;
     }
 
@@ -62,23 +62,15 @@ public class DashboardSection implements ModelObject, StaplerProxy {
         return "Run Dashboard";
     }
 
-    /**
-     * Serves the list URL {@code /batch-control/dashboard/}. Run records are append-only audit
-     * data (SPEC item 10): there is no modifying HTTP API, so every verb except GET/HEAD is
-     * refused with 405.
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Run records are append-only; only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.history();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- window selection

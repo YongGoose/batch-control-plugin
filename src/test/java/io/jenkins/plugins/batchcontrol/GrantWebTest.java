@@ -71,13 +71,17 @@ public class GrantWebTest {
         job = j.createFreeStyleProject("batch-x");
     }
 
-    /** T-08-13: a user without BatchControl/RequestGrant gets 403 on the grant request creation POST. */
+    /**
+     * T-08-13 (sharpened by SPEC 2 / #31): u0 holds none of the Batch Control permissions,
+     * so the root action and every URL beneath it are absent, not merely refused -&gt; 404
+     * (was 403; SPEC item 2 / #31 changed this for a user with zero Batch Control permissions).
+     */
     @Test
     public void t_08_13_createGrantRequestWithoutPermissionIs403() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u0");
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/grants/create"), HttpMethod.POST));
-        assertEquals(403, page.getWebResponse().getStatusCode(), "a user without RequestGrant must get 403 on grant request creation");
+        assertEquals(404, page.getWebResponse().getStatusCode(), "a user with no Batch Control permission at all must get 404, not 403 (SPEC 2, #31)");
         assertTrue(GrantRequestService.get().list().isEmpty(), "no grant request may be stored after the rejected POST");
     }
 
@@ -98,18 +102,30 @@ public class GrantWebTest {
                 .anyMatch(g -> g.getId().equals(grant.getId())));
     }
 
-    /** Revoke is MANAGE-only: a POST by a non-Manage user is 403 and changes nothing. */
+    /**
+     * Revoke is MANAGE-only. u1 (RequestGrant) and a1 (Approve) each hold at least one
+     * Batch Control permission but not Manage, so the section still refuses them with 403.
+     * u0 holds none of the Batch Control permissions at all, so the root action and every
+     * URL beneath it are absent for u0 -&gt; 404 (SPEC item 2 / #31), not 403.
+     */
     @Test
     public void revokePostWithoutManageIs403() throws Exception {
         Grant grant = activeGrant();
 
-        for (String userId : new String[] {"u1", "a1", "u0"}) {
+        for (String userId : new String[] {"u1", "a1"}) {
             JenkinsRule.WebClient wc = webClient().login(userId);
             Page page = wc.getPage(new WebRequest(
                     wc.createCrumbedUrl("batch-control/grants/active/" + grant.getId() + "/revoke"),
                     HttpMethod.POST));
-            assertEquals(403, page.getWebResponse().getStatusCode(), userId + " must not be able to revoke (MANAGE only)");
+            assertEquals(403, page.getWebResponse().getStatusCode(), userId + " holds some Batch Control permission but not Manage, so revoke must still be 403");
         }
+
+        JenkinsRule.WebClient wc = webClient().login("u0");
+        Page page = wc.getPage(new WebRequest(
+                wc.createCrumbedUrl("batch-control/grants/active/" + grant.getId() + "/revoke"),
+                HttpMethod.POST));
+        assertEquals(404, page.getWebResponse().getStatusCode(), "u0 holds no Batch Control permission at all, so revoke must be 404, not 403 (SPEC 2, #31)");
+
         assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "the grant must still be active");
     }
 
@@ -131,7 +147,11 @@ public class GrantWebTest {
                                 && "m1".equals(rec.getUser())), "revocation must leave a ChangeRecord(GRANT_REVOKE)");
     }
 
-    /** The grants screen requires one of RequestGrant/Approve/Manage (StaplerProxy gate). */
+    /**
+     * The grants screen requires one of RequestGrant/Approve/Manage (StaplerProxy gate).
+     * u0 holds none of the Batch Control permissions at all, so per SPEC item 2 / #31 the
+     * root action and every URL beneath it are absent for u0 -&gt; 404, not 403.
+     */
     @Test
     public void grantsListPermissionGate() throws Exception {
         activeGrant(); // some content to list
@@ -143,7 +163,7 @@ public class GrantWebTest {
         }
         Page denied = webClient().login("u0").getPage(new WebRequest(
                 new URL(j.getURL(), "batch-control/grants/"), HttpMethod.GET));
-        assertEquals(403, denied.getWebResponse().getStatusCode(), "a user with none of RequestGrant/Approve/Manage must get 403");
+        assertEquals(404, denied.getWebResponse().getStatusCode(), "a user with no Batch Control permission at all must get 404, not 403 (SPEC 2, #31)");
     }
 
     /** The approve endpoint of the contract works: POST by the designated approver creates the grant. */

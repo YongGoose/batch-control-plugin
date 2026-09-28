@@ -3,9 +3,8 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.model.RootAction;
-import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
-import jenkins.model.Jenkins;
+import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -27,28 +26,25 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       exports</li>
  * </ul>
  *
- * <p>The sidebar icon is hidden when the user has no plugin permission <em>and</em> run control
- * is off, but the URLs stay routable; view access is enforced by
- * {@link RequestsSection#getTarget()}.
+ * <p>The action is <em>absent</em> for a user who holds none of the Batch Control permissions
+ * (SPEC item 2, #31): {@link #getIconFileName()} and {@link #getUrlName()} both return
+ * {@code null}, so it is not listed and {@code /batch-control/} and every URL beneath it answer
+ * 404. A user who holds some Batch Control permission but not the one a section needs gets 403
+ * from that section's gate.
  */
 @Extension
 @Restricted(NoExternalUse.class)
 public class BatchControlRootAction implements RootAction {
 
+    /** Whether the current user may use this action at all. */
+    private static boolean isVisible() {
+        return SectionAccess.hasAny(SectionAccess.anyPermission());
+    }
+
     @Override
     @CheckForNull
     public String getIconFileName() {
-        Jenkins jenkins = Jenkins.get();
-        boolean anyPermission = jenkins.hasPermission(BatchControlPermissions.REQUEST)
-                || jenkins.hasPermission(BatchControlPermissions.APPROVE)
-                || jenkins.hasPermission(BatchControlPermissions.REQUEST_GRANT)
-                || jenkins.hasPermission(BatchControlPermissions.VIEW_HISTORY)
-                || jenkins.hasPermission(BatchControlPermissions.MANAGE);
-        if (!anyPermission && !BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
-            // Hide from the sidebar but keep the URL space routable.
-            return null;
-        }
-        return "symbol-check";
+        return isVisible() ? "symbol-shield-checkmark-outline plugin-ionicons-api" : null;
     }
 
     @Override
@@ -56,9 +52,24 @@ public class BatchControlRootAction implements RootAction {
         return "Batch Control";
     }
 
+    /**
+     * {@code null} without any Batch Control permission: per {@link hudson.model.Action#getUrlName()}
+     * that makes the action unreachable, so the URL space answers 404 instead of disclosing it.
+     */
     @Override
+    @CheckForNull
     public String getUrlName() {
-        return "batch-control";
+        return isVisible() ? "batch-control" : null;
+    }
+
+    /** Permissions for the landing page's {@code l:layout}: any Batch Control permission. */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.anyPermission();
+    }
+
+    /** Link predicates for the side panel: each entry is shown only if it can be opened. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     /** Stapler: serves {@code /batch-control/requests/...}. */
@@ -69,22 +80,6 @@ public class BatchControlRootAction implements RootAction {
     /** Stapler: serves {@code /batch-control/grants/...}. */
     public GrantsSection getGrants() {
         return new GrantsSection();
-    }
-
-    /**
-     * Whether the landing page offers the Grants screen (P-15).
-     *
-     * <p>{@link GrantsSection#getTarget()} refuses the whole subtree while change control is off,
-     * so the two must agree or the landing page advertises a link that explains why it does not
-     * work. The URL stays routable — the refusal is what tells a user with an old bookmark which
-     * switch changed — but it is not offered.
-     *
-     * <p>Only this entry point is conditional. Change Records, Dashboard, Incidents and History
-     * stay where they are with the switch off, because they are the audit trail and the switch
-     * governs whether windows confer anything, not what history may be read.
-     */
-    public boolean isGrantsAvailable() {
-        return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
     }
 
     /** Stapler: serves {@code /batch-control/changes/...}. */

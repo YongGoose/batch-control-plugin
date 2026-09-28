@@ -7,6 +7,7 @@ import hudson.model.Job;
 import hudson.model.ModelObject;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -16,8 +17,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -120,26 +120,17 @@ public class IncidentItem implements ModelObject {
         return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
     }
 
-    // ---------------------------------------------------------------- index (read-only)
+    // ---------------------------------------------------------------- screen access (Jelly)
 
-    /**
-     * Serves the bare detail URL {@code /batch-control/incidents/<id>/}. State transitions
-     * happen only on the named endpoints below, so every verb except GET/HEAD is refused with
-     * 405 here.
-     */
-    // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Use the acknowledge/resolve/comment/rerun endpoints to act on an incident;"
-                            + " only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.history();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- state-changing endpoints

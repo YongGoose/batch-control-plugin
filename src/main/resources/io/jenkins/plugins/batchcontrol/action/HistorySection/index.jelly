@@ -1,18 +1,11 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="History">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/" icon="symbol-arrow-left" title="Back to Batch Control"/>
-        <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-monitor" title="Dashboard"/>
-        <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning" title="Incidents"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="History" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>History</h1>
+      <l:app-bar title="History"/>
       <p class="jenkins-description">
-        Filtered audit views of run records, incidents, change records and run requests
-        (SPEC item 12). The job filter matches a substring of the full name; user, result and
+        Filtered audit views of run records, incidents, change records and run requests.
+        The job filter matches a substring of the full name; user, result and
         status match exactly. Dates are inclusive.
       </p>
 
@@ -47,12 +40,12 @@
       </form>
 
       <!-- Kind tabs: links that preserve the filter and reset paging. -->
-      <p>
+      <div class="jenkins-buttons-row" style="margin-bottom: 1rem;">
         <a class="jenkins-button ${it.kind == 'runs' ? 'jenkins-button--primary' : ''}" href="?${it.query('runs')}">Runs</a>
         <a class="jenkins-button ${it.kind == 'incidents' ? 'jenkins-button--primary' : ''}" href="?${it.query('incidents')}">Incidents</a>
         <a class="jenkins-button ${it.kind == 'changes' ? 'jenkins-button--primary' : ''}" href="?${it.query('changes')}">Changes</a>
         <a class="jenkins-button ${it.kind == 'requests' ? 'jenkins-button--primary' : ''}" href="?${it.query('requests')}">Requests</a>
-      </p>
+      </div>
 
       <!-- Blocked approval-marker re-use (D-30), shown on every tab and only when there is
            something to show. A blocked attempt creates no run record, so on the default Runs tab
@@ -66,7 +59,7 @@
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
           <strong>Blocked re-use of an approved-run marker</strong>
           <p style="margin: 0.25rem 0 0.5rem 0;">
-            An already consumed approval was submitted again and refused (D-23), so no build ran.
+            An already consumed approval was submitted again and refused, so no build ran.
             ${it.markerReuseCount} attempt(s) between ${it.filter.fromValue} and
             ${it.filter.toValue} match the filter above. Review whether this was an operator
             retrying or an automation replaying an approval it no longer holds.
@@ -96,6 +89,12 @@
         </div>
       </j:if>
 
+      <!-- Links to other screens are rendered only for a user who may open them (SPEC item 2).
+           Incident links need no check: the incident screens share this section's ViewHistory
+           gate. -->
+      <j:set var="links" value="${it.links}"/>
+      <j:set var="requestLinks" value="${links.requests}"/>
+      <j:set var="grantLinks" value="${links.grants}"/>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No matching records between ${it.filter.fromValue} and ${it.filter.toValue}.</p>
@@ -141,9 +140,12 @@
                       <td>${c.user}</td>
                       <td>${it.format(c.at)}</td>
                       <td>
-                        <j:if test="${c.grantId != null}">
-                          <a href="${rootURL}/batch-control/grants/${c.grantId}/">${c.grantId}</a>
-                        </j:if>
+                        <j:choose>
+                          <j:when test="${c.grantId != null and grantLinks}">
+                            <a href="${rootURL}/batch-control/grants/${c.grantId}/">${c.grantId}</a>
+                          </j:when>
+                          <j:otherwise>${c.grantId}</j:otherwise>
+                        </j:choose>
                       </td>
                       <td>${c.detail}</td>
                     </tr>
@@ -159,7 +161,14 @@
                 <tbody>
                   <j:forEach var="q" items="${it.pageItems}">
                     <tr>
-                      <td><a href="${rootURL}/batch-control/requests/${q.id}/">${q.id}</a></td>
+                      <td>
+                        <j:choose>
+                          <j:when test="${requestLinks}">
+                            <a href="${rootURL}/batch-control/requests/${q.id}/">${q.id}</a>
+                          </j:when>
+                          <j:otherwise>${q.id}</j:otherwise>
+                        </j:choose>
+                      </td>
                       <td>${q.jobFullName}</td>
                       <td>${q.requester}</td>
                       <td>${q.approver}</td>
@@ -189,9 +198,12 @@
                       <td>${it.duration(r.durationMs)}</td>
                       <td>${r.abortedBy}</td>
                       <td>
-                        <j:if test="${r.runRequestId != null}">
-                          <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
-                        </j:if>
+                        <j:choose>
+                          <j:when test="${r.runRequestId != null and requestLinks}">
+                            <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
+                          </j:when>
+                          <j:otherwise>${r.runRequestId}</j:otherwise>
+                        </j:choose>
                       </td>
                     </tr>
                   </j:forEach>
@@ -199,7 +211,7 @@
               </table>
             </j:otherwise>
           </j:choose>
-          <div style="margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page - 1}">Newer</a>
             </j:if>
@@ -217,12 +229,12 @@
         <code>-</code> or <code>@</code> are prefixed with a quote so spreadsheets never execute
         them as formulas.
       </p>
-      <p>
+      <div class="jenkins-buttons-row">
         <a class="jenkins-button" href="runs.csv?${it.baseQuery}">runs.csv</a>
         <a class="jenkins-button" href="incidents.csv?${it.baseQuery}">incidents.csv</a>
         <a class="jenkins-button" href="changes.csv?${it.baseQuery}">changes.csv</a>
         <a class="jenkins-button" href="requests.csv?${it.baseQuery}">requests.csv</a>
-      </p>
+      </div>
 
       <h2>Monthly Summary (${it.summaryMonth})</h2>
       <table class="jenkins-table" style="max-width: 30rem;">

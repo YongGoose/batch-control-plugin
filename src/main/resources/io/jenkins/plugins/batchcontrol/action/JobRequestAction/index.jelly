@@ -1,9 +1,9 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Request Run - ${it.job.fullDisplayName}">
+  <l:layout title="Request Run - ${it.job.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.job}"/>
     <l:main-panel>
-      <h1>Request Run: ${it.job.fullDisplayName}</h1>
+      <l:app-bar title="Request Run: ${it.job.fullDisplayName}"/>
       <j:choose>
         <j:when test="${!it.active}">
           <div class="jenkins-alert jenkins-alert-info">
@@ -25,11 +25,13 @@
               <f:textarea name="reason" value=""/>
             </f:entry>
             <f:entry title="Approver" description="The approver who will review this request.">
-              <select name="approver" class="jenkins-select__input">
-                <j:forEach var="a" items="${it.approverOptions}">
-                  <option value="${a}">${a}</option>
-                </j:forEach>
-              </select>
+              <div class="jenkins-select">
+                <select name="approver" class="jenkins-select__input">
+                  <j:forEach var="a" items="${it.approverOptions}">
+                    <option value="${a}">${a}</option>
+                  </j:forEach>
+                </select>
+              </div>
             </f:entry>
             <j:if test="${!empty(it.parameterDefinitions)}">
               <f:section title="Parameters"/>

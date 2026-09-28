@@ -91,7 +91,11 @@ public class RunRequestWebTest {
         assertTrue(job.getBuilds().isEmpty(), "no build may have been scheduled");
     }
 
-    /** T-SEC-02: POST approve without the Approve permission is 403. */
+    /**
+     * T-SEC-02 (sharpened by SPEC 2 / #31): u2 holds none of the Batch Control permissions
+     * at all (only Jenkins/Read + Item/Read), so the root action and every URL beneath it
+     * are absent, not merely refused -&gt; 404 (was 403).
+     */
     @Test
     public void t_sec_02_approveWithoutPermissionIs403() throws Exception {
         String id = createPending();
@@ -99,7 +103,7 @@ public class RunRequestWebTest {
 
         Page page = wc.getPage(new WebRequest(
                 wc.createCrumbedUrl("batch-control/requests/" + id + "/approve"), HttpMethod.POST));
-        assertEquals(403, page.getWebResponse().getStatusCode(), "a user without BatchControl/Approve must get 403");
+        assertEquals(404, page.getWebResponse().getStatusCode(), "a user with no Batch Control permission at all must get 404, not 403 (SPEC 2, #31)");
 
         assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
         j.waitUntilNoActivity();

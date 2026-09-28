@@ -1,15 +1,10 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Run Request ${it.id}">
-    <l:side-panel>
-      <l:tasks>
-        <l:task href="${rootURL}/batch-control/requests/" icon="symbol-arrow-left" title="Back to Run Requests"/>
-      </l:tasks>
-    </l:side-panel>
+  <l:layout title="Run Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <h1>Run Request ${it.id}</h1>
+      <l:app-bar title="Run Request ${it.id}"/>
 
-      <table class="jenkins-table">
+      <table class="jenkins-table jenkins-table--small">
         <tbody>
           <tr>
             <th style="text-align: left; width: 12rem;">Job</th>
@@ -210,11 +205,13 @@
           <j:otherwise>
             <f:form method="post" action="changeApprover" name="changeApprover">
               <f:entry title="New approver">
-                <select name="approver" class="jenkins-select__input">
-                  <j:forEach var="a" items="${it.approverOptions}">
-                    <option value="${a}">${a}</option>
-                  </j:forEach>
-                </select>
+                <div class="jenkins-select">
+                  <select name="approver" class="jenkins-select__input">
+                    <j:forEach var="a" items="${it.approverOptions}">
+                      <option value="${a}">${a}</option>
+                    </j:forEach>
+                  </select>
+                </div>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Change Approver"/>

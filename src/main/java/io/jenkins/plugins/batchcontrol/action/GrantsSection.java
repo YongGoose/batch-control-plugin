@@ -4,6 +4,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.ModelObject;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -15,8 +16,8 @@ import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletResponse;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * <p>URL space (fixed contract, asserted by tests):
  * <ul>
  *   <li>{@code /batch-control/grants/} — grant request list + active grant list + new request
- *       form (GET only; other verbs get 405)</li>
+ *       form (served from {@code index.jelly}; PUT/DELETE/PATCH get 405)</li>
  *   <li>{@code POST /batch-control/grants/create} — submit a new grant request</li>
  *   <li>{@code /batch-control/grants/<id>/} — request detail; POST {@code approve} /
  *       {@code reject} / {@code cancel} (see {@link GrantRequestItem})</li>
@@ -93,10 +94,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     public Object getTarget() {
         // Gate the entire /batch-control/grants/** subtree (list, details, POST endpoints go
         // through their own additional checks below and in GrantRequestItem/ActiveGrantsSection).
-        Jenkins.get().checkAnyPermission(
-                BatchControlPermissions.REQUEST_GRANT,
-                BatchControlPermissions.APPROVE,
-                BatchControlPermissions.MANAGE);
+        Jenkins.get().checkAnyPermission(SectionAccess.grants());
+        HttpVerbs.refuseUnsupported();
         // P-15 / SPEC item 1: with change control off, no change-control UI may appear. This whole
         // subtree is change-control UI, so it closes with the switch. GrantRequestService refuses
         // create and approve independently — this is the screen half of the same gate, not a
@@ -113,22 +112,15 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return "Grants";
     }
 
-    /**
-     * Serves the list URL {@code /batch-control/grants/}. Reads never change state, so every
-     * verb except GET/HEAD is refused with 405 (the state-changing endpoints are separate URLs).
-     */
-    // Read-only GET view; permission enforced in getTarget(), non-GET answered 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException, ServletException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Only GET is allowed on this URL");
-            return;
-        }
-        req.getView(this, "index.jelly").forward(req, rsp);
+
+    /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
+    public Permission[] getViewPermissions() {
+        return SectionAccess.grants();
+    }
+
+    /** Link predicates: a link to another screen is rendered only if the user may open it. */
+    public SectionAccess getLinks() {
+        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- routing
