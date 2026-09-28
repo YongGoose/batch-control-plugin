@@ -11,12 +11,28 @@
             <td>${it.request.scope.type}: ${it.request.scope.fullName}</td>
           </tr>
           <tr><th style="text-align: left;">Actions</th><td>${it.join(it.request.actions)}</td></tr>
+          <j:if test="${it.request.createNamePattern != null}">
+            <!-- D-40: shown to the approver so the decision covers the name as well. -->
+            <tr>
+              <th style="text-align: left;">New job name</th>
+              <td>
+                <code>${it.request.createNamePattern}</code>
+                <div class="jenkins-description">
+                  Create is allowed only for a new job whose name matches this in full: the exact
+                  name, or the regular expression between the slashes.
+                </div>
+              </td>
+            </tr>
+          </j:if>
           <tr><th style="text-align: left;">Duration</th><td>${it.request.durationMinutes} minutes</td></tr>
           <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
           <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
-          <tr><th style="text-align: left;">Approver</th><td>${it.request.approver}</td></tr>
+          <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
           <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
+          <j:if test="${it.request.decidedBy != null}">
+            <tr><th style="text-align: left;">Decided by</th><td>${it.request.decidedBy}</td></tr>
+          </j:if>
           <j:if test="${it.request.decisionComment != null}">
             <tr><th style="text-align: left;">Decision comment</th><td>${it.request.decisionComment}</td></tr>
           </j:if>
@@ -25,6 +41,25 @@
 
       <h2>Reason</h2>
       <p style="white-space: pre-wrap;">${it.request.reason}</p>
+
+      <j:if test="${!empty(it.request.approverChanges)}">
+        <h2>Approver Changes</h2>
+        <table class="jenkins-table">
+          <thead>
+            <tr><th>From</th><th>To</th><th>Changed by</th><th>At</th></tr>
+          </thead>
+          <tbody>
+            <j:forEach var="c" items="${it.request.approverChanges}">
+              <tr>
+                <td>${it.join(c.fromApprovers)}</td>
+                <td>${it.join(c.toApprovers)}</td>
+                <td>${c.by}</td>
+                <td>${it.format(c.at)}</td>
+              </tr>
+            </j:forEach>
+          </tbody>
+        </table>
+      </j:if>
 
       <j:if test="${it.canDecide}">
         <h2>Decision</h2>
@@ -48,6 +83,34 @@
             <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
           </f:bottomButtonBar>
         </f:form>
+      </j:if>
+
+      <j:if test="${it.canChangeApprover}">
+        <h2>Change Approvers</h2>
+        <j:choose>
+          <j:when test="${empty(it.approverOptions)}">
+            <div class="jenkins-alert jenkins-alert-warning">
+              No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
+            </div>
+          </j:when>
+          <j:otherwise>
+            <!-- D-26, D-37: starts on the current set; recorded as (previous set, new set). -->
+            <f:form method="post" action="changeApprover" name="changeApprover">
+              <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                       help="/plugin/batch-control/help/approvers.html">
+                <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                  <div class="jenkins-!-margin-bottom-1">
+                    <f:checkbox name="approvers" value="${a}" id="grant-approver-${s.index}"
+                                title="${a}" checked="${it.isDesignated(a)}"/>
+                  </div>
+                </j:forEach>
+              </f:entry>
+              <f:bottomButtonBar>
+                <f:submit value="Change Approvers"/>
+              </f:bottomButtonBar>
+            </f:form>
+          </j:otherwise>
+        </j:choose>
       </j:if>
 
       <j:if test="${it.canCancel}">

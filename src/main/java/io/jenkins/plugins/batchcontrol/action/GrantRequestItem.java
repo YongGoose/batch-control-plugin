@@ -7,11 +7,14 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
+import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -24,8 +27,9 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 
 /**
- * One grant request at {@code /batch-control/grants/<id>/}: detail view plus the three
- * state-changing POST endpoints ({@code approve}, {@code reject}, {@code cancel}).
+ * One grant request at {@code /batch-control/grants/<id>/}: detail view plus the four
+ * state-changing POST endpoints ({@code approve}, {@code reject}, {@code cancel},
+ * {@code changeApprover}).
  *
  * <p>Every endpoint is {@code @RequirePOST} (GET never changes state) and performs its permission
  * check before delegating; all business rules (approver eligibility, comment requirements,
@@ -82,9 +86,29 @@ public class GrantRequestItem implements ModelObject {
         return requester != null && requester.equals(Jenkins.getAuthentication2().getName());
     }
 
-    /** View gating for the approve/reject forms; the endpoints re-check for real. */
+    /**
+     * View gating for the approve/reject forms: only a member of the designated set sees them
+     * (D-29, D-37). The endpoints and the service re-check for real.
+     */
     public boolean isCanDecide() {
-        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE);
+        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
+                && request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
+    }
+
+    /** View gating for the change-approver form; the service enforces requester-only. */
+    public boolean isCanChangeApprover() {
+        return isPending() && isOwnedByCurrentUser()
+                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST_GRANT);
+    }
+
+    /** Approver candidates for the change-approver form (global list, self excluded). */
+    public List<String> getApproverOptions() {
+        return ApproverOptions.forJob(null);
+    }
+
+    /** Whether the change-approver picker starts with this candidate checked. */
+    public boolean isDesignated(String approver) {
+        return request.isDesignatedApprover(approver);
     }
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
@@ -134,6 +158,19 @@ public class GrantRequestItem implements ModelObject {
             throw new AccessDeniedException("Authentication is required to cancel a grant request");
         }
         call(() -> GrantRequestService.get().cancel(request.getId()));
+        rsp.sendRedirect2(".");
+    }
+
+    /**
+     * POST {@code changeApprover} with the repeated {@code approvers} field — replaces the
+     * designated set of a PENDING grant request (D-26, D-37). The service enforces
+     * requester-only, PENDING and eligibility, and records (previous set, new set, by, at).
+     */
+    @RequirePOST
+    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST_GRANT);
+        List<String> approvers = ApproverInput.read(req, null);
+        call(() -> GrantRequestService.get().changeApprovers(request.getId(), approvers));
         rsp.sendRedirect2(".");
     }
 

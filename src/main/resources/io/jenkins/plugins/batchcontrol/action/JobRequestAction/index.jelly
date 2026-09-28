@@ -17,21 +17,26 @@
         </j:when>
         <j:otherwise>
           <p class="jenkins-description">
-            This job requires an approved run request. Fill in the reason, pick an approver and
-            confirm the parameters; the build starts automatically once the request is approved.
+            This job requires an approved run request. Fill in the reason, check one or more
+            approvers and confirm the parameters; the build starts automatically once any one of
+            them approves the request.
           </p>
           <f:form method="post" action="submit" name="batch-control-request">
             <f:entry title="Reason" description="Why this run is needed (required).">
               <f:textarea name="reason" value=""/>
             </f:entry>
-            <f:entry title="Approver" description="The approver who will review this request.">
-              <div class="jenkins-select">
-                <select name="approver" class="jenkins-select__input">
-                  <j:forEach var="a" items="${it.approverOptions}">
-                    <option value="${a}">${a}</option>
-                  </j:forEach>
-                </select>
-              </div>
+            <!-- D-37: posted as repeated "approvers" fields, one user id per checked box, which
+                 JobRequestAction#doSubmit reads with getParameterValues. A single candidate starts
+                 checked so the common one-approver case needs no extra click. -->
+            <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                     help="/plugin/batch-control/help/approvers.html">
+              <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
+              <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                <div class="jenkins-!-margin-bottom-1">
+                  <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
+                              title="${a}" checked="${singleApprover}"/>
+                </div>
+              </j:forEach>
             </f:entry>
             <j:if test="${!empty(it.parameterDefinitions)}">
               <f:section title="Parameters"/>

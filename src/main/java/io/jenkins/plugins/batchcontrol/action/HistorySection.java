@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Incident;
@@ -209,12 +210,15 @@ public class HistorySection implements ModelObject, StaplerProxy {
         CsvWriter csv = CsvWriter.open(rsp, "requests.csv");
         csv.row("id", "jobFullName", "parameters", "reason", "requester", "approver", "status",
                 "createdAt", "decidedAt", "decisionComment", "selfApproved", "incidentId",
-                "executedRunId");
+                "executedRunId", "decidedBy");
+        // D-37: the existing approver column holds the designated set joined by ';', and
+        // decidedBy is appended last so column positions of existing consumers do not move.
+        // Every cell still goes through CsvWriter's formula escaping.
         for (RunRequest q : getRequestItems()) {
             csv.row(q.getId(), q.getJobFullName(), RunLinks.formatParameters(q.getParameters()),
-                    q.getReason(), q.getRequester(), q.getApprover(), q.getStatus(),
+                    q.getReason(), q.getRequester(), Approvers.csv(q.getApprovers()), q.getStatus(),
                     q.getCreatedAt(), q.getDecidedAt(), q.getDecisionComment(),
-                    q.isSelfApproved(), q.getIncidentId(), q.getExecutedRunId());
+                    q.isSelfApproved(), q.getIncidentId(), q.getExecutedRunId(), q.getDecidedBy());
         }
     }
 
@@ -517,6 +521,11 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     // ---------------------------------------------------------------- Jelly helpers
+
+    /** An approver set for display ({@code a1, a2}). */
+    public String join(@CheckForNull List<String> approvers) {
+        return Approvers.display(approvers);
+    }
 
     /** Human-readable timestamp. */
     public String format(Instant instant) {

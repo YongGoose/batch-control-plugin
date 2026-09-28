@@ -93,7 +93,7 @@ public final class Visibility {
 
     /**
      * A run request is visible iff the caller has Manage (or Overall/Administer), OR is the
-     * requester, OR is the designated approver, OR holds Item/Read on the target job. When the
+     * requester, OR is a member of the designated approver set (D-37), OR holds Item/Read on the target job. When the
      * job no longer exists — or is invisible to the caller, including the discover-only case
      * handled by {@link #findVisibleJob} — only requester/approver/Manage still see it.
      */
@@ -102,20 +102,23 @@ public final class Visibility {
             return true;
         }
         String me = Jenkins.getAuthentication2().getName();
-        if (me.equals(request.getRequester()) || me.equals(request.getApprover())) {
+        if (me.equals(request.getRequester()) || request.isDesignatedApprover(me)) {
             return true;
         }
         Job<?, ?> job = findVisibleJob(request.getJobFullName());
         return job != null && job.hasPermission(Item.READ);
     }
 
-    /** A grant request is visible iff the caller has Manage, or is requester or approver. */
+    /**
+     * A grant request is visible iff the caller has Manage, or is the requester or a member of
+     * the designated approver set (D-37).
+     */
     public static boolean canSeeGrantRequest(GrantRequest request) {
         if (isManager()) {
             return true;
         }
         String me = Jenkins.getAuthentication2().getName();
-        return me.equals(request.getRequester()) || me.equals(request.getApprover());
+        return me.equals(request.getRequester()) || request.isDesignatedApprover(me);
     }
 
     /** An active grant is visible iff the caller has Manage, or the grant is their own. */

@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
@@ -163,13 +164,13 @@ public class IncidentItem implements ModelObject {
     }
 
     /**
-     * POST {@code rerun?approver=...} — creates a rerun {@link RunRequest} pre-filled with the
-     * original parameters and linked back to this incident, then redirects to the new request's
-     * detail page.
+     * POST {@code rerun} with the repeated {@code approvers} field (the single {@code approver}
+     * field the rerun form posts is read too) — creates a rerun {@link RunRequest} pre-filled
+     * with the original parameters and linked back to this incident, then redirects to the new
+     * request's detail page.
      */
     @RequirePOST
-    public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp,
-            @QueryParameter String approver) throws IOException {
+    public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
         // S-06: mirror JobRequestAction.doSubmit — no run requests for jobs the caller cannot
         // read. The existence lookup runs as SYSTEM2 because the caller-scoped lookup returns
@@ -187,9 +188,10 @@ public class IncidentItem implements ModelObject {
         if (job != null) {
             job.checkPermission(Item.READ);
         }
+        List<String> approvers = ApproverInput.read(req, null);
         RunRequest created;
         try {
-            created = IncidentService.get().rerun(incident.getId(), approver);
+            created = IncidentService.get().rerun(incident.getId(), approvers);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The rerun request was rejected"
                     : e.getMessage());

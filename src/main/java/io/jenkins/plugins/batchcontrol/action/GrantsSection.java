@@ -6,6 +6,7 @@ import hudson.model.Item;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -13,6 +14,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -163,7 +165,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * (multi-valued checkboxes), {@code durationMinutes} (preset select),
      * {@code customDurationMinutes} (optional free number overriding the preset, capped
      * client-side at {@code maxGrantMinutes} and re-checked by the service), {@code reason},
-     * {@code approver}.
+     * {@code approvers} (repeated, one user id each; D-37) and the optional
+     * {@code createNamePattern} (exact name or {@code /regex/}, CREATE only; D-40).
      */
     @RequirePOST
     public void doCreate(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
@@ -174,10 +177,12 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         int durationMinutes = parseDuration(
                 req.getParameter("durationMinutes"), req.getParameter("customDurationMinutes"));
         String reason = req.getParameter("reason");
-        String approver = req.getParameter("approver");
+        List<String> approvers = ApproverInput.read(req, null);
+        String createNamePattern = parseCreateNamePattern(req.getParameter("createNamePattern"));
 
         try {
-            GrantRequestService.get().create(scope, actions, durationMinutes, reason, approver);
+            GrantRequestService.get().create(scope, actions, durationMinutes, reason, approvers,
+                    createNamePattern);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The grant request was rejected" : e.getMessage());
         }
@@ -217,6 +222,20 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return actions;
     }
 
+    /**
+     * Blank means no restriction. Only the length is bounded here, before the text reaches the
+     * regex compiler; syntax, item-name validity and "CREATE only" are the service's to refuse.
+     */
+    @CheckForNull
+    private static String parseCreateNamePattern(@CheckForNull String raw) {
+        String pattern = CreateNamePattern.normalize(raw);
+        if (pattern != null && pattern.length() > CreateNamePattern.MAX_LENGTH) {
+            throw new Failure("The name restriction must not exceed "
+                    + CreateNamePattern.MAX_LENGTH + " characters.");
+        }
+        return pattern;
+    }
+
     private static int parseDuration(@CheckForNull String preset, @CheckForNull String custom) {
         String raw = custom != null && !custom.trim().isEmpty() ? custom : preset;
         if (raw == null || raw.trim().isEmpty()) {
@@ -244,6 +263,11 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /** Preset duration choices from the global configuration. */
     public List<Integer> getDurationOptions() {
         return BatchControlGlobalConfiguration.get().getGrantDurationOptions();
+    }
+
+    /** Maximum length of the CREATE name restriction, for the form's {@code maxlength}. */
+    public int getCreateNamePatternMaxLength() {
+        return CreateNamePattern.MAX_LENGTH;
     }
 
     /** Upper bound in minutes for a grant request (client-side cap; the service re-checks). */

@@ -17,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
+import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -35,7 +36,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * Per-job "Request Run" page at {@code /job/<name>/batch-control/} (attached by
- * {@link JobRequestActionFactory}). Renders the request form — reason, approver choice and the
+ * {@link JobRequestActionFactory}). Renders the request form — reason, approver set and the
  * job's parameter definitions exactly like the core build page — and submits it to
  * {@link RunRequestService#create}.
  *
@@ -142,14 +143,18 @@ public class JobRequestAction implements Action {
         job.checkPermission(Item.READ);
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
 
-        JSONObject formData = req.getSubmittedForm();
-        String reason = Util.fixEmptyAndTrim(formData.optString("reason", ""));
-        String approver = Util.fixEmptyAndTrim(formData.optString("approver", ""));
+        // The rendered form posts a json blob (f:form) plus the raw fields; a script may post
+        // the raw fields only. Both carry the same contract: reason, repeated approvers (D-37).
+        JSONObject formData = req.getParameter("json") != null ? req.getSubmittedForm() : null;
+        String reason = Util.fixEmptyAndTrim(formData != null
+                ? formData.optString("reason", "") : Util.fixNull(req.getParameter("reason")));
+        List<String> approvers = ApproverInput.read(req, formData);
 
         RunRequest request;
         try {
-            Map<String, String> parameters = parseParameters(req, formData);
-            request = RunRequestService.get().create(job, parameters, reason, approver);
+            Map<String, String> parameters = formData == null
+                    ? new LinkedHashMap<>() : parseParameters(req, formData);
+            request = RunRequestService.get().create(job, parameters, reason, approvers);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
         }
