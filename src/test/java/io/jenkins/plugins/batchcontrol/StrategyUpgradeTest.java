@@ -204,6 +204,35 @@ public class StrategyUpgradeTest {
     }
 
     /**
+     * T-02-36 (SPEC 8 Implementation line, D-35a): a saved wrapper around matrix-auth's
+     * GlobalMatrixAuthorizationStrategy loads as BatchControlMatrixAuthorizationStrategy with
+     * every entry kept, grants confer, the monitor is quiet and the next save writes the subclass.
+     */
+    @Test
+    public void t_02_36_legacyGlobalMatrixWrapperLoadsAsMatrixSubclass() throws Exception {
+        hudson.security.GlobalMatrixAuthorizationStrategy plain =
+                StrategyFixtures.matrix(new hudson.security.GlobalMatrixAuthorizationStrategy());
+        Set<String> before = StrategyFixtures.describeMatrix(plain.getGrantedPermissionEntries());
+        j.createFreeStyleProject("job");
+
+        loadAsLegacyWrapper(plain, 1);
+
+        assertSame(BatchControlMatrixAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),
+                "a legacy wrapper around the global matrix must load as the Batch Control matrix strategy");
+        assertEquals(before, StrategyFixtures.describeMatrix(
+                ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).getGrantedPermissionEntries()),
+                "every global entry must be kept");
+        FreeStyleProject reloaded = j.jenkins.getItemByFullName("job", FreeStyleProject.class);
+        StrategyFixtures.changeControlOn();
+        assertFalse(has(reloaded, "bob", Item.CONFIGURE), "premise: bob has no Configure before a grant");
+        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
+        assertTrue(has(reloaded, "bob", Item.CONFIGURE), "grants must confer after the upgrade");
+        assertFalse(has(reloaded, "carol", Item.CONFIGURE), "guard: carol holds no grant");
+        assertFalse(StrategyFixtures.strategyMonitor().isActivated(), "the monitor must stay quiet after a supported upgrade");
+        assertSavedWithoutLegacyClass(BatchControlMatrixAuthorizationStrategy.class);
+    }
+
+    /**
      * T-02-29 (successor of T-SEC-13 / S-11): a wrapper nested inside a wrapper around
      * matrix-auth loads as a single BatchControlMatrixAuthorizationStrategy with every entry
      * kept — no nesting survives the load.

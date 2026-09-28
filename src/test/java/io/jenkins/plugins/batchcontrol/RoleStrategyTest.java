@@ -91,8 +91,19 @@ public class RoleStrategyTest {
                 "RoleBasedAuthorizationStrategy.getInstance() must return the Batch Control role strategy");
         assertNotNull(cfg.getIconFileName(), "the Manage Roles link must be shown");
         assertNotNull(cfg.getStrategy(), "the Manage Roles page must find the strategy");
-        assertTrue(j.createWebClient().login("admin").goTo("manage/" + cfg.getUrlName() + "/").getWebResponse().getStatusCode() == 200,
-                "the Manage Roles page must open for the administrator");
+        // role-strategy's table.js does not parse in HtmlUnit; the page is asserted on its markup.
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.getOptions().setJavaScriptEnabled(false);
+        wc.login("admin");
+        org.htmlunit.Page page = wc.goTo("manage/" + cfg.getUrlName() + "/");
+        assertTrue(page.getWebResponse().getStatusCode() == 200, "the Manage Roles page must open for the administrator");
+        String body = page.getWebResponse().getContentAsString();
+        assertTrue(body.contains("manage-roles") && body.contains("assign-roles"),
+                "the role-strategy page must offer Manage Roles and Assign Roles, got:\n" + body);
+        org.htmlunit.Page manage = wc.goTo("manage/" + cfg.getUrlName() + "/manage-roles");
+        assertTrue(manage.getWebResponse().getStatusCode() == 200
+                        && manage.getWebResponse().getContentAsString().contains("team-.*"),
+                "the Manage Roles page must render the installed roles (item pattern team-.*)");
     }
 
     /**

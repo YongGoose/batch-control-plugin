@@ -160,9 +160,12 @@ public class GrantSelfGrantGuardTest {
         StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
 
         String xml = p.getConfigFile().asString();
-        String changed = xml.contains("<description/>")
-                ? xml.replace("<description/>", "<description>edited-in-window</description>")
-                : xml.replaceFirst("<description>[^<]*</description>", "<description>edited-in-window</description>");
+        // A new job's config.xml may carry no <description> element at all: drop whatever form it
+        // has and insert one right after the root element, so the payload really edits the job.
+        String changed = xml.replaceAll("<description/>|<description>[^<]*</description>", "")
+                .replaceFirst("<project(\\s[^>]*)?>", "$0<description>edited-in-window</description>");
+        assertTrue(changed.contains("<description>edited-in-window</description>") && !changed.equals(xml),
+                "fixture: the payload must differ from the saved config, got:\n" + changed);
         assertEquals(200, postConfigXml("bob", p, changed), "bob's ordinary save inside the window must succeed");
         assertEquals("edited-in-window", j.jenkins.getItemByFullName("job", FreeStyleProject.class).getDescription());
 
@@ -249,5 +252,89 @@ public class GrantSelfGrantGuardTest {
         FreeStyleProject reloaded = j.jenkins.getItemByFullName("team/new", FreeStyleProject.class);
         assertNotNull(reloaded);
         assertFalse(has(reloaded, "bob", Item.CONFIGURE), "after a reload bob must still hold no Configure on team/new");
+    }
+
+    private static final String PAYLOAD_PROPERTY = "<hudson.security.AuthorizationMatrixProperty>"
+            + "<inheritanceStrategy class=\"org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy\"/>"
+            + "<permission>USER:hudson.model.Item.Configure:bob</permission>"
+            + "<permission>USER:hudson.model.Item.Configure:carol</permission>"
+            + "</hudson.security.AuthorizationMatrixProperty>";
+
+    private int postCreateItem(String user, String containerUrl, String query, String body) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
+        java.net.URL url = new java.net.URL(wc.createCrumbedUrl(containerUrl + "createItem").toExternalForm() + "&" + query);
+        WebRequest req = new WebRequest(url, HttpMethod.POST);
+        if (body != null) {
+            req.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
+            req.setRequestBody(body);
+        }
+        return wc.getPage(req).getWebResponse().getStatusCode();
+    }
+
+    /** The payload's property is gone: no entry names bob or carol (in memory and on disk), and past the window neither configures. */
+    private void assertPayloadPropertyRemoved(String fullName) throws Exception {
+        FreeStyleProject created = j.jenkins.getItemByFullName(fullName, FreeStyleProject.class);
+        assertNotNull(created, "premise: " + fullName + " must have been created");
+        AuthorizationMatrixProperty amp = created.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || (!mentions(amp.getGrantedPermissionEntries(), "bob") && !mentions(amp.getGrantedPermissionEntries(), "carol")),
+                "the payload's authorization property must be removed from " + fullName);
+        String disk = created.getConfigFile().asString();
+        assertFalse(disk.contains(":bob</permission>") || disk.contains(":carol</permission>"),
+                "the removal must be persisted: " + fullName + "'s config.xml must name neither bob nor carol");
+        assertFalse(has(created, "carol", Item.CONFIGURE), "carol must gain no Configure from the payload");
+
+        List<ChangeRecord> violations = StrategyFixtures.records(ChangeType.GRANT_VIOLATION);
+        assertEquals(1, violations.size(), "exactly one GRANT_VIOLATION record must be written, got " + violations.size());
+        assertEquals("bob", violations.get(0).getUser(), "the record must name the creator");
+        assertEquals(fullName, violations.get(0).getTarget(), "the record must name the created item");
+
+        afterWindow();
+        assertFalse(has(created, "bob", Item.CONFIGURE), "past the window bob must hold no Configure on " + fullName);
+    }
+
+    /**
+     * T-02-34 (D-35c, creation payload): bob holds only a FOLDER CREATE grant on {@code team} and
+     * POSTs {@code job/team/createItem} with a config.xml carrying an AuthorizationMatrixProperty
+     * that gives himself and carol Item/Configure. The item is created, the payload's property is
+     * removed (memory and disk) and one GRANT_VIOLATION names bob and {@code team/new}; past the
+     * window bob holds no Configure. Guard: the same POST without the property writes no record
+     * (T-02-25 covers the listener side).
+     */
+    @Test
+    public void t_02_34_createItemPayloadCannotCarryAuthorizationProperty() throws Exception {
+        j.jenkins.createProject(Folder.class, "team");
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+
+        String plain = "<?xml version='1.1' encoding='UTF-8'?><project><properties/><builders/><publishers/><buildWrappers/></project>";
+        int guard = postCreateItem("bob", "job/team/", "name=clean", plain);
+        assertTrue(guard < 400, "premise: the Create grant lets bob create through createItem, got HTTP " + guard);
+        assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(), "guard: a payload without a property is no violation");
+
+        postCreateItem("bob", "job/team/", "name=new", plain.replace("<properties/>", "<properties>" + PAYLOAD_PROPERTY + "</properties>"));
+        assertPayloadPropertyRemoved("team/new");
+    }
+
+    /**
+     * T-02-35 (D-35c, copied item): the source {@code team/src} carries an authorization property
+     * (bob and carol Item/Configure, set by the administrator). bob, with only a FOLDER CREATE
+     * grant, copies it through {@code createItem?mode=copy&from=src}. The copy carries no
+     * authorization property of the source, one GRANT_VIOLATION names bob and {@code team/copy},
+     * and past the window bob holds no Configure on the copy. Guard: the source keeps its property.
+     */
+    @Test
+    public void t_02_35_copiedItemCannotCarryAuthorizationProperty() throws Exception {
+        Folder team = j.jenkins.createProject(Folder.class, "team");
+        FreeStyleProject src = team.createProject(FreeStyleProject.class, "src");
+        AuthorizationMatrixProperty amp = new AuthorizationMatrixProperty(new HashMap<>(), new InheritParentStrategy());
+        amp.add(Item.CONFIGURE, PermissionEntry.user("bob"));
+        amp.add(Item.CONFIGURE, PermissionEntry.user("carol"));
+        src.addProperty(amp);
+        assertTrue(has(src, "bob", Item.EXTENDED_READ), "premise: bob may read the source's configuration");
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+
+        int status = postCreateItem("bob", "job/team/", "name=copy&mode=copy&from=src", null);
+        assertTrue(status < 400, "premise: bob may copy inside his Create window, got HTTP " + status);
+        assertPayloadPropertyRemoved("team/copy");
+        assertTrue(has(src, "carol", Item.CONFIGURE), "guard: the source keeps its own property");
     }
 }

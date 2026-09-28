@@ -3,11 +3,11 @@ package io.jenkins.plugins.batchcontrol;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleBasedAuthorizationStrategy;
 import hudson.model.AdministrativeMonitor;
 import hudson.model.Item;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor;
-import io.jenkins.plugins.batchcontrol.ops.RoleStrategyNoticeMonitor;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
+import io.jenkins.plugins.batchcontrol.security.BatchControlRoleBasedAuthorizationStrategy;
+import java.util.Collections;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 8 administrative monitors. Matrix rows T-08-06 (warning when a user holds direct
- * Item/Configure while change control is on) and T-08-08 (notice when Role Strategy is the
- * global authorization strategy).
+ * Item/Configure while change control is on) and T-08-08 (the batch-control-strategy monitor
+ * for a plain role strategy, SPEC item 8 / D-35a).
  *
  * Per the slice instruction these AdministrativeMonitor rows are covered through integration
  * checks of monitor activation (isActivated()), not through screen-scraping /manage.
@@ -77,22 +77,31 @@ public class GrantMonitorsTest {
         assertFalse(monitor.isActivated(), "with change control off the monitor must stay quiet");
     }
 
-    /** T-08-08: Role Strategy as the global authorization strategy activates the unsupported-JIT notice. */
+    /**
+     * T-08-08 (rewritten for SPEC item 8 / D-35a, which replaced the Role Strategy "JIT
+     * unsupported" notice): with change control on, a plain RoleBasedAuthorizationStrategy
+     * activates the {@code batch-control-strategy} monitor; the Batch Control role strategy does
+     * not; with change control off the plain one does not either.
+     */
     @Test
-    public void t_08_08_roleStrategyNoticeMonitorActivation() throws Exception {
-        AdministrativeMonitor monitor = AdministrativeMonitor.all().get(RoleStrategyNoticeMonitor.class);
-        assertNotNull(monitor, "the Role Strategy notice monitor must be registered");
+    public void t_08_08_plainRoleStrategyActivatesStrategyMonitor() throws Exception {
+        AdministrativeMonitor monitor = j.jenkins.getAdministrativeMonitor("batch-control-strategy");
+        assertNotNull(monitor, "the batch-control-strategy monitor must be registered");
         assertTrue(monitor.isEnabled());
 
-        // matrix strategy selected -> quiet
-        GlobalMatrixAuthorizationStrategy matrix = new GlobalMatrixAuthorizationStrategy();
-        matrix.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
-        j.jenkins.setAuthorizationStrategy(matrix);
-        assertFalse(monitor.isActivated(), "a matrix strategy must not trigger the Role Strategy notice");
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
 
-        // Role Strategy selected -> the JIT-unsupported notice must show
-        j.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy());
-        assertTrue(monitor.isActivated(), "selecting Role Strategy as the global strategy must activate the notice "
-                + "(JIT change control is unsupported there, ARCHITECTURE section 7)");
+        j.jenkins.setAuthorizationStrategy(new BatchControlRoleBasedAuthorizationStrategy(
+                StrategyFixtures.roles(), Collections.emptySet()));
+        assertFalse(monitor.isActivated(), "the Batch Control role strategy must not activate the monitor");
+
+        j.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy(StrategyFixtures.roles(), Collections.emptySet()));
+        assertTrue(monitor.isActivated(), "a plain role strategy with change control on must activate the monitor");
+
+        cfg.setChangeControlEnabled(false);
+        cfg.save();
+        assertFalse(monitor.isActivated(), "with change control off the monitor must stay quiet");
     }
 }

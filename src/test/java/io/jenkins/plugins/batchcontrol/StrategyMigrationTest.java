@@ -208,6 +208,34 @@ public class StrategyMigrationTest {
     }
 
     /**
+     * T-02-37 (D-35a uninstall path, UI): the revert button is offered on the global
+     * configuration page ({@code /manage/configure}) only while a Batch Control strategy is
+     * installed, and POST {@code .../revert} works while the monitor is not activated (which is
+     * exactly the state in which a Batch Control strategy is installed).
+     */
+    @Test
+    public void t_02_37_revertButtonShownOnlyForBatchControlStrategyAndWorksWhileMonitorQuiet() throws Exception {
+        String revertTarget = "administrativeMonitor/" + MONITOR_ID + "/revert";
+        JenkinsRule.WebClient wc = j.createWebClient().login("admin");
+
+        j.jenkins.setAuthorizationStrategy(StrategyFixtures.matrix(new ProjectMatrixAuthorizationStrategy()));
+        assertFalse(wc.goTo("manage/configure").getWebResponse().getContentAsString().contains(revertTarget),
+                "guard: with a plain strategy installed the revert button must not be shown");
+
+        j.jenkins.setAuthorizationStrategy(StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy()));
+        assertTrue(wc.goTo("manage/configure").getWebResponse().getContentAsString().contains(revertTarget),
+                "with a Batch Control strategy installed the global configuration page must offer the revert button");
+        assertFalse(StrategyFixtures.strategyMonitor().isActivated(), "premise: the monitor is not activated");
+
+        int status = post("admin", "revert", true);
+        assertTrue(status < 400, "revert must work while the monitor is not activated, got HTTP " + status);
+        assertSame(ProjectMatrixAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),
+                "revert must install the plain parent");
+        assertFalse(wc.goTo("manage/configure").getWebResponse().getContentAsString().contains(revertTarget),
+                "after the revert the button must disappear");
+    }
+
+    /**
      * T-02-33: the batch-control-strategy monitor shows exactly when change control is on and the
      * installed strategy is not a Batch Control strategy: plain project matrix, plain global
      * matrix and plain role strategy activate it; either subclass keeps it quiet; with change
