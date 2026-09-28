@@ -1,0 +1,23 @@
+<?jelly escape-by-default='true'?>
+<!--
+  D-35a (ARCHITECTURE section 4): change control is on, but the installed authorization
+  strategy is not a Batch Control strategy, so active grants confer nothing. Covers an
+  instance that never migrated and a role-strategy Manage Roles save, which reinstalls the
+  plain class. The migration button only shows when the installed strategy is a plain
+  matrix-auth or role-strategy configuration this plugin can copy (it.migratable).
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <j:set var="controls">
+    <j:if test="${it.migratable}">
+      <form method="post" action="${rootURL}/${it.url}/migrate">
+        <f:submit value="Install the Batch Control variant"/>
+      </form>
+    </j:if>
+  </j:set>
+  <l:adminMonitor severity="warning" controls="${controls}">
+    <strong>Batch Control:</strong> change control is enabled, but the installed authorization
+    strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
+    grants do not confer any permission. Install the matching Batch Control strategy to restore
+    just-in-time change control.
+  </l:adminMonitor>
+</j:jelly>
