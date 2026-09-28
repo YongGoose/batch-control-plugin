@@ -37,7 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *   <li>{@code POST batch-control/grants/create} with {@code scopeType}, {@code scopeFullName},
  *       repeated {@code actions}, {@code durationMinutes}, {@code reason}, repeated
  *       {@code approvers} and the optional {@code createNamePattern};</li>
- *   <li>{@code POST batch-control/grants/<id>/approve|reject} with {@code comment}.</li>
+ *   <li>{@code POST batch-control/grants/<id>/approve|reject} with {@code comment};</li>
+ *   <li>{@code POST batch-control/grants/<id>/changeApprover} with repeated {@code approvers}
+ *       (requester-only, PENDING-only; symmetric with the run-request endpoint above).</li>
  * </ul>
  *
  * <p>Redirects are not followed, so a success answers 2xx/3xx and a refusal 4xx.
@@ -163,6 +165,16 @@ final class ApproverFormFixtures {
         List<NameValuePair> params = new ArrayList<>();
         params.add(new NameValuePair("comment", comment));
         return post(j, userId, "batch-control/grants/" + requestId + "/" + verb, params);
+    }
+
+    /**
+     * {@code POST batch-control/grants/<id>/changeApprover}: only the requester of a still-PENDING
+     * grant request may edit its designated approver set (D-26, D-37 applied to GrantRequest).
+     */
+    static WebResponse changeGrantApprovers(JenkinsRule j, String userId, String requestId,
+                                            String... approvers) throws Exception {
+        return post(j, userId, "batch-control/grants/" + requestId + "/changeApprover",
+                approverPairs(approvers));
     }
 
     // ------------------------------------------------------------------ assertions and records

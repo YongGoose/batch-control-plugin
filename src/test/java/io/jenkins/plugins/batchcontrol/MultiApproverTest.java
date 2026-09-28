@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import jenkins.model.Jenkins;
+import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -25,9 +26,11 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.assertClientError;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.assertSuccess;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.changeGrantApprovers;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.changeRunApprovers;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.decideGrant;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.decideRun;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.get;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.grantRequestIds;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.runRequestIds;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrant;
@@ -47,6 +50,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * designation change edits the set and is recorded as (previous set, new set, by, at).
  * Matrix rows T-03-07 .. T-03-20. The legacy single-{@code approver} load is T-03-21 in
  * {@link MultiApproverLegacyLoadTest} (it needs a restart).
+ *
+ * <p>T-03-22 .. T-03-25 (D-37, D-26; matrix note 59) extend the requester-driven designation
+ * change to grant requests through {@code POST batch-control/grants/<id>/changeApprover}: the
+ * requester may edit a still-PENDING grant request's set, another permission holder may not
+ * (403), the endpoint refuses GET (405), and a decided request may no longer be changed.
  *
  * <p>Every creation, decision and designation change goes through the frozen HTTP form
  * contract (field {@code approvers}, one user id per value; see {@link ApproverFormFixtures}).
@@ -357,5 +365,92 @@ public class MultiApproverTest {
         assertClientError(submitGrant(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "again", null, "a1", "u1"), "a grant request whose set contains the requester");
         assertEquals(before, grantRequestIds());
+    }
+
+    /**
+     * T-03-22: the requester may edit a still-PENDING grant request's designated approvers too
+     * (D-26, D-37 applied to GrantRequest). The new set replaces the old one and exactly one
+     * change is recorded with both whole sets, who changed it and when.
+     */
+    @Test
+    public void t_03_22_grantChangeApproverByRequesterEditsTheSetAndRecords() throws Exception {
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+                "fix the cron expression", null, "a1", "a2");
+
+        assertSuccess(changeGrantApprovers(j, "u1", id, "a2", "a3"), "the requester's grant designation change");
+
+        GrantRequest reloaded = GrantRequestService.get().load(id);
+        assertEquals(Arrays.asList("a2", "a3"), reloaded.getApprovers(), "the new set must replace the old one");
+        List<GrantRequest.ApproverChange> changes = reloaded.getApproverChanges();
+        assertEquals(1, changes.size(), "exactly one designation change must be recorded");
+        assertEquals(Arrays.asList("a1", "a2"), changes.get(0).getFromApprovers(), "the previous set");
+        assertEquals(Arrays.asList("a2", "a3"), changes.get(0).getToApprovers(), "the new set");
+        assertEquals("u1", changes.get(0).getBy());
+        assertNotNull(changes.get(0).getAt());
+    }
+
+    /**
+     * T-03-23: only the requester may change a grant request's designation. u2 holds
+     * {@code BatchControl/RequestGrant} but is not the requester of this request and is
+     * refused with 403; the set and the (empty) change history are unchanged.
+     */
+    @Test
+    public void t_03_23_grantChangeApproverByAnotherHolderIsForbidden() throws Exception {
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+                "fix the cron expression", null, "a1", "a2");
+
+        assertEquals(403, changeGrantApprovers(j, "u2", id, "a3").getStatusCode(),
+                "u2 holds BatchControl/RequestGrant but is not the requester of this request");
+
+        GrantRequest reloaded = GrantRequestService.get().load(id);
+        assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged");
+        assertTrue(reloaded.getApproverChanges() == null || reloaded.getApproverChanges().isEmpty(),
+                "a forbidden change must not be recorded");
+    }
+
+    /**
+     * T-03-24: a state change must never happen on GET; the endpoint answers 405 and the
+     * designation and its change history are unaffected.
+     */
+    @Test
+    public void t_03_24_grantChangeApproverByGetIsRefused() throws Exception {
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+                "fix the cron expression", null, "a1", "a2");
+
+        WebResponse response = get(j, "u1", "batch-control/grants/" + id + "/changeApprover?approvers=a3");
+        assertEquals(405, response.getStatusCode(), "GET must never change the designation");
+
+        GrantRequest reloaded = GrantRequestService.get().load(id);
+        assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged");
+        assertTrue(reloaded.getApproverChanges() == null || reloaded.getApproverChanges().isEmpty(),
+                "a refused GET must not be recorded");
+    }
+
+    /**
+     * T-03-25: once a grant request has been decided, the designation may no longer be changed,
+     * even by the requester.
+     */
+    @Test
+    public void t_03_25_grantChangeApproverAfterDecisionIsRefused() throws Exception {
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+                "fix the cron expression", null, "a1", "a2");
+        assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: the decision that closes the request");
+
+        assertClientError(changeGrantApprovers(j, "u1", id, "a3"), "a change attempted after the decision");
+
+        GrantRequest reloaded = GrantRequestService.get().load(id);
+        assertEquals(RequestStatus.APPROVED, reloaded.getStatus(), "fixture: the decision must have gone through");
+        assertEquals("a1", reloaded.getDecidedBy());
+        assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged after the decision");
+        assertTrue(reloaded.getApproverChanges() == null || reloaded.getApproverChanges().isEmpty(),
+                "a change after the decision must not be recorded");
     }
 }
