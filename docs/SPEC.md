@@ -39,6 +39,9 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: `Manage`가 없는 사용자는 전역 설정·결재자 목록을 바꿀 수 없다.
 - 수용 기준: 관리자 자가 결재 시 ApprovalRecord에 `selfApproved=true`가 기록된다.
 - 전역 옵션 `allowAdminSelfApproval` 기본값 true. false면 관리자도 직무 분리 적용.
+- Acceptance: the permission names used by JCasC and scripts are `BatchControl/<Name>`, independent of the display title of the group. (D-41)
+- Acceptance: a user who holds none of the Batch Control permissions does not see the Batch Control root action in the navigation, and `/batch-control/` answers 404 to them. A link inside the Batch Control screens is shown only to a user who may open its target. (hosting review, #31)
+- Acceptance: the per-job request action (`/job/<name>/batch-control-request/` and its siblings) is absent, not merely refused, for a user who may not use it: it is not listed on the job page and its URL answers 404. (hosting review, #31)
 
 **3. 결재자 지정**
 플러그인 설정에 결재 가능자 목록(사용자 ID)을 등록하고, 요청자는 그중 한 명을 골라 요청합니다.
