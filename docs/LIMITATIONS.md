@@ -274,6 +274,33 @@ code does on purpose.
     neither be requested nor approved during it (item 29), and it removes nothing
     from the audit history of the windows that did exist.
 
+## SYSTEM builds and the global-matrix upgrade
+
+35. **A build that runs as SYSTEM can still write a permanent authorization
+    entry.** A Pipeline `properties([authorizationMatrix(...)])` step, or a Job
+    DSL seed job, executes as SYSTEM unless the instance runs builds under a
+    real user; the guard that reverts a grant holder's self-escalating edit to
+    a job's authorization property looks at who saved the item, and SYSTEM is
+    not a grant holder, so nothing is reverted or recorded. This is not new
+    exposure: any user who already holds standing `Item/Configure` on that job
+    has the identical path today, with or without Batch Control, since Jenkins
+    itself does not distinguish a script's save from a human one. Installing
+    **Authorize Project** so the build runs as the configuring user brings
+    that save under the same guard as a manual one. While change control is
+    on, an administrative monitor warns when no build authenticator (a
+    `QueueItemAuthenticator`) is configured.
+36. **A legacy wrapper around the global matrix strategy is unwrapped on
+    upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
+    per-item ACLs, so converting it straight into the Batch Control matrix
+    strategy would make every stale job, folder and agent
+    `AuthorizationMatrixProperty` effective at once and let any native
+    Configure holder start editing item ACLs. Upgrading from an older release
+    therefore leaves the plain global matrix strategy installed. Moving to
+    **Batch Control: Matrix-based security** afterwards is a separate action
+    an administrator takes explicitly, from the migration button or the
+    administrative monitor's prompt, and both say plainly that per-item
+    properties become effective from that point.
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting

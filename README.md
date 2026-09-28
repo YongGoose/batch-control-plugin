@@ -319,6 +319,14 @@ role-strategy: its own **Manage Roles** save reinstalls the plain
 `RoleBasedAuthorizationStrategy`, so grants stop conferring until an
 administrator re-installs the Batch Control variant from the monitor's prompt.
 
+**A legacy wrapper around the global matrix strategy is unwrapped, not
+converted, on upgrade.** Converting it directly would make every stale
+per-item authorization property effective at once, so upgrading from an
+older release leaves the plain global matrix strategy installed instead.
+Moving to **Batch Control: Matrix-based security** afterwards is a separate,
+explicit step, from the migration button or the monitor's prompt, and both
+say plainly that per-item properties become effective from that point.
+
 **A protected job refused at queue entry fails its caller.** A Pipeline `build`
 step that hits the gate ends the upstream job as `FAILURE`, even with
 `wait: false`. That is Jenkins' behaviour, not a choice made here.
