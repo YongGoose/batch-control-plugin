@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.Cause;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -38,6 +39,7 @@ import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import hudson.cli.CLICommandInvoker;
@@ -47,6 +49,8 @@ import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
+import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.requestAndApprove;
+import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.secureWithRunControl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -332,10 +336,56 @@ public class QueueBlockTest {
         j.assertBuildStatusSuccess(build);
     }
 
+    /**
+     * T-SEC-32 (security-07 S-01, SPEC item 6 / D-16): a job's own approved run may legitimately
+     * trigger itself again (for example {@code build job: env.JOB_NAME, wait: false}, guarded to
+     * fire only once). A same-job UpstreamCause is not a marker replay: D-16 says an
+     * UpstreamCause passes by default (blockUpstream=false) regardless of which job it names, so
+     * the retriggered run must reach the queue and start. In-row guard: the same self-trigger is
+     * still refused when blockUpstream=true — an empty/unset allow list blocks every upstream
+     * job, including the job itself (D-16), exactly like T-06-12's non-allow-listed upstream job.
+     */
+    @Test
+    public void t_sec_32_selfUpstreamCauseFollowsBlockUpstreamPolicy() throws Exception {
+        secureWithRunControl(j);
+
+        WorkflowJob passes = createSelfTriggeringJob("self-up-pass", false);
+        requestAndApprove(passes);
+        j.waitUntilNoActivity();
+        assertEquals(2, passes.getBuilds().size(), "the approved run's self-trigger must reach the queue and start when blockUpstream=false (security-07 S-01, D-16)");
+        WorkflowRun retriggered = passes.getBuildByNumber(2);
+        assertNotNull(retriggered, "build #2 (the self-trigger) must exist");
+        j.assertBuildStatusSuccess(retriggered);
+        Cause.UpstreamCause upstreamCause = retriggered.getCause(Cause.UpstreamCause.class);
+        assertNotNull(upstreamCause, "the retriggered run must carry an UpstreamCause");
+        assertEquals(passes.getFullName(), upstreamCause.getUpstreamProject(), "the UpstreamCause must name the same job");
+
+        // In-row guard: with blockUpstream=true the self-trigger is refused like any other
+        // non-allow-listed upstream job (T-06-12).
+        WorkflowJob blocked = createSelfTriggeringJob("self-up-block", true);
+        requestAndApprove(blocked);
+        j.waitUntilNoActivity();
+        assertEquals(1, blocked.getBuilds().size(), "the self-trigger must not have produced a second build when blockUpstream=true");
+        assertBlocked(blocked, 2);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void protect(FreeStyleProject target) throws Exception {
         setBatchControl(target, new BatchControlJobProperty(true));
+    }
+
+    /** A Pipeline job whose first build triggers a fresh queue submission of itself. */
+    private WorkflowJob createSelfTriggeringJob(String name, boolean blockUpstream) throws Exception {
+        WorkflowJob self = j.jenkins.createProject(WorkflowJob.class, name);
+        self.setDefinition(new CpsFlowDefinition(
+                "if (currentBuild.number == 1) {\n"
+                        + "  build job: '" + name + "', wait: false\n"
+                        + "}\n", true));
+        BatchControlJobProperty property = new BatchControlJobProperty(true);
+        property.setBlockUpstream(blockUpstream);
+        setBatchControl(self, property);
+        return self;
     }
 
     /** Matrix common blocking baseline. */

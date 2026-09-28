@@ -237,6 +237,118 @@ public class ChangeRecordNoOpSaveTest {
         assertEquals(mbBefore + 1, configureRecords("edit-mb").size(), "a real edit of a multibranch project must write exactly one CONFIGURE record");
     }
 
+    /**
+     * T-SEC-33 (security-07 S-02, SPEC item 9 / #20): the {@code plugin="name@version"}
+     * stripper (T-09-13) must anchor to an actual attribute named exactly {@code plugin} — not
+     * to any substring elsewhere in the file that merely looks like {@code plugin="..."}. Ordinary
+     * user-editable text can embed that exact substring (a description mentioning a command line
+     * flag, for example {@code cmd plugin="1.0" tail}), and an edit confined to it (only the
+     * digit inside the embedded substring changes) must still be recorded — a non-anchored
+     * stripper would erase the differing text from both sides and normalise the two bodies
+     * equal, silently dropping the edit. In-row guard: changing only a genuine
+     * {@code plugin="x@1"} attribute still records nothing (T-09-13's rule, unaffected).
+     *
+     * <p>Reproduced through the {@code description} field rather than a synthetic custom XML
+     * attribute: {@code AbstractItem#updateByXml} (config.xml POST) re-serialises the job from
+     * its object model before it is stored, so any attribute a fixture invents with no backing
+     * field (verified experimentally against this branch) never survives to be diffed at all —
+     * the row would measure nothing. {@code description} is a real field that round-trips
+     * byte-for-byte (T-09-12/15 rely on the same fact), so it can actually carry the vulnerable
+     * substring through a real POST, and the stripper's regex cannot distinguish "text" from
+     * "attribute value" any more than it could distinguish two different attributes — both are
+     * just bytes to a stripper that is not anchored to attribute boundaries.
+     */
+    @Test
+    public void t_sec_33_pluginAttributeStripperIsAnchoredToAttributeBoundaries() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("attr-boundary-job");
+        // Same "name@version" shape T-09-13 uses for a genuine plugin="..." attribute, so the
+        // fixture cannot be distinguished by the stripper on shape alone — only by where it sits.
+        job.setDescription("cmd plugin=\"custom-thing@1.0\" tail");
+        job.save();
+        int before = configureRecords("attr-boundary-job").size();
+
+        // The edit is confined to the version digit inside the embedded plugin="..." substring:
+        // exactly the text a non-anchored stripper would erase from both sides, normalising the
+        // two bodies equal. On disk the literal quotes inside the description's text content are
+        // XML-entity-escaped (verified experimentally against this branch: Jenkins's writer emits
+        // &quot; even in element text, not only in attribute values), so the edit is expressed in
+        // that escaped form here — the escaping is orthogonal to the anchoring bug: a stripper
+        // that parses attributes/text and decodes entities sees the very same literal
+        // plugin="custom-thing@1.0" substring either way.
+        String stored = job.getConfigFile().asString();
+        assertTrue(stored.contains("plugin=&quot;custom-thing@1.0&quot; tail"), "fixture: the description embedding plugin=\"custom-thing@1.0\" must be stored (entity-escaped): " + stored);
+        String edited = stored.replace("plugin=&quot;custom-thing@1.0&quot; tail", "plugin=&quot;custom-thing@2.0&quot; tail");
+        assertFalse(edited.equals(stored), "fixture: the edit must change the XML");
+        assertEquals(200, postConfigXml(job, edited));
+        FreeStyleProject reloaded = j.jenkins.getItemByFullName("attr-boundary-job", FreeStyleProject.class);
+        assertEquals("cmd plugin=\"custom-thing@2.0\" tail", reloaded.getDescription(), "fixture: the POST must really have changed the stored description");
+
+        List<ChangeRecord> afterEdit = configureRecords("attr-boundary-job");
+        assertEquals(before + 1, afterEdit.size(), "an edit confined to a plugin=\"...\" substring embedded in ordinary user text must still be recorded (security-07 S-02): the stripper may not match text that is not a real plugin=\"...\" attribute");
+        assertTrue(String.valueOf(afterEdit.get(afterEdit.size() - 1).getDiff()).contains("2.0"), "the record's diff must carry the edit");
+
+        // In-row guard: a change to a genuine plugin="x@1" attribute must still record nothing.
+        WorkflowJob pipeline = j.jenkins.createProject(WorkflowJob.class, "attr-boundary-pipe");
+        pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        String pipelineXml = pipeline.getConfigFile().asString();
+        assertTrue(PLUGIN_ATTRIBUTE.matcher(pipelineXml).find(), "fixture: a Pipeline job's config.xml must carry plugin=\"name@version\" attributes");
+        int guardBefore = configureRecords("attr-boundary-pipe").size();
+        String bumpedVersion = withPluginVersions(pipelineXml, "2.0");
+        assertEquals(200, postConfigXml(pipeline, bumpedVersion));
+        assertEquals(guardBefore, configureRecords("attr-boundary-pipe").size(), "changing only a real plugin=\"x@1\" attribute must still record nothing");
+    }
+
+    /**
+     * T-SEC-34 (security-07 S-04, SPEC item 9 / #20): a computed folder's child is excluded from
+     * CONFIGURE recording only for saves the indexing itself performs — not for a direct,
+     * non-indexing edit of that child's configuration, which is exactly the kind of "who changed
+     * what" SPEC item 9 exists to capture (SPEC item 9 names the Job DSL path as one of the four
+     * that must all be recorded, alongside UI, REST and CLI). In-row guard: re-indexing
+     * afterwards writes no CONFIGURE record for the child (the computed-child skip still holds
+     * for indexing-driven saves).
+     *
+     * <p>The edit is applied with a direct, unauthenticated {@code save()} — the shape a Job DSL
+     * seed job or an init/groovy script takes, and the one SPEC-required path that is actually
+     * reachable here. A REST config.xml POST (Item/Configure over HTTP, "a user with Item/Configure
+     * POSTs config.xml") was tried first and is NOT reachable for a multibranch project's branch
+     * child: workflow-multibranch's {@code BranchJobProperty} denies {@code Item/CONFIGURE} on a
+     * branch job unconditionally, even to an administrator (verified experimentally against this
+     * branch: the branch job's ACL is {@code BranchJobProperty$1}, {@code hasPermission(CONFIGURE)}
+     * is false for the admin user). The same is true one level up: an organization folder's
+     * generated multibranch project child carries the same kind of restriction
+     * ({@code MultiBranchProject$1}, also verified experimentally). So for the two computed-folder
+     * types SPEC item 9 itself names, an HTTP config.xml POST against Item/Configure can never
+     * "take effect" as security-07's illustrative wording describes; the reachable, SPEC-mandated
+     * path is Job DSL / script-style direct persistence, which this row exercises instead. See the
+     * report for the full reasoning and the request this raises for the security-reviewer.
+     */
+    @Test
+    public void t_sec_34_directSaveOfBranchChildIsRecorded() throws Exception {
+        WorkflowMultiBranchProject mp = j.jenkins.createProject(WorkflowMultiBranchProject.class, "mb-branch");
+        mp.getSourcesList().add(new BranchSource(new OneBranchSCMSource()));
+        assertNotNull(mp.scheduleBuild2(0), "fixture: indexing must be schedulable");
+        j.waitUntilNoActivity();
+
+        WorkflowJob branch = j.jenkins.getItemByFullName("mb-branch/master", WorkflowJob.class);
+        assertNotNull(branch, "fixture: indexing must have created the branch child job: " + indexingLog(mp));
+        int before = configureRecords("mb-branch/master").size();
+
+        // A direct, non-indexing configuration save of the branch child — the Job DSL / script
+        // shape SPEC item 9 requires to be recorded, and the only SPEC-mandated path actually
+        // reachable for a branch-api computed child (see class-level note above).
+        branch.setDescription("edited-by-script");
+        branch.save();
+
+        assertEquals("edited-by-script", j.jenkins.getItemByFullName("mb-branch/master", WorkflowJob.class).getDescription(), "fixture: the direct save must really have changed the branch job's configuration");
+        assertEquals(before + 1, configureRecords("mb-branch/master").size(), "a direct, non-indexing save of a multibranch project's branch child must write a CONFIGURE record (security-07 S-04): the computed-child skip may cover only saves the indexing itself performs");
+
+        // In-row guard: re-indexing afterwards writes no new CONFIGURE record for the child.
+        int beforeReindex = configureRecords("mb-branch/master").size();
+        assertNotNull(mp.scheduleBuild2(0), "fixture: re-indexing must be schedulable");
+        j.waitUntilNoActivity();
+        assertEquals(beforeReindex, configureRecords("mb-branch/master").size(), "re-indexing must not itself write a CONFIGURE record for the branch child");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static String indexingLog(WorkflowMultiBranchProject mp) {
@@ -302,6 +414,58 @@ public class ChangeRecordNoOpSaveTest {
             @Override
             public String getDisplayName() {
                 return "Metadata-only test source";
+            }
+        }
+    }
+
+    /** An SCM source that unconditionally reports one head ("master"), for T-SEC-34's branch child. */
+    public static class OneBranchSCMSource extends SCMSource {
+
+        public OneBranchSCMSource() {
+            setId("one-branch-source");
+        }
+
+        @Override
+        protected void retrieve(SCMSourceCriteria criteria, SCMHeadObserver observer,
+                SCMHeadEvent<?> event, TaskListener listener) throws java.io.IOException, InterruptedException {
+            SCMHead head = new SCMHead("master");
+            observer.observe(head, new FixedRevision(head, "r1"));
+        }
+
+        @Override
+        public SCM build(SCMHead head, SCMRevision revision) {
+            return new NullSCM();
+        }
+
+        @TestExtension
+        public static class DescriptorImpl extends SCMSourceDescriptor {
+            @Override
+            public String getDisplayName() {
+                return "One-branch test source";
+            }
+        }
+
+        private static final class FixedRevision extends SCMRevision {
+
+            private final String hash;
+
+            FixedRevision(SCMHead head, String hash) {
+                super(head);
+                this.hash = hash;
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (!(o instanceof FixedRevision)) {
+                    return false;
+                }
+                FixedRevision other = (FixedRevision) o;
+                return getHead().equals(other.getHead()) && hash.equals(other.hash);
+            }
+
+            @Override
+            public int hashCode() {
+                return getHead().hashCode() * 31 + hash.hashCode();
             }
         }
     }
