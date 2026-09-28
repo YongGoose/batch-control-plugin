@@ -39,6 +39,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
+ *   <li>automatic retry → judged by the retried build's causes; a retry of an approved or
+ *       manual run is refused quietly (#36);</li>
  *   <li>timer cause → pass unless {@code blockTimer}, refused quietly (unattended);</li>
  *   <li>upstream cause → D-16 policy: pass unless {@code blockUpstream}; with
  *       {@code blockUpstream} only allow-listed upstream jobs pass, an empty/unset list
@@ -56,6 +58,12 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     /** workflow-cps is an optional dependency; the replay cause is matched by name. */
     private static final String REPLAY_CAUSE_CLASS =
             "org.jenkinsci.plugins.workflow.cps.replay.ReplayCause";
+
+    /** naginator is not a dependency; its retry cause is matched by name (#36). */
+    private static final String NAGINATOR_CAUSE_CLASS = "com.chikli.hudson.plugin.naginator.NaginatorCause";
+
+    /** Nesting bound when unwrapping same-job upstream (retry) causes. */
+    private static final int MAX_RETRY_DEPTH = 10;
 
     /** An INFO line per job and kind is written at most this often; the rest go to FINE. */
     static final long INFO_INTERVAL_MILLIS = 60L * 60L * 1000L;
@@ -144,8 +152,23 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 5. Timer (cron): pass by default, blocked quietly per job setting.
-        for (Cause cause : causes) {
+        // 5. Automatic retry (#36): judged by the causes of the build it retries. The retry cause
+        // itself is replaced by the retried build's causes, so a retry of a timer or upstream run
+        // meets the timer and upstream rules below. A retry of an approved or manual run is a
+        // re-use of that run's approval and is refused quietly: the retry is unattended, and the
+        // way to run the job again is a new request. A retry that presents the consumed marker
+        // never gets here; step 1 refuses it and writes MARKER_REUSE_BLOCKED (D-30).
+        List<Cause> effective = retryAwareCauses(job, causes, 0);
+        for (Cause cause : effective) {
+            if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause) {
+                logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
+                        + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
+                return false;
+            }
+        }
+
+        // 6. Timer (cron): pass by default, blocked quietly per job setting.
+        for (Cause cause : effective) {
             if (cause instanceof TimerTrigger.TimerTriggerCause) {
                 if (property.isBlockTimer()) {
                     logRateLimited("timer", job, () -> "Blocked timer-triggered run of job '"
@@ -156,8 +179,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 6. Upstream (includes the Pipeline build step's BuildUpstreamCause subtype): D-16.
-        for (Cause cause : causes) {
+        // 7. Upstream (includes the Pipeline build step's BuildUpstreamCause subtype): D-16.
+        for (Cause cause : effective) {
             if (cause instanceof Cause.UpstreamCause) {
                 if (!property.isBlockUpstream()) {
                     return true;
@@ -175,8 +198,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
 
-        // 7. SCM causes pass; unknown or empty cause sets pass with a log line.
-        for (Cause cause : causes) {
+        // 8. SCM causes pass; unknown or empty cause sets pass with a log line.
+        for (Cause cause : effective) {
             if (cause instanceof SCMTrigger.SCMTriggerCause) {
                 return true;
             }
@@ -216,6 +239,34 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             return last;
         });
         return claimed[0];
+    }
+
+    /**
+     * The causes a submission is judged by: a retry cause is replaced by the causes of the build
+     * it retries (#36). naginator is not a dependency, so its cause is matched by class name; it
+     * already copies the retried build's causes into the retry, so it is simply dropped. An
+     * upstream cause naming the job itself is a retry through core API, and its recorded
+     * upstream causes are the retried build's.
+     */
+    private static List<Cause> retryAwareCauses(Job<?, ?> job, List<Cause> causes, int depth) {
+        List<Cause> effective = new ArrayList<>(causes.size());
+        for (Cause cause : causes) {
+            if (NAGINATOR_CAUSE_CLASS.equals(cause.getClass().getName())) {
+                continue;
+            }
+            if (cause instanceof Cause.UpstreamCause
+                    && job.getFullName().equals(((Cause.UpstreamCause) cause).getUpstreamProject())) {
+                List<Cause> retried = ((Cause.UpstreamCause) cause).getUpstreamCauses();
+                if (depth < MAX_RETRY_DEPTH) {
+                    effective.addAll(retryAwareCauses(job, retried, depth + 1));
+                } else {
+                    effective.addAll(retried);
+                }
+                continue;
+            }
+            effective.add(cause);
+        }
+        return effective;
     }
 
     private static List<Cause> collectCauses(List<Action> actions) {
