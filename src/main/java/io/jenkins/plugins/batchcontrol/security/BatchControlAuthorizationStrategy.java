@@ -6,8 +6,8 @@ import hudson.security.ACL;
 import hudson.security.AuthorizationStrategy;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.logging.Level;
 import java.util.logging.Logger;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -17,8 +17,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p>{@link #readResolve()} converts it on load:
  * <ul>
- *   <li>a matrix-auth matrix (project-based or global) or role-strategy delegate becomes the
- *       matching Batch Control subclass with every entry kept;</li>
+ *   <li>a matrix-auth project matrix or role-strategy delegate becomes the matching Batch
+ *       Control subclass with every entry kept;</li>
+ *   <li>a matrix-auth global matrix is installed unwrapped (D-35d, S-04): converting it would
+ *       make per-item properties effective, so the monitor offers it as an explicit action;</li>
  *   <li>any other delegate is installed unwrapped. Grants then stop conferring, and
  *       {@code ops.BatchControlStrategyMonitor} says that grants need a supported strategy;</li>
  *   <li>a missing delegate (the old deny-all state) stays deny-all: an empty Batch Control matrix
@@ -44,34 +46,64 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
         this.delegate = delegate;
     }
 
-    /** Replaces the loaded wrapper with the strategy that takes its place (see the class comment). */
+    /**
+     * Replaces the loaded wrapper with the strategy that takes its place (see the class comment).
+     * Never throws: {@code Jenkins.authorizationStrategy} is a critical field, so an exception here
+     * would stop Jenkins from starting (S-03). A conversion that cannot be linked because an
+     * optional plugin is missing falls back to the unwrapped delegate.
+     */
     protected Object readResolve() {
         AuthorizationStrategy saved = delegate;
         if (saved == null) {
-            if (Jenkins.getInstanceOrNull() != null && Jenkins.get().getPlugin("matrix-auth") != null) {
+            AuthorizationStrategy empty = emptyMatrixOrNull();
+            if (empty != null) {
                 LOGGER.warning("The saved Batch Control wrapper had no delegate strategy; loading an "
                         + "empty Batch Control matrix, which denies everyone except SYSTEM.");
-                return StrategyMigration.emptyMatrix();
+                return empty;
             }
             LOGGER.warning("The saved Batch Control wrapper had no delegate strategy; every "
                     + "permission is denied except to SYSTEM.");
             return this;
         }
         String savedClass = saved.getClass().getName();
-        AuthorizationStrategy converted = StrategyMigration.fromLegacyDelegate(saved);
+        if (saved instanceof GrantLayeredStrategy) {
+            return saved;
+        }
+        if (StrategyMigration.isPerItemWidening(saved)) {
+            LOGGER.warning(() -> "The withdrawn Batch Control wrapper was around " + savedClass
+                    + "; it is installed unwrapped, so grants no longer confer anything. Converting "
+                    + "it would make per-item authorization properties effective; the "
+                    + "batch-control-strategy monitor offers that as an explicit action (D-35d).");
+            return saved;
+        }
+        AuthorizationStrategy converted;
+        try {
+            converted = StrategyMigration.fromLegacyDelegate(saved);
+        } catch (LinkageError | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not convert the withdrawn Batch Control wrapper around "
+                    + savedClass + "; it is installed unwrapped and grants no longer confer anything.", e);
+            return saved;
+        }
         if (converted != null) {
             LOGGER.info(() -> "Converted the withdrawn Batch Control wrapper around "
                     + savedClass + " into " + converted.getClass().getName()
                     + ", keeping every entry (D-35a).");
             return converted;
         }
-        if (saved instanceof GrantLayeredStrategy) {
-            return saved;
-        }
         LOGGER.warning(() -> "The withdrawn Batch Control wrapper was around "
                 + savedClass + ", which has no Batch Control variant; it is "
                 + "installed unwrapped and grants no longer confer anything (D-35a).");
         return saved;
+    }
+
+    @CheckForNull
+    private static AuthorizationStrategy emptyMatrixOrNull() {
+        try {
+            return StrategyMigration.emptyMatrix();
+        } catch (LinkageError | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build an empty Batch Control matrix", e);
+            return null;
+        }
     }
 
     @NonNull

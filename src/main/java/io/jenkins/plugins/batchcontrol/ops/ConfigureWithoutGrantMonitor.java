@@ -34,7 +34,9 @@ import org.springframework.security.core.userdetails.UserDetails;
  * permission that bypasses the JIT grant process.
  *
  * <p>The scan uses the strategy's root ACL, which carries no grant scope (S-13), so what it finds
- * is always a native entry, never an open grant.
+ * is always a native entry, never an open grant. It is also the scan's limit (S-07): per-item
+ * native permissions (matrix-auth job, folder and agent properties, role-strategy item roles) are
+ * not visible on the root ACL and are not detected. The monitor is best effort, not an inventory.
  *
  * <p>Candidate users come from {@link User#getAll()} plus, for matrix-family strategies, the
  * strategy's own granted sids (read reflectively — matrix-auth is an optional dependency).

@@ -99,7 +99,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
     /**
      * The Batch Control strategy with every role, assignment and permission template of a
      * role-strategy strategy (migration, the withdrawn wrapper's load conversion, the converter
-     * and JCasC). Declared with a core parameter type so {@link StrategyMigration} can call it
+     * and JCasC). Declared with a core parameter type so {@link RoleStrategies} can call it
      * without loading role-strategy classes first.
      */
     @NonNull

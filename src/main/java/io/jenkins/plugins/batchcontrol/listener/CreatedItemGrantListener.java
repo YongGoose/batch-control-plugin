@@ -67,6 +67,19 @@ public class CreatedItemGrantListener extends ItemListener {
         }
     }
 
+    /**
+     * S-09: after all items are loaded (startup, reload), drops created-item records of items that
+     * no longer exist. Runs as SYSTEM at startup and as the reloading administrator otherwise, so
+     * every item is visible without switching authentication.
+     */
+    @Override
+    public void onLoaded() {
+        if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            Jenkins jenkins = Jenkins.get();
+            GrantService.get().pruneCreatedItems(name -> jenkins.getItemByFullName(name) != null);
+        }
+    }
+
     @Override
     public void onLocationChanged(Item item, String oldFullName, String newFullName) {
         // With change control off every window was revoked (S-15), so no record can be active.

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -212,6 +213,46 @@ public final class GrantService {
      */
     public synchronized void forgetCreatedItem(String fullName) {
         updateCreatedItems(fullName, null);
+    }
+
+    /**
+     * D-35c, S-09: drops from the created-items lists of active grants every item for which
+     * {@code exists} is false. Called after all items are loaded (startup and reload), so a record
+     * of an item deleted on disk while no listener saw it cannot confer anything on an item
+     * created later under the same name by someone else. An item that failed to load loses its
+     * record too, which only takes permissions away (fail-safe).
+     */
+    public synchronized void pruneCreatedItems(Predicate<String> exists) {
+        Instant now = BatchClock.now();
+        for (Grant cached : new ArrayList<>(grants())) {
+            if (!cached.isActiveAt(now) || cached.getCreatedItems().isEmpty()) {
+                continue;
+            }
+            List<String> kept = new ArrayList<>();
+            for (String item : cached.getCreatedItems()) {
+                if (exists.test(item)) {
+                    kept.add(item);
+                }
+            }
+            if (kept.size() == cached.getCreatedItems().size()) {
+                continue;
+            }
+            Grant grant = store.loadGrant(cached.getId());
+            if (grant == null) {
+                continue;
+            }
+            List<String> stored = new ArrayList<>();
+            for (String item : grant.getCreatedItems()) {
+                if (exists.test(item)) {
+                    stored.add(item);
+                }
+            }
+            grant.setCreatedItems(stored);
+            store.saveGrant(grant);
+            replaceInCache(grant);
+            LOGGER.info(() -> "Grant " + grant.getId() + ": dropped created-item records of items "
+                    + "that no longer exist (D-35c)");
+        }
     }
 
     /**

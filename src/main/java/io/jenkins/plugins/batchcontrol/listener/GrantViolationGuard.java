@@ -24,15 +24,22 @@ import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import com.thoughtworks.xstream.io.xml.DomReader;
 import java.io.IOException;
+import java.io.StringReader;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.util.xml.XMLUtils;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.xml.sax.SAXException;
 
 /**
  * D-35b: a user whose Item/Configure comes only from a grant cannot turn it into a permanent
@@ -41,14 +48,17 @@ import org.springframework.security.core.Authentication;
  * that property, the previous property is put back and a {@code GRANT_VIOLATION} change record
  * names the user, the item and the grant.
  *
- * <p>"Only from a grant" is decided after the previous property is back in place: if the user
- * still has Item/Configure with every grant layer switched off, the change was the user's to make
- * and it is re-applied. Otherwise it stays reverted.
+ * <p>"Only from a grant" is decided by permission after the previous property is back in place
+ * (D-35d (1)): the user holds Item/Configure on the item through the installed strategy with the
+ * grant layer, but not without it (inherited ACLs included). Otherwise the change was not a
+ * grant's doing and it is re-applied.
  *
- * <p>The previous state is an in-memory baseline of every job's and folder's property (its XML
- * form, or empty for none), filled when items load or are created and updated after every save.
- * An item not yet in the baseline is only recorded, never reverted, so an unknown state is
- * never overwritten. The baseline is kept whatever the switches say, because the switch may be
+ * <p>The previous state is the item's last recorded configuration snapshot (D-35d (4),
+ * {@code snapshots/} of the store), so a reload from disk that fires no listener cannot leave a
+ * stale in-memory copy behind. An in-memory baseline of every job's and folder's property (its
+ * XML form, or empty for none) is only the fallback for an item without a snapshot. An item
+ * known to neither is left alone, so an unknown state is never overwritten.
+ * A restore that fails is recorded as a violation whose restore failed (S-06). The baseline is kept whatever the switches say, because the switch may be
  * turned on later; the guard itself acts only while change control is on and a Batch Control
  * matrix strategy is installed (grants confer nothing otherwise).
  *
@@ -83,41 +93,152 @@ public class GrantViolationGuard extends SaveableListener {
         String fullName = item.getFullName();
         synchronized (LOCK) {
             String now = propertyXml(item);
-            String before = BASELINE.put(fullName, now);
-            if (before == null || before.equals(now) || !guardApplies()) {
+            String remembered = BASELINE.put(fullName, now);
+            if (!guardApplies()) {
+                return;
+            }
+            // S-05, D-35d (4): the baseline is the last recorded configuration snapshot (this guard
+            // runs ahead of ConfigSnapshotListener, so the snapshot is still the previous save's).
+            // The in-memory copy is only the fallback for an item that has no snapshot yet.
+            String snapshot = snapshotPropertyXml(item);
+            String before = snapshot != null ? snapshot : remembered;
+            if (before == null || before.equals(now)) {
                 return;
             }
             Authentication auth = Jenkins.getAuthentication2();
             if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
+                // D-35d (2): SYSTEM saves (builds without a build authenticator, Job DSL, JCasC)
+                // are not blocked; the batch-control-strategy monitor warns about that setup.
                 return;
             }
             String user = auth.getName();
-            Grant grant = GrantService.get().findConfigureGrant(user, fullName);
-            if (grant == null) {
-                return; // not a save a grant made possible
+            if (!holdsActiveGrant(user)) {
+                return; // without any active grant the save cannot have been made possible by one
             }
             try {
+                // S-01, D-35d (1): "Configure only from a grant" is decided by permission, not by a
+                // grant lookup: with the previous property back in place, the strategy's ACL
+                // without the grant layer (inherited ACLs included) denies Configure, and with it
+                // allows Configure. Any other outcome means the change was not a grant's doing.
                 apply(item, before);
-                if (GrantLayer.hasPermissionWithoutGrants(item, auth, Item.CONFIGURE)) {
-                    apply(item, now); // natively allowed: the change stands
+                boolean onlyFromGrant = !GrantLayer.hasPermissionWithoutGrants(item, auth, Item.CONFIGURE)
+                        && item.hasPermission2(auth, Item.CONFIGURE);
+                if (!onlyFromGrant) {
+                    apply(item, now); // the change stands
                     return;
                 }
             } catch (IOException | RuntimeException e) {
+                // S-06: fail loudly. The change may still be in place, so it is recorded as a
+                // violation whose restore failed.
                 LOGGER.log(Level.SEVERE, "Could not restore the authorization property of '" + fullName
-                        + "' after a change by '" + user + "' under grant " + grant.getId()
-                        + " (D-35b)", e);
+                        + "' after a change by '" + user + "' (D-35b)", e);
+                Grant grant = namedGrant(user, fullName);
+                appendViolation(fullName, user, grant,
+                        "The authorization property was changed by a user whose Item/Configure may come only "
+                                + "from " + grantText(grant) + "; restoring the previous property FAILED ("
+                                + e.getClass().getSimpleName() + "), so an administrator must check the item.");
                 return;
             }
             BASELINE.put(fullName, before);
-            ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
+            Grant grant = namedGrant(user, fullName);
+            appendViolation(fullName, user, grant,
                     "The authorization property was changed by a user whose Item/Configure comes only "
-                            + "from grant " + grant.getId() + "; the previous property was restored.");
-            record.setGrantId(grant.getId());
-            FileStore.get().appendChangeRecord(record);
+                            + "from " + grantText(grant) + "; the previous property was restored.");
             LOGGER.warning(() -> "Reverted a change of the authorization property of '" + fullName
-                    + "' by '" + user + "', whose Item/Configure comes only from grant "
-                    + grant.getId() + " (D-35b)");
+                    + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant)
+                    + " (D-35b)");
         }
+    }
+
+    private static boolean holdsActiveGrant(String user) {
+        for (Grant grant : GrantService.get().listActive()) {
+            if (user.equals(grant.getUser())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The grant to name in the record: the one conferring Configure on the item (a CONFIGURE
+     * grant covering it, or the Create grant it was created through), else any active grant of
+     * the user covering the item.
+     */
+    @CheckForNull
+    private static Grant namedGrant(String user, String fullName) {
+        Grant grant = GrantService.get().findConfigureGrant(user, fullName);
+        return grant != null ? grant : GrantService.get().findActiveGrant(user, fullName, null);
+    }
+
+    private static String grantText(@CheckForNull Grant grant) {
+        return grant == null ? "a grant" : "grant " + grant.getId();
+    }
+
+    private static void appendViolation(String fullName, String user, @CheckForNull Grant grant, String detail) {
+        ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user, detail);
+        record.setGrantId(grant == null ? null : grant.getId());
+        FileStore.get().appendChangeRecord(record);
+    }
+
+    /**
+     * The authorization property of the item's last recorded configuration snapshot, in the form
+     * {@link #propertyXml} returns ({@code ""} for none), or {@code null} when there is no snapshot
+     * or it cannot be read.
+     */
+    @CheckForNull
+    static String snapshotPropertyXml(AbstractItem item) {
+        String className = propertyClassName(item);
+        if (className == null) {
+            return null;
+        }
+        String snapshot;
+        try {
+            snapshot = FileStore.get().loadConfigSnapshot(item.getFullName());
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read the configuration snapshot of '" + item.getFullName() + "'", e);
+            return null;
+        }
+        if (snapshot == null) {
+            return null;
+        }
+        try {
+            Document doc = XMLUtils.parse(new StringReader(snapshot));
+            Element properties = child(doc.getDocumentElement(), "properties");
+            Element element = properties == null ? null : child(properties, className);
+            if (element == null) {
+                return "";
+            }
+            Object property = Items.XSTREAM2.unmarshal(new DomReader(element));
+            return property == null ? "" : Items.XSTREAM2.toXML(property);
+        } catch (SAXException | IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Cannot read the authorization property from the configuration snapshot of '"
+                    + item.getFullName() + "'", e);
+            return null;
+        }
+    }
+
+    @CheckForNull
+    private static Element child(@CheckForNull Element parent, String name) {
+        if (parent == null) {
+            return null;
+        }
+        for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
+            if (n instanceof Element && name.equals(((Element) n).getTagName())) {
+                return (Element) n;
+            }
+        }
+        return null;
+    }
+
+    @CheckForNull
+    private static String propertyClassName(AbstractItem item) {
+        if (item instanceof Job) {
+            return AuthorizationMatrixProperty.class.getName();
+        }
+        if (item instanceof AbstractFolder) {
+            return com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty.class.getName();
+        }
+        return null;
     }
 
     private static boolean guardApplies() {

@@ -38,7 +38,9 @@ import org.springframework.security.core.Authentication;
  *
  * <p>D-35c: an item its holder created through the Create of an active grant also answers
  * Item/Read and Item/Configure (and what they imply) for the holder while the grant is active, so
- * matrix-auth's creator listener finds both already held and writes no permanent entry.
+ * matrix-auth's creator listener finds both already held and writes no permanent entry. Exactly
+ * that item: its descendants the holder did not create get nothing from it (D-35d), which is why
+ * the delegate is always evaluated with the grant layer switched off (see {@link #hasPermission2}).
  *
  * <p>{@link #withoutGrants} evaluates a check with the grant layer switched off on the current
  * thread, which is how the listeners tell a permission that comes only from a grant from one the
@@ -108,7 +110,15 @@ final class GrantAwareACL extends ACL {
                 && grantConfers(a.getName(), permission)) {
             return true;
         }
-        return delegate != null && delegate.hasPermission2(a, permission);
+        // D-35d (1): the parent's decision is taken with every grant layer switched off. matrix-auth
+        // resolves an item without its own property through the parent folder's ACL, which is a
+        // grant-aware ACL too; evaluated with grants on, a D-35c grant on a folder the holder
+        // created would reach every descendant through that inheritance, and a JOB-scope grant on
+        // a folder would widen to its children. Only this, the outermost layer, consults grants:
+        // FOLDER scope already matches descendants by path above, and D-35c answers for exactly
+        // the items the holder created.
+        ACL parent = delegate;
+        return parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
     }
 
     /**

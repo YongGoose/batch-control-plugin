@@ -13,6 +13,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.security.QueueItemAuthenticator;
+import jenkins.security.QueueItemAuthenticatorConfiguration;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.HttpResponse;
@@ -27,7 +29,11 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * that never migrated, a withdrawn wrapper whose delegate had no Batch Control variant, and
  * role-strategy's Manage Roles save, which reinstalls the plain class.
  *
- * <p>{@link #doMigrate()} copies an installed plain matrix-auth project matrix or role-strategy
+ * <p>It also warns while change control is on and no build authenticator is configured, so builds
+ * run as SYSTEM (D-35d (2), {@link #isBuildAuthenticatorMissing()}).
+ *
+ * <p>{@link #doMigrate()} copies an installed plain matrix-auth matrix (project-based, or global:
+ * then per-item properties become effective, {@link #isPerItemWidening()}) or role-strategy
  * configuration into the matching Batch Control subclass, keeping every entry; {@link #doRevert()}
  * is the reverse, the uninstall path. Neither touches per-item properties, which live on the
  * items. Neither switches to {@code ACL.SYSTEM2}: an administrator runs them and
@@ -60,15 +66,64 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         return Messages.BatchControlStrategyMonitor_DisplayName();
     }
 
+    /**
+     * Shows while change control is on and either the installed strategy is not a Batch Control
+     * strategy ({@link #isStrategyUnsupported()}) or builds run as SYSTEM
+     * ({@link #isBuildAuthenticatorMissing()}).
+     */
     @Override
     public boolean isActivated() {
         return BatchControlGlobalConfiguration.get().isChangeControlEnabled()
-                && !GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy());
+                && (strategyUnsupported() || buildAuthenticatorMissing());
+    }
+
+    /**
+     * Condition 1 (D-35a): change control is on, but the installed strategy is not a Batch Control
+     * strategy, so active grants confer nothing (for the view).
+     */
+    public boolean isStrategyUnsupported() {
+        return BatchControlGlobalConfiguration.get().isChangeControlEnabled() && strategyUnsupported();
+    }
+
+    /**
+     * Condition 2 (D-35d (2), S-02): change control is on and no {@link QueueItemAuthenticator} is
+     * configured, so builds run as SYSTEM. A build running as SYSTEM (a Pipeline
+     * {@code properties([authorizationMatrix(...)])} step, a Job DSL seed job) can then write an
+     * authorization property after a Configure grant holder edited the script, and the D-35b guard
+     * does not apply to SYSTEM saves. Configuring a build authenticator (Authorize Project) makes
+     * those saves the user's, so the guard applies. Only a warning: SYSTEM saves are not blocked.
+     */
+    public boolean isBuildAuthenticatorMissing() {
+        return BatchControlGlobalConfiguration.get().isChangeControlEnabled() && buildAuthenticatorMissing();
+    }
+
+    private static boolean strategyUnsupported() {
+        return !GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy());
+    }
+
+    /**
+     * Whether no build authenticator is configured on the global security page
+     * ({@link QueueItemAuthenticatorConfiguration}, where Authorize Project registers its
+     * strategies). Other {@link jenkins.security.QueueItemAuthenticatorProvider}s are not counted:
+     * Pipeline's own provider only hands a {@code node} block the authentication its build already
+     * runs as, so with it alone builds still run as SYSTEM.
+     */
+    private static boolean buildAuthenticatorMissing() {
+        return QueueItemAuthenticatorConfiguration.get().getAuthenticators().isEmpty();
     }
 
     /** Whether the installed strategy can be copied into a Batch Control subclass (for the view). */
     public boolean isMigratable() {
         return StrategyMigration.isMigratable(Jenkins.get().getAuthorizationStrategy());
+    }
+
+    /**
+     * Whether the migration would make per-item authorization properties effective (D-35d (3),
+     * S-04): the installed strategy is matrix-auth's global matrix, which ignores job, folder and
+     * agent properties, while the Batch Control matrix is project-based (for the view's warning).
+     */
+    public boolean isPerItemWidening() {
+        return StrategyMigration.isPerItemWidening(Jenkins.get().getAuthorizationStrategy());
     }
 
     /** Whether a Batch Control strategy is installed, so that {@link #doRevert()} applies. */
@@ -84,8 +139,8 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     }
 
     /**
-     * Installs the Batch Control subclass of the current plain matrix-auth or role-strategy
-     * strategy with every entry kept, and saves. Other strategies are refused.
+     * Installs the Batch Control subclass of the current plain matrix-auth (project or global) or
+     * role-strategy strategy with every entry kept, and saves. Other strategies are refused.
      */
     @RequirePOST
     public HttpResponse doMigrate() throws IOException {
@@ -96,8 +151,9 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         if (migrated == null) {
             return HttpResponses.error(400, "The installed authorization strategy ("
                     + (current == null ? "none" : current.getClass().getName())
-                    + ") has no Batch Control variant. Supported: matrix-auth's project-based "
-                    + "matrix and role-strategy's role-based strategy.");
+                    + ") has no Batch Control variant, or its plugin is not installed. Supported: "
+                    + "matrix-auth's project-based and global matrix, and role-strategy's role-based "
+                    + "strategy.");
         }
         jenkins.setAuthorizationStrategy(migrated);
         jenkins.save();
