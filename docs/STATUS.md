@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-28 (evening) — PR 2 (#30 per-strategy subclasses) ready
+- PR 1 (#31) merged as #37 after security-04 (0 blocker / 0 high).
+- #30: D-35a (option A from PoC-5) implemented: `BatchControlMatrixAuthorizationStrategy`, `BatchControlRoleBasedAuthorizationStrategy`, converters, JCasC configurators, legacy wrapper load shim, `batch-control-strategy` monitor with migrate/revert, D-35b self-grant guard, D-35c created-item Configure. matrix-auth, role-strategy and JCasC are optional dependencies.
+- security-05 on the first implementation: **BLOCKER 3 / HIGH 1 / MEDIUM 1 / LOW 4** (inherited-grant guard bypass, SYSTEM builds, class linking without one of the two plugins, global-matrix conversion widening, stale guard baseline). Rulings recorded as D-35d; all fixed except S-02, which is accepted and documented (LIMITATIONS 35, plus a monitor warning when no build authenticator is configured). security-06 re-review: no BLOCKER/HIGH remains.
+- Gate: `mvn clean verify` 270 tests, 0 failures, 2 errors in the two RealJenkinsRule optional-dependency tests (fixture referenced `JenkinsRule$DummySecurityRealm`); fixture fixed in test code only and both classes re-run green. SpotBugs 0.
+- Next: #34 + #36 (customize-build-now and plugin interaction tests).
+
 ## 2026-09-28 — Hosting review round: PR 1 (#31 cleanup) gate green; #30 PoC chose option A
 - **Scope of this round** (owner, 2026-09-28): the hosting reviewer's feedback on jenkins-infra/repository-permissions-updater#5338 first, then every open p1 issue, then a detailed per-feature e2e pass. New issues #30..#36 (label `hosting-review`); the config-diff remark went to #20.
 - **Owner decisions D-35..D-41** recorded (authorization mechanism by PoC, notifications via extension point + Mailer, several approvers / any one decides, run requests need Item/Build, activation approval per job reusing Request, CREATE requests may restrict the job name, stable permission group id). SPEC item 2 gained the absent-action rule: no Batch Control permission at all means 404 at the action and everything beneath it; a partial holder still gets 403 from a section.
