@@ -1,6 +1,5 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
-import java.util.regex.Pattern;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -30,9 +29,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 final class ConfigNormalizer {
 
-    /** A {@code plugin} attribute inside one start tag; the leading whitespace goes with it. */
-    private static final Pattern PLUGIN_ATTRIBUTE =
-            Pattern.compile("\\s+plugin\\s*=\\s*(?:\"[^\"]*\"|'[^']*')");
+    private static final String PLUGIN = "plugin";
 
     private static final String ACTIONS = "actions";
 
@@ -101,7 +98,7 @@ final class ConfigNormalizer {
                 }
                 if (skipDepth < 0) {
                     String tag = xml.substring(i, end);
-                    out.append(tag.contains("plugin") ? PLUGIN_ATTRIBUTE.matcher(tag).replaceAll("") : tag);
+                    out.append(tag.contains(PLUGIN) ? withoutPluginAttribute(tag) : tag);
                 }
                 if (!selfClosing) {
                     depth++;
@@ -115,6 +112,66 @@ final class ConfigNormalizer {
             i = end;
         }
         return out.toString();
+    }
+
+    /**
+     * The start tag with any attribute whose name is exactly {@code plugin} removed, together with
+     * the whitespace before it. The tag is tokenised into name, {@code =} and quoted value spans,
+     * so text inside another attribute's value is never touched (security-07 S-02). A tag that
+     * does not tokenise cleanly is returned unchanged.
+     */
+    static String withoutPluginAttribute(String tag) {
+        int n = tag.length();
+        int i = 1;
+        while (i < n && !isNameEnd(tag.charAt(i))) {
+            i++; // element name
+        }
+        StringBuilder out = new StringBuilder(n);
+        out.append(tag, 0, i);
+        while (i < n) {
+            int wsStart = i;
+            while (i < n && Character.isWhitespace(tag.charAt(i))) {
+                i++;
+            }
+            if (i >= n || tag.charAt(i) == '>' || tag.charAt(i) == '/') {
+                out.append(tag, wsStart, n);
+                return out.toString();
+            }
+            if (i == wsStart) {
+                return tag; // an attribute must be preceded by whitespace
+            }
+            int nameStart = i;
+            while (i < n && !isNameEnd(tag.charAt(i)) && tag.charAt(i) != '=') {
+                i++;
+            }
+            String name = tag.substring(nameStart, i);
+            while (i < n && Character.isWhitespace(tag.charAt(i))) {
+                i++;
+            }
+            if (name.isEmpty() || i >= n || tag.charAt(i) != '=') {
+                return tag;
+            }
+            i++;
+            while (i < n && Character.isWhitespace(tag.charAt(i))) {
+                i++;
+            }
+            if (i >= n || (tag.charAt(i) != '"' && tag.charAt(i) != '\'')) {
+                return tag;
+            }
+            int close = tag.indexOf(tag.charAt(i), i + 1);
+            if (close < 0) {
+                return tag;
+            }
+            i = close + 1;
+            if (!PLUGIN.equals(name)) {
+                out.append(tag, wsStart, i);
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean isNameEnd(char c) {
+        return Character.isWhitespace(c) || c == '>' || c == '/';
     }
 
     /** Index just past {@code terminator} searched from {@code from}, or the end of the text. */
