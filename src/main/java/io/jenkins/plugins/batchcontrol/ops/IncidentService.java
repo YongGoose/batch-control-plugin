@@ -182,6 +182,11 @@ public final class IncidentService {
      * approver checks are those of {@link RunRequestService#create}.
      */
     public RunRequest rerun(String incidentId, String approver) {
+        return rerun(incidentId, io.jenkins.plugins.batchcontrol.model.Approvers.of(approver));
+    }
+
+    /** Approver-set form (D-37) of {@link #rerun(String, String)}. */
+    public RunRequest rerun(String incidentId, java.util.List<String> approvers) {
         Incident incident = require(incidentId);
         Job<?, ?> job = Jenkins.get().getItemByFullName(incident.getJobFullName(), Job.class);
         if (job == null) {
@@ -193,7 +198,7 @@ public final class IncidentService {
         // Created outside this service's lock: the request service takes its own lock and
         // there is no call path back into this service from request creation.
         RunRequest request = RunRequestService.get().create(job, incident.getParameters(),
-                reason, approver, incidentId);
+                reason, approvers, incidentId);
         lock.lock();
         try {
             Incident reloaded = require(incidentId);

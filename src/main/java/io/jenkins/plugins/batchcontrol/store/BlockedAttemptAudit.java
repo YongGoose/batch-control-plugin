@@ -102,6 +102,15 @@ public final class BlockedAttemptAudit {
      */
     public synchronized boolean record(ChangeType type, String attemptKey, String target,
                                        String user, String detail) {
+        return record(type, attemptKey, target, user, detail, null);
+    }
+
+    /**
+     * As {@link #record(ChangeType, String, String, String, String)}, naming the grant involved
+     * (D-40: a refused CREATE of a name the grant's restriction does not allow).
+     */
+    public synchronized boolean record(ChangeType type, String attemptKey, String target,
+                                       String user, String detail, String grantId) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(attemptKey, "attemptKey");
         Instant now = BatchClock.now();
@@ -114,7 +123,9 @@ public final class BlockedAttemptAudit {
                     + " (S-21 bound); the attempt stays in the log: " + detail);
             return false;
         }
-        store.appendChangeRecord(ChangeRecord.create(type, target, user, detail));
+        ChangeRecord record = ChangeRecord.create(type, target, user, detail);
+        record.setGrantId(grantId);
+        store.appendChangeRecord(record);
         lastWritten.remove(key);
         lastWritten.put(key, now);
         evictOldest();

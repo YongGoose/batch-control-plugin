@@ -8,6 +8,8 @@ import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -24,6 +26,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Extension
 @Restricted(NoExternalUse.class)
 public class ExpiryPeriodicWork extends PeriodicWork {
+
+    private static final Logger LOGGER = Logger.getLogger(ExpiryPeriodicWork.class.getName());
 
     @Override
     public long getRecurrencePeriod() {
@@ -50,5 +54,13 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         RunRequestService.get().expireOverdue(queuedIds, queueSnapshotAt);
         // Pending grant requests expire on the same cadence (SPEC item 8, T-08-12).
         GrantRequestService.get().expireOverduePending();
+        // D-36: EXPIRING / GRANT_EXPIRING once per request or window, notifyBeforeExpiryMinutes
+        // before the expiry. Guarded so a notification problem never stops the expiry work.
+        try {
+            RunRequestService.get().notifyExpiring();
+            GrantRequestService.get().notifyExpiring();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry notifications failed; expiry itself is unaffected", e);
+        }
     }
 }

@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.policy;
 import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import java.util.List;
@@ -51,59 +52,77 @@ public final class ApprovalPolicy {
     }
 
     /**
-     * Validates an approver designation at creation / change time (SPEC item 3).
+     * Validates a single-approver designation (pre D-37 form).
      *
-     * @param requester the requesting user id (the current caller)
-     * @param approver the designated approver id
-     * @param job the target job, used for the optional job-level approver restriction
-     * @throws IllegalArgumentException if the designation violates the policy
+     * @see #checkDesignation(String, List, Job)
      */
     public static void checkDesignation(String requester, String approver, Job<?, ?> job) {
-        if (approver == null || approver.trim().isEmpty()) {
-            throw new IllegalArgumentException("An approver must be designated.");
-        }
-        if (!isListedApprover(approver)) {
-            throw new IllegalArgumentException(
-                    "User '" + approver + "' is not on the configured approver list.");
+        checkDesignation(requester, Approvers.of(approver), job);
+    }
+
+    /**
+     * Validates an approver-set designation at creation / change time (SPEC item 3, D-37): at
+     * least one approver, and every member is on the global list, allowed by the job-level
+     * restriction and not the requester (administrator exception per the self-approval policy).
+     *
+     * @param requester the requesting user id (the current caller)
+     * @param approvers the designated approver ids
+     * @param job the target job, used for the optional job-level approver restriction
+     * @return the normalized set (trimmed, de-duplicated, designation order)
+     * @throws IllegalArgumentException if the designation violates the policy
+     */
+    public static List<String> checkDesignation(String requester, List<String> approvers, Job<?, ?> job) {
+        List<String> normalized = Approvers.normalize(approvers);
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("At least one approver must be designated.");
         }
         List<String> restriction = jobApproverRestriction(job);
-        if (!restriction.isEmpty() && !restriction.contains(approver)) {
-            throw new IllegalArgumentException("User '" + approver
-                    + "' is not an allowed approver for this job.");
+        for (String approver : normalized) {
+            if (!isListedApprover(approver)) {
+                throw new IllegalArgumentException(
+                        "User '" + approver + "' is not on the configured approver list.");
+            }
+            if (!restriction.isEmpty() && !restriction.contains(approver)) {
+                throw new IllegalArgumentException("User '" + approver
+                        + "' is not an allowed approver for this job.");
+            }
+            if (approver.equals(requester) && !selfApprovalAllowedForCaller()) {
+                throw new IllegalArgumentException(
+                        "You cannot designate yourself as an approver of your own request.");
+            }
         }
-        if (approver.equals(requester) && !selfApprovalAllowedForCaller()) {
-            throw new IllegalArgumentException(
-                    "You cannot designate yourself as the approver of your own request.");
-        }
+        return normalized;
     }
 
     /**
      * Checks that the current caller may decide (approve/reject) the given request
      * (SPEC item 3: list membership AND the Approve permission at decision time,
-     * SPEC item 2: admin self-approval policy).
+     * SPEC item 2: admin self-approval policy, D-37: any member of the designated set).
      *
      * @return {@code true} when this decision is a self-approval (requester == decider)
      * @throws AccessDeniedException if the caller may not decide the request
      */
     public static boolean checkDecision(RunRequest request) {
-        return checkDecision(request.getId(), request.getRequester(), request.getApprover());
+        return checkDecision(request.getId(), request.getRequester(), request.getApprovers());
     }
 
     /**
      * Request-type-agnostic decision check, shared by run requests and grant requests
-     * (SPEC item 8 reuses the SPEC item 3 approver rules).
+     * (SPEC item 8 reuses the SPEC item 3 approver rules). The caller must be a member of the
+     * designated set (D-29 exclusivity applied to the set, D-37); the permission, list and
+     * self-approval checks apply to the deciding user.
      *
      * @param requestId the request id (for error messages only)
      * @param requester the request's requester id
-     * @param designatedApprover the request's currently designated approver id
+     * @param designatedApprovers the request's currently designated approver set
      * @return {@code true} when this decision is a self-approval (requester == decider)
      * @throws AccessDeniedException if the caller may not decide the request
      */
-    public static boolean checkDecision(String requestId, String requester, String designatedApprover) {
+    public static boolean checkDecision(String requestId, String requester, List<String> designatedApprovers) {
         String caller = Jenkins.getAuthentication2().getName();
-        if (!caller.equals(designatedApprover)) {
+        if (designatedApprovers == null || !designatedApprovers.contains(caller)) {
             throw new AccessDeniedException(
-                    "Only the designated approver may decide request " + requestId + ".");
+                    "Only a designated approver may decide request " + requestId + ".");
         }
         // Both conditions are required at decision time: permission AND list membership.
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);

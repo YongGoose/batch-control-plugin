@@ -50,6 +50,15 @@ public final class Grant {
      * written before S-09, or no marker could be read) is matched by name alone.
      */
     private Map<String, String> createdItemIdentities;
+    /**
+     * D-40: the CREATE name restriction copied from the request ({@code null}: any name). Copied so
+     * the permission-check hot path never has to load the request.
+     */
+    private String createNamePattern;
+    /** D-36: the GRANT_EXPIRING notification was sent (persisted so a restart does not resend). */
+    private boolean expiringNotified;
+    /** Compiled {@link #createNamePattern}, built lazily. */
+    private transient volatile CreateNamePattern compiledPattern;
 
     private Grant(String id, String grantRequestId, String user, GrantScope scope,
                   List<GrantAction> actions, Instant grantedAt, Instant expiresAt) {
@@ -69,9 +78,47 @@ public final class Grant {
     public static Grant createFor(GrantRequest request, Instant grantedAt) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(grantedAt, "grantedAt");
-        return new Grant(request.getId(), request.getId(), request.getRequester(),
+        Grant grant = new Grant(request.getId(), request.getId(), request.getRequester(),
                 request.getScope(), request.getActions(), grantedAt,
                 grantedAt.plus(Duration.ofMinutes(request.getDurationMinutes())));
+        grant.createNamePattern = request.getCreateNamePattern();
+        return grant;
+    }
+
+    /** D-40: the CREATE name restriction ({@code /regex/} or exact name), or {@code null}. */
+    public String getCreateNamePattern() {
+        return createNamePattern;
+    }
+
+    /**
+     * D-40: whether this grant's Create allows a new item called {@code itemName} (the item name,
+     * not the full name). Always true without a restriction.
+     */
+    public boolean allowsCreateName(String itemName) {
+        if (createNamePattern == null) {
+            return true;
+        }
+        CreateNamePattern pattern = compiledPattern;
+        if (pattern == null) {
+            pattern = CreateNamePattern.forStored(createNamePattern);
+            compiledPattern = pattern;
+        }
+        return pattern.matches(itemName);
+    }
+
+    /** Whether the D-36 GRANT_EXPIRING notification was already sent. */
+    public boolean isExpiringNotified() {
+        return expiringNotified;
+    }
+
+    /** Only {@code security.GrantService} marks the notification as sent. */
+    public void setExpiringNotified(boolean expiringNotified) {
+        this.expiringNotified = expiringNotified;
+    }
+
+    /** The id of the request this grant came from. */
+    public String getGrantRequestId() {
+        return grantRequestId;
     }
 
     public String getId() {

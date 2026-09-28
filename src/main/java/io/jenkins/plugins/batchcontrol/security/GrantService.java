@@ -113,6 +113,67 @@ public final class GrantService {
     }
 
     /**
+     * Every active grant of {@code user} that covers {@code itemFullName} and includes
+     * {@code action} (D-40: the CREATE check has to see all of them, since each may carry a
+     * different name restriction).
+     */
+    public synchronized List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
+        List<Grant> found = new ArrayList<>();
+        if (user == null || itemFullName == null || action == null) {
+            return found;
+        }
+        Instant now = BatchClock.now();
+        for (Grant grant : grants()) {
+            if (grant.isActiveAt(now)
+                    && user.equals(grant.getUser())
+                    && grant.getScope().includes(itemFullName)
+                    && grant.getActions().contains(action)) {
+                found.add(grant);
+            }
+        }
+        return found;
+    }
+
+    /**
+     * D-40: the first active Create grant of {@code user} covering {@code itemFullName} whose name
+     * restriction (if any) allows {@code itemName}, or {@code null}.
+     */
+    @CheckForNull
+    public synchronized Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
+        for (Grant grant : findActiveGrants(user, itemFullName, GrantAction.CREATE)) {
+            if (grant.allowsCreateName(itemName)) {
+                return grant;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * D-36: marks and returns every active grant whose window ends within {@code lead} and whose
+     * GRANT_EXPIRING notification was not sent yet. The flag is persisted before the caller
+     * dispatches, so a restart never resends.
+     */
+    public synchronized List<Grant> claimExpiringNotifications(java.time.Duration lead) {
+        Instant now = BatchClock.now();
+        List<Grant> claimed = new ArrayList<>();
+        for (Grant cached : new ArrayList<>(grants())) {
+            if (!cached.isActiveAt(now) || cached.isExpiringNotified()
+                    || now.isBefore(cached.getExpiresAt().minus(lead))) {
+                continue;
+            }
+            Grant grant = store.loadGrant(cached.getId());
+            if (grant == null || !grant.isActiveAt(now) || grant.isExpiringNotified()) {
+                continue;
+            }
+            grant.setExpiringNotified(true);
+            store.saveGrant(grant);
+            replaceInCache(grant);
+            claimed.add(grant);
+        }
+        return claimed;
+    }
+
+    /**
      * D-35c: the active grant of {@code user} through whose Create the item {@code itemFullName}
      * was created, or {@code null}. The item must still lie inside the grant's scope. While such a
      * grant is active its holder also holds Item/Read and Item/Configure on that item (see
@@ -194,7 +255,9 @@ public final class GrantService {
      */
     @CheckForNull
     public synchronized Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
-        Grant active = findActiveGrant(user, itemFullName, GrantAction.CREATE);
+        // D-40: the grant whose name restriction admits the item (its name, not the full name).
+        String itemName = itemFullName.substring(itemFullName.lastIndexOf('/') + 1);
+        Grant active = findActiveCreateGrant(user, itemFullName, itemName);
         if (active == null) {
             return null;
         }
