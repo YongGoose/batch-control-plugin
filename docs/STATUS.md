@@ -19,6 +19,7 @@
 - #34: customize-build-now does not bypass the gate and the job page still offers Request Run. No code change was needed beyond the tests.
 - #20: configuration comparison ignores `plugin="…@version"` and the root `<actions>`, and computed-folder children are not recorded as CONFIGURE. The snapshot lock is striped.
 - Gate: 300 tests, 0 failures, SpotBugs 0, but **1 h 13 min** (was 22 min). Every JenkinsRule now loads the nine extra plugins. Parallel forks go into the next PR, whose gate validates them.
+- security-07 (0 blocker / 0 high / 2 medium / 2 low): same-job UpstreamCause no longer unwrapped as a retry, `plugin` stripped only as a real attribute, computed-child saves skipped only on the parent's own indexing thread. Regression rows T-SEC-32..34. Parallel forks (`forkCount=1C`) added here. Final gate: **303 tests, 0 failures, SpotBugs 0, 7 min 53 s**.
 
 ## 2026-09-28 (evening) — PR 2 (#30 per-strategy subclasses) ready
 - PR 1 (#31) merged as #37 after security-04 (0 blocker / 0 high).
