@@ -78,32 +78,16 @@
         </table>
       </j:if>
 
-      <!-- D-50 (SPEC item 2): a pending Configure request on jobs whose builds run as SYSTEM.
-           Shown before the decision to everyone who may see this request (the page itself is
-           gated by Visibility); only jobs the viewer may read are named, the rest are counted.
-           Job names are escaped by default. -->
-      <j:set var="systemJobs" value="${it.systemBuildJobs}"/>
-      <j:set var="systemHidden" value="${it.systemBuildHiddenCount}"/>
-      <j:if test="${!empty(systemJobs) or systemHidden > 0}">
+      <!-- D-50a (SPEC item 2): one fixed, instance-wide warning above the decision form, only to a
+           viewer who may decide this request or holds Batch Control/Manage
+           (GrantRequestItem#isShowSystemBuildWarning). It names no job and no count. -->
+      <j:if test="${it.showSystemBuildWarning}">
         <div class="jenkins-alert jenkins-alert-warning" role="alert">
-          <p>
-            <strong>Builds of these jobs run as SYSTEM:</strong>
-          </p>
-          <ul>
-            <j:forEach var="job" items="${systemJobs}">
-              <li><code>${job}</code></li>
-            </j:forEach>
-            <j:if test="${systemHidden > 0}">
-              <li>${systemHidden} more job(s) in this folder that you cannot see</li>
-            </j:if>
-          </ul>
-          <p style="margin-bottom: 0;">
-            While the requester holds this Configure window, they can change such a job so that
-            its next build changes the job's permissions permanently; that change outlasts the
-            window. To avoid this, an administrator sets a default build authorization in
-            Authorize Project, or gives each job its own build authorization, before this
-            request is approved.
-          </p>
+          <strong>Builds can run as SYSTEM on this instance.</strong>
+          A holder of a Configure permission window can therefore make a build change a job's
+          permissions permanently. A Jenkins administrator can prevent this by setting a global
+          default build authorization in Authorize Project (a strategy on a single job is not
+          enough).
         </div>
       </j:if>
 
