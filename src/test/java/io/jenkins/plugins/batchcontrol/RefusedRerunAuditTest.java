@@ -341,8 +341,10 @@ public class RefusedRerunAuditTest {
     /**
      * T-06-79 (D-51a): per user at most 20 per-attempt records of refused re-runs per rolling 10
      * minutes. u1 retries 23 different failed builds within seconds: after 20 there are 20 records
-     * by u1, the 21st refusal adds exactly one summary record, and the 22nd and 23rd add no record
-     * but change the summary's text (its count). Every attempt is refused. Note 162.
+     * by u1, the 21st refusal adds exactly one summary record (it says the further refusals are
+     * counted), and the 22nd and 23rd add no record and leave the summary unchanged (records are
+     * append-only). Every attempt is refused. The closing record at the window's end is not
+     * pinned. Note 162.
      */
     @Test
     public void t_06_79_perUserBudgetEndsInOneCountingSummaryRecord() throws Exception {
@@ -375,16 +377,20 @@ public class RefusedRerunAuditTest {
         ChangeRecord summary = withSummary.stream().filter(r -> twenty.stream().noneMatch(t -> t.getId().equals(r.getId())))
                 .findFirst().orElseThrow();
         String afterFirst = summary.getDetail();
+        assertTrue(String.valueOf(afterFirst).toLowerCase(Locale.ROOT).contains("count"), "the 21st refusal must write"
+                + " the summary record (further refusals are counted, not listed), not a 21st per-attempt record: "
+                + afterFirst);
 
         post(j, "u1", job.getBuildByNumber(22).getUrl() + "retry/");
         post(j, "u1", job.getBuildByNumber(23).getUrl() + "retry/");
         assertBlocked(j, job, builds + 1, builds);
         List<ChangeRecord> after = byUser("u1");
         assertEquals(21, after.size(), "further refusals in the window must not add records: " + describe(after));
-        ChangeRecord counted = after.stream().filter(r -> r.getId().equals(summary.getId())).findFirst().orElseThrow();
-        assertTrue(!String.valueOf(counted.getDetail()).equals(String.valueOf(afterFirst)),
-                "the summary record must count the further refusals (its text must change): before '" + afterFirst
-                        + "', after '" + counted.getDetail() + "'");
+        ChangeRecord unchanged = after.stream().filter(r -> r.getId().equals(summary.getId())).findFirst().orElseThrow();
+        assertEquals(afterFirst, unchanged.getDetail(), "change records are append-only: the summary record must not be"
+                + " rewritten (D-51a)");
+        // The closing record written "when the window ends" is not pinned: SPEC offers no public
+        // trigger for the end of the window, and waiting 10 minutes is not practical here (note 162).
     }
 
     /**

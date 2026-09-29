@@ -164,14 +164,18 @@ final class StrategyFixtures {
     }
 
     /**
-     * Configures a build authenticator (the harness's MockQueueItemAuthenticator, standing in for
-     * Authorize Project). Since D-35d the {@code batch-control-strategy} monitor also warns when
-     * change control is on and no authenticator is configured; rows that measure the strategy
-     * half of the monitor call this so that the other half cannot mask them (note 53).
+     * Configures a build authenticator that gives every build a user identity: Authorize
+     * Project's global default running builds as {@code admin}. Since D-35d the
+     * {@code batch-control-strategy} monitor also warns when change control is on and no
+     * authenticator is configured, and since D-50a when builds can still run as SYSTEM (an empty
+     * MockQueueItemAuthenticator, the fixture before D-50a, maps no item and so leaves every build
+     * as SYSTEM); rows that measure the strategy half of the monitor call this so that the other
+     * half cannot mask them (notes 53, 164).
      */
     static void configureBuildAuthenticator() {
         jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators()
-                .add(new org.jvnet.hudson.test.MockQueueItemAuthenticator());
+                .add(new org.jenkinsci.plugins.authorizeproject.GlobalQueueItemAuthenticator(
+                        new org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy("admin")));
         assertTrue(!jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators().isEmpty(),
                 "fixture: a QueueItemAuthenticator must be configured");
     }
