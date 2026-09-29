@@ -2,13 +2,13 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
-import hudson.model.Job;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
@@ -115,11 +115,19 @@ public class ActivationsSection implements ModelObject, StaplerProxy {
         return Paging.hasNext(getPage(), getTotal());
     }
 
-    /** Root-relative job URL when the viewer may read the job, else {@code null} (plain text). */
+    /**
+     * Root-relative URL of the request's job or computed folder (D-46c) when the viewer may read
+     * it, else {@code null} (plain text).
+     */
     @CheckForNull
     public String jobUrl(ActivationRequest request) {
-        Job<?, ?> job = Visibility.findVisibleJob(request.getJobFullName());
-        return job != null && job.hasPermission(Item.READ) ? job.getUrl() : null;
+        Item item = Visibility.findVisibleItem(request.getJobFullName());
+        return item != null && item.hasPermission(Item.READ) ? item.getUrl() : null;
+    }
+
+    /** S-13-08: ACTIVATE and HOLD worded so they cannot be mistaken for each other. */
+    public String actionLabel(ActivationRequest.Action action) {
+        return ActivationView.actionLabel(action);
     }
 
     /** Jelly helper: an approver set for display ({@code a1, a2}). */

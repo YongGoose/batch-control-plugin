@@ -19,7 +19,7 @@
             <tr>
               <th>ID</th>
               <th>Action</th>
-              <th>Job</th>
+              <th>Job or folder</th>
               <th>Requester</th>
               <th>Created</th>
             </tr>
@@ -28,7 +28,7 @@
             <j:forEach var="r" items="${inbox}">
               <tr>
                 <td><a href="${r.id}/">${r.id}</a></td>
-                <td>${r.action}</td>
+                <td><strong>${it.actionLabel(r.action)}</strong></td>
                 <td>${r.jobFullName}</td>
                 <td>${r.requester}</td>
                 <td>${it.format(r.createdAt)}</td>
@@ -49,7 +49,7 @@
               <tr>
                 <th>ID</th>
                 <th>Action</th>
-                <th>Job</th>
+                <th>Job or folder</th>
                 <th>Requester</th>
                 <th>Approvers</th>
                 <th>Status</th>
@@ -60,7 +60,7 @@
               <j:forEach var="r" items="${it.pageItems}">
                 <tr>
                   <td><a href="${r.id}/">${r.id}</a></td>
-                  <td>${r.action}</td>
+                  <td><strong>${it.actionLabel(r.action)}</strong></td>
                   <td>
                     <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
                     <j:choose>

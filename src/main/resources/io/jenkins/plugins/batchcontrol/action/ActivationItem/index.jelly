@@ -3,14 +3,14 @@
      decision, approver-change and cancel controls are shown only to the users the service would
      accept; every endpoint re-checks. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Activation Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
+  <l:layout title="${it.displayName}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
-      <l:app-bar title="Activation Request ${it.id}"/>
+      <l:app-bar title="${it.displayName}"/>
 
       <table class="jenkins-table jenkins-table--small">
         <tbody>
           <tr>
-            <th style="text-align: left; width: 12rem;">Job</th>
+            <th style="text-align: left; width: 12rem;">Job or folder</th>
             <td>
               <j:choose>
                 <j:when test="${it.jobUrl != null}">
@@ -20,7 +20,7 @@
               </j:choose>
             </td>
           </tr>
-          <tr><th style="text-align: left;">Action</th><td>${it.request.action}</td></tr>
+          <tr><th style="text-align: left;">Action</th><td><strong>${it.actionLabel}</strong></td></tr>
           <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
           <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
           <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
@@ -65,11 +65,13 @@
         <p class="jenkins-description">
           <j:choose>
             <j:when test="${it.hold}">
-              Approving stops timer and upstream triggers from starting this job.
+              This is a HOLD request: approving takes the job out of service, so unattended
+              triggers (timer, upstream, SCM) stop starting it.
             </j:when>
             <j:otherwise>
-              Approving lets timer and upstream triggers start this job, as far as its own trigger
-              settings allow.
+              This is an ACTIVATE request: approving puts the job into service, so unattended
+              triggers (timer, upstream, SCM) may start it, as far as its own trigger settings
+              allow.
             </j:otherwise>
           </j:choose>
         </p>
@@ -78,7 +80,10 @@
             <f:textarea name="comment" value=""/>
           </f:entry>
           <f:bottomButtonBar>
-            <f:submit value="Approve"/>
+            <j:choose>
+              <j:when test="${it.hold}"><f:submit value="Approve Hold"/></j:when>
+              <j:otherwise><f:submit value="Approve Activation"/></j:otherwise>
+            </j:choose>
           </f:bottomButtonBar>
         </f:form>
         <f:form method="post" action="reject" name="reject">

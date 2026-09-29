@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
+import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -29,11 +30,12 @@ import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
- * The activation request form of one job at {@code /job/<name>/batch-control/activation}
- * (SPEC item 6a, D-39), served by {@link JobRequestAction#getActivation()}. It inherits that
- * action's absence rule: without {@code BatchControl/Request} the whole
- * {@code /job/<name>/batch-control/} space answers 404, so this form is never shown to a user
- * who could not submit it.
+ * The activation request form at {@code <item>/batch-control/activation} (SPEC item 6a, D-39)
+ * for a job ({@link JobRequestAction#getActivation()}) or a computed folder, which carries the
+ * activation of its children (D-46c, {@link ComputedFolderActivationAction#getActivation()}). It
+ * inherits the owning action's absence rule: without {@code BatchControl/Request} the whole
+ * {@code <item>/batch-control/} space answers 404, so this form is never shown to a user who
+ * could not submit it.
  *
  * <p>The form offers the one action that can change anything: {@code ACTIVATE} for a job that is
  * not activated, {@code HOLD} for one that is. {@link #doSubmit} passes the posted value to
@@ -43,14 +45,20 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 @Restricted(NoExternalUse.class)
 public class JobActivationForm implements ModelObject {
 
-    private final Job<?, ?> job;
+    /** A job, or a computed folder (D-46c). */
+    private final Item item;
 
-    JobActivationForm(Job<?, ?> job) {
-        this.job = job;
+    JobActivationForm(Item item) {
+        this.item = item;
     }
 
-    public Job<?, ?> getJob() {
-        return job;
+    public Item getItem() {
+        return item;
+    }
+
+    /** Whether the target is a computed folder rather than a job (the view words it accordingly). */
+    public boolean isFolder() {
+        return !(item instanceof Job);
     }
 
     @Override
@@ -67,28 +75,31 @@ public class JobActivationForm implements ModelObject {
 
     /** Whether the job may run on timer and upstream triggers as far as activation is concerned. */
     public boolean isActivated() {
-        return ActivationService.get().isActivated(job);
+        return ActivationView.isActivated(item);
     }
 
     /** Whether an approved hold took the job out of service (as opposed to never activated). */
     public boolean isHeld() {
-        ActivationState state = getState();
-        return !isActivated() && state != null && state.getDeactivatedBy() != null;
+        return ActivationView.isHeld(item);
     }
 
-    /** A child its folder computes for itself is not controlled and needs no activation (D-32). */
-    public boolean isComputedChild() {
-        return ActivationService.isComputedChild(job);
+    /**
+     * A computed child carries no activation of its own: the item returned here does (D-46c).
+     * {@code null} for an item that carries its own.
+     */
+    @CheckForNull
+    public Item getCarrier() {
+        return ActivationView.carrierOf(item);
     }
 
-    /** Whether run control is on and the job requires approval, i.e. the gate applies to it. */
+    /** Whether run control is on, i.e. the gate applies (D-46a: whatever approvalRequired says). */
     public boolean isRunControlled() {
-        return JobActivationNoticeAction.isRunControlled(job);
+        return JobActivationNoticeAction.isRunControlEnabled();
     }
 
     @CheckForNull
     public ActivationState getState() {
-        return ActivationService.get().getState(job);
+        return ActivationView.getState(item);
     }
 
     /** The action a new request would ask for: {@code HOLD} when activated, else {@code ACTIVATE}. */
@@ -99,7 +110,7 @@ public class JobActivationForm implements ModelObject {
     /** The PENDING requests of this job the viewer may see (P-09), oldest first. */
     public List<ActivationRequest> getPendingRequests() {
         List<ActivationRequest> visible = new ArrayList<>();
-        for (ActivationRequest request : ActivationService.get().listPendingForJob(job.getFullName())) {
+        for (ActivationRequest request : ActivationService.get().listPendingForJob(item.getFullName())) {
             if (Visibility.canSeeActivationRequest(request)) {
                 visible.add(request);
             }
@@ -109,7 +120,12 @@ public class JobActivationForm implements ModelObject {
 
     /** Approver candidates: global approver list ∩ job-level restriction (if configured). */
     public List<String> getApproverOptions() {
-        return ApproverOptions.forJob(job);
+        return ApproverOptions.forJob(item instanceof Job ? (Job<?, ?>) item : null);
+    }
+
+    /** S-13-08: the request kind as the screens word it. */
+    public String actionLabel(ActivationRequest.Action action) {
+        return ActivationView.actionLabel(action);
     }
 
     /** Jelly helper: human-readable timestamp. */
@@ -128,7 +144,7 @@ public class JobActivationForm implements ModelObject {
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        job.checkPermission(Item.READ);
+        item.checkPermission(Item.READ);
 
         // The rendered form posts the raw fields plus a json blob (f:form); a script may post the
         // raw fields only. The raw fields are read first either way.
@@ -146,7 +162,7 @@ public class JobActivationForm implements ModelObject {
 
         ActivationRequest request;
         try {
-            request = ActivationService.get().create(job, action, reason, approvers);
+            request = ActivationService.get().create(item, action, reason, approvers);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
         }

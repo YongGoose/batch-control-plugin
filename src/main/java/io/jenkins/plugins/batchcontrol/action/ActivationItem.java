@@ -11,6 +11,7 @@ import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -58,7 +59,12 @@ public class ActivationItem implements ModelObject {
 
     @Override
     public String getDisplayName() {
-        return "Activation Request " + request.getId();
+        return (isHold() ? "Hold Request " : "Activation Request ") + request.getId();
+    }
+
+    /** S-13-08: ACTIVATE and HOLD worded so they cannot be mistaken for each other. */
+    public String getActionLabel() {
+        return ActivationView.actionLabel(request.getAction());
     }
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
@@ -76,11 +82,14 @@ public class ActivationItem implements ModelObject {
         return Approvers.display(approvers);
     }
 
-    /** Root-relative job URL when the viewer may read the job, else {@code null} (plain text). */
+    /**
+     * Root-relative URL of the job or computed folder (D-46c) when the viewer may read it, else
+     * {@code null} (plain text).
+     */
     @CheckForNull
     public String getJobUrl() {
-        Job<?, ?> job = findJob();
-        return job != null && job.hasPermission(Item.READ) ? job.getUrl() : null;
+        Item item = Visibility.findVisibleItem(request.getJobFullName());
+        return item != null && item.hasPermission(Item.READ) ? item.getUrl() : null;
     }
 
     public boolean isPending() {
@@ -172,7 +181,10 @@ public class ActivationItem implements ModelObject {
         }
     }
 
-    /** The target job, or {@code null} when it is gone or invisible to the caller (S-16). */
+    /**
+     * The target job, or {@code null} when it is gone, invisible to the caller (S-16) or a
+     * computed folder (the approver options then fall back to the global list).
+     */
     @CheckForNull
     private Job<?, ?> findJob() {
         return Visibility.findVisibleJob(request.getJobFullName());

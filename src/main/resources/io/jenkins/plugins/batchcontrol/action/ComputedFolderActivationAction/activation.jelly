@@ -1,0 +1,6 @@
+<?jelly escape-by-default='true'?>
+<!-- Serves <folder>/batch-control/activation without a trailing slash, as on a job
+     (JobRequestAction/activation.jelly); the included page uses absolute links. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <st:include page="index.jelly" it="${it.activation}"/>
+</j:jelly>
