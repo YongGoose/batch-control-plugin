@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.ops;
 import hudson.init.InitMilestone;
 import hudson.init.Initializer;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.lang.ref.WeakReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -37,6 +38,7 @@ public final class StartupRecovery {
 
     @Initializer(after = InitMilestone.JOB_CONFIG_ADAPTED)
     public static void recover() {
+        prepareStore();
         try {
             RunRequestService.get().recoverApprovedRequests();
         } catch (RuntimeException e) {
@@ -45,6 +47,18 @@ public final class StartupRecovery {
             // Always mark the session recovered, even on failure: expiry must not stay
             // disabled for the whole session because one request could not be recovered.
             completedFor = new WeakReference<>(Jenkins.getInstanceOrNull());
+        }
+    }
+
+    /**
+     * Builds the store's in-memory entity index now (#13), so the first save on the queue path
+     * never pays for it.
+     */
+    private static void prepareStore() {
+        try {
+            FileStore.get().warmUp();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build the batch-control entity index", e);
         }
     }
 

@@ -92,6 +92,14 @@
       <!-- Links to other screens are rendered only for a user who may open them (SPEC item 2).
            Incident links need no check: the incident screens share this section's ViewHistory
            gate. -->
+      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
+      <j:if test="${it.truncated}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          This period holds more records than one screen can scan (the newest 50,000 were read),
+          so this list and its count are incomplete. The CSV export is complete for the period:
+          <a href="${it.csvUrl}">download it</a>.
+        </div>
+      </j:if>
       <j:set var="links" value="${it.links}"/>
       <j:set var="requestLinks" value="${links.requests}"/>
       <j:set var="grantLinks" value="${links.grants}"/>

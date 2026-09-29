@@ -19,6 +19,14 @@
       </form>
 
       <j:set var="grantLinks" value="${it.links.grants}"/>
+      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
+      <j:if test="${it.truncated}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          This period holds more records than one screen can scan (the newest 50,000 were read),
+          so this list and its count are incomplete. The CSV export is complete for the period:
+          <a href="${it.csvUrl}">download it</a>.
+        </div>
+      </j:if>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No change records in ${it.monthValue}.</p>

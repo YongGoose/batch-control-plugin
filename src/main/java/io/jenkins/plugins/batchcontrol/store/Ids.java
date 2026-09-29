@@ -3,6 +3,8 @@ package io.jenkins.plugins.batchcontrol.store;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DecimalStyle;
+import java.util.Locale;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -13,7 +15,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class Ids {
 
-    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    /**
+     * ASCII digits whatever the controller's default locale (#17): ids become file names, and
+     * retention recovers a record's month from the id prefix.
+     */
+    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)
+            .withDecimalStyle(DecimalStyle.STANDARD);
     /** Lowercase only: some file systems (Windows, macOS default) are case-insensitive. */
     private static final String ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789";
     private static final int RANDOM_LENGTH = 6;

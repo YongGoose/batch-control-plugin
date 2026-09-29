@@ -15,6 +15,12 @@ import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.IncidentSummary;
+import io.jenkins.plugins.batchcontrol.store.Period;
+import io.jenkins.plugins.batchcontrol.store.RecordPage;
+import io.jenkins.plugins.batchcontrol.store.RequestSummary;
+import io.jenkins.plugins.batchcontrol.store.RunMonthStats;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.CsvWriter;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FilterParser;
@@ -32,6 +38,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
@@ -78,14 +85,20 @@ public class HistorySection implements ModelObject, StaplerProxy {
     /** How many blocked marker re-use attempts the always-visible alert lists at most. */
     public static final int REUSE_ALERT_LIMIT = 10;
 
+    /** Most CSV exports that may run at the same time, instance-wide (S-05). */
+    public static final int MAX_CONCURRENT_EXPORTS = 2;
+
+    private static final java.util.concurrent.Semaphore CSV_EXPORTS =
+            new java.util.concurrent.Semaphore(MAX_CONCURRENT_EXPORTS);
+
+    private static final int TOO_MANY_REQUESTS = 429;
+
     private static final List<String> KINDS = List.of("runs", "incidents", "changes", "requests");
 
     private FilterParser.Filter filter;
-    private List<RunRecord> runs;
-    private List<Incident> incidents;
-    private List<ChangeRecord> changes;
-    private List<ChangeRecord> markerReuse;
-    private List<RunRequest> requests;
+    private Listing listing;
+    private RecordPage<ChangeRecord> markerReuse;
+    private List<YearMonth> storedMonths;
 
     @Override
     public Object getTarget() {
@@ -165,22 +178,53 @@ public class HistorySection implements ModelObject, StaplerProxy {
         if (refuseNonGet(req, rsp)) {
             return;
         }
-        switch (rest) {
-            case "/runs.csv" -> writeRunsCsv(rsp);
-            case "/incidents.csv" -> writeIncidentsCsv(rsp);
-            case "/changes.csv" -> writeChangesCsv(rsp);
-            default -> writeRequestsCsv(rsp);
+        // S-05: an export has no span cap (it must be complete), so bound how many run at once
+        // instance-wide; a further one is refused rather than queued.
+        if (!CSV_EXPORTS.tryAcquire()) {
+            rsp.setHeader("Retry-After", "30");
+            rsp.sendError(TOO_MANY_REQUESTS,
+                    "Too many CSV exports are running; try again in a moment");
+            return;
+        }
+        try {
+            switch (rest) {
+                case "/runs.csv" -> writeRunsCsv(rsp);
+                case "/incidents.csv" -> writeIncidentsCsv(rsp);
+                case "/changes.csv" -> writeChangesCsv(rsp);
+                default -> writeRequestsCsv(rsp);
+            }
+        } finally {
+            CSV_EXPORTS.release();
         }
     }
+
+    /*
+     * CSV exports (#13) stay complete for the requested span (only months that exist in the
+     * store are opened) but are written month by month, newest month first, so at most one
+     * month's records are held at a time rather than every row of the span. The store has no
+     * row-streaming read yet; see the ui-dev report.
+     */
 
     private void writeRunsCsv(StaplerResponse2 rsp) throws IOException {
         CsvWriter csv = CsvWriter.open(rsp, "runs.csv");
         csv.row("runId", "jobFullName", "number", "causeType", "user", "parameters", "result",
                 "startedAt", "durationMs", "abortedBy", "runRequestId");
-        for (RunRecord r : getRunItems()) {
-            csv.row(r.getRunId(), r.getJobFullName(), r.getNumber(), r.getCauseType(),
-                    r.getUser(), RunLinks.formatParameters(r.getParameters()), r.getResult(),
-                    r.getStartedAt(), r.getDurationMs(), r.getAbortedBy(), r.getRunRequestId());
+        Predicate<RunRecord> match = runFilter();
+        Comparator<RunRecord> order = Comparator.comparing(RunRecord::getStartedAt)
+                .thenComparing(RunRecord::getRunId).reversed();
+        for (YearMonth m : newestMonthFirst()) {
+            List<RunRecord> month = new ArrayList<>();
+            for (RunRecord r : FileStore.get().listRunRecords(m)) {
+                if (match.test(r)) {
+                    month.add(r);
+                }
+            }
+            month.sort(order);
+            for (RunRecord r : month) {
+                csv.row(r.getRunId(), r.getJobFullName(), r.getNumber(), r.getCauseType(),
+                        r.getUser(), RunLinks.formatParameters(r.getParameters()), r.getResult(),
+                        r.getStartedAt(), r.getDurationMs(), r.getAbortedBy(), r.getRunRequestId());
+            }
         }
     }
 
@@ -188,10 +232,20 @@ public class HistorySection implements ModelObject, StaplerProxy {
         CsvWriter csv = CsvWriter.open(rsp, "incidents.csv");
         csv.row("id", "runId", "jobFullName", "result", "status", "createdAt",
                 "resolvedByRunId", "rerunRequestIds");
-        for (Incident i : getIncidentItems()) {
-            csv.row(i.getId(), i.getRunId(), i.getJobFullName(), i.getResult(), i.getStatus(),
-                    IncidentsSection.creationTime(i), i.getResolvedByRunId(),
-                    String.join(" ", i.getRerunRequestIds()));
+        Predicate<Incident> match = incidentFilter();
+        for (YearMonth m : newestMonthFirst()) {
+            List<Incident> month = new ArrayList<>();
+            for (Incident i : IncidentService.get().list(m)) {
+                if (match.test(i)) {
+                    month.add(i);
+                }
+            }
+            month.sort(INCIDENT_ORDER);
+            for (Incident i : month) {
+                csv.row(i.getId(), i.getRunId(), i.getJobFullName(), i.getResult(), i.getStatus(),
+                        IncidentsSection.creationTime(i), i.getResolvedByRunId(),
+                        String.join(" ", i.getRerunRequestIds()));
+            }
         }
     }
 
@@ -200,9 +254,21 @@ public class HistorySection implements ModelObject, StaplerProxy {
         // The diff column is deliberately omitted: diffs are large multi-line blobs that belong
         // in the change detail screen, not in a spreadsheet.
         csv.row("id", "type", "target", "user", "at", "grantId", "detail");
-        for (ChangeRecord c : getChangeItems()) {
-            csv.row(c.getId(), c.getType(), c.getTarget(), c.getUser(), c.getAt(), c.getGrantId(),
-                    c.getDetail());
+        Predicate<ChangeRecord> match = changeFilter();
+        Comparator<ChangeRecord> order = Comparator.comparing(ChangeRecord::getAt)
+                .thenComparing(ChangeRecord::getId).reversed();
+        for (YearMonth m : newestMonthFirst()) {
+            List<ChangeRecord> month = new ArrayList<>();
+            for (ChangeRecord c : FileStore.get().listChangeRecords(m)) {
+                if (match.test(c)) {
+                    month.add(c);
+                }
+            }
+            month.sort(order);
+            for (ChangeRecord c : month) {
+                csv.row(c.getId(), c.getType(), c.getTarget(), c.getUser(), c.getAt(),
+                        c.getGrantId(), c.getDetail());
+            }
         }
     }
 
@@ -213,13 +279,32 @@ public class HistorySection implements ModelObject, StaplerProxy {
                 "executedRunId", "decidedBy");
         // D-37: the existing approver column holds the designated set joined by ';', and
         // decidedBy is appended last so column positions of existing consumers do not move.
-        // Every cell still goes through CsvWriter's formula escaping.
-        for (RunRequest q : getRequestItems()) {
+        // Every cell still goes through CsvWriter's formula escaping. Filtering runs on the
+        // in-memory summaries (#13); each matching request's XML is loaded only to write its row.
+        for (RequestSummary summary : matchingRequestSummaries()) {
+            RunRequest q = RunRequestService.get().load(summary.id());
+            if (q == null) {
+                continue; // deleted by retention since the summary was read
+            }
             csv.row(q.getId(), q.getJobFullName(), RunLinks.formatParameters(q.getParameters()),
                     q.getReason(), q.getRequester(), Approvers.csv(q.getApprovers()), q.getStatus(),
                     q.getCreatedAt(), q.getDecidedAt(), q.getDecisionComment(),
                     q.isSelfApproved(), q.getIncidentId(), q.getExecutedRunId(), q.getDecidedBy());
         }
+    }
+
+    /** The store's existing month buckets inside the filter range (no month cap, #13). */
+    private List<YearMonth> storedMonths() {
+        if (storedMonths == null) {
+            storedMonths = getFilter().months(FileStore.get().listStoredMonths());
+        }
+        return storedMonths;
+    }
+
+    private List<YearMonth> newestMonthFirst() {
+        List<YearMonth> months = new ArrayList<>(storedMonths());
+        java.util.Collections.reverse(months);
+        return months;
     }
 
     // ---------------------------------------------------------------- filter and kind
@@ -255,159 +340,156 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return "kind=" + safe + "&" + getBaseQuery();
     }
 
-    // ---------------------------------------------------------------- filtered listings
-
-    /** All run records matching the filter, newest first. */
-    public List<RunRecord> getRunItems() {
-        if (runs == null) {
-            FilterParser.Filter f = getFilter();
-            List<RunRecord> matched = new ArrayList<>();
-            for (YearMonth m : f.months()) {
-                for (RunRecord r : FileStore.get().listRunRecords(m)) {
-                    if (f.inRange(r.getStartedAt()) && f.matchesJob(r.getJobFullName())
-                            && f.matchesUser(r.getUser()) && f.matchesResult(r.getResult())) {
-                        matched.add(r);
-                    }
-                }
-            }
-            matched.sort(Comparator.comparing(RunRecord::getStartedAt)
-                    .thenComparing(RunRecord::getRunId)
-                    .reversed());
-            runs = matched;
-        }
-        return runs;
+    /**
+     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
+     * Only ISO dates and constant names go into it, so no encoding is needed.
+     */
+    public String getCsvUrl() {
+        return getKind() + ".csv?" + getBaseQuery();
     }
 
-    /** All incidents matching the filter, newest first. */
-    public List<Incident> getIncidentItems() {
-        if (incidents == null) {
-            FilterParser.Filter f = getFilter();
-            List<Incident> matched = new ArrayList<>();
-            for (YearMonth m : f.months()) {
-                for (Incident i : IncidentService.get().list(m)) {
-                    if (f.inRange(IncidentsSection.creationTime(i))
-                            && f.matchesJob(i.getJobFullName())
-                            && f.matchesResult(i.getResult())
-                            && f.matchesStatus(i.getStatus())) {
-                        matched.add(i);
-                    }
-                }
-            }
-            matched.sort(Comparator
-                    .comparing((Incident i) -> {
-                        Instant at = IncidentsSection.creationTime(i);
-                        return at == null ? Instant.EPOCH : at;
-                    })
-                    .thenComparing(Incident::getId)
-                    .reversed());
-            incidents = matched;
-        }
-        return incidents;
+    // ---------------------------------------------------------------- filters
+
+    private static final Comparator<Incident> INCIDENT_ORDER = Comparator
+            .comparing((Incident i) -> {
+                Instant at = IncidentsSection.creationTime(i);
+                return at == null ? Instant.EPOCH : at;
+            })
+            .thenComparing(Incident::getId)
+            .reversed();
+
+    private Predicate<RunRecord> runFilter() {
+        FilterParser.Filter f = getFilter();
+        return r -> f.inRange(r.getStartedAt()) && f.matchesJob(r.getJobFullName())
+                && f.matchesUser(r.getUser()) && f.matchesResult(r.getResult());
     }
 
-    /** All change records matching the filter, newest first. */
-    public List<ChangeRecord> getChangeItems() {
-        if (changes == null) {
-            FilterParser.Filter f = getFilter();
-            List<ChangeRecord> matched = new ArrayList<>();
-            for (YearMonth m : f.months()) {
-                for (ChangeRecord c : FileStore.get().listChangeRecords(m)) {
-                    if (f.inRange(c.getAt()) && f.matchesJob(c.getTarget())
-                            && f.matchesUser(c.getUser())) {
-                        matched.add(c);
-                    }
-                }
-            }
-            matched.sort(Comparator.comparing(ChangeRecord::getAt)
-                    .thenComparing(ChangeRecord::getId)
-                    .reversed());
-            changes = matched;
-        }
-        return changes;
+    private Predicate<Incident> incidentFilter() {
+        FilterParser.Filter f = getFilter();
+        return i -> f.inRange(IncidentsSection.creationTime(i))
+                && f.matchesJob(i.getJobFullName())
+                && f.matchesResult(i.getResult())
+                && f.matchesStatus(i.getStatus());
+    }
+
+    /** The filter's date range as a store period: only records inside it count toward the cap (S-03). */
+    private Period period() {
+        FilterParser.Filter f = getFilter();
+        return new Period(f.fromInstant(), f.toInstantExclusive());
     }
 
     /**
-     * The blocked approval-marker re-use records matching the filter, newest first — the whole
-     * set, independent of {@link #getKind()} (D-30).
+     * The part of {@link #incidentFilter()} decidable from the index line (S-06), so an incident
+     * XML is loaded only when it can match. A line without a creation time is let through and
+     * decided by the full filter after loading.
+     */
+    private Predicate<IncidentSummary> incidentIndexFilter() {
+        FilterParser.Filter f = getFilter();
+        return s -> (s.createdAt() == null || f.inRange(s.createdAt()))
+                && f.matchesJob(s.jobFullName()) && f.matchesResult(s.result());
+    }
+
+    private Predicate<ChangeRecord> changeFilter() {
+        FilterParser.Filter f = getFilter();
+        return c -> f.inRange(c.getAt()) && f.matchesJob(c.getTarget())
+                && f.matchesUser(c.getUser());
+    }
+
+    /** Request summaries matching the filter (by creation time), newest first (#13). */
+    private List<RequestSummary> matchingRequestSummaries() {
+        FilterParser.Filter f = getFilter();
+        List<RequestSummary> matched = new ArrayList<>();
+        for (RequestSummary q : FileStore.get().listRunRequestSummaries()) {
+            if (f.inRange(q.createdAt()) && f.matchesJob(q.jobFullName())
+                    && f.matchesUser(q.requester()) && f.matchesStatus(q.status())) {
+                matched.add(q);
+            }
+        }
+        matched.sort(Comparator.comparing(RequestSummary::createdAt)
+                .thenComparing(RequestSummary::id)
+                .reversed());
+        return matched;
+    }
+
+    /**
+     * The blocked approval-marker re-use records matching the filter, newest first, at most
+     * {@link #REUSE_ALERT_LIMIT} of them (D-30).
      *
      * <p>A blocked re-use produces no {@link RunRecord}, so on the default {@code runs} tab the
-     * attempt would otherwise be invisible and an operator would have to guess that it is worth
-     * switching to the {@code changes} tab. D-30 exists because such an attempt was only in the
-     * log where nobody saw it; hiding it behind a tab repeats that. The index view therefore
-     * renders these rows as an alert above the selected table on every tab.
-     *
-     * <p>The period, job and user filters are not re-implemented here: this narrows the already
-     * filtered and sorted {@link #getChangeItems()} by type, so the alert always describes the
-     * same window as the table below it (which is what makes {@code ?user=u2} a query for "what
-     * did this account attempt").
+     * attempt would otherwise be invisible; the index view renders these rows as an alert above
+     * the selected table on every tab. The period, job and user filters are the Changes tab's,
+     * so the alert describes the same window as that tab (which is what makes {@code ?user=u2}
+     * a query for "what did this account attempt"). The read is bounded like every page (#13).
      */
     public List<ChangeRecord> getMarkerReuseItems() {
+        return markerReusePage().getItems();
+    }
+
+    private RecordPage<ChangeRecord> markerReusePage() {
         if (markerReuse == null) {
-            List<ChangeRecord> matched = new ArrayList<>();
-            for (ChangeRecord c : getChangeItems()) {
-                if (c.getType() == ChangeType.MARKER_REUSE_BLOCKED) {
-                    matched.add(c);
-                }
-            }
-            markerReuse = matched;
+            Predicate<ChangeRecord> match = changeFilter();
+            markerReuse = FileStore.get().pageChangeRecords(storedMonths(), period(),
+                    c -> c.getType() == ChangeType.MARKER_REUSE_BLOCKED && match.test(c),
+                    0, REUSE_ALERT_LIMIT, Store.MAX_SCANNED_RECORDS);
         }
         return markerReuse;
     }
 
-    /** How many blocked re-use attempts match the filter. */
+    /** How many blocked re-use attempts match the filter (a lower bound when truncated). */
     public int getMarkerReuseCount() {
-        return getMarkerReuseItems().size();
+        return markerReusePage().getMatched();
     }
 
     /**
-     * The re-use rows the alert actually lists: the newest {@link #REUSE_ALERT_LIMIT} of
-     * {@link #getMarkerReuseItems()}. The alert sits above the selected table, so it must stay a
-     * signal rather than become a second unbounded table when an automation retries in a loop;
-     * {@link #getMarkerReuseOverflow()} says how many rows were left out and the Changes tab
-     * (and {@code changes.csv}) has all of them.
+     * The re-use rows the alert actually lists: the newest {@link #REUSE_ALERT_LIMIT}. The alert
+     * must stay a signal rather than become a second unbounded table when an automation retries
+     * in a loop; {@link #getMarkerReuseOverflow()} says how many rows were left out and the
+     * Changes tab (and {@code changes.csv}) has all of them.
      */
     public List<ChangeRecord> getMarkerReuseAlertItems() {
-        List<ChangeRecord> all = getMarkerReuseItems();
-        return all.size() <= REUSE_ALERT_LIMIT
-                ? all
-                : new ArrayList<>(all.subList(0, REUSE_ALERT_LIMIT));
+        return getMarkerReuseItems();
     }
 
     /** How many matching re-use records the alert does not list; 0 when it lists them all. */
     public int getMarkerReuseOverflow() {
-        return Math.max(0, getMarkerReuseItems().size() - REUSE_ALERT_LIMIT);
+        return Math.max(0, getMarkerReuseCount() - REUSE_ALERT_LIMIT);
     }
 
-    /** All run requests matching the filter (by creation time), newest first. */
-    public List<RunRequest> getRequestItems() {
-        if (requests == null) {
-            FilterParser.Filter f = getFilter();
-            List<RunRequest> matched = new ArrayList<>();
-            for (RunRequest q : RunRequestService.get().list()) {
-                if (f.inRange(q.getCreatedAt()) && f.matchesJob(q.getJobFullName())
-                        && f.matchesUser(q.getRequester()) && f.matchesStatus(q.getStatus())) {
-                    matched.add(q);
+    /** One page of the selected kind (#13): rows, match count, and whether the read was capped. */
+    private record Listing(List<?> items, int total, boolean hasNext, boolean truncated) {
+        static Listing of(RecordPage<?> page) {
+            return new Listing(page.getItems(), page.getMatched(), page.isHasNext(), page.isTruncated());
+        }
+    }
+
+    private Listing listing() {
+        if (listing == null) {
+            int offset = (getPage() - 1) * PAGE_SIZE;
+            List<YearMonth> months = storedMonths();
+            int cap = Store.MAX_SCANNED_RECORDS;
+            switch (getKind()) {
+                case "incidents" -> listing = Listing.of(FileStore.get().pageIncidents(
+                        months, period(), incidentIndexFilter(), incidentFilter(),
+                        offset, PAGE_SIZE, cap));
+                case "changes" -> listing = Listing.of(FileStore.get().pageChangeRecords(
+                        months, period(), changeFilter(), offset, PAGE_SIZE, cap));
+                case "requests" -> {
+                    List<RequestSummary> all = matchingRequestSummaries();
+                    List<RunRequest> rows = new ArrayList<>();
+                    for (int k = offset; k < Math.min(offset + PAGE_SIZE, all.size()); k++) {
+                        RunRequest q = RunRequestService.get().load(all.get(k).id());
+                        if (q != null) {
+                            rows.add(q);
+                        }
+                    }
+                    listing = new Listing(rows, all.size(), offset + PAGE_SIZE < all.size(), false);
                 }
+                default -> listing = Listing.of(FileStore.get().pageRunRecords(
+                        months, period(), runFilter(), offset, PAGE_SIZE, cap));
             }
-            matched.sort(Comparator.comparing(RunRequest::getCreatedAt)
-                    .thenComparing(RunRequest::getId)
-                    .reversed());
-            requests = matched;
         }
-        return requests;
-    }
-
-    private List<?> currentKindItems() {
-        switch (getKind()) {
-            case "incidents":
-                return getIncidentItems();
-            case "changes":
-                return getChangeItems();
-            case "requests":
-                return getRequestItems();
-            default:
-                return getRunItems();
-        }
+        return listing;
     }
 
     // ---------------------------------------------------------------- paging (used from Jelly)
@@ -431,16 +513,17 @@ public class HistorySection implements ModelObject, StaplerProxy {
 
     /** The rows of the selected kind shown on the current page, newest first. */
     public List<?> getPageItems() {
-        List<?> all = currentKindItems();
-        int from = (getPage() - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+        return listing().items();
     }
 
+    /** Matching records read (a lower bound when {@link #isTruncated()}). */
     public int getTotal() {
-        return currentKindItems().size();
+        return listing().total();
+    }
+
+    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    public boolean isTruncated() {
+        return listing().truncated();
     }
 
     public boolean isHasPrevious() {
@@ -448,7 +531,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return listing().hasNext();
     }
 
     // ---------------------------------------------------------------- monthly summary
@@ -469,21 +552,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * counts as approved when its decision was an approval (status APPROVED or later EXECUTED).
      */
     private Map<String, Long> summarize(YearMonth month) {
-        long runCount = 0;
-        long success = 0;
-        long failure = 0;
-        long unstable = 0;
-        for (RunRecord r : FileStore.get().listRunRecords(month)) {
-            runCount++;
-            String result = r.getResult();
-            if ("SUCCESS".equals(result)) {
-                success++;
-            } else if ("FAILURE".equals(result)) {
-                failure++;
-            } else if ("UNSTABLE".equals(result)) {
-                unstable++;
-            }
-        }
+        // Run counters are maintained incrementally by the store (#13).
+        RunMonthStats stats = FileStore.get().runMonthStats(month);
         long incidentsOpen = 0;
         long incidentsResolved = 0;
         for (Incident i : IncidentService.get().list(month)) {
@@ -495,24 +565,24 @@ public class HistorySection implements ModelObject, StaplerProxy {
         }
         long requestsApproved = 0;
         long requestsRejected = 0;
-        for (RunRequest q : RunRequestService.get().list()) {
-            Instant decided = q.getDecidedAt();
+        for (RequestSummary q : FileStore.get().listRunRequestSummaries()) {
+            Instant decided = q.decidedAt();
             if (decided == null
                     || !YearMonth.from(decided.atZone(BatchClock.clock().getZone())).equals(month)) {
                 continue;
             }
-            if (q.getStatus() == RequestStatus.REJECTED) {
+            if (q.status() == RequestStatus.REJECTED) {
                 requestsRejected++;
-            } else if (q.getStatus() == RequestStatus.APPROVED
-                    || q.getStatus() == RequestStatus.EXECUTED) {
+            } else if (q.status() == RequestStatus.APPROVED
+                    || q.status() == RequestStatus.EXECUTED) {
                 requestsApproved++;
             }
         }
         Map<String, Long> summary = new LinkedHashMap<>();
-        summary.put("runs", runCount);
-        summary.put("success", success);
-        summary.put("failure", failure);
-        summary.put("unstable", unstable);
+        summary.put("runs", stats.runs());
+        summary.put("success", stats.success());
+        summary.put("failure", stats.failure());
+        summary.put("unstable", stats.unstable());
         summary.put("incidentsOpen", incidentsOpen);
         summary.put("incidentsResolved", incidentsResolved);
         summary.put("requestsApproved", requestsApproved);

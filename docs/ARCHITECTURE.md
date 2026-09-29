@@ -96,7 +96,10 @@ $JENKINS_HOME/batch-control/
 
 - ID: `yyyyMMdd-HHmmss-<6자리 랜덤>` (파일명 안전, 시간순 정렬 가능).
 - 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush.
-- 읽기: 월 파일을 읽어 메모리 필터 (캐시 없음, 요청마다 파일을 읽음).
+- Reads (#13): list screens page newest-first by streaming month files from the end and stop after the page window or at most 50,000 scanned records (`RecordPage.truncated`, and the screen asks the user to narrow the filter). Diffs are read only for the rows shown. Month counters for summaries are kept in memory and updated from what was appended since the last read. An in-memory index of requests and grants is built once per session at startup; the expiry, recovery and invalidation scans load only open requests. All of this is derived state, never persisted, and rebuilt on restart.
+- Locks (#18): one lock per file stripe (64 stripes by path hash) instead of a single store lock. Retention deletes one file at a time under that file's lock, so the queue gate and build completion wait behind at most one write.
+- Names (#17, #25): month bucket names and ids use `Locale.ROOT` ASCII digits and the plugin clock's zone. A shortened item file name is `prefix~sha256`; `encode` writes `~` as `%7E`, so a shortened name never equals a plain encoding. Pre-release file names (the old shortened form, non-ASCII month digits) are neither read nor migrated (D-43).
+- Retention also deletes closed requests and ended grants older than the first kept month.
 - 비밀 마스킹: `hudson.model.PasswordParameterValue`와 `Secret` 타입은 `********`로 저장.
 - 보관: `retentionMonths` 초과 월 파일 삭제 + ChangeRecord(RETENTION).
 - 잡 이름 인코딩: `/` → `%2F`, 기타 URL-safe 인코딩. 디코딩 시 경로 탈출(`..`) 검증.

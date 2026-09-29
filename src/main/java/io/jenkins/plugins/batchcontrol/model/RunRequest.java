@@ -115,6 +115,8 @@ public final class RunRequest {
     private List<ApproverChange> approverChanges = new ArrayList<>();
     private String incidentId;
     private String executedRunId;
+    /** When the approved build started (EXECUTED); {@code null} for requests stored before it existed. */
+    private Long executedAtMillis;
     /**
      * Consumption ticket (D-23): the instant the approval marker was consumed by a queue
      * submission, or {@code null} while the ticket is still unused. Only the policy service
@@ -301,6 +303,15 @@ public final class RunRequest {
 
     public void setExecutedRunId(String executedRunId) {
         this.executedRunId = executedRunId;
+    }
+
+    /** The instant the approved build started, or {@code null} if not executed (or stored before). */
+    public Instant getExecutedAt() {
+        return executedAtMillis == null ? null : Instant.ofEpochMilli(executedAtMillis);
+    }
+
+    public void setExecutedAt(Instant executedAt) {
+        this.executedAtMillis = executedAt == null ? null : executedAt.toEpochMilli();
     }
 
     /** The instant the consumption ticket was claimed, or {@code null} if still unused. */

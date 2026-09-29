@@ -65,6 +65,11 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: PENDING 요청이 있는 상태에서 재시작하면 요청이 그대로 PENDING으로 복구된다.
 - 수용 기준: 승인됐지만 큐 투입 전 재시작된 요청은 재시작 후 자동으로 큐에 투입된다(중복 투입 없음).
 - 수용 기준: 기록은 추가 전용이다. 수정·삭제 API가 없다(보관 기간 만료 삭제 제외).
+- Acceptance: the file name derived from an item's full name is unique: no two distinct full names map to the same stored file, including names long enough to be shortened. Files in the pre-release shortened form are not read (D-43). (#25)
+- Acceptance: stored file names, month bucket names and record ids do not depend on the controller's default locale or time zone: they use ASCII digits (`Locale.ROOT`) and the plugin clock's zone, so retention and the history screens keep working after a locale change. Dates on screens are rendered in the plugin clock's zone. (#17)
+- Acceptance: a history, dashboard or change-list page load reads a bounded amount of data regardless of how many records a month holds (it does not materialise a whole month bucket to render one page), and a query span is capped by records, not by files. Only records inside the requested period count toward the cap; when the cap is reached the screen says so and points to the CSV export, which is complete. A record the fast reader cannot scan is read with the reference parser before it is ever skipped, so no valid record disappears from a screen. Closed requests and grants past the retention period are deleted by retention like the other records, and the per-minute expiry work does not scan closed requests. (#13)
+- Acceptance: retention deletes in bounded batches and never holds the store lock that the queue gate or build completion waits on for longer than one batch; the queue gate performs no store I/O that can wait behind bulk work. Scheduling never stalls because retention is running. (#18)
+
 
 ### 실행 통제
 
@@ -242,7 +247,7 @@ Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서
 ## 6. 비기능 요구
 
 - 재시작 내구성: 4번 수용 기준.
-- 성능: 하루 5,000 실행 규모에서 대시보드 최근 7일 조회가 2초 이내(로컬 기준).
+- 성능: 하루 5,000 실행 규모에서 대시보드 최근 7일 조회가 2초 이내(로컬 기준). This is measured once with a generated dataset and the figure is recorded in `docs/HOSTING-READINESS.md`. (#13)
 - 보안: 모든 상태 변경은 POST + 권한 체크. CSRF crumb 준수. 비밀 파라미터(Password parameter)는 이력에 마스킹 저장.
 - 보안: 사용자 입력(사유, 파라미터 값, 잡 이름)은 모든 화면 렌더링에서 이스케이프되어 스크립트·태그로 실행되지 않는다. (R-3, D-18)
 - 호환: 최신 LTS 라인. Freestyle, Pipeline(WorkflowJob), Folder 지원. Multibranch는 기록만(통제 대상 아님, 문서에 명시).

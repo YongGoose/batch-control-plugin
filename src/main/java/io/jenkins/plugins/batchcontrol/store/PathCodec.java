@@ -17,17 +17,25 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * other byte (including {@code / \ . %} and control characters) becomes {@code %XX}. The result is
  * a single printable path segment that round-trips losslessly via {@link #decode}. Names whose
  * encoding exceeds {@value #MAX_ENCODED_LENGTH} characters are shortened deterministically to
- * {@code <prefix>-<sha256 hex of the full name>}, which keeps two long names differing only at the
+ * {@code <prefix>~<sha256 hex of the full name>}, which keeps two long names differing only at the
  * tail on different files (such shortened names no longer decode, but they stay stable).
+ *
+ * <p><b>Uniqueness (#25).</b> {@code encode} never emits {@code ~} raw (it becomes {@code %7E}), so
+ * a shortened name always contains exactly one character no plain encoding contains and can never
+ * equal the encoding of another, shorter name. Unreleased builds joined the shortened form with
+ * {@code -}, which a plain encoding does emit; files in that form are neither read nor migrated
+ * (D-43): such a file can only be another item's plain encoding.
  */
 @Restricted(NoExternalUse.class)
 public final class PathCodec {
 
     /** Leaves room for an extension within the usual 255-char file-name limit. */
     private static final int MAX_ENCODED_LENGTH = 250;
-    /** Prefix kept when shortening: 180 + 1 ('-') + 64 (sha-256 hex) = 245 &lt;= 250. */
+    /** Prefix kept when shortening: 180 + 1 ('~') + 64 (sha-256 hex) = 245 &lt;= 250. */
     private static final int SHORTENED_PREFIX_LENGTH = 180;
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
+    /** Joins prefix and hash of a shortened name; never emitted raw by {@link #encode}. */
+    private static final char SHORTENED_SEPARATOR = '~';
 
     private PathCodec() {
     }
@@ -57,7 +65,7 @@ public final class PathCodec {
             if (lastPercent > SHORTENED_PREFIX_LENGTH - 3) {
                 prefix = prefix.substring(0, lastPercent);
             }
-            encoded = prefix + "-" + sha256Hex(jobFullName);
+            encoded = prefix + SHORTENED_SEPARATOR + sha256Hex(jobFullName);
         }
         return encoded;
     }
