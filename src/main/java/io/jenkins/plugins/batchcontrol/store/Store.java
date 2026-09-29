@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
+import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -82,6 +84,42 @@ public interface Store {
 
     /** Loads every stored grant, sorted by id (creation order). */
     List<Grant> listGrants();
+
+    // ---------------------------------------------------------------- activation (#15, D-39)
+
+    /** Writes (or rewrites, on a status transition) the activation request XML atomically. */
+    void saveActivationRequest(ActivationRequest request);
+
+    /** Loads an activation request by id, or returns {@code null} if it does not exist. */
+    ActivationRequest loadActivationRequest(String id);
+
+    /** Loads every stored activation request, sorted by id (creation order). */
+    List<ActivationRequest> listActivationRequests();
+
+    /** Loads the PENDING activation requests only, sorted by id, via the entity index (#13). */
+    List<ActivationRequest> listOpenActivationRequests();
+
+    /**
+     * Writes the activation state of a job atomically to
+     * {@code activations/<PathCodec-encoded full name>.xml}; the file name comes from
+     * {@link ActivationState#getJobFullName()}.
+     */
+    void saveActivationState(ActivationState state);
+
+    /** The stored activation state of a job, or {@code null} if none exists. */
+    ActivationState loadActivationState(String jobFullName);
+
+    /** Every stored activation state (unordered). */
+    List<ActivationState> listActivationStates();
+
+    /** Removes the activation state of a job; {@code true} if one existed. */
+    boolean deleteActivationState(String jobFullName);
+
+    /** Whether the one-time upgrade seeding marker {@code activations/.schema} exists. */
+    boolean isActivationSchemaMarked();
+
+    /** Writes the upgrade seeding marker {@code activations/.schema} (atomically). */
+    void markActivationSchema();
 
     /**
      * Stores the latest config.xml snapshot of a job (diff baseline; only the latest version

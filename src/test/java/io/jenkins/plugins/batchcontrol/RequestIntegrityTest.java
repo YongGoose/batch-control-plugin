@@ -79,9 +79,11 @@ public class RequestIntegrityTest {
         // run control is already on, so D-31 gave the job a property at creation; install this
         // one as the only one or blockUpstream would be shadowed (see BatchControlFixtures)
         setBatchControl(protectedJob, property);
+        BatchControlFixtures.activate(protectedJob); // SPEC item 6a: the empty allow list must be the reason (note 91)
 
         WorkflowJob caller = j.createProject(WorkflowJob.class, "caller-a");
         caller.setDefinition(new CpsFlowDefinition("build job: 'protected-b', wait: false", true));
+        BatchControlFixtures.activateAsAdmin(caller); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertStatus(Result.FAILURE, caller); // PoC side effect: blocked build step fails the caller
 
         j.waitUntilNoActivity();
@@ -108,12 +110,18 @@ public class RequestIntegrityTest {
         assertNotNull(marker, "the executed run must carry the marker action");
         assertEquals(request.getId(), marker.getRequestId(), "the marker must be bound to the request id");
 
-        // replaying the very same marker on the same job (re-queue / rebuild path) must be blocked
-        assertScheduleRefused("a consumed marker must not schedule the same job again",
-                () -> jobX.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        // replaying the very same marker on the same job (re-queue / rebuild path) must be
+        // blocked. security-15 S-15-01: the submission, not only the Cause, must run while
+        // impersonating a real user, so the fixture simulates the person replaying it.
+        try (ACLContext ignored = as("u1")) {
+            assertScheduleRefused("a consumed marker must not schedule the same job again",
+                    () -> jobX.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        }
         // and the marker must never authorize a different job
-        assertScheduleRefused("a marker bound to job X must never authorize job Y",
-                () -> jobY.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        try (ACLContext ignored = as("u1")) {
+            assertScheduleRefused("a marker bound to job X must never authorize job Y",
+                    () -> jobY.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        }
 
         j.waitUntilNoActivity();
         assertEquals(1, jobX.getBuilds().size(), "job X must still have exactly one build");

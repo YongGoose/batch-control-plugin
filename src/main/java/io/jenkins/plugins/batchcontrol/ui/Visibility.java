@@ -3,6 +3,8 @@ package io.jenkins.plugins.batchcontrol.ui;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
 import hudson.model.Job;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -165,6 +167,20 @@ public final class Visibility {
         }
         String me = Jenkins.getAuthentication2().getName();
         return me.equals(request.getRequester()) || request.isDesignatedApprover(me);
+    }
+
+    /**
+     * An activation or hold request is visible iff the caller has Manage, or is the requester or
+     * a member of the designated approver set (P-09, SPEC item 6a). Unlike a run request,
+     * {@code Item/Read} on the job does not make it visible: the request carries the approver set
+     * and the reason, which the job page does not otherwise disclose.
+     */
+    public static boolean canSeeActivationRequest(ActivationRequest request) {
+        if (isManager()) {
+            return true;
+        }
+        String me = Jenkins.getAuthentication2().getName();
+        return Approvers.sameUser(me, request.getRequester()) || request.isDesignatedApprover(me);
     }
 
     /** An active grant is visible iff the caller has Manage, or the grant is their own. */

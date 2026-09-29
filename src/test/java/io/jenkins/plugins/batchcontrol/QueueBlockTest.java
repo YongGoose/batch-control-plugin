@@ -47,6 +47,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.activate;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.requestAndApprove;
@@ -74,6 +75,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @WithJenkins
 public class QueueBlockTest {
+
+    /** Item 6a fixture ids on the unsecured instance (any authenticated id holds every permission). */
+    private static final String UNSECURED_REQUESTER = "bc-requester";
+    private static final String UNSECURED_APPROVER = "bc-approver";
 
     private JenkinsRule j;
 
@@ -130,6 +135,7 @@ public class QueueBlockTest {
     public void t_06_04_pipelineReplayIsBlocked() throws Exception {
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        activate(pipeline, UNSECURED_REQUESTER, UNSECURED_APPROVER); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(pipeline); // first run happens before the job becomes protected
         setBatchControl(pipeline, new BatchControlJobProperty(true));
 
@@ -147,10 +153,12 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: only blockUpstream may be the reason (note 91)
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
         // PoC-confirmed side effect: a blocked build step fails the upstream run
+        activate(upstream, UNSECURED_REQUESTER, UNSECURED_APPROVER); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertStatus(Result.FAILURE, upstream);
 
         assertBlocked(job, 1);
@@ -161,6 +169,7 @@ public class QueueBlockTest {
     @Test
     public void t_06_06_timerCausePassesByDefault() throws Exception {
         protect(job);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: the timer door is open only once activated (note 91)
         // matrix note 4: reproduce cron firing by scheduling with a TimerTriggerCause
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
         assertNotNull(future, "a timer cause must pass by default");
@@ -173,6 +182,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: only blockTimer may be the reason (note 91)
 
         // an unattended cause is refused quietly: scheduleBuild2 returns null, nothing is thrown
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
@@ -188,6 +198,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
         setBatchControl(cronJob, property);
+        activate(cronJob, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: the refusal is blockTimer's (note 91)
 
         List<LogRecord> infoRecords = Collections.synchronizedList(new ArrayList<>());
         Handler handler = new Handler() {
@@ -276,8 +287,10 @@ public class QueueBlockTest {
     @Test
     public void t_06_10_upstreamPassesByDefault() throws Exception {
         protect(job);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
+        activate(upstream, UNSECURED_REQUESTER, UNSECURED_APPROVER); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 
@@ -293,9 +306,11 @@ public class QueueBlockTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
+        activate(upstream, UNSECURED_REQUESTER, UNSECURED_APPROVER); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 
@@ -311,10 +326,12 @@ public class QueueBlockTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
 
         WorkflowJob other = j.createProject(WorkflowJob.class, "z");
         other.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
         // PoC-confirmed side effect pinned as regression: the blocked build step fails Z
+        activate(other, UNSECURED_REQUESTER, UNSECURED_APPROVER); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertStatus(Result.FAILURE, other);
 
         assertBlocked(job, 1);
@@ -385,6 +402,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(blockUpstream);
         setBatchControl(self, property);
+        activate(self); // item 6a: the self-trigger is an upstream cause (note 91)
         return self;
     }
 

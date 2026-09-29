@@ -9,7 +9,6 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
@@ -147,6 +146,7 @@ public class HistoryWebTest {
         j.createFreeStyleProject("old-created-job"); // ChangeRecord(CREATE) at the old time
         FreeStyleProject oldFail = j.createFreeStyleProject("old-fail");
         oldFail.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(oldFail); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, oldFail.scheduleBuild2(0));
         j.waitUntilNoActivity();
 
@@ -176,9 +176,11 @@ public class HistoryWebTest {
     public void t_12_03_dateFiltersAndCsvExportsForAllFourDataSets() throws Exception {
         // one marker per data set
         FreeStyleProject histX = j.createFreeStyleProject("hist-x");     // run + change marker
+        BatchControlFixtures.activateAsAdmin(histX); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(histX);
         FreeStyleProject histFail = j.createFreeStyleProject("hist-fail"); // incident marker
         histFail.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(histFail); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, histFail.scheduleBuild2(0));
         FreeStyleProject histReq = j.createFreeStyleProject("hist-req");  // request marker
         histReq.addProperty(new BatchControlJobProperty(true));
@@ -220,9 +222,8 @@ public class HistoryWebTest {
     public void t_12_04_monthlySummaryCountsAreExact() throws Exception {
         // 2 SUCCESS (one via an approved request), 1 FAILURE, 1 UNSTABLE
         FreeStyleProject sumA = j.createFreeStyleProject("sum-a");
-        // setBatchControl, not addProperty: this fixture needs an approval-required job whose
-        // timer is still open, and after D-34 a job created under run control starts with
-        // blockTimer=true (matrix notes 42, 46)
+        // setBatchControl, not addProperty: the fixture's property must be the one the plugin reads
+        // (matrix note 42)
         setBatchControl(sumA, new BatchControlJobProperty(true));
         RunRequest approved;
         try (ACLContext ignored = as("u1")) {
@@ -233,15 +234,31 @@ public class HistoryWebTest {
             RunRequestService.get().approve(approved.getId(), "ok");
         }
         j.waitUntilNoActivity();
-        j.assertBuildStatusSuccess(sumA.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        // the second SUCCESS is a human run of an uncontrolled job: since D-46 every timer run needs an
+        // activation, and whether an activation request counts among the summary's approved
+        // requests is not specified (notes 97, 103), so the fixture avoids one
+        FreeStyleProject sumT = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-t"));
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // u1, or the gate now (correctly) classifies it as unattended - which would refuse this
+        // build too, since the job is uncontrolled and not activated.
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, new hudson.model.Cause.UserIdCause()));
+        }
 
-        FreeStyleProject sumF = j.createFreeStyleProject("sum-f");
+        // D-46: a cause-less build now needs an activation, and an approved ACTIVATE might count
+        // among the summary's approved requests (note 97), so these two are human runs of
+        // uncontrolled jobs instead (note 109)
+        FreeStyleProject sumF = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-f"));
         sumF.getBuildersList().add(new FailureBuilder());
-        j.assertBuildStatus(Result.FAILURE, sumF.scheduleBuild2(0)); // incident stays OPEN
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatus(Result.FAILURE, sumF.scheduleBuild2(0, new hudson.model.Cause.UserIdCause())); // incident stays OPEN
+        }
 
-        FreeStyleProject sumU = j.createFreeStyleProject("sum-u");
+        FreeStyleProject sumU = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-u"));
         sumU.getBuildersList().add(new UnstableBuilder());
-        j.assertBuildStatus(Result.UNSTABLE, sumU.scheduleBuild2(0));
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatus(Result.UNSTABLE, sumU.scheduleBuild2(0, new hudson.model.Cause.UserIdCause()));
+        }
         j.waitUntilNoActivity();
 
         // resolve the UNSTABLE incident -> OPEN 1 / RESOLVED 1
@@ -346,6 +363,7 @@ public class HistoryWebTest {
     public void t_sec_06_getOnIncidentTransitionEndpointsIsRejected() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("sec-fail");
         job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
         Incident incident = IncidentService.get().list(YearMonth.now()).stream()

@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.store;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
@@ -39,6 +40,8 @@ final class EntityIndex {
     final Map<String, RunEntry> runRequests = new ConcurrentHashMap<>();
     final Map<String, GrantRequestEntry> grantRequests = new ConcurrentHashMap<>();
     final Map<String, GrantEntry> grants = new ConcurrentHashMap<>();
+    /** Activation requests (#15) share the grant request entry shape: status and last activity. */
+    final Map<String, GrantRequestEntry> activationRequests = new ConcurrentHashMap<>();
 
     EntityIndex(Path root) {
         this.root = root;
@@ -50,6 +53,11 @@ final class EntityIndex {
 
     void put(GrantRequest request) {
         grantRequests.put(request.getId(),
+                new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request)));
+    }
+
+    void put(ActivationRequest request) {
+        activationRequests.put(request.getId(),
                 new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request)));
     }
 
@@ -84,6 +92,15 @@ final class EntityIndex {
         Instant last = request.getCreatedAt();
         last = later(last, request.getDecidedAt());
         for (GrantRequest.ApproverChange change : request.getApproverChanges()) {
+            last = later(last, change.getAt());
+        }
+        return last;
+    }
+
+    private static Instant lastActivity(ActivationRequest request) {
+        Instant last = request.getCreatedAt();
+        last = later(last, request.getDecidedAt());
+        for (ActivationRequest.ApproverChange change : request.getApproverChanges()) {
             last = later(last, change.getAt());
         }
         return last;

@@ -2,6 +2,8 @@ package io.jenkins.plugins.batchcontrol.store;
 
 import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
+import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -146,6 +148,17 @@ public final class FileStore implements Store {
     private Path grantDir() {
         return root().resolve("grants");
     }
+
+    private Path activationDir() {
+        return root().resolve("activations");
+    }
+
+    private Path activationRequestDir() {
+        return root().resolve("activation-requests");
+    }
+
+    /** The upgrade seeding marker (#15); a dot file, so the {@code *.xml} listing never sees it. */
+    private static final String ACTIVATION_SCHEMA_MARKER = ".schema";
 
     private Path snapshotDir() {
         return root().resolve("snapshots");
@@ -297,6 +310,105 @@ public final class FileStore implements Store {
     @Override
     public List<Grant> listGrants() {
         return listXmlEntities(grantDir(), Grant.class, "grant");
+    }
+
+    // ---------------------------------------------------------------- activation (#15, D-39)
+
+    @Override
+    public void saveActivationRequest(ActivationRequest request) {
+        Objects.requireNonNull(request, "request");
+        saveXmlEntity(activationRequestDir(), request.getId(), request, "activation request");
+        index().put(request);
+    }
+
+    @Override
+    public ActivationRequest loadActivationRequest(String id) {
+        return loadXmlEntity(activationRequestDir(), id, ActivationRequest.class, "activation request");
+    }
+
+    @Override
+    public List<ActivationRequest> listActivationRequests() {
+        return listXmlEntities(activationRequestDir(), ActivationRequest.class, "activation request");
+    }
+
+    @Override
+    public List<ActivationRequest> listOpenActivationRequests() {
+        EntityIndex idx = index();
+        List<String> ids = new ArrayList<>();
+        for (EntityIndex.GrantRequestEntry entry : idx.activationRequests.values()) {
+            if (EntityIndex.isOpen(entry)) {
+                ids.add(entry.id());
+            }
+        }
+        ids.sort(Comparator.naturalOrder());
+        List<ActivationRequest> open = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            ActivationRequest request = loadActivationRequest(id);
+            if (request == null) {
+                idx.activationRequests.remove(id);
+                continue;
+            }
+            if (request.getStatus() == RequestStatus.PENDING) {
+                open.add(request);
+            } else {
+                idx.put(request);
+            }
+        }
+        return open;
+    }
+
+    @Override
+    public void saveActivationState(ActivationState state) {
+        Objects.requireNonNull(state, "state");
+        String fileName = PathCodec.encode(state.getJobFullName()) + ".xml";
+        saveXmlFile(activationDir(), fileName, "activation", state,
+                "activation state of " + state.getJobFullName());
+    }
+
+    @Override
+    public ActivationState loadActivationState(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(activationDir(), PathCodec.encode(jobFullName) + ".xml");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            ActivationState state = (ActivationState) xstream.fromXML(reader);
+            // The name inside the file must match the name the file stands for; anything else is
+            // not this job's state (a hand-copied file), and a job without a state is not activated.
+            return state != null && jobFullName.equals(state.getJobFullName()) ? state : null;
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load the activation state of " + jobFullName, e);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Unreadable activation state of " + jobFullName
+                    + "; treating the job as not activated", e);
+            return null;
+        }
+    }
+
+    @Override
+    public List<ActivationState> listActivationStates() {
+        return listXmlEntities(activationDir(), ActivationState.class, "activation state");
+    }
+
+    @Override
+    public boolean deleteActivationState(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        return deleteFile(PathCodec.resolveUnder(activationDir(), PathCodec.encode(jobFullName) + ".xml"),
+                "activation state of " + jobFullName);
+    }
+
+    @Override
+    public boolean isActivationSchemaMarked() {
+        return Files.isRegularFile(PathCodec.resolveUnder(activationDir(), ACTIVATION_SCHEMA_MARKER));
+    }
+
+    @Override
+    public void markActivationSchema() {
+        writeTextAtomically(activationDir(), ACTIVATION_SCHEMA_MARKER,
+                "1" + System.lineSeparator(), "activation schema marker");
     }
 
     // ---------------------------------------------------------------- config snapshots (#25)
@@ -748,7 +860,27 @@ public final class FileStore implements Store {
             }
             idx.grantRequests.remove(id);
         }
-        return new RetentionResult(runRequests, grantRequests, grantIds);
+        int activationRequests = 0;
+        for (EntityIndex.GrantRequestEntry entry : new ArrayList<>(idx.activationRequests.values())) {
+            if (EntityIndex.isOpen(entry) || !entry.lastActivity().isBefore(cutoff)) {
+                continue;
+            }
+            String id = entry.id();
+            ActivationRequest request = loadActivationRequest(id);
+            if (request != null) {
+                idx.put(request);
+                EntityIndex.GrantRequestEntry fresh = idx.activationRequests.get(id);
+                if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
+                    continue;
+                }
+                if (deleteFile(PathCodec.resolveUnder(activationRequestDir(), id + ".xml"),
+                        "activation request " + id)) {
+                    activationRequests++;
+                }
+            }
+            idx.activationRequests.remove(id);
+        }
+        return new RetentionResult(runRequests, grantRequests, grantIds, activationRequests);
     }
 
     /**
@@ -798,6 +930,9 @@ public final class FileStore implements Store {
             for (Grant grant : listGrants()) {
                 built.put(grant);
             }
+            for (ActivationRequest request : listActivationRequests()) {
+                built.put(request);
+            }
             indexFor = new WeakReference<>(jenkins);
             index = built;
             return built;
@@ -814,18 +949,26 @@ public final class FileStore implements Store {
 
     /** Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}). */
     private void saveXmlEntity(Path dir, String id, Object entity, String what) {
-        Path target = PathCodec.resolveUnder(dir, id + ".xml");
+        saveXmlFile(dir, id + ".xml", id, entity, what + " " + id);
+    }
+
+    /**
+     * Writes one XStream XML file atomically under {@code dir}. {@code tmpPrefix} names the
+     * temporary file; it must stay short (an encoded job name may already use 250 characters).
+     */
+    private void saveXmlFile(Path dir, String fileName, String tmpPrefix, Object entity, String what) {
+        Path target = PathCodec.resolveUnder(dir, fileName);
         ReentrantLock lock = lockFor(target);
         lock.lock();
         try {
             Files.createDirectories(dir);
-            Path tmp = Files.createTempFile(dir, id, ".tmp");
+            Path tmp = Files.createTempFile(dir, tmpPrefix, ".tmp");
             try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
                 xstream.toXML(entity, writer);
             }
             moveAtomically(tmp, target);
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to save " + what + " " + id, e);
+            throw new UncheckedIOException("Failed to save " + what, e);
         } finally {
             lock.unlock();
         }

@@ -4,7 +4,10 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.model.RootAction;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
+import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -16,6 +19,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>{@code /batch-control/} — landing page</li>
  *   <li>{@code /batch-control/requests/} — run request list (paged, newest first)</li>
  *   <li>{@code /batch-control/requests/<id>/} — request detail with decision endpoints</li>
+ *   <li>{@code /batch-control/activations/} — activation approval inbox and list;
+ *       {@code <id>/} detail with approve/reject/cancel/changeApprover endpoints (SPEC item 6a)</li>
  *   <li>{@code /batch-control/grants/} — grant request list, active grants, create/decision/revoke
  *       endpoints</li>
  *   <li>{@code /batch-control/changes/} — change record list (per month, read-only)</li>
@@ -75,6 +80,22 @@ public class BatchControlRootAction implements RootAction {
     /** Stapler: serves {@code /batch-control/requests/...}. */
     public RequestsSection getRequests() {
         return new RequestsSection();
+    }
+
+    /** Stapler: serves {@code /batch-control/activations/...}. */
+    public ActivationsSection getActivations() {
+        return new ActivationsSection();
+    }
+
+    /**
+     * Landing-page inbox line: how many PENDING activation or hold requests name the viewer as a
+     * designated approver; 0 without {@code BatchControl/Approve}.
+     */
+    public int getPendingActivationCount() {
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)) {
+            return 0;
+        }
+        return ActivationService.get().listPendingFor(Jenkins.getAuthentication2().getName()).size();
     }
 
     /** Stapler: serves {@code /batch-control/grants/...}. */

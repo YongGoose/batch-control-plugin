@@ -89,7 +89,7 @@ public class MailNotifier extends BatchControlNotifier {
     }
 
     static String subject(NotificationEvent event, Notification n) {
-        String what = Notification.KIND_GRANT.equals(n.getKind()) ? "change request " : "run request ";
+        String what = kindLabel(n) + " ";
         return oneLine("[Batch Control] " + event.getTitle() + ": " + what + n.getRequestId()
                 + " (" + n.getSubject() + ")");
     }
@@ -99,8 +99,11 @@ public class MailNotifier extends BatchControlNotifier {
         StringBuilder text = new StringBuilder();
         text.append(event.getTitle()).append("\n\n");
         text.append("Request: ").append(n.getRequestId())
-                .append(grant ? " (change request)" : " (run request)").append('\n');
+                .append(" (").append(kindLabel(n)).append(')').append('\n');
         text.append(grant ? "Scope: " : "Job: ").append(nullToEmpty(n.getSubject())).append('\n');
+        if (n.getAction() != null) {
+            text.append("Action: ").append(oneLine(n.getAction())).append('\n');
+        }
         text.append("Requester: ").append(nullToEmpty(n.getRequester())).append('\n');
         // security-08 S-08: the link comes before the free-text reason, and every reason line is
         // quoted, so a multi-line reason cannot pose as another field (such as a forged link).
@@ -112,6 +115,17 @@ public class MailNotifier extends BatchControlNotifier {
             text.append("> ").append(line).append('\n');
         }
         return text.toString();
+    }
+
+    private static String kindLabel(Notification n) {
+        if (Notification.KIND_GRANT.equals(n.getKind())) {
+            return "change request";
+        }
+        if (Notification.KIND_ACTIVATION.equals(n.getKind())) {
+            // security-13 S-13-08: say which of the two opposite actions is asked for.
+            return n.getAction() == null ? "activation request" : n.getAction() + " activation request";
+        }
+        return "run request";
     }
 
     private static String oneLine(String text) {

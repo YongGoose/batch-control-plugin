@@ -1,0 +1,7 @@
+<?jelly escape-by-default='true'?>
+<!-- Serves /job/<name>/batch-control/activation without a trailing slash (the URL the job page
+     and the tests use): Stapler would otherwise redirect the getter's index to "activation/".
+     Renders the same page as JobActivationForm/index.jelly, whose links are absolute. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <st:include page="index.jelly" it="${it.activation}"/>
+</j:jelly>

@@ -23,6 +23,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       {@code Item/Configure} here.</li>
  *   <li>{@link JobTriggerLockAction} — no sidebar entry and no URL; its {@code jobMain.jelly}
  *       shows the blocked-trigger notice of #21 on the job page when a switch is on.</li>
+ *   <li>{@link JobActivationNoticeAction} — no sidebar entry and no URL; its
+ *       {@code jobMain.jelly} shows whether the job is activated (SPEC item 6a).</li>
  * </ul>
  *
  * <p>All are attached unconditionally and decide their own visibility, because a
@@ -42,6 +44,6 @@ public class JobRequestActionFactory extends TransientActionFactory<Job> {
     @Override
     public Collection<? extends Action> createFor(@NonNull Job target) {
         return List.of(new JobRequestAction(target), new JobGrantRequestAction(target),
-                new JobTriggerLockAction(target));
+                new JobTriggerLockAction(target), new JobActivationNoticeAction(target));
     }
 }

@@ -67,6 +67,21 @@ public final class ApprovalPolicy {
         }
     }
 
+    /**
+     * As {@link #jobForPolicy(String)} for any item (an activation request's subject may be a
+     * computed folder, D-46). Same SYSTEM switch and the same precondition: the caller's
+     * permission checks are complete, and the item is only looked up, never acted on.
+     */
+    public static hudson.model.Item itemForPolicy(String fullName) {
+        if (fullName == null) {
+            return null;
+        }
+        // ACL.SYSTEM2 switch: the caller's permission checks are complete (see javadoc).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return Jenkins.get().getItemByFullName(fullName);
+        }
+    }
+
     /** Whether the current caller is an administrator (Overall/Administer). */
     public static boolean callerIsAdmin() {
         return Jenkins.get().hasPermission(Jenkins.ADMINISTER);
@@ -124,14 +139,28 @@ public final class ApprovalPolicy {
      * @throws AccessDeniedException if the caller may not decide the request
      */
     public static boolean checkDecision(RunRequest request) {
-        boolean selfApproval = checkDecision(request.getId(), request.getRequester(), request.getApprovers());
+        return checkJobDecision(request.getId(), request.getRequester(), request.getApprovers(),
+                request.getJobFullName());
+    }
+
+    /**
+     * The decision check of a request whose subject is one job (run and activation requests,
+     * SPEC items 3 and 6a): {@link #checkDecision(String, String, List)} plus the job's own
+     * approver list in force at decision time (#23).
+     *
+     * @return {@code true} when this decision is a self-approval (requester == decider)
+     * @throws AccessDeniedException if the caller may not decide the request
+     */
+    public static boolean checkJobDecision(String requestId, String requester, List<String> designatedApprovers,
+                                           String jobFullName) {
+        boolean selfApproval = checkDecision(requestId, requester, designatedApprovers);
         // #23: the job's approver list in force at decision time binds the deciding approver.
         // Resolved after the caller checks above (designated member, Approve, listed).
-        List<String> restriction = jobApproverRestriction(jobForPolicy(request.getJobFullName()));
+        List<String> restriction = jobApproverRestriction(jobForPolicy(jobFullName));
         String caller = Jenkins.getAuthentication2().getName();
         if (!restriction.isEmpty() && !Approvers.contains(restriction, caller)) {
             throw new AccessDeniedException("User '" + caller
-                    + "' is not an allowed approver for job '" + request.getJobFullName() + "'.");
+                    + "' is not an allowed approver for job '" + jobFullName + "'.");
         }
         return selfApproval;
     }

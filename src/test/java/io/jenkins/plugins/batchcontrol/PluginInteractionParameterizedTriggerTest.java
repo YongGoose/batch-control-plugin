@@ -80,6 +80,7 @@ public class PluginInteractionParameterizedTriggerTest {
         upstream.getPublishersList().add(new BuildTrigger(new BuildTriggerConfig(
                 "pt-x", ResultCondition.ALWAYS, true, parameters())));
 
+        BatchControlFixtures.activateAsAdmin(upstream); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 
@@ -94,6 +95,7 @@ public class PluginInteractionParameterizedTriggerTest {
     @Test
     public void t_06_29_triggerPassesByDefault() throws Exception {
         setBatchControl(target, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(target); // SPEC item 6a: the upstream door needs an activation (note 91)
         FreeStyleProject upstream = upstreamWithBuildStep("pt-y");
 
         post(j, "u1", upstream.getUrl() + "build");
@@ -123,6 +125,7 @@ public class PluginInteractionParameterizedTriggerTest {
         property.setBlockUpstream(true);
         assertSame(property, setBatchControl(job, property));
         assertTrue(job.getProperty(BatchControlJobProperty.class).isBlockUpstream(), "fixture: blockUpstream must be on");
+        BatchControlFixtures.activate(job); // SPEC item 6a: blockUpstream must be the only reason (note 91)
     }
 
     private FreeStyleProject upstreamWithBuildStep(String name) throws Exception {

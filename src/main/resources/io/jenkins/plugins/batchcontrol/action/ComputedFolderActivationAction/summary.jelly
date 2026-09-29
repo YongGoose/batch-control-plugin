@@ -1,0 +1,70 @@
+<?jelly escape-by-default='true'?>
+<!-- D-46c, SPEC item 6a: a computed folder carries the activation of the jobs it generates, so
+     its page states whether it is activated, not activated or on hold and links to the request
+     form (Request holders only). Included by the folder page for every action ("summary");
+     shown while run control is on to viewers holding Item/Read. No script. -->
+<j:jelly xmlns:j="jelly:core">
+  <j:if test="${it.shown}">
+    <j:set var="formUrl" value="${rootURL}/${it.folder.url}batch-control/activation"/>
+    <j:set var="carrier" value="${it.carrier}"/>
+    <j:choose>
+      <j:when test="${carrier != null}">
+        <j:set var="carrierUrl" value="${it.carrierUrl(carrier)}"/>
+        <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
+          <!-- S-14-02: the carrier's name and state only for a viewer with Item/Read on it
+               (carrierUrl is null otherwise); anyone else gets a neutral line. -->
+          <j:choose>
+            <j:when test="${carrierUrl != null}">
+              <strong>Batch Control: activation is held by
+                <a href="${rootURL}/${carrierUrl}">${carrier.fullDisplayName}</a>,
+                which is ${it.carrierState(carrier)}.</strong>
+            </j:when>
+            <j:otherwise>
+              <strong>Batch Control: activation is managed by an item you cannot see.</strong>
+            </j:otherwise>
+          </j:choose>
+        </div>
+      </j:when>
+      <j:when test="${it.activated}">
+        <div class="jenkins-alert jenkins-alert-success" role="status" style="margin-top: 1rem;">
+          <strong>Batch Control: this folder is activated.</strong>
+          Unattended triggers may start the jobs it generates, as far as their own trigger
+          settings allow.
+          <j:if test="${it.canRequest}">
+            To stop unattended runs, <a href="${formUrl}">request a hold</a>; the hold takes effect
+            once it is approved.
+          </j:if>
+        </div>
+      </j:when>
+      <j:otherwise>
+        <div class="jenkins-alert jenkins-alert-warning" role="status" style="margin-top: 1rem;">
+          <j:choose>
+            <j:when test="${it.held}">
+              <strong>Batch Control: this folder is on hold.</strong>
+            </j:when>
+            <j:otherwise>
+              <strong>Batch Control: this folder is not activated.</strong>
+            </j:otherwise>
+          </j:choose>
+          Unattended triggers do not start the jobs it generates until an activation request is
+          approved. Changing the folder configuration does not change this.
+          <j:if test="${it.canRequest}">
+            <a href="${formUrl}">Request activation</a>.
+          </j:if>
+        </div>
+      </j:otherwise>
+    </j:choose>
+    <j:set var="pending" value="${it.pendingRequests}"/>
+    <j:if test="${carrier == null and !empty(pending)}">
+      <ul style="margin: 0.5rem 0;">
+        <j:forEach var="r" items="${pending}">
+          <li>
+            Pending ${it.actionLabel(r.action)} request
+            <a href="${rootURL}/batch-control/activations/${r.id}/">${r.id}</a>
+            by ${r.requester}
+          </li>
+        </j:forEach>
+      </ul>
+    </j:if>
+  </j:if>
+</j:jelly>

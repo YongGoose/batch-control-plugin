@@ -31,6 +31,8 @@ final class NotificationCapture {
     final String reason;
     final List<String> recipients;
     final String url;
+    /** SPEC 6a / security-13 S-13-08: ACTIVATE or HOLD for an activation request, else null. */
+    final String action;
 
     private NotificationCapture(NotificationEvent event, Notification n) {
         this.event = event;
@@ -41,6 +43,7 @@ final class NotificationCapture {
         this.reason = n.getReason();
         this.recipients = n.getRecipients() == null ? null : new ArrayList<>(n.getRecipients());
         this.url = n.getUrl();
+        this.action = n.getAction();
     }
 
     static void record(NotificationEvent event, Notification notification) {
@@ -96,6 +99,6 @@ final class NotificationCapture {
     @Override
     public String toString() {
         return event + "(" + kind + " " + requestId + " subject=" + subject + " requester=" + requester
-                + " recipients=" + recipients + " url=" + url + ")";
+                + " recipients=" + recipients + " url=" + url + " action=" + action + ")";
     }
 }

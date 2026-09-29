@@ -5,6 +5,7 @@ import hudson.Util;
 import hudson.init.Terminator;
 import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -108,6 +109,22 @@ public final class NotificationDispatcher {
                     recipients, url("batch-control/grants/" + request.getId() + "/")));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
+                    + request.getId(), e);
+        }
+    }
+
+    /**
+     * Event for an activation or hold request (SPEC item 6a). Recipients follow the D-36 rule for
+     * the event; the kind is {@link Notification#KIND_ACTIVATION}.
+     */
+    public static void activation(NotificationEvent event, ActivationRequest request) {
+        try {
+            List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
+            dispatch(event, new Notification(Notification.KIND_ACTIVATION, request.getId(),
+                    request.getJobFullName(), request.getRequester(), request.getReason(), recipients,
+                    url("batch-control/activations/" + request.getId() + "/"), request.getAction().name()));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of activation request "
                     + request.getId(), e);
         }
     }

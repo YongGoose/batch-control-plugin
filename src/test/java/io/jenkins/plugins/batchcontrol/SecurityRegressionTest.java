@@ -204,6 +204,7 @@ public class SecurityRegressionTest {
                         BatchControlPermissions.REQUEST).everywhere().to("vr")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
 
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
         Incident incident = IncidentService.get().list(YearMonth.now()).stream()

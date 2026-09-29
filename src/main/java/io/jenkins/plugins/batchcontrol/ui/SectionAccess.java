@@ -45,6 +45,19 @@ public final class SectionAccess {
         };
     }
 
+    /**
+     * {@code /batch-control/activations/**}: requesters, approvers and managers. An activation
+     * request needs {@code BatchControl/Request} (D-39) and is decided with
+     * {@code BatchControl/Approve}, like a run request.
+     */
+    public static Permission[] activations() {
+        return new Permission[] {
+            BatchControlPermissions.REQUEST,
+            BatchControlPermissions.APPROVE,
+            BatchControlPermissions.MANAGE,
+        };
+    }
+
     /** {@code /batch-control/grants/**}: grant requesters, approvers and managers. */
     public static Permission[] grants() {
         return new Permission[] {
@@ -75,6 +88,11 @@ public final class SectionAccess {
     /** Whether the Run Requests screen (and its detail pages) may be linked for this user. */
     public boolean isRequests() {
         return hasAny(requests());
+    }
+
+    /** Whether the Activations screen (and its detail pages) may be linked for this user. */
+    public boolean isActivations() {
+        return hasAny(activations());
     }
 
     /**

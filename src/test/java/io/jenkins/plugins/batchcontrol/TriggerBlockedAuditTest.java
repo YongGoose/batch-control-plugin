@@ -139,6 +139,7 @@ public class TriggerBlockedAuditTest {
     public void t_06_45_refusedReplayWritesOneTriggerBlockedRecord() throws Exception {
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "tb-replay"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        BatchControlFixtures.activate(pipeline, "admin", "admin"); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(pipeline);
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(false);
@@ -202,12 +203,14 @@ public class TriggerBlockedAuditTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList());
         setBatchControl(both, property);
+        activateAsAdmin(both);
         FreeStyleProject other = timerLocked("tb-other");
         FreeStyleProject open = j.createFreeStyleProject("tb-open");
         BatchControlJobProperty openProperty = new BatchControlJobProperty(true);
         openProperty.setBlockTimer(false);
         openProperty.setBlockUpstream(false);
         setBatchControl(open, openProperty);
+        activateAsAdmin(open);
         clockAt(T0);
 
         assertNull(both.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: timer refused");
@@ -257,6 +260,94 @@ public class TriggerBlockedAuditTest {
                 "the exported row must carry the detail (cause kind and switch): " + rows);
     }
 
+    /** The coalescing bound, made configurable by core-dev for this row (matrix note 99). */
+    private static final String MAX_KEYS_PROPERTY =
+            "io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit.maxCoalescedKeys";
+
+    /**
+     * T-06-52 (security-12 S-12-01, P1): the coalescing memory is bounded but its bound must never
+     * suppress a record. The bound is lowered to 50 through its system property, set before the
+     * first refusal and cleared afterwards; 51 distinct locked jobs (one more than the bound) are
+     * each refused once within one hour: every job has exactly one TRIGGER_BLOCKED record and no
+     * submission throws. Guard: the most recently refused job refused again in the same hour
+     * still coalesces (one record). The jobs are FreeStyle, created under run control (so locked,
+     * D-34, and not activated, SPEC 6a) and never built.
+     */
+    @Test
+    public void t_06_52_coalescingBoundNeverSuppressesARecord() throws Exception {
+        String previous = System.getProperty(MAX_KEYS_PROPERTY);
+        System.setProperty(MAX_KEYS_PROPERTY, "50");
+        try {
+            clockAt(T0);
+            int count = 51;
+            List<FreeStyleProject> jobs = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                jobs.add(j.jenkins.createProject(FreeStyleProject.class, "tb-many-" + i));
+            }
+            for (FreeStyleProject job : jobs) {
+                assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                        "fixture: " + job.getName() + " must be refused");
+            }
+            j.waitUntilNoActivity();
+
+            java.util.Map<String, Long> perJob = FileStore.get().listChangeRecords(MONTH).stream()
+                    .filter(r -> r.getType() == ChangeType.TRIGGER_BLOCKED)
+                    .filter(r -> r.getTarget() != null && r.getTarget().startsWith("tb-many-"))
+                    .collect(Collectors.groupingBy(ChangeRecord::getTarget, Collectors.counting()));
+            assertEquals(count, perJob.size(), "every refused job must have a TRIGGER_BLOCKED record");
+            List<String> notOne = perJob.entrySet().stream().filter(e -> e.getValue() != 1L)
+                    .map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.toList());
+            assertTrue(notOne.isEmpty(), "each job must have exactly one record: " + notOne);
+
+            FreeStyleProject last = jobs.get(count - 1);
+            assertNull(last.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
+            assertEquals(1, triggerBlocked(last.getName()).size(), "a recent key must still coalesce within the hour");
+            assertEquals(0, j.jenkins.getQueue().getItems().length, "no refused run may be queued");
+        } finally {
+            if (previous == null) {
+                System.clearProperty(MAX_KEYS_PROPERTY);
+            } else {
+                System.setProperty(MAX_KEYS_PROPERTY, previous);
+            }
+        }
+    }
+
+    /**
+     * T-06-53 (security-12 S-12-01, P0 — run blocking): the refusal fails closed when the audit
+     * write fails. The month's change file is replaced by a directory of the same name, so no
+     * append can succeed; the timer cause is still refused quietly (no exception) with the
+     * blocking baseline. Guard: once the file is writable again, a refusal an hour later is
+     * recorded, so the first refusal really went through the failing write path.
+     */
+    @Test
+    public void t_06_53_refusalHoldsWhenTheAuditWriteFails() throws Exception {
+        clockAt(T0);
+        FreeStyleProject job = timerLocked("tb-failing-write");
+        java.io.File month = new java.io.File(j.jenkins.getRootDir(), "batch-control/changes/" + MONTH + ".jsonl");
+        if (month.isFile()) {
+            assertTrue(month.delete(), "fixture: remove the month file");
+        }
+        assertTrue(month.mkdirs(), "fixture: a directory now stands where the month file is written");
+
+        try {
+            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "a refused timer must stay refused when its audit record cannot be written");
+        } catch (RuntimeException e) {
+            throw new AssertionError("a failed audit write must not surface from the queue gate", e);
+        }
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
+        j.waitUntilNoActivity();
+        assertEquals(1, job.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertTrue(job.getBuilds().isEmpty(), "no build may have run");
+
+        assertTrue(month.delete(), "fixture: restore a writable month file");
+        clockAt(T0.plusSeconds(2 * 3600));
+        assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
+        assertEquals(1, triggerBlocked("tb-failing-write").size(),
+                "guard: with the file writable the next refusal (a new hour) is recorded");
+        assertTrue(job.getBuilds().isEmpty());
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private FreeStyleProject timerLocked(String name) throws Exception {
@@ -265,6 +356,7 @@ public class TriggerBlockedAuditTest {
         property.setBlockTimer(true);
         property.setBlockUpstream(false);
         setBatchControl(job, property);
+        activateAsAdmin(job);
         assertTrue(property.isBlockTimer(), "fixture: blockTimer on");
         assertFalse(property.isBlockUpstream(), "fixture: blockUpstream off");
         return job;
@@ -277,13 +369,25 @@ public class TriggerBlockedAuditTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList());
         setBatchControl(job, property);
+        activateAsAdmin(job);
         assertTrue(property.isBlockUpstream(), "fixture: blockUpstream on");
         assertFalse(property.isBlockTimer(), "fixture: blockTimer off");
         return job;
     }
 
+    /**
+     * SPEC item 6a: the rows here pin that the <em>job switch</em> is named as the reason, so
+     * the job is activated first and the switch is the only thing that refuses (note 91). The
+     * administrator is the only approver of this class and may approve their own request
+     * (allowAdminSelfApproval, default true).
+     */
+    private static void activateAsAdmin(FreeStyleProject job) throws Exception {
+        BatchControlFixtures.activate(job, "admin", "admin");
+    }
+
     private FreeStyleBuild upstreamBuild(String name) throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject(name));
+        activateAsAdmin(upstream); // D-46: a cause-less submission needs an activation (note 109)
         return j.buildAndAssertSuccess(upstream);
     }
 

@@ -10,6 +10,9 @@
         <j:if test="${links.requests}">
           <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list-outline plugin-ionicons-api" title="Run Requests"/>
         </j:if>
+        <j:if test="${links.activations}">
+          <l:task href="${rootURL}/batch-control/activations/" icon="symbol-power-outline plugin-ionicons-api" title="Activations"/>
+        </j:if>
         <j:if test="${links.grants}">
           <l:task href="${rootURL}/batch-control/grants/" icon="symbol-key-outline plugin-ionicons-api" title="Grants"/>
         </j:if>
@@ -27,6 +30,15 @@
         Run approval and audit history for jobs under batch control. Use the side panel to open
         a screen.
       </p>
+      <j:if test="${links.activations}">
+        <j:set var="pendingActivations" value="${it.pendingActivationCount}"/>
+        <j:if test="${pendingActivations > 0}">
+          <div class="jenkins-alert jenkins-alert-info">
+            ${pendingActivations} activation or hold request(s) are awaiting your decision.
+            <a href="${rootURL}/batch-control/activations/">Open Activations</a>
+          </div>
+        </j:if>
+      </j:if>
       <j:if test="${!links.requests and !links.grants and !links.history}">
         <p>
           None of the Batch Control screens is available to you right now. Grant requests can

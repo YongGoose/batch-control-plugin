@@ -98,6 +98,8 @@ public class IncidentTest {
         // creation is independent of run control, so the job is simply taken out of it.
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("cron-fail"));
         job.getBuildersList().add(new FailureBuilder());
+        // SPEC 6a / D-46: a timer run needs an activation even on an uncontrolled job (note 103)
+        BatchControlFixtures.activate(job);
         // matrix note 4: cron firing reproduced by a TimerTriggerCause schedule
         j.assertBuildStatus(Result.FAILURE,
                 job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
@@ -124,6 +126,7 @@ public class IncidentTest {
         // while its timer stays open, and after D-34 the created job carries blockTimer=true
         // (matrix notes 42, 46)
         setBatchControl(job, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(job); // SPEC item 6a: the timer firing needs an activation (note 91)
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),
@@ -161,6 +164,7 @@ public class IncidentTest {
 
         FreeStyleProject unstable = j.createFreeStyleProject("unstable-x");
         unstable.getBuildersList().add(new UnstableBuilder());
+        BatchControlFixtures.activateAsAdmin(unstable); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.UNSTABLE, unstable.scheduleBuild2(0));
         j.waitUntilNoActivity();
         assertNull(incidentForRun("unstable-x#1"), "UNSTABLE is outside incidentResults=[FAILURE], no incident may open");
@@ -168,6 +172,7 @@ public class IncidentTest {
         // positive control so the negative assertion cannot pass vacuously
         FreeStyleProject failing = j.createFreeStyleProject("fail-x");
         failing.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(failing); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, failing.scheduleBuild2(0));
         j.waitUntilNoActivity();
         assertNotNull(incidentForRun("fail-x#1"), "FAILURE stays inside the configured results and must open an incident");
@@ -239,6 +244,7 @@ public class IncidentTest {
                 new StringParameterDefinition("DATE", "2000-01-01")));
         // see t_11_02: a stated property, so the fixture's timer firing survives D-34
         setBatchControl(job, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(job); // SPEC item 6a (note 91)
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),
@@ -270,6 +276,7 @@ public class IncidentTest {
 
         WorkflowJob pipeline = j.createProject(WorkflowJob.class, "abort-inc");
         pipeline.setDefinition(new CpsFlowDefinition("sleep 60", true));
+        BatchControlFixtures.activateAsAdmin(pipeline); // D-46: a cause-less submission needs an activation (note 109)
         QueueTaskFuture<WorkflowRun> future = pipeline.scheduleBuild2(0);
         assertNotNull(future);
         WorkflowRun run = future.waitForStart();
@@ -311,6 +318,9 @@ public class IncidentTest {
                 return false; // fail the build so an incident opens
             }
         });
+        // D-46: a cause-less submission is an unattended cause and needs the job activated,
+        // regardless of approvalRequired (matrix note 109).
+        BatchControlFixtures.activateAsAdmin(job);
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, (hudson.model.Cause) null,
                 new ParametersAction(new PasswordParameterValue("TOKEN", secretValue))));
         j.waitUntilNoActivity();
@@ -342,6 +352,7 @@ public class IncidentTest {
     private Incident openIncident(String jobName) throws Exception {
         FreeStyleProject job = j.createFreeStyleProject(jobName);
         job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
         Incident incident = incidentForRun(jobName + "#1");

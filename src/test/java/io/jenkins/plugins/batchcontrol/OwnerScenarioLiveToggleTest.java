@@ -148,6 +148,7 @@ public class OwnerScenarioLiveToggleTest {
         // must be the job's only property (D-31 already attached one at creation), because the
         // test tightens blockTimer on this very instance further down
         setBatchControl(job, property);
+        BatchControlFixtures.activate(job, REQUESTER, "a1"); // SPEC item 6a: the timer door needs an activation (note 91)
         String gate = "t-os-06";
         job.getBuildersList().add(new GatedBuilder(gate));
 
@@ -220,6 +221,7 @@ public class OwnerScenarioLiveToggleTest {
         // the timer block is switched on this instance further down, so it must be the one the
         // plugin reads and not sit behind D-31's creation-time property
         setBatchControl(job, property);
+        BatchControlFixtures.activate(job, REQUESTER, "a1"); // SPEC item 6a (note 91)
 
         for (int number = 1; number <= 3; number++) {
             Future<FreeStyleBuild> firing = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());

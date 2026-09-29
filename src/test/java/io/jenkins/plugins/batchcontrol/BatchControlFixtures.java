@@ -1,11 +1,24 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.Item;
 import hudson.model.Job;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
+import hudson.security.SecurityRealm;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Fixture helpers for job-level batch-control settings.
@@ -74,6 +87,79 @@ final class BatchControlFixtures {
         }
         assertNull(job.getProperty(BatchControlJobProperty.class), "fixture: " + job.getFullName() + " must carry no BatchControlJobProperty");
         return job;
+    }
+
+    /**
+     * SPEC item 6a (#15, D-39): brings {@code job} into service the only way SPEC allows — an
+     * {@code ACTIVATE} request by {@code requester}, approved by the designated {@code approver}
+     * through {@link ActivationService}. A job created after the plugin's first start is not
+     * activated, so every row whose premise is "this run-controlled job's timer/upstream door is
+     * open" (or "only the job switch blocks it") must establish that through this helper (matrix
+     * note 91). The helper asserts the premise it establishes, so a row can never go on measuring
+     * a job that is still not activated.
+     *
+     * <p>The approver is added to the global approver list for the duration of the call if it is
+     * not already there, and the list is restored afterwards. The users act through a plain
+     * authenticated token, so the helper also works on an unsecured instance (the default
+     * {@code JenkinsRule}); on a secured one the ids must hold what item 6a names
+     * ({@code BatchControl/Request} + {@code Item/Read} for the requester, {@code Approve} for the
+     * approver).
+     *
+     * <p>The parameter is an {@link Item}, not a {@link Job}: since D-46 a computed folder
+     * (multibranch project, organization folder) carries the activation for its children, so
+     * the same helper activates a {@code WorkflowMultiBranchProject} (matrix note 102).
+     */
+    static void activate(Item job, String requester, String approver) throws IOException {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        List<String> before = cfg.getApprovers() == null
+                ? new ArrayList<>() : new ArrayList<>(cfg.getApprovers());
+        boolean added = !before.contains(approver);
+        if (added) {
+            List<String> widened = new ArrayList<>(before);
+            widened.add(approver);
+            cfg.setApprovers(widened);
+            cfg.save();
+        }
+        try {
+            ActivationRequest request;
+            try (ACLContext ignored = ACL.as2(token(requester))) {
+                request = ActivationService.get().create(job, ActivationRequest.Action.ACTIVATE,
+                        "fixture: bring " + job.getFullName() + " into service",
+                        Collections.singletonList(approver));
+            }
+            try (ACLContext ignored = ACL.as2(token(approver))) {
+                ActivationService.get().approve(request.getId(), "fixture: activation approved");
+            }
+        } finally {
+            if (added) {
+                cfg.setApprovers(before);
+                cfg.save();
+            }
+        }
+        assertTrue(ActivationService.get().isActivated(job), "fixture: " + job.getFullName()
+                + " must be activated after the approved ACTIVATE request");
+    }
+
+    /** {@link #activate(Job, String, String)} with the ids most secured fixtures here use. */
+    static void activate(Item job) throws IOException {
+        activate(job, "u1", "a1");
+    }
+
+    /**
+     * {@link #activate(Item, String, String)} as the administrator deciding their own request
+     * (allowAdminSelfApproval, default true). For rows whose point is not activation but which
+     * submit a cause-less / {@code LegacyCodeCause} build of a job created under run control —
+     * an unclassified, unattended cause under D-46 (matrix note 109). Needs a user {@code admin}
+     * holding Jenkins/Administer (or an unsecured instance).
+     */
+    static void activateAsAdmin(Item job) throws IOException {
+        activate(job, "admin", "admin");
+    }
+
+    /** An authenticated principal that needs no security realm (works on unsecured instances). */
+    static Authentication token(String userId) {
+        return new UsernamePasswordAuthenticationToken(userId, "",
+                Collections.singletonList(SecurityRealm.AUTHENTICATED_AUTHORITY2));
     }
 
     /**
