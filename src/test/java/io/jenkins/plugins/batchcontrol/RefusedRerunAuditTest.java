@@ -455,6 +455,74 @@ public class RefusedRerunAuditTest {
                 + describe(byU1));
     }
 
+    /**
+     * T-06-82 (D-51a, security-22 S-22-05): a chained re-run is recorded as what the person did.
+     * Build #2 is naginator's automatic retry of #1 (the job was uncontrolled and activated then).
+     * With the job approval-required, u1 clicks Rebuild on #2: the record by u1 names a Rebuild
+     * (not a Retry) and build #2 (not #1). Note 165.
+     */
+    @Test
+    public void t_06_82_rebuildOfRetriedBuildIsRecordedAsRebuildOfThatBuild() throws Exception {
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rr-chain-rebuild"));
+        job.getBuildersList().add(new FailureBuilder());
+        job.getPublishersList().add(new NaginatorPublisher("", false, false, false, 1, new FixedDelay(0)));
+        BatchControlFixtures.activate(job);
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
+        j.waitUntilNoActivity();
+        FreeStyleBuild retried = job.getBuildByNumber(2);
+        assertNotNull(retried, "fixture: naginator must have retried #1 as #2");
+        assertNotNull(retried.getCause(com.chikli.hudson.plugin.naginator.NaginatorCause.class),
+                "fixture: #2 must be naginator's retry");
+        job.getPublishersList().clear();
+        setBatchControl(job, new BatchControlJobProperty(true));
+        assertNotNull(retried.getAction(RebuildAction.class), "fixture: the rebuild plugin must offer its action on #2");
+
+        post(j, "u1", retried.getUrl() + "rebuild/");
+
+        assertBlocked(j, job, 3, 2);
+        List<ChangeRecord> byU1 = rerunRecords(job).stream().filter(r -> "u1".equals(r.getUser()))
+                .collect(Collectors.toList());
+        assertEquals(1, byU1.size(), "one refusal record by u1: " + describe(rerunRecords(job)));
+        String text = String.valueOf(byU1.get(0).getDetail()).toLowerCase(Locale.ROOT);
+        assertTrue(text.contains("rebuild") && !text.contains("retry"), "the record must name the Rebuild, not a"
+                + " Retry: " + describe(byU1));
+        assertTrue(namesOnly(byU1.get(0), 2), "the record must name the rebuilt build #2, not #1: " + describe(byU1));
+    }
+
+    /**
+     * T-06-83 (D-51a, security-22 S-22-05): build #2 is u1's Rebuild of #1 (the job was uncontrolled
+     * and activated then). With the job approval-required, u1 clicks Retry on #2: the record by u1
+     * names a Retry (not a Rebuild) and build #2 (not #1). Note 165.
+     */
+    @Test
+    public void t_06_83_retryOfRebuiltBuildIsRecordedAsRetryOfThatBuild() throws Exception {
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rr-chain-retry"));
+        job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activate(job);
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
+        post(j, "u1", job.getBuildByNumber(1).getUrl() + "rebuild/");
+        j.waitUntilNoActivity();
+        FreeStyleBuild rebuilt = job.getBuildByNumber(2);
+        assertNotNull(rebuilt, "fixture: the Rebuild of #1 must have run as #2");
+        setBatchControl(job, new BatchControlJobProperty(true));
+        assertNotNull(rebuilt.getAction(NaginatorRetryAction.class), "fixture: naginator must offer Retry on #2");
+
+        post(j, "u1", rebuilt.getUrl() + "retry/");
+
+        assertBlocked(j, job, 3, 2);
+        List<ChangeRecord> byU1 = rerunRecords(job).stream().filter(r -> "u1".equals(r.getUser()))
+                .collect(Collectors.toList());
+        assertEquals(1, byU1.size(), "one refusal record by u1: " + describe(rerunRecords(job)));
+        String text = String.valueOf(byU1.get(0).getDetail()).toLowerCase(Locale.ROOT);
+        assertTrue(text.contains("retry") && !text.contains("rebuild"), "the record must name the Retry, not a"
+                + " Rebuild: " + describe(byU1));
+        assertTrue(namesOnly(byU1.get(0), 2), "the record must name the retried build #2, not #1: " + describe(byU1));
+    }
+
     /** The record names build {@code n} ({@code #n} or {@code /n/}) and no other build number 1..3. */
     private static boolean namesOnly(ChangeRecord r, int n) {
         String text = r.getTarget() + " " + r.getDetail();

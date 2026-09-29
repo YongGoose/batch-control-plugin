@@ -91,13 +91,21 @@ public class SystemBuildWarningTest {
     }
 
     /**
-     * T-08-60 (D-50a twin): a global default build authorization (GlobalQueueItemAuthenticator
-     * running builds as admin): neither Manage Jenkins nor the detail page carries the warning.
+     * T-08-60 (D-50a/D-50b twin): a global default build authorization (GlobalQueueItemAuthenticator)
+     * running builds as {@code batch}, who holds only Overall/Read, Job/Read and Job/Build: neither
+     * Manage Jenkins nor the detail page carries the warning. (Before D-50b the account was admin;
+     * that case is now T-08-63.)
      */
     @Test
     public void t_08_60_globalDefaultStrategyShowsNoSystemWarning() throws Exception {
+        // D-50b: the global default's account holds only Overall/Read, Job/Read and Job/Build
+        BatchControlMatrixAuthorizationStrategy strategy = StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy());
+        strategy.add(jenkins.model.Jenkins.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("batch"));
+        strategy.add(hudson.model.Item.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("batch"));
+        strategy.add(hudson.model.Item.BUILD, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("batch"));
+        j.jenkins.setAuthorizationStrategy(strategy);
         QueueItemAuthenticatorConfiguration.get().getAuthenticators()
-                .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("admin")));
+                .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("batch")));
         j.createFreeStyleProject("sys-job");
         String id = request("sys-job");
 
@@ -148,6 +156,50 @@ public class SystemBuildWarningTest {
         String detail = detailText("a1", id);
         assertTrue(detail.contains("SYSTEM"), "the approver must see the warning for own-job too: "
                 + UsabilityFixtures.excerpt(detail));
+    }
+
+    /**
+     * T-08-63 (D-50b, security-22 S-22-01 row a): the global default build authorization runs
+     * builds as {@code admin}, who holds Overall/Administer. Such a build can write a permanent
+     * authorization entry that the guard keeps, so the warning appears on Manage Jenkins and to the
+     * approver.
+     */
+    @Test
+    public void t_08_63_globalDefaultAsAdministratorStillWarns() throws Exception {
+        QueueItemAuthenticatorConfiguration.get().getAuthenticators()
+                .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("admin")));
+        j.createFreeStyleProject("sys-job");
+        String id = request("sys-job");
+
+        String manage = manageText();
+        assertTrue(manage.contains("SYSTEM"), "a global default running builds as an administrator must warn (D-50b): "
+                + UsabilityFixtures.excerpt(manage));
+        String detail = detailText("a1", id);
+        assertTrue(detail.contains("SYSTEM"), "the approver must see the warning: " + UsabilityFixtures.excerpt(detail));
+    }
+
+    /**
+     * T-08-64 (D-50b): the global default's account {@code svc} holds root-level Item/Configure
+     * (and Overall/Read) in the strategy without any grant, but not Administer: the warning
+     * appears on Manage Jenkins and to the approver.
+     */
+    @Test
+    public void t_08_64_globalDefaultAsRootConfigureHolderStillWarns() throws Exception {
+        BatchControlMatrixAuthorizationStrategy strategy = StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy());
+        strategy.add(jenkins.model.Jenkins.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("svc"));
+        strategy.add(hudson.model.Item.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("svc"));
+        strategy.add(hudson.model.Item.CONFIGURE, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("svc"));
+        j.jenkins.setAuthorizationStrategy(strategy);
+        QueueItemAuthenticatorConfiguration.get().getAuthenticators()
+                .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("svc")));
+        j.createFreeStyleProject("sys-job");
+        String id = request("sys-job");
+
+        String manage = manageText();
+        assertTrue(manage.contains("SYSTEM"), "a global default running builds as an account with root-level"
+                + " Configure must warn (D-50b): " + UsabilityFixtures.excerpt(manage));
+        String detail = detailText("a1", id);
+        assertTrue(detail.contains("SYSTEM"), "the approver must see the warning: " + UsabilityFixtures.excerpt(detail));
     }
 
     private void perProject() {

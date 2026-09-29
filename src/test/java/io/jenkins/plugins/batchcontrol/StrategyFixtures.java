@@ -165,7 +165,9 @@ final class StrategyFixtures {
 
     /**
      * Configures a build authenticator that gives every build a user identity: Authorize
-     * Project's global default running builds as {@code admin}. Since D-35d the
+     * Project's global default running builds as {@code batch-builder}, an account with no entry
+     * in any fixture strategy (so without Configure: D-50b counts an identity with Administer or
+     * root-level Configure as unsafe too). Since D-35d the
      * {@code batch-control-strategy} monitor also warns when change control is on and no
      * authenticator is configured, and since D-50a when builds can still run as SYSTEM (an empty
      * MockQueueItemAuthenticator, the fixture before D-50a, maps no item and so leaves every build
@@ -175,7 +177,7 @@ final class StrategyFixtures {
     static void configureBuildAuthenticator() {
         jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators()
                 .add(new org.jenkinsci.plugins.authorizeproject.GlobalQueueItemAuthenticator(
-                        new org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy("admin")));
+                        new org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy("batch-builder")));
         assertTrue(!jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators().isEmpty(),
                 "fixture: a QueueItemAuthenticator must be configured");
     }
