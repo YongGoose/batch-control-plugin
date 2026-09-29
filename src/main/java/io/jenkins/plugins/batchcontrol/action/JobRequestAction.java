@@ -11,16 +11,16 @@ import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.security.Permission;
 import hudson.util.Secret;
-import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
+import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +49,9 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 @Restricted(NoExternalUse.class)
 public class JobRequestAction implements Action {
 
+    /** {@link FormErrors} name of the request form. */
+    static final String FORM = "request";
+
     private final Job<?, ?> job;
 
     public JobRequestAction(Job<?, ?> job) {
@@ -64,7 +67,11 @@ public class JobRequestAction implements Action {
     @Override
     @CheckForNull
     public String getIconFileName() {
-        if (!isActive() || !canRequest()) {
+        // e2e-03 DEF-12: the entry is offered only to a user who can submit the form, which
+        // also needs Job/Build on the job (D-38). The URL space stays for Request holders
+        // because the activation form lives under it; the form page explains the missing
+        // permission to anyone who opens it without Job/Build.
+        if (!isActive() || !isCanRequestRun()) {
             return null;
         }
         return "symbol-paper-plane-outline plugin-ionicons-api";
@@ -73,6 +80,15 @@ public class JobRequestAction implements Action {
     /** Whether the current user may use this action at all ({@code BatchControl/Request}). */
     private static boolean canRequest() {
         return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+    }
+
+    /**
+     * Whether the current user may submit a run request for this job: {@code BatchControl/Request}
+     * plus {@code Item/Build} on the job (D-38, #24), the checks {@link RunRequestService#create}
+     * makes. View gating only; {@link #doSubmit} and the service check for real.
+     */
+    public boolean isCanRequestRun() {
+        return RunRequestService.get().canRequest(job);
     }
 
     /**
@@ -105,17 +121,52 @@ public class JobRequestAction implements Action {
 
     /** True when run control is on and this job requires approved runs. */
     public boolean isActive() {
-        if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
-            return false;
-        }
-        BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
-        return property != null && property.isApprovalRequired();
+        return RunRequestService.requiresApprovalToRun(job);
     }
 
-    /** The job's parameter definitions, rendered by each definition's own {@code index.jelly}. */
+    /**
+     * The job's parameter definitions, rendered by each definition's own {@code index.jelly}.
+     *
+     * <p>e2e-03 DEF-09: when a submission is being refused, each definition whose value was
+     * parsed is replaced by a copy defaulting to that value
+     * ({@link ParameterDefinition#copyWithDefaultValue}), so the re-rendered form shows what the
+     * user entered. Sensitive values (password parameters) are never copied back into the page.
+     */
     public List<ParameterDefinition> getParameterDefinitions() {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
-        return property == null ? Collections.emptyList() : property.getParameterDefinitions();
+        if (property == null) {
+            return Collections.emptyList();
+        }
+        List<ParameterDefinition> definitions = property.getParameterDefinitions();
+        Object submitted = getFormErrors().getAttachment();
+        if (!(submitted instanceof List)) {
+            return definitions;
+        }
+        Map<String, ParameterValue> byName = new LinkedHashMap<>();
+        for (Object value : (List<?>) submitted) {
+            if (value instanceof ParameterValue) {
+                byName.put(((ParameterValue) value).getName(), (ParameterValue) value);
+            }
+        }
+        List<ParameterDefinition> refilled = new ArrayList<>(definitions.size());
+        for (ParameterDefinition definition : definitions) {
+            ParameterValue value = byName.get(definition.getName());
+            ParameterDefinition shown = definition;
+            if (value != null && !value.isSensitive() && !(value.getValue() instanceof Secret)) {
+                try {
+                    shown = definition.copyWithDefaultValue(value);
+                } catch (RuntimeException e) {
+                    shown = definition; // a definition that cannot copy keeps its own default
+                }
+            }
+            refilled.add(shown == null ? definition : shown);
+        }
+        return refilled;
+    }
+
+    /** The refusal of the last submission on this request, or an empty one (DEF-09). */
+    public FormErrors getFormErrors() {
+        return FormErrors.current(FORM);
     }
 
     /** Approver candidates: global approver list ∩ job-level restriction (if configured). */
@@ -136,15 +187,16 @@ public class JobRequestAction implements Action {
 
     /**
      * POST {@code submit} — creates the run request and redirects to its detail page at
-     * {@code /batch-control/requests/<id>/}. Validation failures from the service render as a
-     * {@link Failure} page with the message.
+     * {@code /batch-control/requests/<id>/}. A refused submission re-renders the form with HTTP 400,
+     * the message next to the field it concerns and the user's input kept (e2e-03 DEF-09).
      *
      * <p>N-01: {@link #parseParameters} is inside the {@code try} on purpose. A parameter
      * definition rejects a bad value by throwing {@link IllegalArgumentException} — a choice
      * parameter given a value outside its choices, for instance — and that is the same class the
      * service's own validation throws. Parsing outside the {@code try} turned user-supplied
      * input into an uncaught exception and an HTTP 500 "Oops!" page while an empty reason
-     * correctly answered 400; both are user input and both belong in the same 400 channel.
+     * correctly answered 400; both are user input and both belong in the same 400 channel, now
+     * the re-rendered form.
      *
      * <p>security-08 S-10: a scripted submission with no {@code json} field used to store an
      * empty parameter map, so the later approved build ran with whatever defaults the job had at
@@ -158,24 +210,52 @@ public class JobRequestAction implements Action {
             throws IOException, ServletException {
         job.checkPermission(Item.READ);
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38: the requester needs Job/Build. The service checks it too; checking it here first
+        // keeps the answer a 403 whatever else is wrong with the submission.
+        job.checkPermission(Item.BUILD);
 
         // The rendered form posts a json blob (f:form) plus the raw fields; a script may post
         // the raw fields only. Both carry the same contract: reason, repeated approvers (D-37).
         JSONObject formData = req.getParameter("json") != null ? req.getSubmittedForm() : null;
         String reason = Util.fixEmptyAndTrim(formData != null
                 ? formData.optString("reason", "") : Util.fixNull(req.getParameter("reason")));
-        List<String> approvers = ApproverInput.read(req, formData);
 
-        RunRequest request;
+        // e2e-03 DEF-09: every refusal of the user's input is shown on the form, next to the
+        // field, with the input kept (FormErrors), instead of a bare "Error" page.
+        FormErrors errors = new FormErrors(FORM);
+        List<String> approvers = List.of();
         try {
-            Map<String, String> parameters = formData == null
-                    ? parseRawParameters(req) : parseParameters(req, formData);
-            request = RunRequestService.get().create(job, parameters, reason, approvers);
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
+            approvers = ApproverInput.read(req, formData);
+        } catch (Failure e) {
+            errors.field("approvers", e.getMessage());
         }
-        rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
-                + Util.rawEncode(request.getId()) + "/");
+        List<ParameterValue> submitted = new ArrayList<>();
+        Map<String, String> parameters = null;
+        try {
+            parameters = formData == null
+                    ? parseRawParameters(req, submitted) : parseParameters(req, formData, submitted);
+        } catch (IllegalArgumentException | Failure e) {
+            errors.field("parameters", "A parameter value was refused"
+                    + (e.getMessage() == null ? "." : ": " + e.getMessage()));
+        }
+        if (reason == null) {
+            errors.field("reason", "Enter a reason: the approvers decide on it.");
+        }
+        if (approvers.isEmpty()) {
+            errors.field("approvers", "Check at least one approver.");
+        }
+        if (errors.isEmpty()) {
+            try {
+                RunRequest request = RunRequestService.get().create(job, parameters, reason, approvers);
+                rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
+                        + Util.rawEncode(request.getId()) + "/");
+                return;
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                errors.fromService(e.getMessage(), "reason", "reason", "approver", "approvers",
+                        "parameter", "parameters");
+            }
+        }
+        errors.attach(submitted).render(req, rsp, this);
     }
 
     /**
@@ -187,7 +267,8 @@ public class JobRequestAction implements Action {
      * definition's own {@link IllegalArgumentException} propagate for a value it refuses; the
      * caller turns the latter into the same 400 as every other rejected submission (N-01).
      */
-    private Map<String, String> parseParameters(StaplerRequest2 req, JSONObject formData) {
+    private Map<String, String> parseParameters(StaplerRequest2 req, JSONObject formData,
+                                                List<ParameterValue> submitted) {
         Map<String, String> parameters = new LinkedHashMap<>();
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
@@ -212,6 +293,7 @@ public class JobRequestAction implements Action {
             }
             ParameterValue value = definition.createValue(req, jsonEntry);
             if (value != null) {
+                submitted.add(value);
                 parameters.put(value.getName(), flatten(value));
             }
         }
@@ -229,7 +311,7 @@ public class JobRequestAction implements Action {
      * definition's own {@link IllegalArgumentException} for a bad value propagates unchanged
      * (N-01: caught by the caller's {@code try}).
      */
-    private Map<String, String> parseRawParameters(StaplerRequest2 req) {
+    private Map<String, String> parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted) {
         Map<String, String> parameters = new LinkedHashMap<>();
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
@@ -241,6 +323,7 @@ public class JobRequestAction implements Action {
                 value = definition.getDefaultParameterValue();
             }
             if (value != null) {
+                submitted.add(value);
                 parameters.put(value.getName(), flatten(value));
             }
         }

@@ -1,0 +1,26 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-03 DEF-10 (SPEC section 6): the Batch Control configuration for BatchControl/Manage
+     holders, at /batch-control-configuration/ (BatchControlConfigurationLink). The fields are the
+     configuration's own config.jelly, bound to the configuration exactly as on Manage Jenkins >
+     System, so the field checks and help texts are the same; saving posts to configSubmit, which
+     re-checks the permission and refuses invalid values. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <l:layout title="Batch Control configuration" permission="${it.requiredPermission}" type="one-column">
+    <l:main-panel>
+      <l:app-bar title="Batch Control configuration"/>
+      <p class="jenkins-description">
+        The same settings as the Batch Control section of Manage Jenkins &gt; System. Changes are
+        recorded in the change history.
+      </p>
+      <j:set var="descriptor" value="${it.configuration}"/>
+      <j:set var="instance" value="${it.configuration}"/>
+      <f:form method="post" action="configSubmit" name="config">
+        <st:include from="${descriptor}" page="${descriptor.globalConfigPage}"/>
+        <f:bottomButtonBar>
+          <f:submit value="Save"/>
+          <f:apply/>
+        </f:bottomButtonBar>
+      </f:form>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

@@ -14,6 +14,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
+import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
@@ -44,6 +45,9 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  */
 @Restricted(NoExternalUse.class)
 public class JobActivationForm implements ModelObject {
+
+    /** {@link FormErrors} name of the activation form. */
+    static final String FORM = "activation";
 
     /** A job, or a computed folder (D-46c). */
     private final Item item;
@@ -147,8 +151,8 @@ public class JobActivationForm implements ModelObject {
     /**
      * POST {@code submit} with {@code action} ({@code ACTIVATE}|{@code HOLD}), {@code reason} and
      * the repeated {@code approvers} field; redirects to the request at
-     * {@code /batch-control/activations/<id>/}. Validation failures from the service render as a
-     * {@link Failure} page (HTTP 400) with the message.
+     * {@code /batch-control/activations/<id>/}. A refused submission re-renders the form (HTTP 400)
+     * with the message next to its field and the input kept (e2e-03 DEF-09).
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
@@ -166,17 +170,38 @@ public class JobActivationForm implements ModelObject {
         if (reason == null && formData != null) {
             reason = Util.fixEmptyAndTrim(formData.optString("reason", ""));
         }
-        List<String> approvers = ApproverInput.read(req, formData);
         ActivationRequest.Action action = parseAction(actionName);
 
-        ActivationRequest request;
+        // e2e-03 DEF-09: refusals of the user's input come back on the form (FormErrors).
+        FormErrors errors = new FormErrors(FORM);
+        List<String> approvers = List.of();
         try {
-            request = ActivationService.get().create(item, action, reason, approvers);
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The request was rejected" : e.getMessage());
+            approvers = ApproverInput.read(req, formData);
+        } catch (Failure e) {
+            errors.field("approvers", e.getMessage());
         }
-        rsp.sendRedirect2(req.getContextPath() + "/batch-control/activations/"
-                + Util.rawEncode(request.getId()) + "/");
+        if (reason == null) {
+            errors.field("reason", "Enter a reason: the approvers decide on it.");
+        }
+        if (approvers.isEmpty()) {
+            errors.field("approvers", "Check at least one approver.");
+        }
+        if (errors.isEmpty()) {
+            try {
+                ActivationRequest request = ActivationService.get().create(item, action, reason, approvers);
+                rsp.sendRedirect2(req.getContextPath() + "/batch-control/activations/"
+                        + Util.rawEncode(request.getId()) + "/");
+                return;
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                errors.fromService(e.getMessage(), "reason", "reason", "approver", "approvers");
+            }
+        }
+        errors.render(req, rsp, this);
+    }
+
+    /** The refusal of the last submission on this request, or an empty one (DEF-09). */
+    public FormErrors getFormErrors() {
+        return FormErrors.current(FORM);
     }
 
     /** Exactly {@code ACTIVATE} or {@code HOLD}; anything else is refused before the service is called. */

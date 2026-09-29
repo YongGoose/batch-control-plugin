@@ -1,36 +1,32 @@
 <div>
-  If checked, builds triggered by upstream jobs are blocked unless the upstream job is listed below;
-  by default they pass through.
+  If checked, builds triggered by upstream jobs are refused while <b>Enable run control</b> is on,
+  unless the upstream job is listed in <b>Allowed upstream jobs</b>; unchecked, they pass this
+  switch. It applies whether or not <b>Require approval to run</b> is checked.
   <p>
-    <b>A job created while run control is on does not start at that default.</b> Every newly
-    created job starts locked — <b>Require approval to run</b>, <b>Block cron (timer) triggers</b>
-    and <b>Block upstream triggers</b> all on and <b>Allowed upstream jobs</b> empty — whoever
-    created it and however. Creating a job therefore does not put it into service. Bringing it into
-    service means turning a switch off here, and that change is recorded and, with change control
-    on, needs a permission window. Jobs that already existed when run control was turned on are
-    untouched.
+    <b>This switch is not what puts a job into service.</b> An upstream-triggered run starts only if
+    the job is <b>activated</b> (an approved activation request, made from the job page) <b>and</b>
+    this switch lets the upstream job through. Unchecking it on a job that is not activated changes
+    nothing. A job created while run control is on starts not activated, with this switch checked
+    and the allowed-upstream list empty, so it needs its activation requested before any upstream
+    job can start it. Jobs that already existed when run control was turned on were recorded as
+    activated.
   </p>
   <p>
-    A value supplied when the job was created does not survive the lock: a
+    A value supplied when the job was created does not survive the creation lock: a
     <code>blockUpstream=false</code> in a <code>config.xml</code> POST, a CLI
     <code>create-job</code>, a Job DSL seed or the job this one was copied from is overwritten, and
-    the allowed-upstream list is emptied rather than carried over. The list is emptied because while
-    <b>Block upstream triggers</b> is on it is precisely the set of upstream jobs <b>exempt</b> from
-    the block, so honouring a supplied one would leave the upstream door open and make the lock
-    cosmetic. The case that makes it concrete is name squatting: an existing pipeline runs
-    <code>build job: 'X'</code> where <code>X</code> does not exist yet, and whoever may create
-    items creates <code>X</code> with the calling pipeline in its exempt list — the pipeline's next
-    run would then execute their job with no approval and no window.
+    the allowed-upstream list is emptied rather than carried over. While this switch is checked
+    that list is exactly the set of upstream jobs exempt from the block, so honouring a supplied
+    one would let whoever creates a job name the pipelines allowed to start it.
   </p>
   <p>
-    A blocked upstream run is refused without a message at the time, because the trigger has
-    nobody to show one to, although the upstream job surfaces the failure. It is not invisible
-    afterwards: while run control is on and this switch is checked, the job's main page shows a
-    notice naming <b>Block upstream triggers</b> and saying it is cleared here; each refusal writes
-    a <code>TRIGGER_BLOCKED</code> change record (at most one per job and cause kind per hour,
-    listed under Change Records and History and exported in <code>changes.csv</code>); and the
-    controller log carries a "Blocked upstream-triggered run of job" line at most once an hour per
-    job (repeats are logged at FINE). Unchecking this switch is itself a recorded configuration
+    A refused upstream run has nobody to show a message to at the time, although the upstream job
+    reports the failed trigger. Afterwards, the job page says whether the job is activated and,
+    while this switch is checked, shows a notice naming <b>Block upstream triggers</b>; each refusal
+    writes a <code>TRIGGER_BLOCKED</code> change record naming what blocked it (at most one per job
+    and cause kind per hour, listed under Change Records and History and in
+    <code>changes.csv</code>); and the controller log carries a "Blocked upstream-triggered run of
+    job" line at most once an hour per job. Unchecking this switch is a recorded configuration
     change and, with change control on, needs a permission window.
   </p>
 </div>

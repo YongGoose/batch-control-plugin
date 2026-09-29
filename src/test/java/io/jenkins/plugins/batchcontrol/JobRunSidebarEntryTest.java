@@ -35,7 +35,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Core's build entry cannot be hidden or re-pointed from a plugin, so the fix renamed it. These
  * rows therefore assert the pairing rather than a single caption: exactly one entry reads
  * "Request Run" and it is the one that opens the request form, while the relabelled core entry
- * says what it is and still points at the build URL.
+ * says what it is and still points at the build URL. A coordinator ruling on e2e-03 part 2
+ * (DEF-25) confirmed this contract — core draws the link for every Item/Build holder — and added
+ * that a click on it is refused with a plain-words explanation (SPEC section 6 usability line,
+ * docs/LIMITATIONS.md; matrix note 131).
  *
  * <p>Relationship to the existing SPEC row: T-06-15 pins the acceptance criterion of SPEC item 6
  * ("Build Now" is replaced by "Request Run") at page level and keeps passing unchanged. These rows
@@ -160,6 +163,36 @@ public class JobRunSidebarEntryTest {
         // The two entries must be different links: the whole finding was two entries with the same
         // caption going to different places, and a fix that merged them would lose the request form.
         assertFalse(requestRun.get(0).getHrefAttribute().equals(directBuild.get(0).getHrefAttribute()), target.getFullName() + ": the two entries must be distinct links");
+
+        assertDirectBuildClickIsExplained(target, page.getFullyQualifiedUrl(directBuild.get(0).getHrefAttribute()).toExternalForm());
+    }
+
+    /**
+     * Coordinator ruling (e2e-03 part 2, reverting the DEF-25 revision of these rows): core draws
+     * its build link for every Item/Build holder and a plugin cannot remove it, so the renamed
+     * entry stays (docs/LIMITATIONS.md). Under the SPEC section 6 usability line its click must be
+     * refused with a plain-words explanation naming approval — no "Oops!", stack trace or bare
+     * "Access Denied" — and nothing may be queued. A parameterised job's click opens core's
+     * parameters form; the refusal is then the answer to submitting it.
+     */
+    private void assertDirectBuildClickIsExplained(Job<?, ?> target, String absoluteHref) throws Exception {
+        String relative = absoluteHref.substring(j.getURL().toExternalForm().length());
+        int nextBuildNumber = target.getNextBuildNumber();
+        int builds = target.getBuilds().size();
+        org.htmlunit.Page answer;
+        if (target instanceof jenkins.model.ParameterizedJobMixIn.ParameterizedJob
+                && ((jenkins.model.ParameterizedJobMixIn.ParameterizedJob<?, ?>) target).isParameterized()) {
+            JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
+            HtmlPage form = (HtmlPage) wc.getPage(new java.net.URL(absoluteHref));
+            answer = j.submit(form.getFormByName("parameters"));
+        } else {
+            answer = PluginInteractionFixtures.post(j, "u1", relative);
+        }
+        assertTrue(answer.getWebResponse().getStatusCode() >= 400, target.getFullName() + ": the direct build click must be refused, got HTTP "
+                + answer.getWebResponse().getStatusCode());
+        UsabilityFixtures.assertPlainRefusal(target.getFullName() + ": the direct build click", UsabilityFixtures.text(answer),
+                java.util.regex.Pattern.compile("(?i)approv"));
+        PluginInteractionFixtures.assertBlocked(j, target, nextBuildNumber, builds);
     }
 
     // ---------------------------------------------------------------- helpers

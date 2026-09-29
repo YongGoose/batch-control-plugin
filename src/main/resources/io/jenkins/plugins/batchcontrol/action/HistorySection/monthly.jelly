@@ -1,0 +1,26 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-03 DEF-22 / T-12-12 (SPEC item 12): the monthly aggregate as a screen, with the counts
+     labelled in words (HistorySection#summaryLabel). The JSON at summary?month= keeps the field
+     keys for scripts. Read-only; ViewHistory is enforced by HistorySection#getTarget. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Monthly Summary" type="one-column" permissions="${it.viewPermissions}">
+    <l:main-panel>
+      <j:set var="month" value="${it.monthlyMonth}"/>
+      <l:app-bar title="Monthly Summary (${month})"/>
+      <table class="jenkins-table" style="max-width: 30rem;">
+        <tbody>
+          <j:forEach var="s" items="${it.monthlySummary.entrySet()}">
+            <tr>
+              <th style="text-align: left;">${it.summaryLabel(s.key)}</th>
+              <td>${s.value}</td>
+            </tr>
+          </j:forEach>
+        </tbody>
+      </table>
+      <p>
+        <a href="${rootURL}/batch-control/history/">Back to History</a> ·
+        <a href="${rootURL}/batch-control/history/summary?month=${month}">This month as JSON</a>
+      </p>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

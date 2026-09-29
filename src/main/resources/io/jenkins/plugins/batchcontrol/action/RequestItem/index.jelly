@@ -1,8 +1,26 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<!-- e2e-03 DEF-09: a refused approve, reject, cancel or approver change comes back to this page
+     (RequestItem#call, ui.FormErrors): the message is next to the field or above the form it
+     concerns and the comment or approver set the user entered is kept. Links on this page are
+     absolute because a refusal is rendered at the POST URL (.../reject), not at .../<id>/. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Run Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Run Request ${it.id}"/>
+
+      <!-- DEF-09: a refusal whose form is no longer shown (the request was decided or cancelled
+           meanwhile) is reported here, above the current state. -->
+      <j:if test="${!it.canDecide}">
+        <bc:formError errors="${it.formErrors('approve')}"/>
+        <bc:formError errors="${it.formErrors('reject')}"/>
+      </j:if>
+      <j:if test="${!it.canChangeApprover}">
+        <bc:formError errors="${it.formErrors('changeApprover')}"/>
+      </j:if>
+      <j:if test="${!it.canCancel}">
+        <bc:formError errors="${it.formErrors('cancel')}"/>
+      </j:if>
 
       <table class="jenkins-table jenkins-table--small">
         <tbody>
@@ -22,11 +40,36 @@
           <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
           <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
+          <!-- e2e-03 DEF-13 / DEF-17: who closed the request and why. A cancellation is attributed
+               through decidedBy, an invalidation through invalidationReason. -->
           <j:if test="${it.request.decidedBy != null}">
-            <tr><th style="text-align: left;">Decided by</th><td>${it.request.decidedBy}</td></tr>
+            <tr>
+              <th style="text-align: left;">
+                <j:choose>
+                  <j:when test="${it.request.status.name() == 'CANCELLED'}">Cancelled by</j:when>
+                  <j:otherwise>Decided by</j:otherwise>
+                </j:choose>
+              </th>
+              <td>${it.request.decidedBy}</td>
+            </tr>
+          </j:if>
+          <!-- e2e-03 DEF-17: why the request was invalidated (rename or move of its job). -->
+          <j:if test="${it.request.invalidationReason != null}">
+            <tr>
+              <th style="text-align: left;">Why it was invalidated</th>
+              <td style="white-space: pre-wrap;">${it.request.invalidationReason}</td>
+            </tr>
           </j:if>
           <j:if test="${it.request.decisionComment != null}">
-            <tr><th style="text-align: left;">Decision comment</th><td>${it.request.decisionComment}</td></tr>
+            <tr>
+              <th style="text-align: left;">
+                <j:choose>
+                  <j:when test="${it.request.status.name() == 'EXPIRED'}">Why it expired</j:when>
+                  <j:otherwise>Decision comment</j:otherwise>
+                </j:choose>
+              </th>
+              <td style="white-space: pre-wrap;">${it.request.decisionComment}</td>
+            </tr>
           </j:if>
           <j:if test="${it.request.selfApproved}">
             <tr><th style="text-align: left;">Self-approved</th><td>Yes</td></tr>
@@ -129,11 +172,11 @@
               <j:forEach var="n" items="${it.recentRunLimitOptions}">
                 <j:choose>
                   <j:when test="${n == it.recentRunLimit}">
-                    <a class="jenkins-button jenkins-button--primary" href="?runs=${n}"
+                    <a class="jenkins-button jenkins-button--primary" href="${rootURL}/batch-control/requests/${it.id}/?runs=${n}"
                        aria-current="true">${n}</a>
                   </j:when>
                   <j:otherwise>
-                    <a class="jenkins-button" href="?runs=${n}">${n}</a>
+                    <a class="jenkins-button" href="${rootURL}/batch-control/requests/${it.id}/?runs=${n}">${n}</a>
                   </j:otherwise>
                 </j:choose>
               </j:forEach>
@@ -163,17 +206,23 @@
 
       <j:if test="${it.canDecide}">
         <h2>Decision</h2>
-        <f:form method="post" action="approve" name="approve">
+        <j:set var="approveErrors" value="${it.formErrors('approve')}"/>
+        <j:set var="rejectErrors" value="${it.formErrors('reject')}"/>
+        <bc:formError errors="${approveErrors}"/>
+        <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/approve" name="approve">
           <f:entry title="Comment (optional)">
-            <f:textarea name="comment" value=""/>
+            <f:textarea name="comment" value="${approveErrors.value('comment')}"/>
+            <bc:fieldError errors="${approveErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
             <f:submit value="Approve"/>
           </f:bottomButtonBar>
         </f:form>
-        <f:form method="post" action="reject" name="reject">
+        <bc:formError errors="${rejectErrors}"/>
+        <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/reject" name="reject">
           <f:entry title="Rejection comment (required)" description="Rejection is final for this request; a rejected request cannot be reopened.">
-            <f:textarea name="comment" value=""/>
+            <f:textarea name="comment" value="${rejectErrors.value('comment')}"/>
+            <bc:fieldError errors="${rejectErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
             <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
@@ -208,15 +257,18 @@
           <j:otherwise>
             <!-- D-26, D-37: the picker starts on the current set, so unchecking one member and
                  checking another edits the set; the change is recorded as (previous set, new set). -->
-            <f:form method="post" action="changeApprover" name="changeApprover">
+            <j:set var="approverErrors" value="${it.formErrors('changeApprover')}"/>
+            <bc:formError errors="${approverErrors}"/>
+            <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/changeApprover" name="changeApprover">
               <f:entry title="Approvers" description="Any one of the checked approvers may decide."
                        help="/plugin/batch-control/help/approvers.html">
                 <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
                   <div class="jenkins-!-margin-bottom-1">
                     <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
-                                title="${a}" checked="${it.isDesignated(a)}"/>
+                                title="${a}" checked="${approverErrors.present ? approverErrors.checked('approvers', a) : it.isDesignated(a)}"/>
                   </div>
                 </j:forEach>
+                <bc:fieldError errors="${approverErrors}" field="approvers"/>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Change Approvers"/>
@@ -228,8 +280,9 @@
 
       <j:if test="${it.canCancel}">
         <h2>Cancel</h2>
+        <bc:formError errors="${it.formErrors('cancel')}"/>
         <p>
-          <l:confirmationLink href="cancel" post="true" title="Cancel this run request?"
+          <l:confirmationLink href="${rootURL}/batch-control/requests/${it.id}/cancel" post="true" title="Cancel this run request?"
                               message="The request will be closed as CANCELLED. This cannot be undone.">
             Cancel Request
           </l:confirmationLink>

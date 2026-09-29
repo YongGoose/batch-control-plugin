@@ -1,11 +1,17 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<!-- e2e-03 DEF-09: a refused new request comes back to this page (GrantsSection#doCreate,
+     ui.FormErrors) with each message next to its field and the input kept; links are absolute
+     because the refusal is rendered at .../grants/create. DEF-18 (D-33): ended windows are
+     listed with a re-request link. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Grants" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Grants"/>
+      <j:set var="base" value="${rootURL}/batch-control/grants/"/>
       <p class="jenkins-description">
         Temporary (just-in-time) permission requests for creating, configuring or deleting jobs,
-        and the grants currently active.
+        the grants currently active and the ones that have ended.
       </p>
 
       <h2>Grant Requests</h2>
@@ -30,25 +36,25 @@
             <tbody>
               <j:forEach var="r" items="${it.pageItems}">
                 <tr>
-                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td><a href="${base}${r.id}/">${r.id}</a></td>
                   <td>${r.scope.type}: ${r.scope.fullName}</td>
                   <td>${it.join(r.actions)}</td>
                   <td>${r.durationMinutes} min</td>
                   <td>${r.reason}</td>
                   <td>${r.requester}</td>
                   <td>${it.join(r.approvers)}</td>
-                  <td>${r.status}</td>
+                  <td>${it.statusLabel(r)}</td>
                 </tr>
               </j:forEach>
             </tbody>
           </table>
           <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasPrevious}">
-              <a class="jenkins-button" href="?page=${it.page - 1}&amp;activePage=${it.activePage}">Newer</a>
+              <a class="jenkins-button" href="${base}?page=${it.page - 1}&amp;activePage=${it.activePage}&amp;pastPage=${it.pastPage}">Newer</a>
             </j:if>
             <span>Page ${it.page} (${it.total} requests)</span>
             <j:if test="${it.hasNext}">
-              <a class="jenkins-button" href="?page=${it.page + 1}&amp;activePage=${it.activePage}">Older</a>
+              <a class="jenkins-button" href="${base}?page=${it.page + 1}&amp;activePage=${it.activePage}&amp;pastPage=${it.pastPage}">Older</a>
             </j:if>
           </div>
         </j:otherwise>
@@ -70,6 +76,7 @@
                 <th>User</th>
                 <th>Scope</th>
                 <th>Actions</th>
+                <th>New job names</th>
                 <th>Granted</th>
                 <th>Expires</th>
                 <th>Remaining</th>
@@ -85,12 +92,13 @@
                   <td>${g.user}</td>
                   <td>${g.scope.type}: ${g.scope.fullName}</td>
                   <td>${it.join(g.actions)}</td>
+                  <td><code>${it.createNameLabel(g)}</code></td>
                   <td>${it.format(g.grantedAt)}</td>
                   <td>${it.format(g.expiresAt)}</td>
                   <td>${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
                     <td>
-                      <l:confirmationLink href="active/${g.id}/revoke" post="true"
+                      <l:confirmationLink href="${base}active/${g.id}/revoke" post="true"
                                           title="Revoke this grant?"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
                         Revoke
@@ -103,53 +111,126 @@
           </table>
           <div class="jenkins-buttons-row" style="margin-top: 1rem;">
             <j:if test="${it.hasActivePrevious}">
-              <a class="jenkins-button" href="?activePage=${it.activePage - 1}&amp;page=${it.page}">Newer</a>
+              <a class="jenkins-button" href="${base}?activePage=${it.activePage - 1}&amp;page=${it.page}&amp;pastPage=${it.pastPage}">Newer</a>
             </j:if>
             <span>Page ${it.activePage} (${it.activeTotal} active grants)</span>
             <j:if test="${it.hasActiveNext}">
-              <a class="jenkins-button" href="?activePage=${it.activePage + 1}&amp;page=${it.page}">Older</a>
+              <a class="jenkins-button" href="${base}?activePage=${it.activePage + 1}&amp;page=${it.page}&amp;pastPage=${it.pastPage}">Older</a>
+            </j:if>
+          </div>
+        </j:otherwise>
+      </j:choose>
+
+      <!-- DEF-18 (SPEC item 8, D-33): the history of ended windows, with a re-request link that
+           opens the form below prefilled from the ended grant (resolved from the store, the
+           caller's own grants only; never echoed from the query string). -->
+      <h2>Ended Grants</h2>
+      <j:choose>
+        <j:when test="${it.pastTotal == 0}">
+          <p>No ended grants.</p>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Scope</th>
+                <th>Actions</th>
+                <th>New job names</th>
+                <th>Granted</th>
+                <th>Ended</th>
+                <th>How</th>
+                <th/>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="g" items="${it.pastPageItems}">
+                <tr>
+                  <td>${g.id}</td>
+                  <td>${g.user}</td>
+                  <td>${g.scope.type}: ${g.scope.fullName}</td>
+                  <td>${it.join(g.actions)}</td>
+                  <td><code>${it.createNameLabel(g)}</code></td>
+                  <td>${it.format(g.grantedAt)}</td>
+                  <td>${it.format(it.endedAt(g))}</td>
+                  <td>${it.endedLabel(g)}</td>
+                  <td>
+                    <j:if test="${it.isCanRenew(g)}">
+                      <a href="${base}?from=${g.id}#new-grant-request">Request again</a>
+                    </j:if>
+                  </td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+            <j:if test="${it.hasPastPrevious}">
+              <a class="jenkins-button" href="${base}?pastPage=${it.pastPage - 1}&amp;page=${it.page}&amp;activePage=${it.activePage}">Newer</a>
+            </j:if>
+            <span>Page ${it.pastPage} (${it.pastTotal} ended grants)</span>
+            <j:if test="${it.hasPastNext}">
+              <a class="jenkins-button" href="${base}?pastPage=${it.pastPage + 1}&amp;page=${it.page}&amp;activePage=${it.activePage}">Older</a>
             </j:if>
           </div>
         </j:otherwise>
       </j:choose>
 
       <j:if test="${it.canRequest}">
-        <h2>New Grant Request</h2>
+        <h2 id="new-grant-request">New Grant Request</h2>
         <!-- U-01: arriving from a job's "Request Change Permission" entry prefills the scope and
              pre-selects Configure. Both values come from the resolved model object, never from
              the raw query string, and are escaped by the Jelly default like every other value. -->
-        <j:if test="${it.prefilled}">
+        <j:set var="errors" value="${it.formErrors}"/>
+        <j:set var="renew" value="${it.renewSource}"/>
+        <j:if test="${it.prefilled and !errors.present}">
           <p class="jenkins-description">
-            Prefilled for <strong>${it.prefillScopeFullName}</strong>. Check the actions you need,
-            say why, and check one or more approvers.
+            <j:choose>
+              <j:when test="${renew != null}">
+                Prefilled from ended grant ${renew.id} for <strong>${it.prefillScopeFullName}</strong>.
+                Check the actions and duration, say why you need it again, and check one or more
+                approvers.
+              </j:when>
+              <j:otherwise>
+                Prefilled for <strong>${it.prefillScopeFullName}</strong>. Check the actions you need,
+                say why, and check one or more approvers.
+              </j:otherwise>
+            </j:choose>
           </p>
         </j:if>
-        <f:form method="post" action="create" name="createGrantRequest">
+        <bc:formError errors="${errors}"/>
+        <j:set var="scopeTypeValue" value="${errors.present ? errors.value('scopeType') : it.prefillScopeType}"/>
+        <f:form method="post" action="${base}create" name="createGrantRequest">
           <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
             <div class="jenkins-select">
               <select name="scopeType" class="jenkins-select__input">
-                <option value="JOB" selected="${it.prefillScopeType == 'JOB' ? 'true' : null}">Job (exact full name)</option>
-                <option value="FOLDER" selected="${it.prefillScopeType == 'FOLDER' ? 'true' : null}">Folder (the folder and everything below it)</option>
+                <option value="JOB" selected="${scopeTypeValue == 'JOB' ? 'true' : null}">Job (exact full name)</option>
+                <option value="FOLDER" selected="${scopeTypeValue == 'FOLDER' ? 'true' : null}">Folder (the folder and everything below it)</option>
               </select>
             </div>
+            <bc:fieldError errors="${errors}" field="scopeType"/>
           </f:entry>
           <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
             <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
-                   value="${it.prefillScopeFullName}"/>
+                   value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"/>
+            <bc:fieldError errors="${errors}" field="scopeFullName"/>
           </f:entry>
           <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
             <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
                  GrantsSection#doCreate reads with getParameterValues("actions"). -->
             <div class="jenkins-!-margin-bottom-1">
-              <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"/>
+              <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"
+                          checked="${errors.present ? errors.checked('actions', 'CREATE') : it.isPrefillAction('CREATE')}"/>
             </div>
             <div class="jenkins-!-margin-bottom-1">
               <f:checkbox name="actions" value="CONFIGURE" id="grant-action-configure" title="Configure"
-                          checked="${it.prefilled}"/>
+                          checked="${errors.present ? errors.checked('actions', 'CONFIGURE') : it.isPrefillAction('CONFIGURE')}"/>
             </div>
             <div>
-              <f:checkbox name="actions" value="DELETE" id="grant-action-delete" title="Delete"/>
+              <f:checkbox name="actions" value="DELETE" id="grant-action-delete" title="Delete"
+                          checked="${errors.present ? errors.checked('actions', 'DELETE') : it.isPrefillAction('DELETE')}"/>
             </div>
+            <bc:fieldError errors="${errors}" field="actions"/>
           </f:entry>
           <!-- D-40: optional, CREATE only. Length-bounded here and in GrantsSection#doCreate;
                syntax is validated by the service at submission. -->
@@ -158,24 +239,30 @@
                    help="/plugin/batch-control/help/grant-create-name-pattern.html">
             <input type="text" name="createNamePattern" class="jenkins-input"
                    placeholder="nightly-report or /report-[0-9]+/"
-                   maxlength="${it.createNamePatternMaxLength}"/>
+                   maxlength="${it.createNamePatternMaxLength}"
+                   value="${errors.present ? errors.value('createNamePattern') : it.prefillCreateNamePattern}"/>
+            <bc:fieldError errors="${errors}" field="createNamePattern"/>
           </f:entry>
           <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
             <div class="jenkins-select">
               <select name="durationMinutes" class="jenkins-select__input">
                 <j:forEach var="d" items="${it.durationOptions}">
-                  <option value="${d}">${it.minutesLabel(d)}</option>
+                  <j:set var="durationSelected" value="${errors.present ? errors.value('durationMinutes') == d.toString() : it.isPrefillDuration(d)}"/>
+                  <option value="${d}" selected="${durationSelected ? 'true' : null}">${it.minutesLabel(d)}</option>
                 </j:forEach>
               </select>
             </div>
+            <bc:fieldError errors="${errors}" field="durationMinutes"/>
           </f:entry>
           <f:entry title="Custom duration (minutes)"
                    description="Optional. Overrides the preset above when set. Maximum: ${it.maxGrantMinutes} minutes.">
             <input type="number" name="customDurationMinutes" class="jenkins-input"
-                   min="1" max="${it.maxGrantMinutes}" step="1"/>
+                   min="1" max="${it.maxGrantMinutes}" step="1" value="${errors.value('customDurationMinutes')}"/>
+            <bc:fieldError errors="${errors}" field="customDurationMinutes"/>
           </f:entry>
           <f:entry title="Reason" help="/plugin/batch-control/help/grant-reason.html">
-            <f:textarea name="reason" value=""/>
+            <f:textarea name="reason" value="${errors.value('reason')}"/>
+            <bc:fieldError errors="${errors}" field="reason"/>
           </f:entry>
           <j:choose>
             <j:when test="${empty(it.approverOptions)}">
@@ -192,9 +279,10 @@
                 <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
                   <div class="jenkins-!-margin-bottom-1">
                     <f:checkbox name="approvers" value="${a}" id="grant-approver-${s.index}"
-                                title="${a}" checked="${singleApprover}"/>
+                                title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
                   </div>
                 </j:forEach>
+                <bc:fieldError errors="${errors}" field="approvers"/>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Request Grant"/>

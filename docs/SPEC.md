@@ -267,4 +267,5 @@ Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서
 - 성능: 하루 5,000 실행 규모에서 대시보드 최근 7일 조회가 2초 이내(로컬 기준). This is measured once with a generated dataset and the figure is recorded in `docs/HOSTING-READINESS.md`. (#13)
 - 보안: 모든 상태 변경은 POST + 권한 체크. CSRF crumb 준수. 비밀 파라미터(Password parameter)는 이력에 마스킹 저장.
 - 보안: 사용자 입력(사유, 파라미터 값, 잡 이름)은 모든 화면 렌더링에서 이스케이프되어 스크립트·태그로 실행되지 않는다. (R-3, D-18)
+- Usability (e2e-03): every button, link and form is shown only to users who can use it; every refusal, on the web, the CLI or a Replay, tells the user in plain words why and what to do instead (no bare "Access Denied", stack trace, "Oops!" page or generic toast from our own code); invalid input is refused with a message next to the field and the user's input is kept; no link leads to a 404 or 403 page; recorded history names who did what (for example who cancelled a request and why a request was invalidated). The BatchControl/Manage permission is enough to open and save the Batch Control configuration.
 - 호환: 최신 LTS 라인. Freestyle, Pipeline(WorkflowJob), Folder 지원. Multibranch는 기록만(통제 대상 아님, 문서에 명시).

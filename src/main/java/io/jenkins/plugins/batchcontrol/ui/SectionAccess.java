@@ -1,7 +1,12 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
+import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -106,5 +111,41 @@ public final class SectionAccess {
     /** Whether the ViewHistory screens (changes, dashboard, incidents, history) may be linked. */
     public boolean isHistory() {
         return hasAny(history());
+    }
+
+    /**
+     * Whether the run request with this id may be linked (e2e-03 DEF-11): the Run Requests
+     * screen is open to the user AND the request itself is visible to them (P-09,
+     * {@link Visibility#canSeeRunRequest}); the detail page answers 404 otherwise. Rows of the
+     * history screens are visible to every ViewHistory holder, so the id is then plain text.
+     */
+    public boolean request(@CheckForNull String requestId) {
+        if (requestId == null || requestId.isEmpty() || !isRequests()) {
+            return false;
+        }
+        RunRequest request;
+        try {
+            request = RunRequestService.get().load(requestId);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return request != null && Visibility.canSeeRunRequest(request);
+    }
+
+    /**
+     * Whether the grant request (or the grant, which has the same id) with this id may be linked
+     * (DEF-11): the Grants screen is open to the user AND the request is visible to them (P-09).
+     */
+    public boolean grant(@CheckForNull String grantRequestId) {
+        if (grantRequestId == null || grantRequestId.isEmpty() || !isGrants()) {
+            return false;
+        }
+        GrantRequest request;
+        try {
+            request = GrantRequestService.get().load(grantRequestId);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        return request != null && Visibility.canSeeGrantRequest(request);
     }
 }

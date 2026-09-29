@@ -157,7 +157,7 @@
                       <td>${it.format(c.at)}</td>
                       <td>
                         <j:choose>
-                          <j:when test="${c.grantId != null and grantLinks}">
+                          <j:when test="${c.grantId != null and grantLinks and links.grant(c.grantId)}">
                             <a href="${rootURL}/batch-control/grants/${c.grantId}/">${c.grantId}</a>
                           </j:when>
                           <j:otherwise>${c.grantId}</j:otherwise>
@@ -179,7 +179,7 @@
                     <tr>
                       <td>
                         <j:choose>
-                          <j:when test="${requestLinks}">
+                          <j:when test="${requestLinks and links.request(q.id)}">
                             <a href="${rootURL}/batch-control/requests/${q.id}/">${q.id}</a>
                           </j:when>
                           <j:otherwise>${q.id}</j:otherwise>
@@ -223,7 +223,7 @@
                       <td>${r.abortedBy}</td>
                       <td>
                         <j:choose>
-                          <j:when test="${r.runRequestId != null and requestLinks}">
+                          <j:when test="${r.runRequestId != null and requestLinks and links.request(r.runRequestId)}">
                             <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
                           </j:when>
                           <j:otherwise>${r.runRequestId}</j:otherwise>
@@ -265,13 +265,14 @@
         <tbody>
           <j:forEach var="s" items="${it.summary.entrySet()}">
             <tr>
-              <th style="text-align: left;">${s.key}</th>
+              <th style="text-align: left;">${it.summaryLabel(s.key)}</th>
               <td>${s.value}</td>
             </tr>
           </j:forEach>
         </tbody>
       </table>
       <p>
+        <a href="monthly?month=${it.summaryMonth}">Monthly summary</a> (a screen, one month) ·
         <a href="summary?month=${it.summaryMonth}">Monthly aggregate as JSON</a>
       </p>
     </l:main-panel>

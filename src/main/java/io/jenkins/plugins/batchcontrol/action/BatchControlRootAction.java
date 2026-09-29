@@ -2,8 +2,10 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
+import hudson.ExtensionList;
 import hudson.model.RootAction;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
@@ -75,6 +77,18 @@ public class BatchControlRootAction implements RootAction {
     /** Link predicates for the side panel: each entry is shown only if it can be opened. */
     public SectionAccess getLinks() {
         return new SectionAccess();
+    }
+
+    /**
+     * e2e-03 DEF-10: the Batch Control configuration page for a {@code BatchControl/Manage}
+     * holder, who may not reach Manage Jenkins; {@code null} (no link) for anyone else, or while
+     * the page is not shipped.
+     */
+    @CheckForNull
+    public BatchControlConfigurationLink getConfigurationLink() {
+        BatchControlConfigurationLink link =
+                ExtensionList.lookup(BatchControlConfigurationLink.class).stream().findFirst().orElse(null);
+        return link != null && link.isCanManage() && link.isPageAvailable() ? link : null;
     }
 
     /** Stapler: serves {@code /batch-control/requests/...}. */

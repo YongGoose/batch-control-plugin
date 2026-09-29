@@ -1,7 +1,8 @@
 <?jelly escape-by-default='true'?>
 <!-- #21: blocked unattended triggers are refused with nobody to tell, so the job page says so.
      Rendered by the job main page for every action; nothing is shown unless a switch is on, run
-     control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches).
+     control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches),
+     whether or not the job requires approval for manual runs (DEF-15).
      Only constant text and switch names are rendered; no script. -->
 <j:jelly xmlns:j="jelly:core">
   <j:if test="${!empty(it.blockingSwitches)}">
@@ -34,6 +35,12 @@
             <j:otherwise>Grants</j:otherwise>
           </j:choose>)</j:if>.
         Refused attempts are listed as <code>TRIGGER_BLOCKED</code> change records.
+      </p>
+      <!-- e2e-03 DEF-15 / DEF-21 (D-46): shown whatever "Require approval to run" says, and
+           clearing a switch is not what puts a job into service; activation is. -->
+      <p style="margin: 0.5rem 0 0;">
+        Clearing a switch only removes that block: an unattended run also needs the job to be
+        activated, which is a separate, approved request (see the activation notice on this page).
       </p>
     </div>
   </j:if>

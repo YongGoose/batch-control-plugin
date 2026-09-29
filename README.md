@@ -155,7 +155,8 @@ the job.
 ## Requirements
 
 Jenkins 2.568.3 or newer, the baseline the plugin is compiled against;
-`cloudbees-folder`, which the Plugin Manager resolves for you.
+`cloudbees-folder` and `ionicons-api`, both required, which the Plugin Manager
+(or Deploy Plugin, when installing a build of your own) resolves for you.
 
 The five Batch Control permissions are only visible on authorization strategies
 that draw a permission matrix, so with Jenkins' built-in "Logged-in users can do
@@ -190,12 +191,13 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 | Allow administrators to approve their own requests | on | When off, separation of duties applies to administrators too |
 | Pending request timeout (hours) | 72 | A pending request expires after this |
 | Approved-but-not-run timeout (minutes) | 60 | An approved request that was never queued expires after this |
-| Grant duration options (minutes) | 15, 30, 60 | The choices offered on the window request form |
+| Grant duration options (minutes, comma-separated) | 15, 30, 60 | The choices offered on the window request form |
 | Maximum grant duration (minutes) | 240 | Upper bound on a custom duration |
-| Results that open an incident | FAILURE, UNSTABLE | `ABORTED` can be added |
+| Results that open an incident (comma-separated) | FAILURE, UNSTABLE | `ABORTED` can be added |
 | Retention period (months) | 24 | Month files older than this are deleted, and the deletion is recorded |
 | Notify before expiry (minutes) | 10 | How long before an active grant window expires its holder is notified |
 | Send e-mail notifications | off | Shown only while the Mailer plugin is installed |
+| Batch Control strategy | shown only while installed | Not a saved field: **Revert to the plain strategy** appears here while a Batch Control authorization strategy variant is installed (step 2) |
 
 A request cannot be created unless its designated approver is on the Approvers
 list, and `BatchControl/Approve` is checked on them again at the moment they
@@ -245,12 +247,13 @@ action: on the plugin set this project is built against, a `CONFIGURE` window
 additionally confers `Item/ExtendedRead`, `Credentials/UseItem` and
 `Run/Replay`, which is worth knowing before approving one
 ([Limitations](#limitations)). An administrative monitor warns if change control
-is on without one of these two variants installed, and separately if
-role-strategy's own **Manage Roles** save has reinstalled the plain
-`RoleBasedAuthorizationStrategy` (it offers a one-click reinstall of the
-variant either way). Run control and recording do not need any of this. A window
-confers its permissions only when a Batch Control variant is selected *and*
-change control is on.
+is on without one of these two variants installed. Tested against
+role-strategy 918, saving **Manage Roles** or **Assign Roles** keeps the Batch
+Control variant in place, so grants keep conferring; the monitor's one-click
+reinstall stays available as a safety net in case a different role-strategy
+release swaps the variant out another way. Run control and recording do not
+need any of this. A window confers its permissions only when a Batch Control
+variant is selected *and* change control is on.
 
 ### 3. Assign the permissions
 
@@ -413,10 +416,11 @@ Strategy** keeps that plugin's own per-item configuration (folder, job and
 agent authorization properties, item and agent roles) configurable and
 effective, since each variant is a subclass of the corresponding upstream
 strategy. Selecting any other strategy gets you run control and recording only,
-and an administrative monitor says so. One fail-safe limitation with
-role-strategy: its own **Manage Roles** save reinstalls the plain
-`RoleBasedAuthorizationStrategy`, so grants stop conferring until an
-administrator re-installs the Batch Control variant from the monitor's prompt.
+and an administrative monitor says so. Tested against role-strategy 918, its own
+**Manage Roles** and **Assign Roles** saves keep the Batch Control variant in
+place, so grants keep conferring; the administrative monitor's one-click
+reinstall remains available as a safety net should a different role-strategy
+release swap the variant out another way.
 
 **A legacy wrapper around the global matrix strategy is unwrapped, not
 converted, on upgrade.** Converting it directly would make every stale
@@ -493,10 +497,11 @@ approved window.
 
 ## Roadmap
 
-Deliberately not in this release: a REST API, JCasC support for the global
-configuration, and approval events exported to the Audit Log plugin; sequential
-multi-stage approval chains (today's designated set is decided by whichever
-member acts first, not a sequence of stages).
+Deliberately not in this release: a REST API, and approval events exported to
+the Audit Log plugin; sequential multi-stage approval chains (today's
+designated set is decided by whichever member acts first, not a sequence of
+stages). The global configuration and the authorization strategy variants
+already round-trip through JCasC.
 
 ## Contributing
 

@@ -1,12 +1,12 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import hudson.Extension;
-import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.ui.GrantRequiredFailure;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -34,8 +34,8 @@ public class DeleteVetoListener extends ItemListener {
         if (GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE) != null) {
             return;
         }
-        throw new Failure("Change control: deleting '" + item.getFullName()
-                + "' requires an approved batch-control DELETE grant. "
-                + "Request one under Batch Control > Grants and try again once it is approved.");
+        // e2e-03 DEF-26: the refusal says what is missing and links the Grants screen only for a
+        // user who may open it (anyone else is told whom to ask). Still a Failure (HTTP 400).
+        throw new GrantRequiredFailure(item, GrantAction.DELETE, "deleting");
     }
 }

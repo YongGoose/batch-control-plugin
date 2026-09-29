@@ -54,8 +54,10 @@ public class ActionVisibilityTest {
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
                 // Overall/Read + Item/Read, and no Batch Control permission at all
                 .grant(Jenkins.READ, Item.READ).everywhere().to("plain")
-                // Request only (no ViewHistory)
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST).everywhere().to("u1")
+                // Request (no ViewHistory). Item/Build too: a run request needs it (D-38), and under
+                // the SPEC section 6 usability line (e2e-03 DEF-12, T-05-19) the per-job Request Run
+                // link is shown only to a user who can use it, so T-02-09's positive case needs it.
+                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST).everywhere().to("u1")
                 // ViewHistory only (no Request)
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.VIEW_HISTORY).everywhere().to("viewer")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));

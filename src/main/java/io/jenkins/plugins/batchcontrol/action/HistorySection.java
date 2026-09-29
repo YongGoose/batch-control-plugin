@@ -593,6 +593,45 @@ public class HistorySection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- Jelly helpers
 
+    /** Row labels of the on-page monthly summary (e2e-03 DEF-22); the JSON keeps the keys. */
+    private static final Map<String, String> SUMMARY_LABELS = Map.of(
+            "runs", "Runs",
+            "success", "Successful runs",
+            "failure", "Failed runs",
+            "unstable", "Unstable runs",
+            "incidentsOpen", "Incidents still open",
+            "incidentsResolved", "Incidents resolved",
+            "requestsApproved", "Run requests approved",
+            "requestsRejected", "Run requests rejected");
+
+    /**
+     * The month of the {@code monthly} summary screen (e2e-03 DEF-22, T-12-12), from
+     * {@code ?month=YYYY-MM}; anything else (absent, malformed) falls back to
+     * {@link #getSummaryMonth()}, so the query string never reaches the page unparsed.
+     */
+    public String getMonthlyMonth() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("month");
+        if (raw != null) {
+            try {
+                return YearMonth.parse(raw.trim()).toString();
+            } catch (DateTimeParseException ignored) {
+                // Fall back to the filter month.
+            }
+        }
+        return getSummaryMonth();
+    }
+
+    /** The rows of the {@code monthly} summary screen for {@link #getMonthlyMonth()}. */
+    public Map<String, Long> getMonthlySummary() {
+        return summarize(YearMonth.parse(getMonthlyMonth()));
+    }
+
+    /** The label of a monthly summary row; an unknown key is shown as it is. */
+    public String summaryLabel(String key) {
+        return SUMMARY_LABELS.getOrDefault(key, key);
+    }
+
     /** An approver set for display ({@code a1, a2}). */
     public String join(@CheckForNull List<String> approvers) {
         return Approvers.display(approvers);

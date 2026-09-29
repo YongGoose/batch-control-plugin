@@ -13,6 +13,11 @@
 
 ---
 
+## 2026-09-30 — final e2e (e2e-03) in progress; part-1 fixes merged (#45), part-2 fixes ready
+- e2e-03 part 1 (pre-flight, reviewer items, plugin precedence) and part 2 (Section B, 21 groups) done; the gate held on every path; defects were about what users are told and what is recorded. Part-1 defects DEF-01..07 merged in #45 (security-16 0/0/0/1).
+- Part-2 defects DEF-08..27 and DD-07..12 fixed on `fix/e2e-run3-part2` (usability acceptance line added to SPEC section 6). Rulings: core Build Now, Pipeline Replay and naginator Retry links cannot be hidden by a plugin, so they stay visible and a click is refused with an explanation (LIMITATIONS); Rebuild is hidden via RebuildValidator; a Discover-only user is not offered the rerun form.
+- Owner: strict five-criterion e2e rubric; a re-audit of pre-rubric rows is running and has found DEF-28..33 (next fix batch). Owner approved the #5338 reply and the Discussion draft (docs/hosting-reply) for posting after the remaining steps.
+
 ## 2026-09-29 (evening) — p1 round complete: PRs #41, #42, #43 merged; #15 ready
 - **Lanes (owner-approved partial parallelism):** lane B #41 (#19, #24, #26; security-09 0/0/1/1, D-42) and lane A #42 (#13, #17, #18, #25; security-10 0/1/2/8 → D-43 removed legacy file-name compatibility; security-11 re-review 0/0/2/0). A real defect was found in lane A and pinned (T-04-15: saving a long-named job deleted another job's baseline). SPEC section 6 measured: dashboard median 101 ms, history 79 ms (target 2 s).
 - **#43** (#21 TRIGGER_BLOCKED records and job-page lock notice, #22 one run-link rule D-44, shared paging, Store seam, security-11 N-01/N-02): security-12 0/0/0/1.

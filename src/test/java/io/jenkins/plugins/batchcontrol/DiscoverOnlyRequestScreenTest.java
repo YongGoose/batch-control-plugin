@@ -34,7 +34,6 @@ import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlAnchor;
-import org.htmlunit.html.HtmlOption;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.html.HtmlSelect;
 import org.junit.jupiter.api.BeforeEach;
@@ -401,24 +400,33 @@ public class DiscoverOnlyRequestScreenTest {
         assertEquals(1, page.getByXPath("//h2[contains(text(),'History')]"
                 + "/following-sibling::table[1]/tbody/tr").size(), "the transition history must hold the opening transition");
 
-        // The region of this screen that actually goes through the permission-aware lookup: the
-        // rerun form's approver list. With the lookup throwing, this collapsed into the "no
-        // approvers are configured" warning, which is the S-16 symptom on this page.
-        HtmlSelect rerunApprovers = page.getForms().stream()
-                .filter(f -> f.getActionAttribute().contains("rerun"))
-                .flatMap(f -> f.getElementsByTagName("select").stream())
-                .filter(HtmlSelect.class::isInstance)
-                .map(HtmlSelect.class::cast)
-                .filter(s -> "approver".equals(s.getAttribute("name")))
-                .findFirst().orElse(null);
-        assertNotNull(rerunApprovers, "the rerun form's approver dropdown must render for a discover-only caller; forms"
-                + " on the page: " + page.getForms().stream()
-                        .map(f -> f.getActionAttribute()).collect(Collectors.toList()));
-        List<String> options = rerunApprovers.getOptions().stream()
-                .map(HtmlOption::getValueAttribute).collect(Collectors.toList());
-        assertTrue(options.containsAll(Arrays.asList("a1", "a2")), "the dropdown must offer the configured approvers, but offered " + options);
-        assertFalse(text.contains("No approvers are configured"), "the approver list must not collapse into the \"no approvers\" warning - that is"
-                + " what a swallowed lookup looked like");
+        // Coordinator ruling (e2e-03 part 2, SPEC section 6 usability line and DEF-12 / T-05-19):
+        // b holds no Item/Read or Item/Build on secret-j, so a rerun request of it can never be
+        // submitted (D-38) and the rerun form must not be offered at all. This replaces the former
+        // expectation that the rerun form's approver dropdown renders for b; the S-16 symptom (a
+        // blank screen) is still covered by the field assertions above.
+        List<String> rerunForms = page.getForms().stream()
+                .map(f -> f.getActionAttribute())
+                .filter(action -> action != null && action.contains("rerun"))
+                .collect(Collectors.toList());
+        assertTrue(rerunForms.isEmpty(), "the rerun form must not be offered to a discover-only caller (no Item/Read, no Item/Build);"
+                + " rerun forms on the page: " + rerunForms);
+        assertTrue(page.getAnchors().stream().noneMatch(a -> a.getHrefAttribute().contains("/rerun")),
+                "no rerun link may be offered to a discover-only caller");
+
+        // Security guard (kept): a rerun POSTed anyway by b is refused and creates no request.
+        java.util.Set<String> requestsBefore = ApproverFormFixtures.runRequestIds();
+        List<org.htmlunit.util.NameValuePair> rerun = new java.util.ArrayList<>();
+        rerun.add(new org.htmlunit.util.NameValuePair("approvers", "a1"));
+        rerun.add(new org.htmlunit.util.NameValuePair("approver", "a1"));
+        rerun.add(new org.htmlunit.util.NameValuePair("reason", "rerun by a discover-only caller"));
+        org.htmlunit.WebResponse refused = ApproverFormFixtures.post(j, "b",
+                "batch-control/incidents/" + incident.getId() + "/rerun", rerun);
+        assertTrue(refused.getStatusCode() >= 400, "a rerun POST by a discover-only caller must be refused, got HTTP " + refused.getStatusCode());
+        assertEquals(requestsBefore, ApproverFormFixtures.runRequestIds(), "the refused rerun must create no run request");
+        Incident reloaded = IncidentService.get().load(incident.getId());
+        assertTrue(reloaded.getRerunRequestIds() == null || reloaded.getRerunRequestIds().isEmpty(),
+                "no rerun request id may be linked to the incident");
 
         // The disclosure boundary, which is what this row can assert without ruling on the open
         // question recorded in matrix note 48: whatever the page links to, the caller still cannot

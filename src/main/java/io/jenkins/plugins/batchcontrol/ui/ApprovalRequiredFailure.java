@@ -61,11 +61,13 @@ public class ApprovalRequiredFailure extends Failure {
 
     /**
      * Whether the page links the request form: the viewer holds {@code BatchControl/Request}
-     * (without it {@code <job>/batch-control/} answers 404) and may read the job.
+     * (without it {@code <job>/batch-control/} answers 404), may read the job and holds
+     * {@code Item/Build} on it (without it the submission is refused, D-38).
      */
     public boolean isCanRequest() {
         Job<?, ?> job = getJob();
-        return job != null && job.hasPermission(Item.READ)
+        // e2e-03 DEF-12: the form is only useful with Job/Build as well (D-38).
+        return job != null && job.hasPermission(Item.READ) && job.hasPermission(Item.BUILD)
                 && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
     }
 

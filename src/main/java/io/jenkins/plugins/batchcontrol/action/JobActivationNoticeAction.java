@@ -117,9 +117,18 @@ public class JobActivationNoticeAction implements Action {
         return ActivationView.actionLabel(action);
     }
 
-    /** Whether the viewer may open the request form ({@code BatchControl/Request}). */
+    /** Whether the viewer may open the activation request form ({@code BatchControl/Request}). */
     public boolean isCanRequest() {
         return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+    }
+
+    /**
+     * Whether the viewer may submit a run request for this job, so the run request form is
+     * linked (e2e-03 DEF-12): {@code BatchControl/Request} and {@code Item/Build} on the job
+     * (D-38), the same predicate as the sidebar entry.
+     */
+    public boolean isCanRequestRun() {
+        return new JobRequestAction(job).isCanRequestRun();
     }
 
     /** The PENDING requests of this job the viewer may see (P-09). */

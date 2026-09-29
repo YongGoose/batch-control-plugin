@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.Job;
 import hudson.model.ModelObject;
@@ -16,9 +17,11 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -298,30 +301,36 @@ public class RequestItem implements ModelObject {
     /** POST {@code approve?comment=...} — approver decision (comment optional). */
     @RequirePOST
     public void doApprove(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String comment)
-            throws IOException {
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
-        call(() -> RunRequestService.get().approve(request.getId(), comment));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("approve"),
+                () -> RunRequestService.get().approve(request.getId(), comment), "comment", "comment");
     }
 
     /** POST {@code reject?comment=...} — approver decision (service enforces non-empty comment). */
     @RequirePOST
     public void doReject(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String comment)
-            throws IOException {
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
-        call(() -> RunRequestService.get().reject(request.getId(), comment));
-        rsp.sendRedirect2(".");
+        FormErrors errors = new FormErrors("reject");
+        if (Util.fixEmptyAndTrim(comment) == null) {
+            // SPEC item 5: a rejection needs a comment; the service refuses it too.
+            errors.field("comment", "Enter a rejection comment: the requester sees it as the reason.");
+            refresh().renderRefusal(req, rsp, errors);
+            return;
+        }
+        call(req, rsp, errors, () -> RunRequestService.get().reject(request.getId(), comment),
+                "comment", "comment");
     }
 
     /** POST {@code cancel} — authenticated users only; service enforces requester-or-Manage. */
     @RequirePOST
-    public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+    public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         Authentication authentication = Jenkins.getAuthentication2();
         if (ACL.isAnonymous2(authentication)) {
             throw new AccessDeniedException("Authentication is required to cancel a run request");
         }
-        call(() -> RunRequestService.get().cancel(request.getId()));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("cancel"), () -> RunRequestService.get().cancel(request.getId()));
     }
 
     /**
@@ -329,25 +338,60 @@ public class RequestItem implements ModelObject {
      * designated set (D-26, D-37); the service enforces requester-only, PENDING and eligibility.
      */
     @RequirePOST
-    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        List<String> approvers = ApproverInput.read(req, null);
-        call(() -> RunRequestService.get().changeApprovers(request.getId(), approvers));
-        rsp.sendRedirect2(".");
+        FormErrors errors = new FormErrors("changeApprover");
+        List<String> approvers;
+        try {
+            approvers = ApproverInput.read(req, null);
+        } catch (Failure e) {
+            refresh().renderRefusal(req, rsp, errors.field("approvers", e.getMessage()));
+            return;
+        }
+        if (approvers.isEmpty()) {
+            refresh().renderRefusal(req, rsp, errors.field("approvers", "Check at least one approver."));
+            return;
+        }
+        call(req, rsp, errors, () -> RunRequestService.get().changeApprovers(request.getId(), approvers),
+                "approver", "approvers");
+    }
+
+    /** The refusal of form {@code form} on this request, or an empty one (DEF-09, Jelly). */
+    public FormErrors formErrors(String form) {
+        return FormErrors.current(form);
     }
 
     // ---------------------------------------------------------------- helpers
 
     /**
-     * Runs a service call and converts its validation errors into {@link Failure} so the user
-     * sees the message instead of a stack trace. No state logic here.
+     * Runs a service call and redirects back to this page; a refusal (the service's validation
+     * and state errors) is shown on this page next to the form it concerns, with the input kept
+     * (e2e-03 DEF-09), instead of a bare error page. No state logic here.
      */
-    private static void call(Runnable serviceCall) {
+    private void call(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors,
+                      Runnable serviceCall, String... keywords) throws IOException, ServletException {
         try {
             serviceCall.run();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The operation was rejected" : e.getMessage());
+            refresh().renderRefusal(req, rsp, errors.fromService(e.getMessage(), keywords));
+            return;
         }
+        rsp.sendRedirect2(".");
+    }
+
+    /**
+     * This request as stored now: a refusal is often "someone else decided first", and the page
+     * shown with it must show that state, not the snapshot this item was resolved with.
+     */
+    private RequestItem refresh() {
+        RunRequest current = RunRequestService.get().load(request.getId());
+        return current == null ? this : new RequestItem(current);
+    }
+
+    private void renderRefusal(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors)
+            throws IOException, ServletException {
+        errors.render(req, rsp, this);
     }
 
     /**

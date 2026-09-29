@@ -8,6 +8,7 @@ import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
@@ -15,6 +16,7 @@ import java.io.File;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
@@ -146,8 +148,24 @@ final class GrantAwareACL extends ACL {
         // the items the holder created.
         ACL parent = delegate;
         boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
-        if (!allowed && decision.refusedName != null && decision.recordable) {
-            decision.recordRefusal(a.getName());
+        if (!allowed && decision.refusedName != null) {
+            if (decision.recordable) {
+                decision.recordRefusal(a.getName());
+            }
+            // e2e-03 DEF-19: core checks Item/Create before it looks at the name, so a plain refusal
+            // is an "Access Denied ... missing the Job/Create permission" that does not say why (and,
+            // while the holder types, a server log line per keystroke). On the web endpoints that
+            // create or rename, and on the checks their pages run while a name is typed, the refusal
+            // is instead answered with the explanation. Only the Create check of the current user's
+            // own request is answered this way; it is refused either way, and nothing has changed.
+            if (permission == Item.CREATE && a.getName().equals(Jenkins.getAuthentication2().getName())) {
+                if (!decision.recordable && NewItemName.isValidationOperation(decision.operation)) {
+                    throw NameRestrictionValidation.validation(decision.explain());
+                }
+                if (decision.recordable && NewItemName.isWebChangeOperation(decision.operation)) {
+                    throw NameRestrictionValidation.refusal(decision.explain());
+                }
+            }
         }
         return allowed;
     }
@@ -193,6 +211,19 @@ final class GrantAwareACL extends ACL {
         static Decision refused(String itemName, String groupFullName, Grant grant, NewItemName context) {
             return new Decision(false, itemName, groupFullName, grant, context.isRecordable(),
                     context.getOperation());
+        }
+
+        /** Plain-text explanation of the refusal for the holder (e2e-03 DEF-19). */
+        String explain() {
+            Grant grant = this.grant;
+            String group = groupFullName == null || groupFullName.isEmpty() ? "Jenkins" : "'" + groupFullName + "'";
+            String allowed = grant == null || grant.getCreateNamePattern() == null
+                    ? "a restricted set of names"
+                    : CreateNamePattern.describe(grant.getCreateNamePattern());
+            return "'" + refusedName + "' is not allowed here: your permission window for " + group
+                    + (grant == null ? "" : " (grant " + grant.getId() + ")")
+                    + " only allows " + allowed + ". Choose a name within that restriction, or request a new"
+                    + " permission window for this name.";
         }
 
         void recordRefusal(String user) {
@@ -281,7 +312,11 @@ final class GrantAwareACL extends ACL {
                     if (rename == null) {
                         return Decision.CONFERS;
                     }
-                    result = rename; // refused; a CONFIGURE grant may still confer below
+                    // SPEC item 8 (D-40, D-40a): renaming an item created through a restricted
+                    // Create grant must match the restriction, so no grant confers this rename,
+                    // not even a CONFIGURE action of the same or another window (e2e-03 DEF-19).
+                    // The installed strategy's own Configure still decides underneath.
+                    return rename;
                 }
             }
             if (GrantAction.fromPermission(p) == null) {
