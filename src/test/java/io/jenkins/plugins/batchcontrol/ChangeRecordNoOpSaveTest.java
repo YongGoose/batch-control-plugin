@@ -536,6 +536,71 @@ public class ChangeRecordNoOpSaveTest {
         }
     }
 
+    /**
+     * T-09-22 (security-18 S-18-02): the DEF-30 normalisation may ignore only a numeric
+     * {@code configVersion} leaf. A job property with a {@code configVersion} field of its own
+     * (a plugin whose field of that name is meaningful configuration) is edited through
+     * {@code POST config.xml} twice: a non-numeric leaf ({@code abc} to {@code xyz}) and a wrapper
+     * holding a child element ({@code <foo>bar</foo>} to {@code <foo>baz</foo>}). Each edit is a
+     * configuration change and writes one CONFIGURE record whose diff carries it (SPEC 9). T-09-21
+     * is the numeric twin that stays silent. Note 150.
+     */
+    @Test
+    public void t_09_22_nonNumericConfigVersionContentIsStillRecorded() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("cv-job");
+        job.addProperty(new VersionedProperty("abc", "bar"));
+        String stored = job.getConfigFile().asString();
+        assertTrue(stored.contains("<configVersion>abc</configVersion>"), "fixture: the leaf must be stored: " + stored);
+        assertTrue(stored.matches("(?s).*<configVersion>\\s*<foo>bar</foo>\\s*</configVersion>.*"),
+                "fixture: the wrapper must be stored: " + stored);
+
+        int before = configureRecords("cv-job").size();
+        String leafEdit = stored.replace("<configVersion>abc</configVersion>", "<configVersion>xyz</configVersion>");
+        assertEquals(200, postConfigXml(job, leafEdit));
+        FreeStyleProject afterLeaf = j.jenkins.getItemByFullName("cv-job", FreeStyleProject.class);
+        assertEquals("xyz", afterLeaf.getProperty(VersionedProperty.class).configVersion,
+                "fixture: the POST must have changed the leaf");
+        List<ChangeRecord> leaf = configureRecords("cv-job");
+        assertEquals(before + 1, leaf.size(), "a change of a non-numeric configVersion leaf is a configuration change"
+                + " and must write one CONFIGURE record");
+        assertTrue(String.valueOf(leaf.get(leaf.size() - 1).getDiff()).contains("xyz"), "the diff must carry the edit");
+
+        String wrapperEdit = afterLeaf.getConfigFile().asString().replace("<foo>bar</foo>", "<foo>baz</foo>");
+        assertTrue(wrapperEdit.contains("<foo>baz</foo>"), "fixture: the wrapper edit must be in the XML");
+        assertEquals(200, postConfigXml(afterLeaf, wrapperEdit));
+        assertEquals("baz", j.jenkins.getItemByFullName("cv-job", FreeStyleProject.class)
+                .getProperty(VersionedProperty.class).nested.configVersion.foo, "fixture: the POST must have changed the wrapper");
+        List<ChangeRecord> wrapper = configureRecords("cv-job");
+        assertEquals(before + 2, wrapper.size(), "a change inside a configVersion wrapper element must write one"
+                + " CONFIGURE record");
+        assertTrue(String.valueOf(wrapper.get(wrapper.size() - 1).getDiff()).contains("baz"), "the diff must carry the edit");
+    }
+
+    /** A job property whose own fields are named configVersion: a leaf string and a wrapper object. */
+    public static class VersionedProperty extends hudson.model.JobProperty<hudson.model.Job<?, ?>> {
+        public String configVersion;
+        public Holder nested;
+
+        public VersionedProperty(String leaf, String foo) {
+            this.configVersion = leaf;
+            this.nested = new Holder();
+            this.nested.configVersion = new Wrapped();
+            this.nested.configVersion.foo = foo;
+        }
+
+        public static class Holder {
+            public Wrapped configVersion;
+        }
+
+        public static class Wrapped {
+            public String foo;
+        }
+
+        @TestExtension("t_09_22_nonNumericConfigVersionContentIsStillRecorded")
+        public static class DescriptorImpl extends hudson.model.JobPropertyDescriptor {
+        }
+    }
+
     /** Counts Jenkins save events per config file — the premise that a save really happened. */
     @TestExtension
     public static class SaveCounter extends SaveableListener {

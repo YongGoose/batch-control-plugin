@@ -150,6 +150,54 @@ public class RefusedRerunAuditTest {
     }
 
     /**
+     * T-06-75 (security-18 S-18-03): u1 presses naginator's Retry on a failed build that was
+     * started by a remote token call (its causes include a {@code RemoteCause}; the build ran
+     * before the job was made approval-required). The click is a person re-running a build, so it
+     * is refused like T-06-74: an HTML refusal page naming approval (not the plain-text answer
+     * meant for a token caller), a TRIGGER_BLOCKED record by u1 naming the retry, and no
+     * REMOTE_RUN_BLOCKED record (SPEC 6; usability line: history names who did what). Note 151.
+     */
+    @Test
+    public void t_06_75_retryOfRemoteStartedBuildIsRecordedAsUserRetry() throws Exception {
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rr-remote-retry"));
+        job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activate(job);
+        FreeStyleBuild remote = j.assertBuildStatus(Result.FAILURE,
+                job.scheduleBuild2(0, new Cause.RemoteCause("127.0.0.1", "token call")));
+        assertNotNull(remote.getCause(Cause.RemoteCause.class), "fixture: build #1 must carry a RemoteCause");
+        assertNotNull(remote.getAction(NaginatorRetryAction.class), "fixture: naginator must offer Retry");
+        setBatchControl(job, new BatchControlJobProperty(true));
+        j.waitUntilNoActivity();
+        int remoteBlockedBefore = remoteRunBlocked(job).size();
+
+        Page answer = post(j, "u1", remote.getUrl() + "retry/");
+
+        assertBlocked(j, job, 2, 1);
+        String type = String.valueOf(answer.getWebResponse().getContentType());
+        assertTrue(type.startsWith("text/html"), "a person's Retry must be answered with the HTML refusal page, not the"
+                + " token caller's plain text; got " + type + ": " + answer.getWebResponse().getContentAsString());
+        assertTrue(UsabilityFixtures.text(answer).toLowerCase(Locale.ROOT).contains("approv"),
+                "the refusal page must name approval");
+        List<ChangeRecord> records = rerunRecords(job);
+        assertTrue(records.stream().anyMatch(r -> r.getType() == ChangeType.TRIGGER_BLOCKED && "u1".equals(r.getUser())
+                        && String.valueOf(r.getDetail()).toLowerCase(Locale.ROOT).contains("retry")),
+                "u1's Retry must be recorded as TRIGGER_BLOCKED cause=RETRY by u1: " + describe(records)
+                        + " remote=" + describe(remoteRunBlocked(job)));
+        assertEquals(remoteBlockedBefore, remoteRunBlocked(job).size(), "a person's Retry must not be recorded as a"
+                + " remote run submission: " + describe(remoteRunBlocked(job)));
+    }
+
+    private static List<ChangeRecord> remoteRunBlocked(FreeStyleProject job) {
+        List<ChangeRecord> out = new ArrayList<>();
+        for (ChangeType type : ChangeType.values()) {
+            if (type.name().equals("REMOTE_RUN_BLOCKED")) {
+                out.addAll(ActivationFixtures.recordsFor(type, job.getFullName()));
+            }
+        }
+        return out;
+    }
+
+    /**
      * T-06-63 (DEF-03, PR-02): u1 clicks Rebuild on an approved run; the refusal is recorded and
      * the record is in {@code changes.csv}.
      */

@@ -59,6 +59,44 @@ public class GlobalSwitchTest {
         j.assertBuildStatusSuccess(build);
     }
 
+    /**
+     * T-01-15 (security-18 S-18-06; SPEC 1 and CLAUDE.md: with the switch off, existing Jenkins
+     * behaviour does not change): with run control off, a build of a job carrying
+     * {@code approvalRequired=true} lists no Batch Control action in its {@code api/json}
+     * {@code actions} array. The array itself must be non-empty (core's CauseAction), so an
+     * unreadable answer cannot pass. Note 152.
+     */
+    @Test
+    public void t_01_15_runControlOffBuildApiListsNoBatchControlAction() throws Exception {
+        assertFalse(BatchControlGlobalConfiguration.get().isRunControlEnabled(), "fixture: run control is off");
+        FreeStyleProject p = j.createFreeStyleProject("api-off");
+        p.addProperty(new BatchControlJobProperty(true));
+        FreeStyleBuild build = j.buildAndAssertSuccess(p);
+
+        org.htmlunit.Page page = j.createWebClient().goTo(build.getUrl() + "api/json", "application/json");
+        net.sf.json.JSONObject json = net.sf.json.JSONObject.fromObject(page.getWebResponse().getContentAsString());
+        net.sf.json.JSONArray actions = json.getJSONArray("actions");
+        boolean sawCore = false;
+        for (int i = 0; i < actions.size(); i++) {
+            Object action = actions.get(i);
+            if (!(action instanceof net.sf.json.JSONObject)) {
+                continue;
+            }
+            String cls = ((net.sf.json.JSONObject) action).optString("_class", "");
+            sawCore |= cls.equals("hudson.model.CauseAction");
+            assertFalse(cls.startsWith("io.jenkins.plugins.batchcontrol."), "with run control off a build's api/json must"
+                    + " list no Batch Control action, found " + cls + " in " + actions);
+        }
+        assertTrue(sawCore, "fixture: the build's api/json must list core's CauseAction: " + actions);
+
+        // api/json renders an action that exports nothing as an anonymous {} entry, so the same
+        // check is made on the public Actionable API that api/json is built from.
+        for (hudson.model.Action action : build.getAllActions()) {
+            assertFalse(action.getClass().getName().startsWith("io.jenkins.plugins.batchcontrol."), "with run control"
+                    + " off a build must carry no Batch Control action, found " + action.getClass().getName());
+        }
+    }
+
     /** T-01-02: admin turns runControlEnabled false -> true; ChangeRecord(CONFIG_TOGGLE, admin, false->true). */
     @Test
     public void t_01_02_enableRunControlLeavesConfigToggleRecord() throws Exception {
