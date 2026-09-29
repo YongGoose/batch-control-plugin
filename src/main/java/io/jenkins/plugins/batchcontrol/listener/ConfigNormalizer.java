@@ -20,7 +20,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       actions and the plugin versions are what such a self-save can change in
  *       {@code config.xml};</li>
  *   <li>every {@code <configVersion>} leaf element holding a whole number, at any depth (e2e
- *       re-audit DEF-30; any other {@code configVersion} content is kept, S-18-02). It is a
+ *       re-audit DEF-30) and whose start tag has no attributes; any other {@code configVersion} is
+ *       kept (S-18-02, S-19-02). It is a
  *       plugin's own format-version bookkeeping (for example throttle-concurrents'
  *       {@code ThrottleJobProperty}), written by the plugin's {@code readResolve}/migration code and
  *       not by any form field, so an upgraded plugin re-serialising an unchanged item adds or bumps
@@ -95,7 +96,9 @@ final class ConfigNormalizer {
                     i = end;
                     continue;
                 }
-                if (skipDepth < 0 && !selfClosing && depth >= 1 && CONFIG_VERSION.equals(tagName(xml, i + 1))) {
+                if (skipDepth < 0 && !selfClosing && depth >= 1 && CONFIG_VERSION.equals(tagName(xml, i + 1))
+                        && xml.substring(i + 1 + CONFIG_VERSION.length(), end - 1).isBlank()) {
+                    // S-19-02: only the bare start tag (no attributes) qualifies.
                     int after = numericLeafEnd(xml, end);
                     if (after >= 0) {
                         // S-18-02: only a leaf holding a whole number is version bookkeeping.
