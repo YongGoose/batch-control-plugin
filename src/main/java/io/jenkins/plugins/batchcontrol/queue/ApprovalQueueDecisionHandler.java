@@ -211,19 +211,29 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // 4. User-originated (UI button, REST build endpoints, CLI): guide, never fail silently.
             // A refused Rebuild is also recorded (SPEC item 6, e2e-03 DEF-03): it re-runs an earlier
             // build without a new approval, and the plugin's own toast hides the guidance.
-            for (Cause cause : causes) {
-                if (cause instanceof Cause.UserIdCause) {
-                    // A user-clicked naginator Retry carries NaginatorCause plus a fresh UserIdCause.
-                    String rerun = isAutomaticRetry(causes) ? KIND_RETRY
-                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
-                    if (rerun != null) {
-                        String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
-                        recordTriggerBlocked(job, rerun, "approvalRequired",
-                                "Blocked " + what + " of job '" + job.getFullName() + "' by '"
-                                        + Jenkins.getAuthentication2().getName()
-                                        + "' - a re-run does not reuse an earlier approval; submit a new run request");
+            // D-47: whether a person acts is judged on this submission. An automatic retry that
+            // copied the retried build's UserIdCause is unattended and continues at step 5; only a
+            // Retry a person clicks (NaginatorCause plus that person's fresh UserIdCause, inside
+            // their HTTP request) is handled here.
+            boolean retry = isAutomaticRetry(causes);
+            if (!retry || isUserClickedRetry()) {
+                for (Cause cause : causes) {
+                    if (cause instanceof Cause.UserIdCause) {
+                        String rerun = retry ? KIND_RETRY
+                                : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
+                        if (rerun != null) {
+                            String user = Jenkins.getAuthentication2().getName();
+                            String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
+                            // e2e re-audit DEF-32: keyed per user, so a person's refused re-run is
+                            // recorded under their name and never merged into the SYSTEM record of
+                            // automatic retries (or another person's).
+                            recordTriggerBlocked(job, rerun, "approvalRequired",
+                                    "Blocked " + what + " of job '" + job.getFullName() + "' by '" + user
+                                            + "' - a re-run does not reuse an earlier approval; submit a new run request",
+                                    user);
+                        }
+                        throw refusal(job, causes);
                     }
-                    throw refusal(job, causes);
                 }
             }
 
@@ -343,6 +353,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return false;
     }
 
+    /**
+     * Whether a retry submission was made by a person (D-47, DEF-32): naginator's Retry link is
+     * served inside the clicking user's HTTP request, while its automatic retry is scheduled from
+     * a run listener with no current request.
+     */
+    private static boolean isUserClickedRetry() {
+        return Stapler.getCurrentRequest2() != null && !ACL.SYSTEM2.equals(Jenkins.getAuthentication2());
+    }
+
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
     private static boolean isAutomaticRetry(List<Cause> causes) {
         return retryAwareCauses(causes).size() != causes.size();
@@ -389,10 +408,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * fails, and the refusal is already in the controller log.
      */
     private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
+        recordTriggerBlocked(job, kind, blockingSwitch, text, null);
+    }
+
+    /**
+     * As {@link #recordTriggerBlocked(Job, String, String, String)}; a non-null {@code user} is
+     * part of the coalescing key, for refusals a person made (DEF-32).
+     */
+    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text,
+                                             String user) {
         String fullName = job.getFullName();
+        String key = user == null ? fullName + '|' + kind : fullName + '|' + kind + "|user:" + user;
         try {
             BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
-                    fullName + '|' + kind, TRIGGER_AUDIT_INTERVAL, fullName,
+                    key, TRIGGER_AUDIT_INTERVAL, fullName,
                     Jenkins.getAuthentication2().getName(),
                     "cause=" + kind + " switch=" + blockingSwitch + ": " + text
                             + " (repeats within an hour are merged into this record)");

@@ -215,7 +215,8 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     /**
      * The expensive part: impersonates candidate user sids against the strategy's root ACL, then
-     * probes each granted group with an authentication that carries only that group. A group's
+     * probes each granted group with an authentication that carries only that group. A user's
+     * permissions are those granted to the account itself (DEF-29). A group's
      * permissions are those its probe holds beyond what every logged-in user holds, so a grant
      * to {@code authenticated} is reported once, on {@code authenticated}.
      */
@@ -230,20 +231,23 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             if (rootAcl.hasPermission2(auth, Jenkins.ADMINISTER)) {
                 continue; // admin bypass is out of scope (SPEC section 1)
             }
-            List<String> held = heldPermissions(rootAcl, auth, Collections.emptyList());
+            // e2e re-audit DEF-29: a user is listed for what the strategy grants the account itself.
+            // The probe carries the account name without its group authorities (not even
+            // authenticated), so a permission held only through `authenticated` or another group
+            // is reported once, on that group's entry below, not repeated for every member.
+            List<String> held = heldPermissions(rootAcl, principalOnly(auth), Collections.emptyList());
             if (!held.isEmpty()) {
                 holders.add(new StandingHolder(sid, false, held));
             }
         }
         Set<String> groups = strategyGroupSids(strategy);
-        if (groups.isEmpty()) {
-            return holders;
-        }
         Authentication everyLoggedIn = groupProbe(null);
         List<String> baseline = new ArrayList<>();
         if (!rootAcl.hasPermission2(everyLoggedIn, Jenkins.ADMINISTER)) {
             baseline = heldPermissions(rootAcl, everyLoggedIn, Collections.emptyList());
-            if (groups.contains(AUTHENTICATED) && !baseline.isEmpty()) {
+            // Reported whether or not the strategy's entries can be read: users no longer carry
+            // what every logged-in user holds (DEF-29), so this entry is where it shows.
+            if (!baseline.isEmpty()) {
                 holders.add(new StandingHolder(AUTHENTICATED, true, baseline));
             }
         }
@@ -275,6 +279,11 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
         return held;
     }
 
+    /** {@code auth}'s account name with no granted authorities: matches user entries only. */
+    private static Authentication principalOnly(Authentication auth) {
+        return new UsernamePasswordAuthenticationToken(auth.getName(), "", Collections.emptyList());
+    }
+
     /** A logged-in authentication that is no real account and carries only {@code group}, if any. */
     private static Authentication groupProbe(@CheckForNull String group) {
         List<GrantedAuthority> authorities = new ArrayList<>();
@@ -292,13 +301,17 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
+            if (ACL.SYSTEM_USERNAME.equals(user.getId())) {
+                continue; // the internal SYSTEM identity is not a person holding a standing permission
+            }
             sids.add(user.getId());
         }
         for (String sid : strategyPermissionSids(strategy)) {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
-            if (!sid.isEmpty() && !ACL.ANONYMOUS_USERNAME.equals(sid) && !"authenticated".equals(sid)) {
+            if (!sid.isEmpty() && !ACL.ANONYMOUS_USERNAME.equals(sid) && !ACL.SYSTEM_USERNAME.equals(sid)
+                    && !AUTHENTICATED.equals(sid)) {
                 sids.add(sid);
             }
         }
