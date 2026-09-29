@@ -92,6 +92,15 @@ public class JobActivationForm implements ModelObject {
         return ActivationView.carrierOf(item);
     }
 
+    /**
+     * S-14-02: whether the viewer holds {@code Item/Read} on the carrier, so its name may be
+     * shown; otherwise the view renders a neutral line.
+     */
+    public boolean isCarrierReadable() {
+        Item carrier = getCarrier();
+        return carrier != null && carrier.hasPermission(Item.READ);
+    }
+
     /** Whether run control is on, i.e. the gate applies (D-46a: whatever approvalRequired says). */
     public boolean isRunControlled() {
         return JobActivationNoticeAction.isRunControlEnabled();

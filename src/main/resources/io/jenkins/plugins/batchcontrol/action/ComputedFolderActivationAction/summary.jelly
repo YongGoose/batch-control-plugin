@@ -11,11 +11,18 @@
       <j:when test="${carrier != null}">
         <j:set var="carrierUrl" value="${it.carrierUrl(carrier)}"/>
         <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
-          <strong>Batch Control: activation is held by
-            <j:choose>
-              <j:when test="${carrierUrl != null}"><a href="${rootURL}/${carrierUrl}">${carrier.fullDisplayName}</a></j:when>
-              <j:otherwise>${carrier.fullDisplayName}</j:otherwise>
-            </j:choose>, which is ${it.carrierState(carrier)}.</strong>
+          <!-- S-14-02: the carrier's name and state only for a viewer with Item/Read on it
+               (carrierUrl is null otherwise); anyone else gets a neutral line. -->
+          <j:choose>
+            <j:when test="${carrierUrl != null}">
+              <strong>Batch Control: activation is held by
+                <a href="${rootURL}/${carrierUrl}">${carrier.fullDisplayName}</a>,
+                which is ${it.carrierState(carrier)}.</strong>
+            </j:when>
+            <j:otherwise>
+              <strong>Batch Control: activation is managed by an item you cannot see.</strong>
+            </j:otherwise>
+          </j:choose>
         </div>
       </j:when>
       <j:when test="${it.activated}">
