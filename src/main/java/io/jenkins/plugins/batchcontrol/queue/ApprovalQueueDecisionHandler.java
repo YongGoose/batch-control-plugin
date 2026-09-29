@@ -30,7 +30,9 @@ import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Ancestor;
 import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * The queue gate (SPEC item 6, D-03): every run path goes through
@@ -45,7 +47,8 @@ import org.kohsuke.stapler.Stapler;
  *   <li>Pipeline Replay → refuse and record it (#21); a person on the Replay page gets the
  *       refusal page and the CLI a one-line error (e2e-03 DEF-16, DEF-14), anything else is
  *       refused quietly;</li>
- *   <li>remote (build-token) cause → refuse quietly and record the attempt (S-14);</li>
+ *   <li>remote (build-token) cause → refuse and record the attempt (S-14); inside an HTTP
+ *       request the caller gets a plain-text 403 (DEF-33/34), elsewhere the refusal is quiet;</li>
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
@@ -98,6 +101,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     static final String KIND_OTHER = "OTHER";
     static final String KIND_RETRY = "RETRY";
     static final String KIND_REBUILD = "REBUILD";
+
+    /** build-token-root's root action; not a dependency, matched by name (S-18-03). */
+    private static final String BUILD_TOKEN_ROOT_ACTION_CLASS =
+            "org.jenkinsci.plugins.build_token_root.BuildRootAction";
 
     /** The CLI {@code build} command's cause (a {@code UserIdCause} subtype), matched by name. */
     private static final String CLI_CAUSE_CLASS = "hudson.cli.BuildCommand$CLICause";
@@ -177,20 +184,36 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // to step 7 and passed, which made the two endpoints SPEC item 6 names as blocked
             // bypassable by anyone holding the token string.
             //
-            // Refused quietly, like the timer and upstream refusals and unlike step 4: the caller is
-            // a script reading an HTTP status, so guidance text has no reader. Quiet is why the
-            // attempt is written to the audit history instead — the same reasoning D-30 applies to a
-            // blocked marker re-use. The record is bounded (S-21): see BlockedAttemptAudit.
-            for (Cause cause : causes) {
+            // The attempt is written to the audit history — the same reasoning D-30 applies to a
+            // blocked marker re-use. The record is bounded (S-21): see BlockedAttemptAudit. Inside an
+            // HTTP request the script caller also gets a plain-text 403 saying what to do (e2e
+            // re-audit DEF-33/34): otherwise core answers its "scheduled" 302 and build-token-root
+            // an empty 403. Without a current request (queue maintenance, Groovy, other plugins'
+            // background threads) the refusal stays a quiet false, so nothing is thrown there.
+            // S-18-03: a Retry a person clicks copies the retried build's causes, a RemoteCause
+            // included, next to that person's fresh UserIdCause. It is that person's submission
+            // (D-47, DEF-32), so it skips this step and is refused and recorded at step 4.
+            boolean userClickedRetry = isAutomaticRetry(causes) && isUserClickedRetry();
+            for (Cause cause : userClickedRetry ? List.<Cause>of() : causes) {
                 if (cause instanceof Cause.RemoteCause) {
                     LOGGER.warning(() -> "Blocked a remote (build-token) run of approval-required job '"
                             + job.getFullName() + "': " + cause.getShortDescription());
-                    BlockedAttemptAudit.get().record(ChangeType.REMOTE_RUN_BLOCKED,
-                            job.getFullName(), job.getFullName(),
-                            Jenkins.getAuthentication2().getName(),
-                            "Blocked a remote run submission of job '" + job.getFullName()
-                                    + "' - the job requires an approved batch-control run request and "
-                                    + "a build token does not substitute for one - " + cause.getShortDescription());
+                    try {
+                        BlockedAttemptAudit.get().record(ChangeType.REMOTE_RUN_BLOCKED,
+                                job.getFullName(), job.getFullName(),
+                                Jenkins.getAuthentication2().getName(),
+                                "Blocked a remote run submission of job '" + job.getFullName()
+                                        + "' - the job requires an approved batch-control run request and "
+                                        + "a build token does not substitute for one - " + cause.getShortDescription());
+                    } catch (RuntimeException e) {
+                        // As in recordTriggerBlocked: a store failure never turns the refusal into
+                        // an exception on a non-request thread; the refusal is already logged above.
+                        LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked remote run of job '"
+                                + job.getFullName() + "'");
+                    }
+                    if (isTokenBuildEndpoint(job)) {
+                        throw new RemoteRunRefusal(remoteRefusedMessage(job));
+                    }
                     return false;
                 }
             }
@@ -198,19 +221,29 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // 4. User-originated (UI button, REST build endpoints, CLI): guide, never fail silently.
             // A refused Rebuild is also recorded (SPEC item 6, e2e-03 DEF-03): it re-runs an earlier
             // build without a new approval, and the plugin's own toast hides the guidance.
-            for (Cause cause : causes) {
-                if (cause instanceof Cause.UserIdCause) {
-                    // A user-clicked naginator Retry carries NaginatorCause plus a fresh UserIdCause.
-                    String rerun = isAutomaticRetry(causes) ? KIND_RETRY
-                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
-                    if (rerun != null) {
-                        String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
-                        recordTriggerBlocked(job, rerun, "approvalRequired",
-                                "Blocked " + what + " of job '" + job.getFullName() + "' by '"
-                                        + Jenkins.getAuthentication2().getName()
-                                        + "' - a re-run does not reuse an earlier approval; submit a new run request");
+            // D-47: whether a person acts is judged on this submission. An automatic retry that
+            // copied the retried build's UserIdCause is unattended and continues at step 5; only a
+            // Retry a person clicks (NaginatorCause plus that person's fresh UserIdCause, inside
+            // their HTTP request) is handled here.
+            boolean retry = isAutomaticRetry(causes);
+            if (!retry || userClickedRetry) {
+                for (Cause cause : causes) {
+                    if (cause instanceof Cause.UserIdCause) {
+                        String rerun = retry ? KIND_RETRY
+                                : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
+                        if (rerun != null) {
+                            String user = Jenkins.getAuthentication2().getName();
+                            String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
+                            // e2e re-audit DEF-32: keyed per user, so a person's refused re-run is
+                            // recorded under their name and never merged into the SYSTEM record of
+                            // automatic retries (or another person's).
+                            recordTriggerBlocked(job, rerun, "approvalRequired",
+                                    "Blocked " + what + " of job '" + job.getFullName() + "' by '" + user
+                                            + "' - a re-run does not reuse an earlier approval; submit a new run request",
+                                    user);
+                        }
+                        throw refusal(job, causes);
                     }
-                    throw refusal(job, causes);
                 }
             }
 
@@ -330,6 +363,49 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return false;
     }
 
+    /**
+     * Whether a retry submission was made by a person (D-47, DEF-32): naginator's Retry link is
+     * served inside the clicking user's HTTP request, while its automatic retry is scheduled from
+     * a run listener with no current request.
+     */
+    private static boolean isUserClickedRetry() {
+        return Stapler.getCurrentRequest2() != null && !ACL.SYSTEM2.equals(Jenkins.getAuthentication2());
+    }
+
+    /**
+     * Whether the current HTTP request is one of the build-token endpoints (S-18-03): core's
+     * {@code build} or {@code buildWithParameters} web method of {@code job} itself, or
+     * build-token-root's action (matched by class name; it is not a dependency). Only those callers
+     * get the plain-text refusal; any other code scheduling with a {@code RemoteCause} on a request
+     * thread keeps the quiet {@code false} it always got.
+     */
+    private static boolean isTokenBuildEndpoint(Job<?, ?> job) {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null) {
+            return false;
+        }
+        List<Ancestor> ancestors = req.getAncestors();
+        if (ancestors.isEmpty()) {
+            return false;
+        }
+        Object last = ancestors.get(ancestors.size() - 1).getObject();
+        if (last != null && BUILD_TOKEN_ROOT_ACTION_CLASS.equals(last.getClass().getName())) {
+            return true;
+        }
+        if (last != job) {
+            return false;
+        }
+        String path = req.getRequestURI();
+        if (path == null) {
+            return false;
+        }
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        String lastToken = path.substring(path.lastIndexOf('/') + 1);
+        return "build".equals(lastToken) || "buildWithParameters".equals(lastToken);
+    }
+
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
     private static boolean isAutomaticRetry(List<Cause> causes) {
         return retryAwareCauses(causes).size() != causes.size();
@@ -376,10 +452,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * fails, and the refusal is already in the controller log.
      */
     private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
+        recordTriggerBlocked(job, kind, blockingSwitch, text, null);
+    }
+
+    /**
+     * As {@link #recordTriggerBlocked(Job, String, String, String)}; a non-null {@code user} is
+     * part of the coalescing key, for refusals a person made (DEF-32).
+     */
+    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text,
+                                             String user) {
         String fullName = job.getFullName();
+        String key = user == null ? fullName + '|' + kind : fullName + '|' + kind + "|user:" + user;
         try {
             BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
-                    fullName + '|' + kind, TRIGGER_AUDIT_INTERVAL, fullName,
+                    key, TRIGGER_AUDIT_INTERVAL, fullName,
                     Jenkins.getAuthentication2().getName(),
                     "cause=" + kind + " switch=" + blockingSwitch + ": " + text
                             + " (repeats within an hour are merged into this record)");
@@ -464,6 +550,12 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         }
         return Stapler.getCurrentRequest2() != null
                 ? new ApprovalRequiredFailure(job, message) : new Failure(message);
+    }
+
+    /** The plain-text refusal of a build-token submission (e2e re-audit DEF-33/34). */
+    private static String remoteRefusedMessage(Job<?, ?> job) {
+        return "Not scheduled: job '" + job.getFullName() + "' requires an approved batch-control run "
+                + "request, and a build token does not substitute for one. " + requestHint(job);
     }
 
     /** The refusal of a Pipeline Replay a person submitted (e2e-03 DEF-16). */

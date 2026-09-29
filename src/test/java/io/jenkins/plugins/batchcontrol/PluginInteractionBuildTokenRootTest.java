@@ -81,6 +81,62 @@ public class PluginInteractionBuildTokenRootTest {
         assertNotNull(free.getBuildByNumber(1));
     }
 
+    /**
+     * T-06-72 (e2e-run3 DEF-33, PR-04): a script caller refused by the gate on
+     * {@code /buildByToken/build} is told why. The answer is not 2xx and carries a non-empty
+     * plain-text body saying the job needs an approved run request (SPEC 6 usability line: every
+     * refusal tells the user in plain words why and what to do instead). Nothing is queued
+     * (note 144).
+     */
+    @Test
+    public void t_06_72_buildByTokenRefusalExplainsItself() throws Exception {
+        FreeStyleProject job = withToken(j.createFreeStyleProject("btr-msg"));
+        setBatchControl(job, new BatchControlJobProperty(true));
+
+        org.htmlunit.Page answer = get(j, null, "buildByToken/build?job=btr-msg&token=" + TOKEN);
+        int code = answer.getWebResponse().getStatusCode();
+        String body = answer.getWebResponse().getContentAsString();
+        String type = String.valueOf(answer.getWebResponse().getContentType());
+        assertTrue(code < 200 || code >= 300, "the refused token call must not answer success, got " + code);
+        assertTrue(body != null && !body.trim().isEmpty(), "the refusal must carry a body, got HTTP " + code + " with an"
+                + " empty body");
+        assertTrue(type.startsWith("text/plain"), "a script caller's refusal must be plain text, got " + type + ": "
+                + body);
+        assertMentionsApprovedRunRequest("buildByToken/build", body);
+        assertBlocked(j, job, 1, 0);
+    }
+
+    /**
+     * T-06-73 (e2e-run3 DEF-34, B5-06): core's own remote trigger {@code GET /job/X/build?token=}
+     * called by an authenticated requester on an approval-required job must not answer the 302 core
+     * gives when it has scheduled a build: a script would treat the refused run as started. The
+     * answer is neither 2xx nor 3xx and says the job needs an approved run request; no build is
+     * queued (note 145).
+     */
+    @Test
+    public void t_06_73_coreTokenTriggerRefusalIsNotARedirect() throws Exception {
+        FreeStyleProject job = withToken(j.createFreeStyleProject("core-token"));
+        setBatchControl(job, new BatchControlJobProperty(true));
+
+        org.jvnet.hudson.test.JenkinsRule.WebClient wc = j.createWebClient()
+                .withThrowExceptionOnFailingStatusCode(false).withRedirectEnabled(false).login("u1");
+        org.htmlunit.Page answer = wc.getPage(new org.htmlunit.WebRequest(
+                new java.net.URL(j.getURL(), job.getUrl() + "build?token=" + TOKEN), org.htmlunit.HttpMethod.GET));
+        int code = answer.getWebResponse().getStatusCode();
+        String text = UsabilityFixtures.text(answer);
+        assertTrue(code >= 400, "the refused token trigger must answer neither 2xx nor 3xx (a redirect reads as a"
+                + " started run), got " + code + " Location=" + answer.getWebResponse().getResponseHeaderValue("Location"));
+        assertTrue(text != null && !text.trim().isEmpty(), "the refusal must carry a message");
+        assertMentionsApprovedRunRequest("job/core-token/build?token=", text);
+        assertBlocked(j, job, 1, 0);
+    }
+
+    private static void assertMentionsApprovedRunRequest(String what, String text) {
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        assertTrue(lower.contains("approv") && lower.contains("request"), what + ": the refusal must say that the job"
+                + " needs an approved run request: " + (text.length() > 800 ? text.substring(0, 800) : text));
+    }
+
     /** Installs the job's authentication token (core's {@code authToken} config element). */
     private FreeStyleProject withToken(FreeStyleProject job) throws Exception {
         String xml = job.getConfigFile().asString();

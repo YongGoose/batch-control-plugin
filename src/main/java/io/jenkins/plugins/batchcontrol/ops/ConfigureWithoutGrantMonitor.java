@@ -16,8 +16,10 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -215,13 +217,19 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     /**
      * The expensive part: impersonates candidate user sids against the strategy's root ACL, then
-     * probes each granted group with an authentication that carries only that group. A group's
-     * permissions are those its probe holds beyond what every logged-in user holds, so a grant
-     * to {@code authenticated} is reported once, on {@code authenticated}.
+     * probes each group with an authentication that carries only that group. The groups probed
+     * are the strategy's own group entries, when it exposes them, together with every authority
+     * the security realm returns for a candidate user (S-18-01: role-strategy exposes no entries,
+     * and LDAP groups are only known through their members). A user's permissions are those
+     * granted to the account itself (DEF-29). A group's permissions are those its probe holds
+     * beyond what every logged-in user holds, so a grant to {@code authenticated} is reported
+     * once, on {@code authenticated}. When no group at all can be enumerated, a user is probed
+     * with all of their authorities minus that baseline instead, so nothing goes unreported.
      */
     private static List<StandingHolder> scanForStandingPermissions(AuthorizationStrategy strategy) {
         ACL rootAcl = strategy.getRootACL();
-        List<StandingHolder> holders = new ArrayList<>();
+        Map<String, Authentication> users = new LinkedHashMap<>();
+        Set<String> groups = new LinkedHashSet<>(strategyGroupSids(strategy));
         for (String sid : candidateSids(strategy)) {
             Authentication auth = authenticate(sid);
             if (auth == null) {
@@ -230,36 +238,52 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             if (rootAcl.hasPermission2(auth, Jenkins.ADMINISTER)) {
                 continue; // admin bypass is out of scope (SPEC section 1)
             }
-            List<String> held = heldPermissions(rootAcl, auth, Collections.emptyList());
-            if (!held.isEmpty()) {
-                holders.add(new StandingHolder(sid, false, held));
+            users.put(sid, auth);
+            for (GrantedAuthority authority : auth.getAuthorities()) {
+                String name = authority.getAuthority();
+                if (groups.size() < MAX_CANDIDATES && name != null && !name.isEmpty()) {
+                    groups.add(name);
+                }
             }
         }
-        Set<String> groups = strategyGroupSids(strategy);
-        if (groups.isEmpty()) {
-            return holders;
-        }
+        groups.remove(AUTHENTICATED);
+
+        List<StandingHolder> groupHolders = new ArrayList<>();
         Authentication everyLoggedIn = groupProbe(null);
         List<String> baseline = new ArrayList<>();
         if (!rootAcl.hasPermission2(everyLoggedIn, Jenkins.ADMINISTER)) {
             baseline = heldPermissions(rootAcl, everyLoggedIn, Collections.emptyList());
-            if (groups.contains(AUTHENTICATED) && !baseline.isEmpty()) {
-                holders.add(new StandingHolder(AUTHENTICATED, true, baseline));
+            // Reported whether or not the strategy's entries can be read: users do not carry
+            // what every logged-in user holds (DEF-29), so this entry is where it shows.
+            if (!baseline.isEmpty()) {
+                groupHolders.add(new StandingHolder(AUTHENTICATED, true, baseline));
             }
         }
         for (String group : groups) {
-            if (AUTHENTICATED.equals(group)) {
-                continue;
-            }
             Authentication probe = groupProbe(group);
             if (rootAcl.hasPermission2(probe, Jenkins.ADMINISTER)) {
                 continue; // an administrators group: admin bypass is out of scope
             }
             List<String> held = heldPermissions(rootAcl, probe, baseline);
             if (!held.isEmpty()) {
-                holders.add(new StandingHolder(group, true, held));
+                groupHolders.add(new StandingHolder(group, true, held));
             }
         }
+
+        List<StandingHolder> holders = new ArrayList<>();
+        boolean groupsKnown = !groups.isEmpty();
+        for (Map.Entry<String, Authentication> user : users.entrySet()) {
+            // DEF-29: with the groups enumerated, a user is listed for what the strategy grants the
+            // account itself; the probe carries the account name without its authorities (not even
+            // authenticated), so a permission held through a group is reported once, on that group.
+            List<String> held = groupsKnown
+                    ? heldPermissions(rootAcl, principalOnly(user.getValue()), Collections.emptyList())
+                    : heldPermissions(rootAcl, user.getValue(), baseline);
+            if (!held.isEmpty()) {
+                holders.add(new StandingHolder(user.getKey(), false, held));
+            }
+        }
+        holders.addAll(groupHolders);
         return holders;
     }
 
@@ -273,6 +297,11 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             }
         }
         return held;
+    }
+
+    /** {@code auth}'s account name with no granted authorities: matches user entries only. */
+    private static Authentication principalOnly(Authentication auth) {
+        return new UsernamePasswordAuthenticationToken(auth.getName(), "", Collections.emptyList());
     }
 
     /** A logged-in authentication that is no real account and carries only {@code group}, if any. */
@@ -292,13 +321,17 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
+            if (ACL.SYSTEM_USERNAME.equals(user.getId())) {
+                continue; // the internal SYSTEM identity is not a person holding a standing permission
+            }
             sids.add(user.getId());
         }
         for (String sid : strategyPermissionSids(strategy)) {
             if (sids.size() >= MAX_CANDIDATES) {
                 return sids;
             }
-            if (!sid.isEmpty() && !ACL.ANONYMOUS_USERNAME.equals(sid) && !"authenticated".equals(sid)) {
+            if (!sid.isEmpty() && !ACL.ANONYMOUS_USERNAME.equals(sid) && !ACL.SYSTEM_USERNAME.equals(sid)
+                    && !AUTHENTICATED.equals(sid)) {
                 sids.add(sid);
             }
         }

@@ -1,0 +1,33 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e re-audit DEF-31 (SPEC item 6): included by the build page for every action, inside the
+     build summary table, so it is a t:summary row. On a build of an approval-required job it says
+     that a manual run, including Rebuild or Retry of this build, needs an approved run request:
+     those buttons only report a refusal as core's generic "Failed.". The request form link is not
+     worded "Request Run" (U-02) and is rendered only for a viewer who may submit a run request
+     (RunApprovalNoticeAction#isCanRequestRun); anyone else is told whom to ask.
+     Only constant text and the job URL are rendered; no script. -->
+<j:jelly xmlns:j="jelly:core" xmlns:t="/lib/hudson">
+  <j:if test="${it.shown}">
+    <t:summary icon="symbol-shield-checkmark-outline plugin-ionicons-api">
+      <div role="status" class="batch-control-run-approval-notice">
+        <strong>Batch Control: manual runs of this job need an approved run request.</strong>
+        Rebuilding or retrying this build, or starting the job any other way than through an
+        approved request, is refused, even where the button only reports a generic failure.
+        <j:choose>
+          <j:when test="${it.canRequestRun}">
+            <a href="${rootURL}/${it.job.url}batch-control/">Open the run request form</a>; the
+            build starts automatically once the request is approved.
+          </j:when>
+          <j:when test="${it.canRequest}">
+            You may not request runs of this job: that needs the Job/Build permission on it. Ask a
+            Jenkins administrator for it, or ask a user who has it to request the run for you.
+          </j:when>
+          <j:otherwise>
+            Ask a user who may submit run requests, an approver or a Jenkins administrator to
+            request the run for you.
+          </j:otherwise>
+        </j:choose>
+      </div>
+    </t:summary>
+  </j:if>
+</j:jelly>

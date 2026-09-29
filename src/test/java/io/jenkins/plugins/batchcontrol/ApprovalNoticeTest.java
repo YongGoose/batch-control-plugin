@@ -40,7 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * notice that manual runs need an approved request, with a link to the request screen, so a user
  * whose click on another plugin's build button ... only gets that plugin's generic failure
  * message still sees why and where to go. A refusal page links the request screen only for users
- * who may open it and otherwise says whom to ask." Matrix rows T-06-56 .. T-06-60 (note 116).
+ * who may open it and otherwise says whom to ask." Matrix rows T-06-56 .. T-06-60 (note 116),
+ * T-06-71 (note 143) and T-UI-23 (note 140).
  *
  * <p>The notice is recognised in the job page's main panel (never the side panel, whose
  * "Request Run" entry T-06-15 already covers) as an element whose text names both a manual run
@@ -201,7 +202,89 @@ public class ApprovalNoticeTest {
         assertBlockedNoBuild(plain);
     }
 
+    /**
+     * T-06-71 (e2e-run3 DEF-31/32, PR-02/PR-05): the build page of an approval-required job — where
+     * other plugins' Rebuild and Retry buttons live and end in their generic "Failed." toast —
+     * shows the same manual-run notice as the job page (SPEC 6: a user whose click on another
+     * plugin's build button only gets that plugin's generic failure message still sees why and
+     * where to go). The requester's notice links the request screen; a user who may not request
+     * sees the notice without the link; an uncontrolled job's build page has no notice (note 143).
+     */
+    @Test
+    public void t_06_71_buildPageOfApprovalRequiredJobShowsNotice() throws Exception {
+        FreeStyleProject job = approvalRequired("notice-build");
+        PluginInteractionFixtures.requestAndApprove(job);
+        j.waitUntilNoActivity();
+        assertNotNull(job.getBuildByNumber(1), "fixture: the approved request must have produced build #1");
+
+        HtmlPage requesterPage = pageAt("u1", job.getUrl() + "1/");
+        DomElement notice = findNotice(requesterPage);
+        assertNotNull(notice, "the build page of an approval-required job must show the manual-run notice in the main"
+                + " panel: " + excerpt(mainText(requesterPage)));
+        assertTrue(hasRequestLinkNear(requesterPage, notice, job), "the build-page notice must link "
+                + job.getUrl() + "batch-control/ for a requester: " + excerpt(notice.asNormalizedText()));
+
+        HtmlPage nobcPage = pageAt("nobc", job.getUrl() + "1/");
+        assertNotNull(findNotice(nobcPage), "the build-page notice must be shown also to a reader who may not request: "
+                + excerpt(mainText(nobcPage)));
+        assertFalse(anyRequestLink(nobcPage, job), "no link to the request screen for a user without Batch Control"
+                + " permission");
+
+        FreeStyleProject free = uncontrolled(j.createFreeStyleProject("notice-build-free"));
+        BatchControlFixtures.activate(free);
+        j.buildAndAssertSuccess(free);
+        assertNull(findNotice(pageAt("u1", free.getUrl() + "1/")), "the build page of a job that does not require"
+                + " approval must show no manual-run notice");
+    }
+
+    /**
+     * T-UI-23 (e2e-run3 DEF-28, A-11): the gate's refusal page ("Approval required") carries no
+     * hierarchical "Back to ..." link — the breadcrumb already leads back (SPEC 6 usability line,
+     * note 140). Read on the three answers a person meets: the requester's direct build, the
+     * requester's parameters form, and a non-requester's direct build. Each is still an HTML page
+     * naming approval, so an empty answer cannot pass.
+     */
+    @Test
+    public void t_ui_23_refusalPageHasNoBackLink() throws Exception {
+        FreeStyleProject plain = approvalRequired("nolink-plain");
+        FreeStyleProject param = parameterized("nolink-param");
+
+        List<Page> answers = new ArrayList<>();
+        answers.add(PluginInteractionFixtures.post(j, "u1", plain.getUrl() + "build?delay=0sec"));
+        answers.add(submitParametersForm("u1", param));
+        answers.add(PluginInteractionFixtures.post(j, "nobc", plain.getUrl() + "build?delay=0sec"));
+        String[] paths = {"direct build as u1", "parameters form as u1", "direct build as nobc"};
+        Pattern backText = Pattern.compile("(?i)\\bback\\s+to\\b");
+        Pattern backCaption = Pattern.compile("(?is)^\\W*back\\b.*");
+        for (int i = 0; i < answers.size(); i++) {
+            Page answer = answers.get(i);
+            assertTrue(answer.getWebResponse().getStatusCode() >= 400, paths[i] + ": fixture: must be refused, got "
+                    + answer.getWebResponse().getStatusCode());
+            assertTrue(answer instanceof HtmlPage, paths[i] + ": the refusal must be an HTML page");
+            HtmlPage page = (HtmlPage) answer;
+            String text = page.asNormalizedText();
+            assertTrue(text.toLowerCase(Locale.ROOT).contains("approv"), paths[i] + ": fixture: the refusal names"
+                    + " approval: " + excerpt(text));
+            assertFalse(backText.matcher(text).find(), paths[i] + ": the refusal page must not carry a \"Back to ...\""
+                    + " link or text: " + excerpt(text));
+            for (HtmlAnchor a : page.getAnchors()) {
+                assertFalse(backCaption.matcher(a.asNormalizedText().trim()).matches(), paths[i]
+                        + ": no hierarchical back link may be offered: '" + a.asNormalizedText() + "' -> "
+                        + a.getHrefAttribute());
+            }
+        }
+        assertBlockedNoBuild(plain);
+        assertBlockedNoBuild(param);
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private HtmlPage pageAt(String userId, String relative) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
+        HtmlPage page = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), relative), HttpMethod.GET));
+        assertEquals(200, page.getWebResponse().getStatusCode(), userId + " must reach " + relative);
+        return page;
+    }
 
     private FreeStyleProject approvalRequired(String name) throws Exception {
         FreeStyleProject job = j.createFreeStyleProject(name);

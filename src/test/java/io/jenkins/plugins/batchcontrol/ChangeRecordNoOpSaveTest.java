@@ -238,6 +238,60 @@ public class ChangeRecordNoOpSaveTest {
     }
 
     /**
+     * T-09-21 (e2e-run3 DEF-30, A-12): a Pipeline job carrying a throttle-concurrents property whose
+     * stored config.xml predates the property's internal {@code configVersion} element (the state
+     * of a job written before that field existed, or by a tool that omits it). A POST of that same
+     * config.xml where only the {@code plugin="x@version"} attributes differ changes no
+     * user-editable configuration, even though Jenkins re-serialises the posted XML and the stored
+     * file gains {@code <configVersion>}: no CONFIGURE record (SPEC 9). A real description edit
+     * afterwards writes exactly one (note 142).
+     */
+    @Test
+    public void t_09_21_reserialisedInternalFieldWithPluginVersionChangeWritesNoRecord() throws Exception {
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "throttle-pipe");
+        job.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        job.addProperty(new hudson.plugins.throttleconcurrents.ThrottleJobProperty(1, 1,
+                Collections.<String>emptyList(), true, "project", false, "",
+                hudson.plugins.throttleconcurrents.ThrottleMatrixProjectOptions.DEFAULT));
+        job.setDescription("throttle-before");
+        String current = job.getConfigFile().asString();
+        assertTrue(PLUGIN_ATTRIBUTE.matcher(current).find(), "fixture: plugin attributes expected: " + current);
+        // A property built in memory may already lack configVersion (the field is filled in on
+        // load); strip it in case it is present, so the stored file is in the legacy state either way.
+        String legacy = current.replaceAll("\\s*<configVersion>[^<]*</configVersion>", "");
+        assertFalse(legacy.contains("<configVersion>"), "fixture: the stored file must lack configVersion");
+        Files.writeString(job.getConfigFile().getFile().toPath(), legacy, StandardCharsets.UTF_8);
+        j.jenkins.reload();
+        WorkflowJob reloaded = j.jenkins.getItemByFullName("throttle-pipe", WorkflowJob.class);
+        assertFalse(reloaded.getConfigFile().asString().contains("<configVersion>"),
+                "fixture: after the reload the stored config must still lack configVersion");
+        int before = configureRecords("throttle-pipe").size();
+
+        String posted = withPluginVersions(legacy, "2.0");
+        assertFalse(posted.equals(legacy), "fixture: the POST must differ in the plugin attributes");
+        assertEquals(200, postConfigXml(reloaded, posted));
+        assertTrue(j.jenkins.getItemByFullName("throttle-pipe", WorkflowJob.class).getConfigFile().asString()
+                .contains("<configVersion>"), "fixture: the POST must have let throttle-concurrents re-serialise its"
+                + " configVersion into the stored file, or this row does not reproduce DEF-30");
+        assertEquals("throttle-before", j.jenkins.getItemByFullName("throttle-pipe", WorkflowJob.class).getDescription(),
+                "fixture: the description is unchanged");
+        assertEquals(before, configureRecords("throttle-pipe").size(), "a config.xml POST that changes only plugin"
+                + " version attributes (and lets a plugin re-serialise its internal configVersion) must not write a"
+                + " CONFIGURE record: " + configureRecords("throttle-pipe").stream()
+                        .map(r -> String.valueOf(r.getDiff())).collect(Collectors.joining("\n----\n")));
+
+        WorkflowJob afterNoOp = j.jenkins.getItemByFullName("throttle-pipe", WorkflowJob.class);
+        String edited = afterNoOp.getConfigFile().asString()
+                .replace("<description>throttle-before</description>", "<description>throttle-after</description>");
+        assertTrue(edited.contains("throttle-after"), "fixture: the description edit must be in the XML");
+        assertEquals(200, postConfigXml(afterNoOp, edited));
+        List<ChangeRecord> records = configureRecords("throttle-pipe");
+        assertEquals(before + 1, records.size(), "a real edit must write exactly one CONFIGURE record");
+        assertTrue(String.valueOf(records.get(records.size() - 1).getDiff()).contains("throttle-after"),
+                "the record's diff must carry the description edit");
+    }
+
+    /**
      * T-SEC-33 (security-07 S-02, SPEC item 9 / #20): the {@code plugin="name@version"}
      * stripper (T-09-13) must anchor to an actual attribute named exactly {@code plugin} — not
      * to any substring elsewhere in the file that merely looks like {@code plugin="..."}. Ordinary
@@ -479,6 +533,71 @@ public class ChangeRecordNoOpSaveTest {
 
         public int getFetch() {
             return fetch;
+        }
+    }
+
+    /**
+     * T-09-22 (security-18 S-18-02): the DEF-30 normalisation may ignore only a numeric
+     * {@code configVersion} leaf. A job property with a {@code configVersion} field of its own
+     * (a plugin whose field of that name is meaningful configuration) is edited through
+     * {@code POST config.xml} twice: a non-numeric leaf ({@code abc} to {@code xyz}) and a wrapper
+     * holding a child element ({@code <foo>bar</foo>} to {@code <foo>baz</foo>}). Each edit is a
+     * configuration change and writes one CONFIGURE record whose diff carries it (SPEC 9). T-09-21
+     * is the numeric twin that stays silent. Note 150.
+     */
+    @Test
+    public void t_09_22_nonNumericConfigVersionContentIsStillRecorded() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("cv-job");
+        job.addProperty(new VersionedProperty("abc", "bar"));
+        String stored = job.getConfigFile().asString();
+        assertTrue(stored.contains("<configVersion>abc</configVersion>"), "fixture: the leaf must be stored: " + stored);
+        assertTrue(stored.matches("(?s).*<configVersion>\\s*<foo>bar</foo>\\s*</configVersion>.*"),
+                "fixture: the wrapper must be stored: " + stored);
+
+        int before = configureRecords("cv-job").size();
+        String leafEdit = stored.replace("<configVersion>abc</configVersion>", "<configVersion>xyz</configVersion>");
+        assertEquals(200, postConfigXml(job, leafEdit));
+        FreeStyleProject afterLeaf = j.jenkins.getItemByFullName("cv-job", FreeStyleProject.class);
+        assertEquals("xyz", afterLeaf.getProperty(VersionedProperty.class).configVersion,
+                "fixture: the POST must have changed the leaf");
+        List<ChangeRecord> leaf = configureRecords("cv-job");
+        assertEquals(before + 1, leaf.size(), "a change of a non-numeric configVersion leaf is a configuration change"
+                + " and must write one CONFIGURE record");
+        assertTrue(String.valueOf(leaf.get(leaf.size() - 1).getDiff()).contains("xyz"), "the diff must carry the edit");
+
+        String wrapperEdit = afterLeaf.getConfigFile().asString().replace("<foo>bar</foo>", "<foo>baz</foo>");
+        assertTrue(wrapperEdit.contains("<foo>baz</foo>"), "fixture: the wrapper edit must be in the XML");
+        assertEquals(200, postConfigXml(afterLeaf, wrapperEdit));
+        assertEquals("baz", j.jenkins.getItemByFullName("cv-job", FreeStyleProject.class)
+                .getProperty(VersionedProperty.class).nested.configVersion.foo, "fixture: the POST must have changed the wrapper");
+        List<ChangeRecord> wrapper = configureRecords("cv-job");
+        assertEquals(before + 2, wrapper.size(), "a change inside a configVersion wrapper element must write one"
+                + " CONFIGURE record");
+        assertTrue(String.valueOf(wrapper.get(wrapper.size() - 1).getDiff()).contains("baz"), "the diff must carry the edit");
+    }
+
+    /** A job property whose own fields are named configVersion: a leaf string and a wrapper object. */
+    public static class VersionedProperty extends hudson.model.JobProperty<hudson.model.Job<?, ?>> {
+        public String configVersion;
+        public Holder nested;
+
+        public VersionedProperty(String leaf, String foo) {
+            this.configVersion = leaf;
+            this.nested = new Holder();
+            this.nested.configVersion = new Wrapped();
+            this.nested.configVersion.foo = foo;
+        }
+
+        public static class Holder {
+            public Wrapped configVersion;
+        }
+
+        public static class Wrapped {
+            public String foo;
+        }
+
+        @TestExtension("t_09_22_nonNumericConfigVersionContentIsStillRecorded")
+        public static class DescriptorImpl extends hudson.model.JobPropertyDescriptor {
         }
     }
 

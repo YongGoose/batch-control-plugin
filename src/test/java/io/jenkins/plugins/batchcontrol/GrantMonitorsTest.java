@@ -146,6 +146,115 @@ public class GrantMonitorsTest {
                 + " warning must not suggest it is not one: " + excerpt(text));
     }
 
+    /**
+     * T-08-53 (e2e-run3 DEF-29, A-03): the group {@code authenticated} holds Job/Configure on the
+     * Batch Control matrix strategy; three known users hold only Overall/Read and Job/Read. The
+     * warning lists the group as a group, by its name, with the permission it holds; it does not
+     * turn the group into per-user entries for accounts that have no Configure entry of their own
+     * (note 141).
+     */
+    @Test
+    public void t_08_53_monitorListsGroupHolderAsGroupNotAsItsMembers() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String[] members = {"member29a", "member29b", "member29c"};
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        strategy.add(Jenkins.READ, PermissionEntry.group("authenticated"));
+        strategy.add(Item.READ, PermissionEntry.group("authenticated"));
+        strategy.add(Item.CONFIGURE, PermissionEntry.group("authenticated"));
+        for (String member : members) {
+            strategy.add(Jenkins.READ, PermissionEntry.user(member));
+            strategy.add(Item.READ, PermissionEntry.user(member));
+            hudson.model.User.getById(member, true).save(); // a known account, as after a login
+        }
+        // a known account with no entry of its own at all: everything it holds comes from the
+        // authenticated group (SPEC 8: the warning is about holders "from the strategy"; this
+        // account holds Configure only as a member of the listed group)
+        hudson.model.User.getById("member29d", true).save();
+        j.jenkins.setAuthorizationStrategy(strategy);
+        StrategyFixtures.configureBuildAuthenticator(); // keep the other monitor's warning out of the way
+
+        AdministrativeMonitor monitor = AdministrativeMonitor.all().get(ConfigureWithoutGrantMonitor.class);
+        assertTrue(monitor.isActivated(), "fixture: a group holding Job/Configure must activate the monitor");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        HtmlPage manage = wc.goTo("manage/");
+        assertEquals(200, manage.getWebResponse().getStatusCode());
+        String text = manage.asNormalizedText();
+
+        String groupLine = null;
+        for (String line : text.split("\\R")) {
+            if (line.contains("authenticated") && line.toLowerCase(java.util.Locale.ROOT).contains("configure")) {
+                groupLine = line;
+                break;
+            }
+        }
+        assertNotNull(groupLine, "the warning must list the group 'authenticated' with its Configure permission on one"
+                + " entry: " + excerpt(text));
+        assertTrue(groupLine.toLowerCase(java.util.Locale.ROOT).contains("group"), "the entry must say that"
+                + " 'authenticated' is a group: " + groupLine);
+        for (String member : new String[] {"member29a", "member29b", "member29c", "member29d"}) {
+            assertFalse(text.contains(member), "a user whose Configure comes only from the authenticated group must not"
+                    + " be listed as a user entry (the group entry is listed instead): " + excerpt(text));
+        }
+        assertFalse(text.matches("(?s).*\\bUser SYSTEM\\b.*"), "the internal SYSTEM identity is not an account holding"
+                + " Configure from the strategy and must not be listed as a user entry: " + excerpt(text));
+    }
+
+    /**
+     * T-08-56 (security-18 S-18-01): under the Batch Control role strategy a global role
+     * {@code editors} with Overall/Read and Job/Configure is assigned to the realm group
+     * {@code devs} (not {@code authenticated}); {@code u18} is a member of {@code devs} and has no
+     * role of its own. The monitor is shown and lists the group {@code devs} with Configure (SPEC 8;
+     * the group is the holder, as in T-08-53). Note 149.
+     */
+    @Test
+    public void t_08_56_roleStrategyGroupHolderIsListed() throws Exception {
+        JenkinsRule.DummySecurityRealm realm = j.createDummySecurityRealm();
+        realm.addGroups("u18", "devs");
+        j.jenkins.setSecurityRealm(realm);
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+
+        java.util.TreeMap<com.michelin.cio.hudson.plugins.rolestrategy.Role,
+                java.util.Set<com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry>> global = new java.util.TreeMap<>();
+        global.put(new com.michelin.cio.hudson.plugins.rolestrategy.Role("admin", java.util.regex.Pattern.compile(".*"),
+                        java.util.Set.of(Jenkins.ADMINISTER), ""),
+                new java.util.HashSet<>(java.util.Set.of(com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry.user("admin"))));
+        global.put(new com.michelin.cio.hudson.plugins.rolestrategy.Role("editors", java.util.regex.Pattern.compile(".*"),
+                        java.util.Set.of(Jenkins.READ, Item.READ, Item.CONFIGURE), ""),
+                new java.util.HashSet<>(java.util.Set.of(com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry.group("devs"))));
+        java.util.Map<String, com.michelin.cio.hudson.plugins.rolestrategy.RoleMap> maps = new java.util.HashMap<>();
+        maps.put(RoleBasedAuthorizationStrategy.GLOBAL, new com.michelin.cio.hudson.plugins.rolestrategy.RoleMap(global));
+        maps.put(RoleBasedAuthorizationStrategy.PROJECT, new com.michelin.cio.hudson.plugins.rolestrategy.RoleMap(new java.util.TreeMap<>()));
+        maps.put(RoleBasedAuthorizationStrategy.SLAVE, new com.michelin.cio.hudson.plugins.rolestrategy.RoleMap(new java.util.TreeMap<>()));
+        j.jenkins.setAuthorizationStrategy(new BatchControlRoleBasedAuthorizationStrategy(maps, Collections.emptySet()));
+        StrategyFixtures.configureBuildAuthenticator(); // keep the other monitor's warning out of the way
+        hudson.model.User.getById("u18", true).save(); // a known account, as after a login
+        assertTrue(StrategyFixtures.has(j.jenkins, "u18", Item.CONFIGURE), "fixture: u18 must hold Configure through devs");
+
+        AdministrativeMonitor monitor = AdministrativeMonitor.all().get(ConfigureWithoutGrantMonitor.class);
+        assertTrue(monitor.isActivated(), "a role holding Job/Configure assigned to a group must activate the monitor");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        HtmlPage manage = wc.goTo("manage/");
+        assertEquals(200, manage.getWebResponse().getStatusCode());
+        String text = manage.asNormalizedText();
+        String groupLine = null;
+        for (String line : text.split("\\R")) {
+            if (line.matches("(?s).*\\bdevs\\b.*") && line.toLowerCase(java.util.Locale.ROOT).contains("configure")) {
+                groupLine = line;
+                break;
+            }
+        }
+        assertNotNull(groupLine, "the warning must list the group 'devs' with its Configure permission: " + excerpt(text));
+        assertTrue(groupLine.toLowerCase(java.util.Locale.ROOT).contains("group"), "the entry must say that 'devs' is a"
+                + " group: " + groupLine);
+    }
+
     private static String excerpt(String text) {
         String flat = text.replaceAll("\\s+", " ");
         return flat.length() > 2000 ? flat.substring(0, 2000) + "..." : flat;

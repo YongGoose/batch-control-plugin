@@ -261,6 +261,11 @@ public class GrantSelfGrantGuardTest {
             + "</hudson.security.AuthorizationMatrixProperty>";
 
     private int postCreateItem(String user, String containerUrl, String query, String body) throws Exception {
+        return postCreateItemPage(user, containerUrl, query, body).getWebResponse().getStatusCode();
+    }
+
+    private org.htmlunit.Page postCreateItemPage(String user, String containerUrl, String query, String body)
+            throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
         java.net.URL url = new java.net.URL(wc.createCrumbedUrl(containerUrl + "createItem").toExternalForm() + "&" + query);
         WebRequest req = new WebRequest(url, HttpMethod.POST);
@@ -268,7 +273,7 @@ public class GrantSelfGrantGuardTest {
             req.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
             req.setRequestBody(body);
         }
-        return wc.getPage(req).getWebResponse().getStatusCode();
+        return wc.getPage(req);
     }
 
     /** The payload's property is gone: no entry names bob or carol (in memory and on disk), and past the window neither configures. */
@@ -464,8 +469,12 @@ public class GrantSelfGrantGuardTest {
         assertTrue(has(src, "bob", Item.EXTENDED_READ), "premise: bob may read the source's configuration");
         StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
 
-        int status = postCreateItem("bob", "job/team/", "name=copy&mode=copy&from=src", null);
-        assertTrue(status < 400, "premise: bob may copy inside his Create window, got HTTP " + status);
+        org.htmlunit.Page answer = postCreateItemPage("bob", "job/team/", "name=copy&mode=copy&from=src", null);
+        // D-48 ruling: the copy is made, but its stripped authorization property is reported to
+        // bob with a 403 and the D-48 message (note 153)
+        assertEquals(403, answer.getWebResponse().getStatusCode(), "a copy whose authorization property the guard"
+                + " stripped must answer 403 (D-48), got HTTP " + answer.getWebResponse().getStatusCode());
+        GrantSelfGrantFeedbackTest.assertGuardFeedback("copy", UsabilityFixtures.text(answer), "team/copy", "team » copy");
         assertPayloadPropertyRemoved("team/copy");
         assertTrue(has(src, "carol", Item.CONFIGURE), "guard: the source keeps its own property");
     }

@@ -16,6 +16,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import org.htmlunit.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -104,6 +105,96 @@ public class RefusedRerunAuditTest {
 
         assertBlocked(j, job, 2, 1);
         assertRecorded(job, request, "u1");
+    }
+
+    /**
+     * T-06-74 (e2e-run3 DEF-32, PR-05): on a job with naginator's automatic retry, the approved run
+     * fails and the automatic retry is refused and recorded as SYSTEM (D-47: unattended). Within
+     * the same hour u1 presses Retry on the failed run; that refusal must be recorded as u1, with
+     * the retry named, and not folded into the SYSTEM record of the automatic retry (SPEC 6: every
+     * refused retry is recorded; usability line: recorded history names who did what). Note 146.
+     */
+    @Test
+    public void t_06_74_manualRetryRefusalIsRecordedAsTheUserNotMergedIntoSystem() throws Exception {
+        FreeStyleProject job = approvalRequired("rr-nag-both");
+        job.getBuildersList().add(new FailureBuilder());
+        job.getPublishersList().add(new NaginatorPublisher("", false, false, false, 1, new FixedDelay(0)));
+
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        assertBlocked(j, job, 2, 1);
+        FreeStyleBuild failed = job.getBuildByNumber(1);
+        j.assertBuildStatus(Result.FAILURE, failed);
+        List<ChangeRecord> automatic = rerunRecords(job);
+        assertTrue(!automatic.isEmpty(), "fixture: the refused automatic retry must be recorded: " + describe(automatic));
+        assertTrue(automatic.stream().noneMatch(r -> "u1".equals(r.getUser())), "fixture: before u1 acts no refusal"
+                + " record may name u1: " + describe(automatic));
+        assertNotNull(failed.getAction(NaginatorRetryAction.class), "fixture: naginator must offer Retry");
+
+        post(j, "u1", failed.getUrl() + "retry/");
+        assertBlocked(j, job, 2, 1);
+
+        List<ChangeRecord> records = rerunRecords(job);
+        List<ChangeRecord> byU1 = records.stream().filter(r -> "u1".equals(r.getUser())).collect(Collectors.toList());
+        assertTrue(!byU1.isEmpty(), "u1's refused Retry must be recorded with user = u1, not merged into the automatic"
+                + " retry's record: " + describe(records));
+        for (ChangeRecord record : byU1) {
+            if (record.getType() == ChangeType.TRIGGER_BLOCKED) {
+                assertTrue(String.valueOf(record.getDetail()).toLowerCase(Locale.ROOT).contains("retry"),
+                        "u1's TRIGGER_BLOCKED record must name the retry as its cause kind: " + describe(byU1));
+            }
+        }
+        assertTrue(records.stream().anyMatch(r -> !"u1".equals(r.getUser())
+                        && String.valueOf(r.getUser()).equalsIgnoreCase("SYSTEM")),
+                "the automatic retry's record stays attributed to SYSTEM (D-47): " + describe(records));
+    }
+
+    /**
+     * T-06-75 (security-18 S-18-03): u1 presses naginator's Retry on a failed build that was
+     * started by a remote token call (its causes include a {@code RemoteCause}; the build ran
+     * before the job was made approval-required). The click is a person re-running a build, so it
+     * is refused like T-06-74: an HTML refusal page naming approval (not the plain-text answer
+     * meant for a token caller), a TRIGGER_BLOCKED record by u1 naming the retry, and no
+     * REMOTE_RUN_BLOCKED record (SPEC 6; usability line: history names who did what). Note 151.
+     */
+    @Test
+    public void t_06_75_retryOfRemoteStartedBuildIsRecordedAsUserRetry() throws Exception {
+        FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rr-remote-retry"));
+        job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activate(job);
+        FreeStyleBuild remote = j.assertBuildStatus(Result.FAILURE,
+                job.scheduleBuild2(0, new Cause.RemoteCause("127.0.0.1", "token call")));
+        assertNotNull(remote.getCause(Cause.RemoteCause.class), "fixture: build #1 must carry a RemoteCause");
+        assertNotNull(remote.getAction(NaginatorRetryAction.class), "fixture: naginator must offer Retry");
+        setBatchControl(job, new BatchControlJobProperty(true));
+        j.waitUntilNoActivity();
+        int remoteBlockedBefore = remoteRunBlocked(job).size();
+
+        Page answer = post(j, "u1", remote.getUrl() + "retry/");
+
+        assertBlocked(j, job, 2, 1);
+        String type = String.valueOf(answer.getWebResponse().getContentType());
+        assertTrue(type.startsWith("text/html"), "a person's Retry must be answered with the HTML refusal page, not the"
+                + " token caller's plain text; got " + type + ": " + answer.getWebResponse().getContentAsString());
+        assertTrue(UsabilityFixtures.text(answer).toLowerCase(Locale.ROOT).contains("approv"),
+                "the refusal page must name approval");
+        List<ChangeRecord> records = rerunRecords(job);
+        assertTrue(records.stream().anyMatch(r -> r.getType() == ChangeType.TRIGGER_BLOCKED && "u1".equals(r.getUser())
+                        && String.valueOf(r.getDetail()).toLowerCase(Locale.ROOT).contains("retry")),
+                "u1's Retry must be recorded as TRIGGER_BLOCKED cause=RETRY by u1: " + describe(records)
+                        + " remote=" + describe(remoteRunBlocked(job)));
+        assertEquals(remoteBlockedBefore, remoteRunBlocked(job).size(), "a person's Retry must not be recorded as a"
+                + " remote run submission: " + describe(remoteRunBlocked(job)));
+    }
+
+    private static List<ChangeRecord> remoteRunBlocked(FreeStyleProject job) {
+        List<ChangeRecord> out = new ArrayList<>();
+        for (ChangeType type : ChangeType.values()) {
+            if (type.name().equals("REMOTE_RUN_BLOCKED")) {
+                out.addAll(ActivationFixtures.recordsFor(type, job.getFullName()));
+            }
+        }
+        return out;
     }
 
     /**
