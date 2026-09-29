@@ -69,9 +69,8 @@ public class JobTriggerLockAction implements Action {
         if (!job.hasPermission(Item.READ)) {
             return List.of();
         }
-        // e2e-03 DEF-15 (SPEC item 6 #21, D-46a): the switches are enforced whatever
-        // approvalRequired says, and BatchControlJobProperty#getBlockingSwitches() now answers
-        // that way too, so the notice follows enforcement.
+        // e2e-03 DEF-15 (SPEC item 6 #21, D-46a): the switches refuse unattended runs whatever
+        // approvalRequired says, and getBlockingSwitches() follows the switches alone.
         BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
         return property == null ? List.of() : property.getBlockingSwitches();
     }

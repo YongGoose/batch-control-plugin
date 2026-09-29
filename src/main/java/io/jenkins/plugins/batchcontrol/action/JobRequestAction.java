@@ -11,8 +11,6 @@ import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.security.Permission;
 import hudson.util.Secret;
-import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -90,7 +88,7 @@ public class JobRequestAction implements Action {
      * makes. View gating only; {@link #doSubmit} and the service check for real.
      */
     public boolean isCanRequestRun() {
-        return canRequest() && job.hasPermission(Item.BUILD);
+        return RunRequestService.get().canRequest(job);
     }
 
     /**
@@ -123,11 +121,7 @@ public class JobRequestAction implements Action {
 
     /** True when run control is on and this job requires approved runs. */
     public boolean isActive() {
-        if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
-            return false;
-        }
-        BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
-        return property != null && property.isApprovalRequired();
+        return RunRequestService.requiresApprovalToRun(job);
     }
 
     /**

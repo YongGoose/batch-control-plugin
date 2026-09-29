@@ -41,7 +41,7 @@
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
           <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>
           <!-- e2e-03 DEF-13 / DEF-17: who closed the request and why. A cancellation is attributed
-               through decidedBy, an invalidation explains itself through decisionComment. -->
+               through decidedBy, an invalidation through invalidationReason. -->
           <j:if test="${it.request.decidedBy != null}">
             <tr>
               <th style="text-align: left;">
@@ -53,11 +53,17 @@
               <td>${it.request.decidedBy}</td>
             </tr>
           </j:if>
+          <!-- e2e-03 DEF-17: why the request was invalidated (rename or move of its job). -->
+          <j:if test="${it.request.invalidationReason != null}">
+            <tr>
+              <th style="text-align: left;">Why it was invalidated</th>
+              <td style="white-space: pre-wrap;">${it.request.invalidationReason}</td>
+            </tr>
+          </j:if>
           <j:if test="${it.request.decisionComment != null}">
             <tr>
               <th style="text-align: left;">
                 <j:choose>
-                  <j:when test="${it.request.status.name() == 'INVALIDATED'}">Why it was invalidated</j:when>
                   <j:when test="${it.request.status.name() == 'EXPIRED'}">Why it expired</j:when>
                   <j:otherwise>Decision comment</j:otherwise>
                 </j:choose>

@@ -122,10 +122,42 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         // replacement for it, and the permission check above stays first so only a caller who
         // would otherwise be let in learns which switch is off.
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            recordRefusedCreate();
             throw new Failure(CHANGE_CONTROL_OFF_MESSAGE);
         }
         return this;
     }
+
+    /**
+     * e2e-03 DEF-27: a grant request POSTed while change control is off never reaches
+     * {@link #doCreate}, because this whole subtree is closed. It is still a refused request, so
+     * the policy layer records it ({@link GrantRequestService#refuseRequestWhileChangeControlOff});
+     * the caller then gets the screen's explanation as before. Only a POST to {@code create}
+     * counts: opening the closed screen is not a request. The permission check of
+     * {@link #getTarget()} has already passed, and the CSRF crumb filter runs before Stapler.
+     */
+    private static void recordRefusedCreate() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null || !"POST".equals(req.getMethod())) {
+            return;
+        }
+        String rest = req.getRestOfPath();
+        if (rest == null || !(rest.equals("/create") || rest.equals("/create/"))) {
+            return;
+        }
+        String scope = Util.fixEmptyAndTrim(req.getParameter("scopeFullName"));
+        if (scope != null && scope.length() > MAX_RECORDED_SCOPE_LENGTH) {
+            scope = scope.substring(0, MAX_RECORDED_SCOPE_LENGTH);
+        }
+        try {
+            GrantRequestService.get().refuseRequestWhileChangeControlOff(scope);
+        } catch (IllegalStateException expected) {
+            // Recorded; the caller gets CHANGE_CONTROL_OFF_MESSAGE from getTarget().
+        }
+    }
+
+    /** Bound on the user-supplied scope name written into the refusal record. */
+    private static final int MAX_RECORDED_SCOPE_LENGTH = 1000;
 
     @Override
     public String getDisplayName() {

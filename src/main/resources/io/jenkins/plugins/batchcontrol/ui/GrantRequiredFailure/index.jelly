@@ -17,7 +17,8 @@
         <j:choose>
           <j:when test="${it.canRequest}">
             <p style="margin-bottom: 0;">
-              <a href="${rootURL}/${it.requestUrl}">Request a ${it.actionLabel} window</a> for it;
+              Request a ${it.actionLabel} window for it on the
+              <a href="${rootURL}/${it.requestUrl}">Grants</a> screen (the form is prefilled), and
               try again once the request is approved.
             </p>
           </j:when>

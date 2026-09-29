@@ -127,9 +127,7 @@ public class IncidentItem implements ModelObject {
      * The endpoint and the service re-check.
      */
     public boolean isCanRerun() {
-        Job<?, ?> job = findJob();
-        return job != null && job.hasPermission(Item.BUILD)
-                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        return IncidentService.get().canRerun(incident);
     }
 
     /** Whether the incident's job still exists and is visible, so a rerun is possible at all. */

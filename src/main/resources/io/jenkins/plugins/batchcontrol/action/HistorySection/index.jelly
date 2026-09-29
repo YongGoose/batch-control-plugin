@@ -272,6 +272,7 @@
         </tbody>
       </table>
       <p>
+        <a href="monthly?month=${it.summaryMonth}">Monthly summary</a> (a screen, one month) ·
         <a href="summary?month=${it.summaryMonth}">Monthly aggregate as JSON</a>
       </p>
     </l:main-panel>

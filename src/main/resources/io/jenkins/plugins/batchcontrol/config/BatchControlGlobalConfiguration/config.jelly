@@ -22,14 +22,16 @@
     <f:entry title="Approved-but-not-run timeout (minutes)" field="approvedRunTimeoutMinutes">
       <f:number min="1"/>
     </f:entry>
-    <f:entry title="Grant duration options (minutes, comma-separated)" field="grantDurationOptionsText">
-      <f:textbox/>
+    <f:entry title="Grant duration options (minutes, comma-separated)" field="grantDurationOptions">
+      <!-- The SPEC key names the field (T-CFG-04); the value is the comma-separated text, which
+           BatchControlGlobalConfiguration binds through its text setter. -->
+      <f:textbox value="${instance.grantDurationOptionsText}"/>
     </f:entry>
     <f:entry title="Maximum grant duration (minutes)" field="maxGrantMinutes">
       <f:number min="1"/>
     </f:entry>
-    <f:entry title="Results that open an incident (comma-separated)" field="incidentResultsText">
-      <f:textbox/>
+    <f:entry title="Results that open an incident (comma-separated)" field="incidentResults">
+      <f:textbox value="${instance.incidentResultsText}"/>
     </f:entry>
     <f:entry title="Retention period (months)" field="retentionMonths">
       <f:number min="1"/>
