@@ -23,9 +23,14 @@
     run would then execute their job with no approval and no window.
   </p>
   <p>
-    A blocked upstream run is refused quietly, because the trigger has nobody to show a message to,
-    although the upstream job surfaces the failure. If a chain stopped working unexpectedly, this
-    screen is the first thing to check, and the controller log carries a "Blocked
-    upstream-triggered run of job" line, at most once an hour per job (repeats are logged at FINE).
+    A blocked upstream run is refused without a message at the time, because the trigger has
+    nobody to show one to, although the upstream job surfaces the failure. It is not invisible
+    afterwards: while run control is on and this switch is checked, the job's main page shows a
+    notice naming <b>Block upstream triggers</b> and saying it is cleared here; each refusal writes
+    a <code>TRIGGER_BLOCKED</code> change record (at most one per job and cause kind per hour,
+    listed under Change Records and History and exported in <code>changes.csv</code>); and the
+    controller log carries a "Blocked upstream-triggered run of job" line at most once an hour per
+    job (repeats are logged at FINE). Unchecking this switch is itself a recorded configuration
+    change and, with change control on, needs a permission window.
   </p>
 </div>

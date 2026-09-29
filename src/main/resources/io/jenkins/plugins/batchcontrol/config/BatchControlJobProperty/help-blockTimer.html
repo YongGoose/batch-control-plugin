@@ -18,17 +18,25 @@
     restore it.
   </p>
   <p>
-    <b>If this job's cron did not fire, read this first.</b> A blocked timer run is refused
-    quietly, because an unattended trigger has nobody to show a message to. A locked job therefore
-    looks exactly like a job whose cron never fired, and three things tell those two cases apart:
+    <b>If this job's cron did not fire, read this first.</b> A blocked timer run is refused without
+    a message at the time, because an unattended trigger has nobody to show one to. It is not
+    invisible afterwards:
   </p>
   <ul>
-    <li>this screen — if <b>Block cron (timer) triggers</b> is checked while your definition says
-      otherwise, the lock is the reason;</li>
-    <li>the controller log — a refused timer run logs a "Blocked timer-triggered run of job"
-      line at most once an hour per job (repeats are logged at FINE), and a cron that never fired logs nothing at all;</li>
-    <li>the change history — the job has a <code>CREATE</code> record and no later
-      <code>CONFIGURE</code> record clearing the switches, which is positive evidence that nothing
-      has unlocked it since.</li>
+    <li>the job page — while run control is on and this switch is checked, the job's main page
+      shows a notice naming <b>Block cron (timer) triggers</b> and saying it is cleared here, in
+      the job configuration;</li>
+    <li>the change history — a refused timer run writes a <code>TRIGGER_BLOCKED</code> change
+      record (job, cause kind and the switch that blocked it), at most one per job and cause kind
+      per hour, listed under Change Records and History and exported in <code>changes.csv</code>;
+      a cron that never fired writes nothing;</li>
+    <li>the controller log — the same refusal logs a "Blocked timer-triggered run of job" line at
+      most once an hour per job (repeats are logged at FINE);</li>
+    <li>the job's own history — a <code>CREATE</code> record and no later <code>CONFIGURE</code>
+      record clearing the switches is positive evidence that nothing has unlocked it since.</li>
   </ul>
+  <p>
+    Unchecking this switch is itself a recorded configuration change and, with change control on,
+    needs a permission window.
+  </p>
 </div>

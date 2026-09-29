@@ -1,0 +1,40 @@
+<?jelly escape-by-default='true'?>
+<!-- #21: blocked unattended triggers are refused with nobody to tell, so the job page says so.
+     Rendered by the job main page for every action; nothing is shown unless a switch is on, run
+     control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches).
+     Only constant text and switch names are rendered; no script. -->
+<j:jelly xmlns:j="jelly:core">
+  <j:if test="${!empty(it.blockingSwitches)}">
+    <div class="jenkins-alert jenkins-alert-warning" role="status" style="margin-top: 1rem;">
+      <strong>Batch Control: unattended triggers of this job are blocked</strong>
+      <ul style="margin: 0.5rem 0;">
+        <j:if test="${it.timerBlocked}">
+          <li>
+            <b>Block cron (timer) triggers</b> (<code>blockTimer</code>) is on: scheduled cron
+            builds of this job are refused and do not run.
+          </li>
+        </j:if>
+        <j:if test="${it.upstreamBlocked}">
+          <li>
+            <b>Block upstream triggers</b> (<code>blockUpstream</code>) is on: builds triggered by
+            an upstream job are refused unless that job is listed in <b>Allowed upstream jobs</b>.
+          </li>
+        </j:if>
+      </ul>
+      <p style="margin: 0;">
+        To clear it, turn the switch off in the Batch Control section of the
+        <j:choose>
+          <j:when test="${it.canConfigure}"><a href="${rootURL}/${it.job.url}configure">job configuration</a>.</j:when>
+          <j:otherwise>job configuration.</j:otherwise>
+        </j:choose>
+        That change is recorded in the change history<j:if test="${it.changeControlEnabled}">
+          and, with change control on, needs a permission window
+          (<j:choose>
+            <j:when test="${it.links.grants}"><a href="${rootURL}/batch-control/grants/">Grants</a></j:when>
+            <j:otherwise>Grants</j:otherwise>
+          </j:choose>)</j:if>.
+        Refused attempts are listed as <code>TRIGGER_BLOCKED</code> change records.
+      </p>
+    </div>
+  </j:if>
+</j:jelly>

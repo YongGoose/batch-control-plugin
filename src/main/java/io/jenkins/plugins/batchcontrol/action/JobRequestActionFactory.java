@@ -11,7 +11,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Attaches the plugin's two per-job sidebar entries to every job.
+ * Attaches the plugin's two per-job sidebar entries, and the trigger-lock notice, to every job.
  *
  * <ul>
  *   <li>{@link JobRequestAction} — so {@code /job/<name>/batch-control/} is always routable; the
@@ -21,9 +21,11 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       no URL space and hides itself unless change control is on, the user holds
  *       {@code BatchControl/RequestGrant} and the user does not already hold
  *       {@code Item/Configure} here.</li>
+ *   <li>{@link JobTriggerLockAction} — no sidebar entry and no URL; its {@code jobMain.jelly}
+ *       shows the blocked-trigger notice of #21 on the job page when a switch is on.</li>
  * </ul>
  *
- * <p>Both are attached unconditionally and decide their own visibility, because a
+ * <p>All are attached unconditionally and decide their own visibility, because a
  * {@link TransientActionFactory} runs for reasons other than rendering a sidebar (URL routing,
  * API listings) and must not make visibility depend on which of those is happening.
  */
@@ -39,6 +41,7 @@ public class JobRequestActionFactory extends TransientActionFactory<Job> {
     @NonNull
     @Override
     public Collection<? extends Action> createFor(@NonNull Job target) {
-        return List.of(new JobRequestAction(target), new JobGrantRequestAction(target));
+        return List.of(new JobRequestAction(target), new JobGrantRequestAction(target),
+                new JobTriggerLockAction(target));
     }
 }
