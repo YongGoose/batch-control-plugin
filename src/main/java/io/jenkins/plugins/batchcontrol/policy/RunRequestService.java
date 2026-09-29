@@ -408,6 +408,8 @@ public final class RunRequestService {
             if (request.getStatus() == RequestStatus.APPROVED) {
                 request.setStatus(RequestStatus.EXECUTED);
                 request.setExecutedRunId(runId);
+                // Retention measures a request's last activity from this (security-10 S-09).
+                request.setExecutedAt(BatchClock.now());
                 store.saveRunRequest(request);
             }
         } finally {

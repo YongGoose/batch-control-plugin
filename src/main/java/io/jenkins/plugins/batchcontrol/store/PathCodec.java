@@ -22,10 +22,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p><b>Uniqueness (#25).</b> {@code encode} never emits {@code ~} raw (it becomes {@code %7E}), so
  * a shortened name always contains exactly one character no plain encoding contains and can never
- * equal the encoding of another, shorter name. Versions before #25 joined the shortened form with
- * {@code -}, which a plain encoding does emit: a job named after the decoded prefix, a dash and the
- * hash of a long name shared that long name's files. {@link #legacyShortened} still computes that
- * old form so a file written under it can be found and migrated.
+ * equal the encoding of another, shorter name. Unreleased builds joined the shortened form with
+ * {@code -}, which a plain encoding does emit; files in that form are neither read nor migrated
+ * (D-43): such a file can only be another item's plain encoding.
  */
 @Restricted(NoExternalUse.class)
 public final class PathCodec {
@@ -37,8 +36,6 @@ public final class PathCodec {
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
     /** Joins prefix and hash of a shortened name; never emitted raw by {@link #encode}. */
     private static final char SHORTENED_SEPARATOR = '~';
-    /** The pre-#25 separator, still emitted raw for plain names (collision-prone). */
-    private static final char LEGACY_SHORTENED_SEPARATOR = '-';
 
     private PathCodec() {
     }
@@ -50,22 +47,6 @@ public final class PathCodec {
 
     /** Encodes a job full name into a safe, deterministic, collision-free file-name segment. */
     public static String encode(String jobFullName) {
-        return encode(jobFullName, SHORTENED_SEPARATOR);
-    }
-
-    /**
-     * The file-name segment an earlier version (before #25) used for {@code jobFullName}, or
-     * {@code null} when the name is short enough that both versions agree. Only for finding and
-     * migrating files written under the old shortened form; never for writing.
-     */
-    public static String legacyShortened(String jobFullName) {
-        Objects.requireNonNull(jobFullName, "jobFullName");
-        String current = encode(jobFullName, SHORTENED_SEPARATOR);
-        String legacy = encode(jobFullName, LEGACY_SHORTENED_SEPARATOR);
-        return legacy.equals(current) ? null : legacy;
-    }
-
-    private static String encode(String jobFullName, char shortenedSeparator) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         StringBuilder sb = new StringBuilder(jobFullName.length() + 16);
         for (byte b : jobFullName.getBytes(StandardCharsets.UTF_8)) {
@@ -84,7 +65,7 @@ public final class PathCodec {
             if (lastPercent > SHORTENED_PREFIX_LENGTH - 3) {
                 prefix = prefix.substring(0, lastPercent);
             }
-            encoded = prefix + shortenedSeparator + sha256Hex(jobFullName);
+            encoded = prefix + SHORTENED_SEPARATOR + sha256Hex(jobFullName);
         }
         return encoded;
     }

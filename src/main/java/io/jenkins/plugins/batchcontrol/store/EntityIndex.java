@@ -73,6 +73,7 @@ final class EntityIndex {
         last = later(last, request.getDecidedAt());
         last = later(last, request.getQueuedAt());
         last = later(last, request.getExpiryBase());
+        last = later(last, request.getExecutedAt());
         for (RunRequest.ApproverChange change : request.getApproverChanges()) {
             last = later(last, change.getAt());
         }

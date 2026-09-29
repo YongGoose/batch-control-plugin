@@ -26,6 +26,9 @@ final class ReverseLineReader implements Closeable {
 
     private static final int CHUNK_SIZE = 64 * 1024;
 
+    /** Longest line exposed (security-10 S-04); longer lines are skipped and counted. */
+    static final int MAX_LINE_BYTES = 1024 * 1024;
+
     private final SeekableByteChannel channel;
     private final byte[] chunk = new byte[CHUNK_SIZE];
     /** File offset of {@code chunk[0]}; everything before it is still unread. */
@@ -39,6 +42,9 @@ final class ReverseLineReader implements Closeable {
     private byte[] carry = new byte[256];
     private int carryStart = carry.length;
     private boolean done;
+    /** Whether the line being assembled has exceeded {@link #MAX_LINE_BYTES}. */
+    private boolean discarding;
+    private int oversized;
 
     private byte[] lineBuffer;
     private int lineOffset;
@@ -54,9 +60,12 @@ final class ReverseLineReader implements Closeable {
         while (true) {
             for (int i = index - 1; i >= 0; i--) {
                 if (chunk[i] == '\n') {
-                    expose(i + 1, index);
+                    boolean exposed = expose(i + 1, index);
                     index = i;
-                    return true;
+                    if (exposed) {
+                        return true;
+                    }
+                    i = index;
                 }
             }
             if (position == 0) {
@@ -64,9 +73,9 @@ final class ReverseLineReader implements Closeable {
                     return false;
                 }
                 done = true;
-                expose(0, index);
+                boolean exposed = expose(0, index);
                 index = 0;
-                return true;
+                return exposed;
             }
             prependToCarry(0, index);
             int n = (int) Math.min(CHUNK_SIZE, position);
@@ -105,13 +114,29 @@ final class ReverseLineReader implements Closeable {
         return true;
     }
 
-    private void expose(int from, int to) {
-        if (carryStart == carry.length) {
+    /** Lines longer than {@link #MAX_LINE_BYTES} skipped so far. */
+    int oversized() {
+        return oversized;
+    }
+
+    /** Exposes the line; {@code false} if it was too long and has been skipped instead. */
+    private boolean expose(int from, int to) {
+        if (carryStart == carry.length && !discarding) {
+            if (to - from > MAX_LINE_BYTES) {
+                oversized++;
+                return false;
+            }
             lineBuffer = chunk;
             lineOffset = from;
             lineLength = to - from;
         } else {
             prependToCarry(from, to);
+            if (discarding) {
+                discarding = false;
+                carryStart = carry.length;
+                oversized++;
+                return false;
+            }
             lineBuffer = carry;
             lineOffset = carryStart;
             lineLength = carry.length - carryStart;
@@ -121,11 +146,18 @@ final class ReverseLineReader implements Closeable {
         if (lineLength > 0 && lineBuffer[lineOffset + lineLength - 1] == '\r') {
             lineLength--;
         }
+        return true;
     }
 
     private void prependToCarry(int from, int to) {
         int n = to - from;
-        if (n == 0) {
+        if (n == 0 || discarding) {
+            return;
+        }
+        if ((long) carry.length - carryStart + n > MAX_LINE_BYTES) {
+            // Drop what was assembled and ignore the rest of this line up to its start.
+            discarding = true;
+            carryStart = carry.length;
             return;
         }
         if (carryStart < n) {

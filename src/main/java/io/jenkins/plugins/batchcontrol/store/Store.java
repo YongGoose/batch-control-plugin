@@ -98,6 +98,14 @@ public interface Store {
     RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Predicate<? super RunRecord> filter,
                                          int offset, int limit, int maxScanned);
 
+    /**
+     * As {@link #pageRunRecords(Collection, Predicate, int, int, int)}, counting only records whose
+     * start time lies inside {@code period} toward {@code maxScanned} (security-10 S-03).
+     */
+    RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Period period,
+                                         Predicate<? super RunRecord> filter,
+                                         int offset, int limit, int maxScanned);
+
     /** Run counters of one month, maintained incrementally from the bucket (#13). */
     RunMonthStats runMonthStats(YearMonth month);
 
@@ -112,6 +120,11 @@ public interface Store {
      * are read for the returned rows only.
      */
     RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months,
+                                               Predicate<? super ChangeRecord> filter,
+                                               int offset, int limit, int maxScanned);
+
+    /** As {@link #pageRunRecords(Collection, Period, Predicate, int, int, int)} for change records. */
+    RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months, Period period,
                                                Predicate<? super ChangeRecord> filter,
                                                int offset, int limit, int maxScanned);
 
@@ -139,6 +152,16 @@ public interface Store {
      * time, then id); every index line read counts against {@code maxScanned}.
      */
     RecordPage<Incident> pageIncidents(Collection<YearMonth> months, Predicate<? super Incident> filter,
+                                       int offset, int limit, int maxScanned);
+
+    /**
+     * As {@link #pageRunRecords(Collection, Period, Predicate, int, int, int)} for incidents:
+     * {@code indexFilter} is tested on the index line and an incident's XML is loaded only when it
+     * passes (security-10 S-06); {@code filter} then sees the loaded incident.
+     */
+    RecordPage<Incident> pageIncidents(Collection<YearMonth> months, Period period,
+                                       Predicate<? super IncidentSummary> indexFilter,
+                                       Predicate<? super Incident> filter,
                                        int offset, int limit, int maxScanned);
 
     /**

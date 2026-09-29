@@ -16,26 +16,29 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * buffer, no objects); values are materialised only when asked for, and short repeated strings
  * (job names, users, results, types) come from a small per-query cache instead of a new
  * {@code String} per line. A line that is not a well-formed JSON object makes {@link #scan}
- * return {@code false}; the caller skips it, as the fail-soft list reads do.
+ * return {@code false}; the caller then re-reads it with json-lib before skipping it, so this
+ * reader can only be faster than the reference parser, never stricter (security-10 S-02).
  *
  * <p>One instance per query; not thread-safe.
  */
 @Restricted(NoExternalUse.class)
 final class JsonLineScanner {
 
-    private static final int MAX_MEMBERS = 64;
+    private static final int INITIAL_MEMBERS = 16;
     private static final int CACHE_SIZE = 1024;
     private static final int MAX_CACHED_LENGTH = 64;
 
     private byte[] buf;
     private int count;
-    private final int[] keyStart = new int[MAX_MEMBERS];
-    private final int[] keyEnd = new int[MAX_MEMBERS];
+    // Member tables grow on demand (security-10 S-02): a record with many parameters must never be
+    // rejected for its size. They only grow to the widest line of the query.
+    private int[] keyStart = new int[INITIAL_MEMBERS];
+    private int[] keyEnd = new int[INITIAL_MEMBERS];
     /** Value range; for a string, the bytes between the quotes. */
-    private final int[] valueStart = new int[MAX_MEMBERS];
-    private final int[] valueEnd = new int[MAX_MEMBERS];
+    private int[] valueStart = new int[INITIAL_MEMBERS];
+    private int[] valueEnd = new int[INITIAL_MEMBERS];
     /** '"' string (no escapes), '\\' string with escapes, 'n' null, '{' object, '0' other. */
-    private final byte[] kind = new byte[MAX_MEMBERS];
+    private byte[] kind = new byte[INITIAL_MEMBERS];
 
     private final String[] cache = new String[CACHE_SIZE];
     private final byte[][] cacheBytes = new byte[CACHE_SIZE][];
@@ -77,8 +80,8 @@ final class JsonLineScanner {
                 skipWs();
                 expect(':');
                 skipWs();
-                if (count == MAX_MEMBERS) {
-                    return false;
+                if (count == keyStart.length) {
+                    grow();
                 }
                 keyStart[count] = ks;
                 keyEnd[count] = ke;
@@ -95,6 +98,27 @@ final class JsonLineScanner {
             }
         } catch (IllegalStateException e) {
             return false;
+        }
+    }
+
+    private void grow() {
+        int n = keyStart.length * 2;
+        keyStart = Arrays.copyOf(keyStart, n);
+        keyEnd = Arrays.copyOf(keyEnd, n);
+        valueStart = Arrays.copyOf(valueStart, n);
+        valueEnd = Arrays.copyOf(valueEnd, n);
+        kind = Arrays.copyOf(kind, n);
+    }
+
+    /**
+     * A numeric member as a long, or {@link Long#MIN_VALUE} when absent or not an integer (the
+     * caller then parses the whole line and lets the record decide).
+     */
+    long optLong(byte[] key) {
+        try {
+            return requireLong(key);
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            return Long.MIN_VALUE;
         }
     }
 

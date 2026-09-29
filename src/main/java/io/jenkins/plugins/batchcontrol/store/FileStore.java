@@ -1,8 +1,5 @@
 package io.jenkins.plugins.batchcontrol.store;
 
-import hudson.model.Item;
-import hudson.model.Items;
-import hudson.security.ACL;
 import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -50,6 +47,7 @@ import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.ToLongFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -89,6 +87,15 @@ public final class FileStore implements Store {
 
     /** Bound on the month-summary cache entries (one per month file ever summarised). */
     private static final int MAX_STATS_ENTRIES = 256;
+
+    /**
+     * Bytes of out-of-period lines one page query may skip before it reports truncation
+     * (security-10 S-03): about a month at the SPEC section 6 volume.
+     */
+    private static final long MAX_SKIPPED_BYTES = 128L * 1024 * 1024;
+
+    /** Tolerance for appends that land slightly out of time order (concurrent writers). */
+    private static final long APPEND_ORDER_SLACK_MILLIS = 60_000L;
 
     /** Chunk size of the incremental month-summary reader. */
     private static final int STATS_CHUNK = 64 * 1024;
@@ -296,26 +303,13 @@ public final class FileStore implements Store {
         Objects.requireNonNull(configXml, "configXml");
         writeTextAtomically(snapshotDir(), PathCodec.encode(jobFullName) + ".xml", configXml,
                 "config snapshot of " + jobFullName);
-        // A file under the pre-#25 shortened form is NOT deleted here: that name is also the plain
-        // encoding of another possible item, whose own baseline it may be. Only the startup
-        // migration, which sees every live item, decides what such a file is.
     }
 
     @Override
     public String loadConfigSnapshot(String jobFullName) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
-        String text = readTextOrNull(file);
-        if (text == null) {
-            // Written by a version before #25 and not migrated at startup (the item was not live
-            // then). Read-only: reached only while this item has no current-form baseline, and
-            // the first save gives it one.
-            String legacy = PathCodec.legacyShortened(jobFullName);
-            if (legacy != null && !isLiveItemName(PathCodec.decode(legacy))) {
-                text = readTextOrNull(PathCodec.resolveUnder(snapshotDir(), legacy + ".xml"));
-            }
-        }
-        return text;
+        return readTextOrNull(file);
     }
 
     @Override
@@ -323,82 +317,6 @@ public final class FileStore implements Store {
         Objects.requireNonNull(jobFullName, "jobFullName");
         deleteFile(PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml"),
                 "config snapshot of " + jobFullName);
-    }
-
-    /**
-     * Whether an item named {@code fullName} exists. A pre-#25 shortened name is also the plain
-     * encoding of the item named by its decoding; when that item exists the file is its own
-     * baseline, never a legacy one (#25). Evaluated for every item regardless of the caller's
-     * Item/Read (a hidden item's file is still not another item's baseline): the lookup passes
-     * the system authentication as a parameter and does not switch the thread's context.
-     */
-    private static boolean isLiveItemName(String fullName) {
-        Jenkins jenkins = Jenkins.getInstanceOrNull();
-        if (jenkins == null) {
-            return true; // cannot tell: treat as taken, so nothing is misread
-        }
-        for (Item item : Items.allItems2(ACL.SYSTEM2, jenkins, Item.class)) {
-            if (fullName.equals(item.getFullName())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * One-time migration of config snapshots written under the pre-#25 shortened form (called at
-     * startup with the full name of every loaded item). A legacy file is renamed to the current
-     * form, unless another live item's plain encoding equals the legacy name: then both items
-     * shared the file and nobody can tell whose configuration it holds, so it is deleted and both
-     * items start from a fresh baseline (a missing baseline is safe, a wrong one is not).
-     *
-     * @return the number of legacy files renamed or deleted
-     */
-    public int migrateLegacySnapshots(Collection<String> liveFullNames) {
-        Path dir = snapshotDir();
-        if (!Files.isDirectory(dir)) {
-            return 0;
-        }
-        Set<String> liveEncodings = new HashSet<>();
-        for (String name : liveFullNames) {
-            liveEncodings.add(PathCodec.encode(name));
-        }
-        int migrated = 0;
-        for (String name : liveFullNames) {
-            String legacy = PathCodec.legacyShortened(name);
-            if (legacy == null) {
-                continue;
-            }
-            Path legacyFile = PathCodec.resolveUnder(dir, legacy + ".xml");
-            if (!Files.isRegularFile(legacyFile)) {
-                continue;
-            }
-            Path current = PathCodec.resolveUnder(dir, PathCodec.encode(name) + ".xml");
-            try {
-                if (liveEncodings.contains(legacy)) {
-                    LOGGER.warning(() -> "Deleting config snapshot " + legacyFile.getFileName()
-                            + ": it was shared by the long-named item '" + name + "' and another"
-                            + " item whose name encodes identically under the pre-#25 scheme;"
-                            + " both start from a fresh baseline");
-                    deleteFile(legacyFile, "shared legacy config snapshot");
-                } else if (Files.exists(current)) {
-                    deleteFile(legacyFile, "obsolete legacy config snapshot");
-                } else {
-                    ReentrantLock lock = lockFor(current);
-                    lock.lock();
-                    try {
-                        moveAtomically(legacyFile, current);
-                    } finally {
-                        lock.unlock();
-                    }
-                }
-                migrated++;
-            } catch (IOException | UncheckedIOException e) {
-                LOGGER.log(Level.WARNING, e, () -> "Could not migrate legacy config snapshot "
-                        + legacyFile.getFileName());
-            }
-        }
-        return migrated;
     }
 
     // ---------------------------------------------------------------- run and change records
@@ -418,9 +336,23 @@ public final class FileStore implements Store {
     public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months,
                                                 Predicate<? super RunRecord> filter,
                                                 int offset, int limit, int maxScanned) {
+        return pageRunRecords(months, Period.ALL, filter, offset, limit, maxScanned);
+    }
+
+    @Override
+    public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Period period,
+                                                Predicate<? super RunRecord> filter,
+                                                int offset, int limit, int maxScanned) {
         Comparator<RunRecord> newestFirst = Comparator.comparing(RunRecord::getStartedAt)
                 .thenComparing(RunRecord::getRunId).reversed();
-        return page(runsDir(), months, FileStore::runRecordFromScanner, filter, newestFirst,
+        // A run is appended when it completes: start + duration orders the file.
+        ToLongFunction<JsonLineScanner> appendedAt = line -> {
+            long started = line.optLong(K_STARTED);
+            long duration = line.optLong(K_DURATION);
+            return started == Long.MIN_VALUE || duration == Long.MIN_VALUE ? Long.MAX_VALUE : started + duration;
+        };
+        return page(runsDir(), months, period, K_STARTED, appendedAt, FileStore::runRecordFromScanner,
+                FileStore::runRecordFromJson, RunRecord::getStartedAt, filter, newestFirst,
                 offset, limit, maxScanned);
     }
 
@@ -462,18 +394,30 @@ public final class FileStore implements Store {
             long consumed = entry.offset;
             long position = entry.offset;
             RunMonthStats stats = entry.stats;
+            boolean oversized = false;
             int read;
             while ((read = channel.read(buffer)) > 0) {
                 byte[] bytes = buffer.array();
                 for (int i = 0; i < read; i++) {
                     position++;
                     if (bytes[i] != '\n') {
-                        line.write(bytes[i]);
+                        if (line.size() < ReverseLineReader.MAX_LINE_BYTES) {
+                            line.write(bytes[i]);
+                        } else {
+                            oversized = true; // S-04: the rest of this line is dropped
+                        }
                         continue;
                     }
-                    String text = line.toString(StandardCharsets.UTF_8).trim();
+                    boolean skip = oversized;
+                    oversized = false;
+                    String text = skip ? "" : line.toString(StandardCharsets.UTF_8).trim();
                     line.reset();
                     consumed = position;
+                    if (skip) {
+                        LOGGER.warning(() -> "Month summary skipped a line longer than "
+                                + ReverseLineReader.MAX_LINE_BYTES + " bytes in " + file);
+                        continue;
+                    }
                     if (text.isEmpty()) {
                         continue;
                     }
@@ -533,9 +477,17 @@ public final class FileStore implements Store {
     public RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months,
                                                       Predicate<? super ChangeRecord> filter,
                                                       int offset, int limit, int maxScanned) {
+        return pageChangeRecords(months, Period.ALL, filter, offset, limit, maxScanned);
+    }
+
+    @Override
+    public RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months, Period period,
+                                                      Predicate<? super ChangeRecord> filter,
+                                                      int offset, int limit, int maxScanned) {
         Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
                 .thenComparing(ChangeRecord::getId).reversed();
-        RecordPage<ChangeRecord> page = page(changesDir(), months, FileStore::changeRecordFromScanner,
+        RecordPage<ChangeRecord> page = page(changesDir(), months, period, K_AT, line -> line.optLong(K_AT),
+                FileStore::changeRecordFromScanner, FileStore::changeRecordFromJson, ChangeRecord::getAt,
                 filter, newestFirst, offset, limit, maxScanned);
         // Patches only for the rendered rows (the filter never looks at the diff text).
         page.getItems().forEach(this::attachDiff);
@@ -585,14 +537,44 @@ public final class FileStore implements Store {
     public RecordPage<Incident> pageIncidents(Collection<YearMonth> months,
                                               Predicate<? super Incident> filter,
                                               int offset, int limit, int maxScanned) {
+        return pageIncidents(months, Period.ALL, summary -> true, filter, offset, limit, maxScanned);
+    }
+
+    @Override
+    public RecordPage<Incident> pageIncidents(Collection<YearMonth> months, Period period,
+                                              Predicate<? super IncidentSummary> indexFilter,
+                                              Predicate<? super Incident> filter,
+                                              int offset, int limit, int maxScanned) {
         Comparator<Incident> newestFirst = Comparator
                 .comparing((Incident i) -> i.getCreatedAt() == null ? Instant.EPOCH : i.getCreatedAt())
                 .thenComparing(Incident::getId).reversed();
-        Function<JsonLineScanner, Incident> parser = line -> {
-            String id = line.optString(K_ID, false);
-            return id == null ? null : loadIncident(id);
-        };
-        return page(incidentIndexDir(), months, parser, filter, newestFirst, offset, limit, maxScanned);
+        // The index fields are checked first; the XML is loaded only for lines that pass (S-06).
+        Function<IncidentSummary, Incident> load = summary ->
+                summary == null || !indexFilter.test(summary) ? null : loadIncident(summary.id());
+        Function<JsonLineScanner, Incident> fast = line -> load.apply(incidentSummaryFromScanner(line));
+        Function<JSONObject, Incident> full = json -> load.apply(incidentSummaryFromJson(json));
+        return page(incidentIndexDir(), months, period, K_CREATED, line -> line.optLong(K_CREATED), fast, full,
+                Incident::getCreatedAt, filter, newestFirst, offset, limit, maxScanned);
+    }
+
+    private static IncidentSummary incidentSummaryFromScanner(JsonLineScanner line) {
+        String id = line.optString(K_ID, false);
+        if (id == null) {
+            return null;
+        }
+        long created = line.optLong(K_CREATED);
+        return new IncidentSummary(id, line.optString(K_RUN_ID, false), line.optString(K_JOB, true),
+                line.optString(K_RESULT, true), created == Long.MIN_VALUE ? null : Instant.ofEpochMilli(created));
+    }
+
+    private static IncidentSummary incidentSummaryFromJson(JSONObject json) {
+        String id = optString(json, "id");
+        if (id == null) {
+            return null;
+        }
+        Instant created = json.has("createdAt") ? Instant.ofEpochMilli(json.getLong("createdAt")) : null;
+        return new IncidentSummary(id, optString(json, "runId"), optString(json, "jobFullName"),
+                optString(json, "result"), created);
     }
 
     // ---------------------------------------------------------------- retention (SPEC item 12)
@@ -647,13 +629,18 @@ public final class FileStore implements Store {
         try {
             Path indexFile = PathCodec.resolveUnder(incidentIndexDir(), monthFileName(month));
             if (Files.isRegularFile(indexFile)) {
-                try (BufferedReader reader = Files.newBufferedReader(indexFile, StandardCharsets.UTF_8)) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        String id = incidentIdOrNull(line);
+                // Order is irrelevant here; the reverse reader caps line length (S-04).
+                JsonLineScanner scanner = new JsonLineScanner();
+                try (ReverseLineReader reader = new ReverseLineReader(indexFile)) {
+                    while (reader.next()) {
+                        String id = scanner.scan(reader.buffer(), reader.offset(), reader.length())
+                                ? scanner.optString(K_ID, false) : null;
                         if (id != null) {
-                            deleted |= deleteFile(PathCodec.resolveUnder(incidentDir(), id + ".xml"), "incident " + id);
+                            deleted |= deleteIncidentXml(id);
                         }
+                    }
+                    if (reader.oversized() > 0) {
+                        LOGGER.warning(() -> "Skipped over-long lines in " + indexFile);
                     }
                 } catch (NoSuchFileException e) {
                     // Deleted concurrently.
@@ -682,14 +669,11 @@ public final class FileStore implements Store {
         return deleted;
     }
 
-    private static String incidentIdOrNull(String line) {
-        if (line.isBlank()) {
-            return null;
-        }
+    private boolean deleteIncidentXml(String id) {
         try {
-            return optString(JSONObject.fromObject(line), "id");
-        } catch (RuntimeException e) {
-            return null;
+            return deleteFile(PathCodec.resolveUnder(incidentDir(), id + ".xml"), "incident " + id);
+        } catch (IllegalArgumentException e) {
+            return false; // not a valid id; nothing of ours to delete
         }
     }
 
@@ -764,9 +748,8 @@ public final class FileStore implements Store {
     }
 
     /**
-     * Month bucket names are ASCII ({@code \d} in Java regex is ASCII-only), so a file written
-     * under a default locale with other digits (before #17) is not recognised here; see
-     * {@link #normalizeMonthFileNames()}.
+     * Month bucket names are ASCII ({@code \d} in Java regex is ASCII-only). Names with other
+     * digits were only ever written by unreleased builds and are ignored (D-43).
      */
     private static YearMonth parseMonthFileName(String fileName) {
         if (!fileName.endsWith(".jsonl")) {
@@ -781,83 +764,6 @@ public final class FileStore implements Store {
         } catch (java.time.format.DateTimeParseException e) {
             return null;
         }
-    }
-
-    /**
-     * One-time repair of month buckets written before #17 under a default locale whose digits are
-     * not ASCII (e.g. {@code ٢٠٢٦-٠٩.jsonl}): each is renamed to its ASCII name, or appended to
-     * the ASCII bucket when that exists too, so retention and the screens see those records again.
-     *
-     * @return the number of bucket files repaired
-     */
-    public int normalizeMonthFileNames() {
-        int repaired = 0;
-        for (Path dir : monthDirs()) {
-            for (Path file : listMonthFiles(dir)) {
-                Path fileName = file.getFileName();
-                String name = fileName == null ? "" : fileName.toString();
-                if (parseMonthFileName(name) != null) {
-                    continue;
-                }
-                YearMonth month = parseAnyDigitMonth(name);
-                if (month == null) {
-                    continue;
-                }
-                Path target = PathCodec.resolveUnder(dir, monthFileName(month));
-                ReentrantLock lock = lockFor(target);
-                lock.lock();
-                try {
-                    if (Files.exists(target)) {
-                        byte[] content = Files.readAllBytes(file);
-                        byte[] separator = System.lineSeparator().getBytes(StandardCharsets.UTF_8);
-                        Files.write(target, separator, StandardOpenOption.APPEND);
-                        Files.write(target, content, StandardOpenOption.APPEND);
-                        Files.delete(file);
-                    } else {
-                        moveAtomically(file, target);
-                    }
-                    repaired++;
-                    LOGGER.info(() -> "Renamed month bucket " + name + " to " + target.getFileName()
-                            + " (written under a non-ASCII-digit default locale)");
-                } catch (IOException e) {
-                    LOGGER.log(Level.WARNING, e, () -> "Could not repair month bucket " + file);
-                } finally {
-                    lock.unlock();
-                }
-            }
-        }
-        return repaired;
-    }
-
-    /** {@code YYYY-MM.jsonl} with digits of any script, or {@code null}. */
-    private static YearMonth parseAnyDigitMonth(String fileName) {
-        if (!fileName.endsWith(".jsonl")) {
-            return null;
-        }
-        String base = fileName.substring(0, fileName.length() - ".jsonl".length());
-        if (base.length() != 7 || base.charAt(4) != '-') {
-            return null;
-        }
-        int year = 0;
-        int monthValue = 0;
-        for (int i = 0; i < 7; i++) {
-            if (i == 4) {
-                continue;
-            }
-            int digit = Character.digit(base.charAt(i), 10);
-            if (digit < 0) {
-                return null;
-            }
-            if (i < 4) {
-                year = year * 10 + digit;
-            } else {
-                monthValue = monthValue * 10 + digit;
-            }
-        }
-        if (monthValue < 1 || monthValue > 12) {
-            return null;
-        }
-        return YearMonth.of(year, monthValue);
     }
 
     // ---------------------------------------------------------------- entity index (#13)
@@ -1078,21 +984,38 @@ public final class FileStore implements Store {
 
     /**
      * The bounded page query behind the {@code page*} methods (#13). Months are read newest
-     * first and every file from its end, so the newest records are read first; reading stops at
-     * {@code maxScanned} records. Only the {@code offset + limit} newest matches are held (a
-     * bounded heap), sorted exactly by {@code newestFirst}.
+     * first and every file from its end, so the newest records come first.
+     *
+     * <ul>
+     *   <li>Only records inside {@code period} count toward {@code maxScanned} (security-10 S-03).
+     *       Their timestamp ({@code timeKey}) is read from the raw bytes, so a line outside the
+     *       period is skipped unparsed; newer lines draw on a separate byte budget
+     *       ({@link #MAX_SKIPPED_BYTES}), and reading stops at the first line appended
+     *       ({@code appendedAt}) before the period starts, since every earlier line is older.</li>
+     *   <li>A line the fast scanner rejects is re-read with json-lib before it is skipped, so the
+     *       fast path is never stricter than the reference parser (S-02).</li>
+     *   <li>Lines over {@link ReverseLineReader#MAX_LINE_BYTES} are skipped and logged once (S-04).</li>
+     *   <li>Only the {@code offset + limit} newest matches are held (a bounded heap), sorted exactly
+     *       by {@code newestFirst}.</li>
+     * </ul>
      */
-    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Function<JsonLineScanner, T> parser,
-                                   Predicate<? super T> filter, Comparator<T> newestFirst,
-                                   int offset, int limit, int maxScanned) {
+    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Period period, byte[] timeKey,
+                                   ToLongFunction<JsonLineScanner> appendedAt,
+                                   Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
+                                   Function<T, Instant> timeOf, Predicate<? super T> filter,
+                                   Comparator<T> newestFirst, int offset, int limit, int maxScanned) {
         int from = Math.max(0, offset);
         int size = Math.max(0, limit);
         int cap = Math.max(0, maxScanned);
         int keep = (int) Math.min((long) from + size, cap);
         PriorityQueue<T> newest = new PriorityQueue<>(Math.max(1, Math.min(keep, 1024)), newestFirst.reversed());
+        long stopBefore = period.from() == null ? Long.MIN_VALUE
+                : period.from().toEpochMilli() - APPEND_ORDER_SLACK_MILLIS;
         int scanned = 0;
         int matched = 0;
-        int skipped = 0;
+        int unreadable = 0;
+        int oversized = 0;
+        long skippedBytes = 0;
         boolean truncated = false;
         JsonLineScanner scanner = new JsonLineScanner();
         List<YearMonth> ordered = new ArrayList<>(new TreeSet<>(months).descendingSet());
@@ -1103,46 +1026,81 @@ public final class FileStore implements Store {
                 continue;
             }
             try (ReverseLineReader reader = new ReverseLineReader(file)) {
-                while (reader.next()) {
-                    if (reader.isBlank()) {
-                        continue;
-                    }
-                    if (scanned >= cap) {
-                        truncated = true;
-                        break scan;
-                    }
-                    scanned++;
-                    T value;
-                    try {
-                        if (!scanner.scan(reader.buffer(), reader.offset(), reader.length())) {
-                            throw new IllegalArgumentException("not a JSON object");
+                try {
+                    while (reader.next()) {
+                        if (reader.isBlank()) {
+                            continue;
                         }
-                        value = parser.apply(scanner);
-                    } catch (RuntimeException e) {
-                        if (skipped++ < 10) {
-                            LOGGER.log(Level.WARNING, "Skipping unparseable line of {0}: {1}",
-                                    new Object[] {file, e.getClass().getName()});
+                        T value = null;
+                        boolean parsed = false;
+                        if (scanner.scan(reader.buffer(), reader.offset(), reader.length())) {
+                            long at = scanner.optLong(timeKey);
+                            if (at != Long.MIN_VALUE && (period.isAfter(at) || period.isBefore(at))) {
+                                if (period.isBefore(at) && appendedAt.applyAsLong(scanner) < stopBefore) {
+                                    break scan; // every earlier line, in this and older months, is older
+                                }
+                                skippedBytes += reader.length();
+                                if (skippedBytes > MAX_SKIPPED_BYTES) {
+                                    truncated = true;
+                                    break scan;
+                                }
+                                continue;
+                            }
+                            try {
+                                value = fastParser.apply(scanner);
+                                parsed = true;
+                            } catch (RuntimeException e) {
+                                // fall through to the reference parser
+                            }
                         }
-                        continue;
-                    }
-                    if (value == null || !filter.test(value)) {
-                        continue;
-                    }
-                    matched++;
-                    if (keep > 0) {
-                        if (newest.size() < keep) {
-                            newest.add(value);
-                        } else if (newestFirst.compare(value, newest.peek()) < 0) {
-                            newest.poll();
-                            newest.add(value);
+                        if (!parsed) {
+                            try {
+                                String text = new String(reader.buffer(), reader.offset(), reader.length(),
+                                        StandardCharsets.UTF_8);
+                                value = fullParser.apply(JSONObject.fromObject(text));
+                            } catch (RuntimeException e) {
+                                if (unreadable++ == 0) {
+                                    LOGGER.log(Level.WARNING, "Skipping unparseable line(s) of {0}: {1}",
+                                            new Object[] {file, e.getClass().getName()});
+                                }
+                                continue;
+                            }
+                            Instant at = value == null ? null : timeOf.apply(value);
+                            if (at != null && (period.isAfter(at.toEpochMilli()) || period.isBefore(at.toEpochMilli()))) {
+                                continue;
+                            }
+                        }
+                        if (scanned >= cap) {
+                            truncated = true;
+                            break scan;
+                        }
+                        scanned++;
+                        if (value == null || !filter.test(value)) {
+                            continue;
+                        }
+                        matched++;
+                        if (keep > 0) {
+                            if (newest.size() < keep) {
+                                newest.add(value);
+                            } else if (newestFirst.compare(value, newest.peek()) < 0) {
+                                newest.poll();
+                                newest.add(value);
+                            }
                         }
                     }
+                } finally {
+                    oversized += reader.oversized();
                 }
             } catch (NoSuchFileException e) {
                 // Deleted by retention between the check and the read.
             } catch (IOException e) {
                 throw new UncheckedIOException("Failed to read " + file, e);
             }
+        }
+        if (oversized > 0) {
+            int count = oversized;
+            LOGGER.warning(() -> "Skipped " + count + " record line(s) longer than "
+                    + ReverseLineReader.MAX_LINE_BYTES + " bytes in " + dir);
         }
         List<T> sorted = new ArrayList<>(newest);
         sorted.sort(newestFirst);
@@ -1205,6 +1163,7 @@ public final class FileStore implements Store {
     private static final byte[] K_GRANT_ID = key("grantId");
     private static final byte[] K_DIFF = key("diff");
     private static final byte[] K_DETAIL = key("detail");
+    private static final byte[] K_CREATED = key("createdAt");
 
     /** The page-query twin of {@link #runRecordFromJson} (same fields, same required ones). */
     private static RunRecord runRecordFromScanner(JsonLineScanner line) {
