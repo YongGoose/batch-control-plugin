@@ -201,9 +201,19 @@ public class GrantSelfGrantFeedbackTest {
 
     /** The D-48 message: item, authorization entries not kept, temporary grant, other changes saved, ask an administrator. */
     private static void assertFeedback(String what, String text, FreeStyleProject job) {
+        assertGuardFeedback(what, text, job.getFullName(), job.getFullDisplayName());
+    }
+
+    /**
+     * The D-48 message, shared with the older D-35c rows (T-02-35, T-08-47): the item is named by
+     * one of {@code itemNames} (full name or full display name), the authorization entries were not
+     * kept, why, the other changes were saved, ask an administrator; no crash text.
+     */
+    static void assertGuardFeedback(String what, String text, String... itemNames) {
         String lower = text.toLowerCase(Locale.ROOT);
         String shown = UsabilityFixtures.excerpt(text);
-        assertTrue(text.contains(job.getFullName()), what + ": the message must name the item: " + shown);
+        assertTrue(Arrays.stream(itemNames).anyMatch(text::contains), what + ": the message must name the item "
+                + Arrays.toString(itemNames) + ": " + shown);
         assertTrue(lower.contains("authoriz"), what + ": the message must speak of the authorization entries: " + shown);
         assertTrue(NOT_KEPT.matcher(text).find(), what + ": the message must say the authorization entries were not"
                 + " kept: " + shown);

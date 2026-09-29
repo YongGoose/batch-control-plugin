@@ -99,7 +99,13 @@ public class GrantViolationDetailTest {
         int refused = createItem("bob", "other-name", MINIMAL_JOB_XML);
         assertTrue(refused >= 400 && refused < 500, "fixture: the non-matching creation must be refused, got " + refused);
         // 2. a creation payload carrying an authorization property (the item is created, the property removed)
-        assertTrue(createItem("bob", "app-1", PAYLOAD_JOB_XML) < 400, "fixture: the matching creation must succeed");
+        // D-48 ruling: the item is created, its payload property is stripped, and bob is told with
+        // a 403 and the D-48 message (note 153)
+        org.htmlunit.Page payload = createItemPage("bob", "app-1", PAYLOAD_JOB_XML);
+        assertEquals(403, payload.getWebResponse().getStatusCode(), "a creation whose payload authorization property"
+                + " the guard stripped must answer 403 (D-48), got " + payload.getWebResponse().getStatusCode());
+        GrantSelfGrantFeedbackTest.assertGuardFeedback("createItem with an authorization payload",
+                UsabilityFixtures.text(payload), "team/app-1", "team » app-1");
         assertNotNull(team.getItem("app-1"), "fixture: team/app-1 must exist");
         // 3. renaming the created item to a non-matching name
         List<NameValuePair> rename = new ArrayList<>();
@@ -140,13 +146,17 @@ public class GrantViolationDetailTest {
     // ---------------------------------------------------------------- helpers
 
     private int createItem(String userId, String name, String xml) throws Exception {
+        return createItemPage(userId, name, xml).getWebResponse().getStatusCode();
+    }
+
+    private org.htmlunit.Page createItemPage(String userId, String name, String xml) throws Exception {
         JenkinsRule.WebClient wc = client(j, userId);
         URL url = new URL(wc.createCrumbedUrl(team.getUrl() + "createItem").toExternalForm()
                 + "&name=" + URLEncoder.encode(name, StandardCharsets.UTF_8));
         WebRequest request = new WebRequest(url, HttpMethod.POST);
         request.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
         request.setRequestBody(xml);
-        return wc.getPage(request).getWebResponse().getStatusCode();
+        return wc.getPage(request);
     }
 
     private int postConfigXml(String userId, FreeStyleProject job, String xml) throws Exception {
