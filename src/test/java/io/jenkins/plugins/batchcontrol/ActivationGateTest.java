@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 6a (#15, D-39, D-46), the queue gate: for an unattended cause on any non-computed
  * job while run control is on, the gate passes only if the job is activated <em>and</em> its
  * {@code blockTimer} / {@code blockUpstream} does not block the cause, whatever
- * {@code approvalRequired} says (D-46). Matrix rows T-06a-01..09, T-06a-42.
+ * {@code approvalRequired} says (D-46). Matrix rows T-06a-01..09, T-06a-42, T-06a-53..54.
  *
  * <p>Reading used throughout: note 91's "run-controlled job" (approvalRequired=true) is
  * superseded by D-46 for the unattended gate — every non-computed job needs activation while
@@ -380,6 +380,53 @@ public class ActivationGateTest {
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, new Cause.LegacyCodeCause()));
         j.waitUntilNoActivity();
         assertEquals(2, job.getBuilds().size(), "both submissions must have built once activated");
+    }
+
+    /**
+     * T-06a-54 (P0, security-15 S-15-01): classifying a cause as human by its Java type alone is
+     * not enough. A {@link Cause.UserIdCause} built while authenticated as {@code ACL.SYSTEM2}
+     * carries a null {@code userId} — it names no resolvable person — so it is not a live person
+     * acting now (D-47) and must not exempt a non-activated job from the gate, even though
+     * {@code approvalRequired} is false here. Guard: the very same, still non-activated job runs
+     * from a real logged-in user's Build Now (Item/Build), so the row measures the
+     * SYSTEM-authored fake cause and not a gate that also blocks genuine human runs on a
+     * non-approval job.
+     */
+    @Test
+    public void t_06a_54_systemAuthoredUserIdCauseIsNotHumanAndNeedsActivation() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("gate-system-cause");
+        BatchControlJobProperty free = new BatchControlJobProperty(false);
+        free.setBlockTimer(false);
+        free.setBlockUpstream(false);
+        setBatchControl(job, free);
+        assertFalse(isActivated(job), "premise: the job is not activated");
+
+        boolean refused;
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            refused = job.scheduleBuild2(0, new hudson.model.CauseAction(new Cause.UserIdCause())) == null;
+        } catch (RuntimeException guidance) {
+            refused = true; // a guidance Failure is an equally acceptable refusal (T-06a-04 pattern)
+        }
+        assertTrue(refused, "security-15 S-15-01: a SYSTEM-authored UserIdCause (null userId) must not"
+                + " count as human and must be refused on a non-activated job");
+        assertBlocked(j, job, 1, 0);
+
+        List<ChangeRecord> records = ActivationFixtures.recordsFor(ChangeType.TRIGGER_BLOCKED, "gate-system-cause");
+        assertEquals(1, records.size(), "the refusal must leave one TRIGGER_BLOCKED record: " + records);
+        assertNotNull(records.get(0).getDetail(), "the record must carry a detail");
+        assertTrue(records.get(0).getDetail().toLowerCase(java.util.Locale.ROOT).contains("activation"),
+                "the record must name activation as what blocked the SYSTEM-authored cause: "
+                        + records.get(0).getDetail());
+
+        // Guard: a real logged-in user's Build Now on the same, still non-activated,
+        // non-approval job still runs - manual builds on non-approval jobs are unaffected.
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
+        int code = wc.getPage(new WebRequest(wc.createCrumbedUrl(job.getUrl() + "build"), HttpMethod.POST))
+                .getWebResponse().getStatusCode();
+        assertTrue(code < 400, "guard: a real user's Build Now on a non-approval job must succeed, got HTTP " + code);
+        j.waitUntilNoActivity();
+        assertEquals(1, job.getBuilds().size(), "guard: the real user's Build Now must have produced the job's only build");
+        assertFalse(isActivated(job), "guard: a manual run must not itself activate the job");
     }
 
     // ---------------------------------------------------------------- helpers
