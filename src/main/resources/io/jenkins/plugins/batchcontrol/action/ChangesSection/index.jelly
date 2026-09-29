@@ -19,6 +19,13 @@
       </form>
 
       <j:set var="grantLinks" value="${it.links.grants}"/>
+      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
+      <j:if test="${it.truncated}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          Only the newest 50,000 records were read, so this list and its count are incomplete.
+          Use the History screen with a job or user filter to reach older records of this month.
+        </div>
+      </j:if>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No change records in ${it.monthValue}.</p>

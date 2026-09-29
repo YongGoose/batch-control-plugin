@@ -4,7 +4,10 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.RecordPage;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.DiffSummary;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
@@ -12,8 +15,6 @@ import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -38,8 +39,8 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     /** Page size for the change record list. */
     public static final int PAGE_SIZE = 50;
 
-    /** Lazily computed, per-request cached sorted snapshot of the selected month. */
-    private List<ChangeRecord> sorted;
+    /** Lazily computed, per-request cached page of the selected month. */
+    private RecordPage<ChangeRecord> page;
 
     @Override
     public Object getTarget() {
@@ -80,7 +81,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
                 }
             }
         }
-        return YearMonth.now();
+        return YearMonth.now(BatchClock.clock());
     }
 
     /** Selected month as {@code YYYY-MM} (value of the month input and the query parameter). */
@@ -100,7 +101,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
 
     /** Whether a next-month link makes sense (no records exist in the future). */
     public boolean isHasNextMonth() {
-        return getMonth().isBefore(YearMonth.now());
+        return getMonth().isBefore(YearMonth.now(BatchClock.clock()));
     }
 
     // ---------------------------------------------------------------- paging (used from Jelly)
@@ -124,16 +125,17 @@ public class ChangesSection implements ModelObject, StaplerProxy {
 
     /** The change records shown on the current page, newest first. */
     public List<ChangeRecord> getPageItems() {
-        List<ChangeRecord> all = allSorted();
-        int from = (getPage() - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+        return page().getItems();
     }
 
+    /** Matching records read (a lower bound when {@link #isTruncated()}). */
     public int getTotal() {
-        return allSorted().size();
+        return page().getMatched();
+    }
+
+    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    public boolean isTruncated() {
+        return page().isTruncated();
     }
 
     public boolean isHasPrevious() {
@@ -141,7 +143,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return page().isHasNext();
     }
 
     /** Jelly helper: human-readable timestamp. */
@@ -160,14 +162,12 @@ public class ChangesSection implements ModelObject, StaplerProxy {
         return DiffSummary.of(diff);
     }
 
-    private List<ChangeRecord> allSorted() {
-        if (sorted == null) {
-            List<ChangeRecord> all = new ArrayList<>(FileStore.get().listChangeRecords(getMonth()));
-            all.sort(Comparator.comparing(ChangeRecord::getAt)
-                    .thenComparing(ChangeRecord::getId)
-                    .reversed());
-            sorted = all;
+    private RecordPage<ChangeRecord> page() {
+        if (page == null) {
+            // Bounded read (#13): only this page's window is held and only its diffs are read.
+            page = FileStore.get().pageChangeRecords(List.of(getMonth()), c -> true,
+                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
-        return sorted;
+        return page;
     }
 }

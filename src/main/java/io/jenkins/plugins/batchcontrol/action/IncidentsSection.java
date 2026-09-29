@@ -7,6 +7,9 @@ import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.RecordPage;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
@@ -14,8 +17,6 @@ import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -40,8 +41,8 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     /** Page size for the incident list. */
     public static final int PAGE_SIZE = 50;
 
-    /** Lazily computed, per-request cached sorted snapshot of the selected month. */
-    private List<Incident> sorted;
+    /** Lazily computed, per-request cached page of the selected month. */
+    private RecordPage<Incident> page;
 
     @Override
     public Object getTarget() {
@@ -141,16 +142,17 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
 
     /** The incidents shown on the current page, newest first. */
     public List<Incident> getPageItems() {
-        List<Incident> all = allSorted();
-        int from = (getPage() - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+        return page().getItems();
     }
 
+    /** Matching incidents read (a lower bound when {@link #isTruncated()}). */
     public int getTotal() {
-        return allSorted().size();
+        return page().getMatched();
+    }
+
+    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    public boolean isTruncated() {
+        return page().isTruncated();
     }
 
     public boolean isHasPrevious() {
@@ -158,7 +160,7 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return page().isHasNext();
     }
 
     // ---------------------------------------------------------------- Jelly helpers
@@ -190,18 +192,12 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return transitions == null || transitions.isEmpty() ? null : transitions.get(0).getAt();
     }
 
-    private List<Incident> allSorted() {
-        if (sorted == null) {
-            List<Incident> all = new ArrayList<>(IncidentService.get().list(getMonth()));
-            all.sort(Comparator
-                    .comparing((Incident i) -> {
-                        Instant at = creationTime(i);
-                        return at == null ? Instant.EPOCH : at;
-                    })
-                    .thenComparing(Incident::getId)
-                    .reversed());
-            sorted = all;
+    private RecordPage<Incident> page() {
+        if (page == null) {
+            // Bounded read (#13): the monthly index is walked newest first up to the record cap.
+            page = FileStore.get().pageIncidents(List.of(getMonth()), i -> true,
+                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
-        return sorted;
+        return page;
     }
 }

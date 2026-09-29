@@ -5,6 +5,8 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.RecordPage;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
@@ -13,7 +15,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
@@ -46,8 +47,8 @@ public class DashboardSection implements ModelObject, StaplerProxy {
     /** Upper bound for {@code ?days=}; larger or invalid values fall back to the default. */
     public static final int MAX_DAYS = 365;
 
-    /** Lazily computed, per-request cached sorted snapshot of the selected window. */
-    private List<RunRecord> sorted;
+    /** Lazily computed, per-request cached page of the selected window. */
+    private RecordPage<RunRecord> page;
 
     @Override
     public Object getTarget() {
@@ -115,16 +116,17 @@ public class DashboardSection implements ModelObject, StaplerProxy {
 
     /** The run records shown on the current page, newest first. */
     public List<RunRecord> getPageItems() {
-        List<RunRecord> all = allSorted();
-        int from = (getPage() - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+        return page().getItems();
     }
 
+    /** Matching records read (a lower bound when {@link #isTruncated()}). */
     public int getTotal() {
-        return allSorted().size();
+        return page().getMatched();
+    }
+
+    /** Whether the per-request record cap stopped the read (#13): ask to narrow the window. */
+    public boolean isTruncated() {
+        return page().isTruncated();
     }
 
     public boolean isHasPrevious() {
@@ -132,7 +134,7 @@ public class DashboardSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return page().isHasNext();
     }
 
     // ---------------------------------------------------------------- Jelly helpers
@@ -159,25 +161,19 @@ public class DashboardSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- data
 
-    private List<RunRecord> allSorted() {
-        if (sorted == null) {
-            Instant now = BatchClock.now();
-            Instant cutoff = now.minus(Duration.ofDays(getDays()));
+    private RecordPage<RunRecord> page() {
+        if (page == null) {
+            Instant cutoff = BatchClock.now().minus(Duration.ofDays(getDays()));
             YearMonth last = YearMonth.now(BatchClock.clock());
             YearMonth first = YearMonth.from(cutoff.atZone(BatchClock.clock().getZone()));
-            List<RunRecord> window = new ArrayList<>();
+            List<YearMonth> months = new ArrayList<>();
             for (YearMonth m = first; !m.isAfter(last); m = m.plusMonths(1)) {
-                for (RunRecord record : FileStore.get().listRunRecords(m)) {
-                    if (!record.getStartedAt().isBefore(cutoff)) {
-                        window.add(record);
-                    }
-                }
+                months.add(m);
             }
-            window.sort(Comparator.comparing(RunRecord::getStartedAt)
-                    .thenComparing(RunRecord::getRunId)
-                    .reversed());
-            sorted = window;
+            // Bounded read (#13): newest first, stops at the record cap.
+            page = FileStore.get().pageRunRecords(months, r -> !r.getStartedAt().isBefore(cutoff),
+                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
-        return sorted;
+        return page;
     }
 }

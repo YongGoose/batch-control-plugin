@@ -16,6 +16,13 @@
       </form>
 
       <j:set var="requestLinks" value="${it.links.requests}"/>
+      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
+      <j:if test="${it.truncated}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          Only the newest 50,000 records were read, so this list and its count are incomplete.
+          Choose a shorter window to reach older records, or use the History screen with a job or user filter.
+        </div>
+      </j:if>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No runs recorded in the last ${it.days} day(s).</p>

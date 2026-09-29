@@ -22,13 +22,17 @@ import org.kohsuke.stapler.StaplerRequest2;
  * the full name), {@code user} (exact id), {@code result} and {@code status} (enum-name tokens).
  *
  * <p>All parsing is forgiving: garbage values fall back to the default instead of failing, so a
- * hand-edited URL can never produce a stack trace. The date range is capped at
- * {@value #MAX_MONTHS} months to bound how many monthly store files a single request may read.
+ * hand-edited URL can never produce a stack trace.
+ *
+ * <p>Caps (#13): the primary bound on a page load is by records — the store's page queries stop
+ * after {@code Store.MAX_SCANNED_RECORDS} and the screen asks the user to narrow the filter. The
+ * date range is additionally capped at {@value #MAX_MONTHS} months as a secondary limit on how
+ * many monthly files one request (and one CSV export) may open.
  */
 @Restricted(NoExternalUse.class)
 public final class FilterParser {
 
-    /** Hard cap on the number of monthly buckets one request may scan. */
+    /** Secondary cap on the number of monthly buckets one request may open (#13). */
     public static final int MAX_MONTHS = 36;
 
     /** Default range length in days (inclusive of today) when no dates are given. */

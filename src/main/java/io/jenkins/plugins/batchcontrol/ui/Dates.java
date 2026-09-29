@@ -4,8 +4,9 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DecimalStyle;
+import java.util.Locale;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -16,7 +17,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <ul>
  *   <li>a <b>point in time</b> is always absolute, {@code yyyy-MM-dd HH:mm:ss z} in the
- *       controller's zone — {@link #format};</li>
+ *       plugin clock's zone ({@code BatchClock.clock().getZone()}, read on every call) —
+ *       {@link #format};</li>
  *   <li>a <b>length of time</b> (a build's duration) is always a span, {@code 3 min 20 sec} —
  *       {@link #span};</li>
  *   <li>a <b>countdown</b> to a known instant is the same span vocabulary — {@link #until}.</li>
@@ -32,15 +34,29 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class Dates {
 
-    private static final DateTimeFormatter FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z").withZone(ZoneId.systemDefault());
+    private static final String PATTERN = "yyyy-MM-dd HH:mm:ss z";
 
     private Dates() {
     }
 
     /** @return the formatted timestamp, or an empty string for null (e.g. undecided requests). */
     public static String format(@CheckForNull Instant instant) {
-        return instant == null ? "" : FORMAT.format(instant);
+        if (instant == null) {
+            return "";
+        }
+        // Display string (#17): the zone is the plugin clock's, read per call so a test clock or
+        // a zone change applies immediately; the zone name follows the viewer's locale, but the
+        // digits stay ASCII (DecimalStyle.STANDARD) so the value reads the same everywhere.
+        return DateTimeFormatter.ofPattern(PATTERN, displayLocale())
+                .withDecimalStyle(DecimalStyle.STANDARD)
+                .withZone(BatchClock.clock().getZone())
+                .format(instant);
+    }
+
+    private static Locale displayLocale() {
+        org.kohsuke.stapler.StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
+        Locale locale = req == null ? null : req.getLocale();
+        return locale == null ? Locale.getDefault(Locale.Category.FORMAT) : locale;
     }
 
     /**
