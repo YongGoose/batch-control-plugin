@@ -242,7 +242,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * {@code switch=activation}.
      */
     private static boolean activatedOrRefuse(Job<?, ?> job, String kind, String what) {
-        if (ActivationService.get().isActivated(job)) {
+        // D-32: a child a computed folder generates is not controlled and needs no activation.
+        if (ActivationService.isComputedChild(job) || ActivationService.get().isActivated(job)) {
             return true;
         }
         logRateLimited("activation-" + kind, job, () -> "Blocked " + what + " of job '" + job.getFullName()

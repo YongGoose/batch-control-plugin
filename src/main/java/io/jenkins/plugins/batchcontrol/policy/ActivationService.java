@@ -82,15 +82,13 @@ public final class ActivationService {
      * Whether the job may run on timer and upstream causes as far as activation is concerned
      * (SPEC item 6a). The queue gate ANDs this with {@code blockTimer}/{@code blockUpstream}.
      *
-     * <p>A child a computed folder generates for itself is not controlled (D-32) and needs no
-     * activation. Any other job is activated only if an activated state is stored for it. A
-     * state that cannot be read counts as not activated (fail closed).
+     * <p>The answer is truthful: a job is activated only if an activated state is stored for it,
+     * so a computed child (D-32), which nobody activates, reports not activated. It is the queue
+     * gate that exempts computed children from the activation check, because they are not
+     * controlled. A state that cannot be read counts as not activated (fail closed).
      */
     public boolean isActivated(Job<?, ?> job) {
         Objects.requireNonNull(job, "job");
-        if (isComputedChild(job)) {
-            return true;
-        }
         String fullName = job.getFullName();
         Map<String, Boolean> cache = cache();
         Boolean cached = cache.get(fullName);
