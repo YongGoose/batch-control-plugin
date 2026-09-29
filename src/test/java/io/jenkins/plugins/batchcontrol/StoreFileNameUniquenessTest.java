@@ -32,8 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 4, "the file name derived from an item's full name is unique ... A file written by an
- * earlier version under the old shortened form is still found" (#25). Matrix rows T-04-06 and
- * T-04-07 (the unit half is T-04-05 in {@code store.PathCodecUniquenessTest}).
+ * earlier version under the old shortened form is still found" (#25). Matrix rows T-04-06,
+ * T-04-07 and T-04-15 (the unit half is T-04-05 in {@code store.PathCodecUniquenessTest}).
  *
  * <p>Observed through the CONFIGURE records only (SPEC 9: a CONFIGURE diff is computed against
  * the item's previous snapshot), never through which file the store chose. Recording is active
@@ -139,6 +139,84 @@ public class StoreFileNameUniquenessTest {
         assertRemoved(diff, "legacy-baseline-marker", "the CONFIGURE diff must be computed against the snapshot stored under the old"
                         + " shortened form (#25)");
         assertTrue(diff.contains("after-upgrade"), "guard: the diff carries the new value:\n" + diff);
+    }
+
+    /**
+     * T-04-15 (#25 migration, commit 08f342c): a real defect, distinct from T-04-06/07. Saving the
+     * snapshot of the long-named job V deleted the file at V's <em>legacy</em> shortened path (the
+     * old {@code -} scheme) even though a live, unrelated job W whose <em>plain</em> full name
+     * equals that exact string keeps its real, current baseline snapshot there. That destroyed W's
+     * baseline, so W's next configuration change wrote no CONFIGURE record at all, breaking SPEC
+     * item 9's guarantee that every configuration change is recorded.
+     *
+     * <p>W is given a baseline and one ordinary change before V exists at all (a control proving
+     * normal recording). V is then created and saved twice (the trigger). W's configuration is
+     * changed again: exactly one new CONFIGURE record must exist, carrying a non-empty diff against
+     * W's own previous value, not an empty or missing baseline. A closing guard deletes V and
+     * repeats the same check once more.
+     */
+    @Test
+    public void t_04_15_savingTheLongNamedJobDoesNotDestroyTheCollidingJobsBaseline() throws Exception {
+        Folder a = j.jenkins.createProject(Folder.class, FOLDER_A);
+        Folder b = a.createProject(Folder.class, FOLDER_B);
+
+        String wFullName = attackerFor(VICTIM);
+        String wLeaf = wFullName.substring(wFullName.lastIndexOf('/') + 1);
+        FreeStyleProject w = b.createProject(FreeStyleProject.class, wLeaf);
+        assertEquals(wFullName, w.getFullName(), "fixture: W's full name");
+        assertEquals(legacyShortForm(VICTIM), wFullName.replace("/", "%2F"),
+                "fixture: W's plain encoding equals V's legacy shortened form (#25)");
+
+        // Give W a baseline, with no V in the picture yet.
+        w.setDescription("w-baseline");
+
+        // Control: an ordinary change to W, still with no V present, is recorded exactly once
+        // against its own baseline. This proves the harness records normally on its own, so a
+        // later failure to record is attributable to V, not to the fixture.
+        int beforeControl = configures(wFullName).size();
+        w.setDescription("w-changed-0");
+        List<ChangeRecord> controlRecords = configures(wFullName);
+        assertEquals(beforeControl + 1, controlRecords.size(),
+                "control: with no V present, W's change must be recorded exactly once");
+        String controlDiff = controlRecords.get(controlRecords.size() - 1).getDiff();
+        assertNotNull(controlDiff, "control: the recorded change must carry a diff");
+        assertRemoved(controlDiff, "w-baseline", "control: the diff must be against W's own baseline");
+        assertTrue(controlDiff.contains("w-changed-0"), "control: the diff carries the new value:\n" + controlDiff);
+
+        // Create the long-named job V and save it. Its own legacy shortened path (the old '-'
+        // scheme) is exactly W's plain full name. Before commit 08f342c, saving V deleted the file
+        // at that shared path -- W's own live snapshot -- destroying W's baseline.
+        FreeStyleProject v = b.createProject(FreeStyleProject.class, VICTIM_LEAF);
+        assertEquals(VICTIM, v.getFullName(), "fixture: V's full name");
+        v.setDescription("v-1");
+        v.setDescription("v-2");
+
+        // Regression: W's next configuration change must still be recorded exactly once, with a
+        // non-empty diff against the configuration it had before V was ever saved.
+        int beforeRegression = configures(wFullName).size();
+        w.setDescription("w-changed-1");
+        List<ChangeRecord> regressionRecords = configures(wFullName);
+        assertEquals(beforeRegression + 1, regressionRecords.size(),
+                "saving V must not destroy W's baseline: W's own configuration change must still be"
+                        + " recorded exactly once (#25, commit 08f342c)");
+        String regressionDiff = regressionRecords.get(regressionRecords.size() - 1).getDiff();
+        assertNotNull(regressionDiff, "the CONFIGURE record must carry a diff");
+        assertFalse(regressionDiff.isBlank(), "the diff must not be empty (the baseline must not have been lost)");
+        assertRemoved(regressionDiff, "w-changed-0",
+                "the diff must be against W's real previous configuration, not an empty or missing baseline");
+        assertTrue(regressionDiff.contains("w-changed-1"), "the diff carries the new value:\n" + regressionDiff);
+
+        // Guard: deleting V must not disturb W's baseline either.
+        v.delete();
+        int beforeAfterDelete = configures(wFullName).size();
+        w.setDescription("w-changed-2");
+        List<ChangeRecord> afterDeleteRecords = configures(wFullName);
+        assertEquals(beforeAfterDelete + 1, afterDeleteRecords.size(),
+                "deleting V must not affect W's baseline or recording");
+        String afterDeleteDiff = afterDeleteRecords.get(afterDeleteRecords.size() - 1).getDiff();
+        assertNotNull(afterDeleteDiff, "the CONFIGURE record must carry a diff");
+        assertRemoved(afterDeleteDiff, "w-changed-1",
+                "after deleting V, W's diff is still against its own previous configuration");
     }
 
     /** The diff of the newest CONFIGURE record of {@code target} in the current month. */
