@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-29 (evening) — p1 round complete: PRs #41, #42, #43 merged; #15 ready
+- **Lanes (owner-approved partial parallelism):** lane B #41 (#19, #24, #26; security-09 0/0/1/1, D-42) and lane A #42 (#13, #17, #18, #25; security-10 0/1/2/8 → D-43 removed legacy file-name compatibility; security-11 re-review 0/0/2/0). A real defect was found in lane A and pinned (T-04-15: saving a long-named job deleted another job's baseline). SPEC section 6 measured: dashboard median 101 ms, history 79 ms (target 2 s).
+- **#43** (#21 TRIGGER_BLOCKED records and job-page lock notice, #22 one run-link rule D-44, shared paging, Store seam, security-11 N-01/N-02): security-12 0/0/0/1.
+- **#15 activation approval:** SPEC 6a, D-39, D-45 (a job created with run control off counts as activated). Three review rounds: security-13 **1/2/3/5** (clearing approvalRequired, SCM/unclassified causes and computed folders all bypassed activation → D-46 covers every unattended start path, computed folders carry activation); security-14 **1/1/0/1** (an automatic retry inherited a human cause → D-47 classifies by the submission itself); security-15 0/0/1/0 (a user cause submitted as SYSTEM → human only when the submitter is not SYSTEM; anonymous Build Now unchanged). Gate: **488 tests, 0 failures, SpotBugs 0.**
+- **Process notes:** machine sleep and swap exhaustion from parallel forks stalled agents repeatedly (fixed: caffeinate on AC power, `-DforkCount=2` for concurrent builds); one test I specified (10,001 jobs) would have run for hours and was rewritten with a configurable bound.
+- **e2e:** checklist `e2e/CHECKLIST.md` (~300 rows, branch `e2e/checklist`) and environment WIP (branch `e2e/run-1`) ready; runs only when the owner says start. Reply to the hosting reviewer after e2e.
+
 ## 2026-09-29 — PR 4 (#32, #33, #35, #23, #11) ready
 - PR 3 merged as #39.
 - D-37 several approvers (any one decides, first decision wins), D-36 notifications (`ops.BatchControlNotifier` extension point, optional Mailer e-mail, off by default), D-40 CREATE name restriction (exact name or `/regex/`, enforced before the item exists on every creation path).
