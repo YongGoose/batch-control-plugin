@@ -118,8 +118,13 @@ public class PluginInteractionNaginatorTest {
         // D-47: an automatic retry is unattended regardless of who started the build it retries.
         BatchControlFixtures.activate(job);
 
-        // a human first run (note 100): the retry is judged by the causes of the build it retries
-        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
+        // a human first run (note 100): the retry is judged by the causes of the build it
+        // retries. security-15 S-15-01: the submission, not only the Cause, must run while
+        // impersonating u1 (harmless here since the job is already activated, but kept
+        // consistent with the other rows so no such submission is left unwrapped).
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
         j.waitUntilNoActivity();
         assertEquals(2, job.getBuilds().size(), "fixture: naginator must retry a failed uncontrolled, activated job automatically");
 

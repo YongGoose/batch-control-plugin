@@ -238,18 +238,27 @@ public class HistoryWebTest {
         // activation, and whether an activation request counts among the summary's approved
         // requests is not specified (notes 97, 103), so the fixture avoids one
         FreeStyleProject sumT = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-t"));
-        j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // u1, or the gate now (correctly) classifies it as unattended - which would refuse this
+        // build too, since the job is uncontrolled and not activated.
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, new hudson.model.Cause.UserIdCause()));
+        }
 
         // D-46: a cause-less build now needs an activation, and an approved ACTIVATE might count
         // among the summary's approved requests (note 97), so these two are human runs of
         // uncontrolled jobs instead (note 109)
         FreeStyleProject sumF = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-f"));
         sumF.getBuildersList().add(new FailureBuilder());
-        j.assertBuildStatus(Result.FAILURE, sumF.scheduleBuild2(0, ActivationFixtures.userCause("u1"))); // incident stays OPEN
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatus(Result.FAILURE, sumF.scheduleBuild2(0, new hudson.model.Cause.UserIdCause())); // incident stays OPEN
+        }
 
         FreeStyleProject sumU = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-u"));
         sumU.getBuildersList().add(new UnstableBuilder());
-        j.assertBuildStatus(Result.UNSTABLE, sumU.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatus(Result.UNSTABLE, sumU.scheduleBuild2(0, new hudson.model.Cause.UserIdCause()));
+        }
         j.waitUntilNoActivity();
 
         // resolve the UNSTABLE incident -> OPEN 1 / RESOLVED 1

@@ -110,12 +110,18 @@ public class RequestIntegrityTest {
         assertNotNull(marker, "the executed run must carry the marker action");
         assertEquals(request.getId(), marker.getRequestId(), "the marker must be bound to the request id");
 
-        // replaying the very same marker on the same job (re-queue / rebuild path) must be blocked
-        assertScheduleRefused("a consumed marker must not schedule the same job again",
-                () -> jobX.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        // replaying the very same marker on the same job (re-queue / rebuild path) must be
+        // blocked. security-15 S-15-01: the submission, not only the Cause, must run while
+        // impersonating a real user, so the fixture simulates the person replaying it.
+        try (ACLContext ignored = as("u1")) {
+            assertScheduleRefused("a consumed marker must not schedule the same job again",
+                    () -> jobX.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        }
         // and the marker must never authorize a different job
-        assertScheduleRefused("a marker bound to job X must never authorize job Y",
-                () -> jobY.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        try (ACLContext ignored = as("u1")) {
+            assertScheduleRefused("a marker bound to job X must never authorize job Y",
+                    () -> jobY.scheduleBuild2(0, new Cause.UserIdCause(), marker));
+        }
 
         j.waitUntilNoActivity();
         assertEquals(1, jobX.getBuilds().size(), "job X must still have exactly one build");

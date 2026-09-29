@@ -111,6 +111,13 @@ final class ActivationFixtures {
      * Fixtures use it instead of a cause-less {@code scheduleBuild2(0)} / {@code buildAndAssertSuccess}
      * when a helper job must simply run, because whether a cause-less or {@code LegacyCodeCause}
      * submission is an "unclassified" (unattended) cause under D-46 is not settled (note 100).
+     *
+     * <p><b>security-15 S-15-01:</b> impersonation must cover the {@code scheduleBuild2} call
+     * itself, not only this factory method — the queue gate now classifies a cause as human only
+     * if the <em>submitting</em> authentication also names the same user, not the SYSTEM the test
+     * thread runs as by default. Callers must wrap the whole submission:
+     * {@code try (ACLContext c = ACL.as2(token(id))) { job.scheduleBuild2(0, userCause(id)); }}
+     * (or equivalently construct {@code new Cause.UserIdCause()} directly inside that block).
      */
     static Cause userCause(String userId) {
         try (hudson.security.ACLContext ignored = hudson.security.ACL.as2(BatchControlFixtures.token(userId))) {

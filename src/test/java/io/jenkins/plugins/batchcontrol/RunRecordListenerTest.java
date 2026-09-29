@@ -83,12 +83,18 @@ public class RunRecordListenerTest {
     public void t_10_01_freestyleAndPipelineAreBothRecorded() throws Exception {
         // This row measures the recorder, not the queue gate: both jobs stay out of run control
         // (D-31 would otherwise make them approval-required at creation and block the USER cause).
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // u1, or the gate now (correctly) classifies it as unattended.
         FreeStyleProject freestyle = uncontrolled(j.createFreeStyleProject("fs-x"));
-        j.assertBuildStatusSuccess(freestyle.scheduleBuild2(0, userCause("u1")));
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(freestyle.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
 
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe-x"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'record me'", true));
-        j.assertBuildStatusSuccess(pipeline.scheduleBuild2(0, new CauseAction(userCause("u1"))));
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(pipeline.scheduleBuild2(0, new CauseAction(new Cause.UserIdCause())));
+        }
         j.waitUntilNoActivity();
 
         RunRecord freestyleRecord = record("fs-x#1");
@@ -138,17 +144,24 @@ public class RunRecordListenerTest {
         // control (D-31 attaches approvalRequired=true at creation while run control is on)
         FreeStyleProject target = uncontrolled(j.createFreeStyleProject("cause-x"));
 
-        // #1 USER
-        j.assertBuildStatusSuccess(target.scheduleBuild2(0, userCause("u1")));
+        // #1 USER. security-15 S-15-01: the submission, not only the Cause, must run while
+        // impersonating u1, or the gate now (correctly) classifies it as unattended.
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(target.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
         // SPEC 6a / D-46: the unattended causes below need an activation even on an uncontrolled
         // job created under run control (note 103)
         BatchControlFixtures.activate(target);
         // #2 TIMER (matrix note 4: cron firing reproduced by a TimerTriggerCause schedule)
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
-        // #3 UPSTREAM (real build-step invocation, waits for the downstream run)
+        // #3 UPSTREAM (real build-step invocation, waits for the downstream run). The upstream
+        // job itself is uncontrolled and not activated, so its own submission must be genuinely
+        // human (security-15 S-15-01).
         WorkflowJob upstream = uncontrolled(j.createProject(WorkflowJob.class, "up"));
         upstream.setDefinition(new CpsFlowDefinition("build job: 'cause-x', wait: true", true));
-        j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new CauseAction(userCause("u1"))));
+        try (ACLContext ignored = as("u1")) {
+            j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new CauseAction(new Cause.UserIdCause())));
+        }
         j.waitUntilNoActivity();
         // #4 SCM
         j.assertBuildStatusSuccess(target.scheduleBuild2(0,
@@ -256,10 +269,15 @@ public class RunRecordListenerTest {
                 .count();
         assertTrue(recorded >= 1, "a multibranch child completion must be recorded");
 
-        // record-only: with run control on, a manual user-cause run of the child is not blocked
+        // record-only: with run control on, a manual user-cause run of the child is not blocked.
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // u1 (harmless here since the branch's activation is carried by its already-activated
+        // multibranch project, but kept consistent so no such submission is left unwrapped).
         int nextNumber = branch.getNextBuildNumber();
-        QueueTaskFuture<WorkflowRun> manual = branch.scheduleBuild2(0,
-                new CauseAction(userCause("u1")));
+        QueueTaskFuture<WorkflowRun> manual;
+        try (ACLContext ignored = as("u1")) {
+            manual = branch.scheduleBuild2(0, new CauseAction(new Cause.UserIdCause()));
+        }
         assertNotNull(manual, "run control must not block a multibranch child (record-only)");
         manual.get();
         j.waitUntilNoActivity();
@@ -279,13 +297,6 @@ public class RunRecordListenerTest {
 
     private ACLContext as(String userId) {
         return ACL.as2(User.getById(userId, true).impersonate2());
-    }
-
-    /** A UserIdCause constructed while authenticated as the given user. */
-    private Cause userCause(String userId) {
-        try (ACLContext ignored = as(userId)) {
-            return new Cause.UserIdCause();
-        }
     }
 
     private RunRecord record(String runId) {
