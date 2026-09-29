@@ -106,12 +106,13 @@ public class StoreFileNameUniquenessTest {
     }
 
     /**
-     * T-04-07 (#25): a snapshot written by an earlier version under the old shortened form
-     * (180-char encoded prefix + '-' + sha256(full name), issue #25) is still found: the next
-     * CONFIGURE of that job is diffed against it.
+     * T-04-07 (#25, contract reversed by D-43, note 80): a file in the pre-release shortened form
+     * (180-char encoded prefix + '-' + sha256(full name), issue #25) is <em>not</em> read. The
+     * next CONFIGURE of the long-named job is not diffed against it, and the file is left where
+     * and as it is (not moved into the job's current name, not rewritten).
      */
     @Test
-    public void t_04_07_snapshotUnderTheOldShortenedFormIsStillFound() throws Exception {
+    public void t_04_07_snapshotInThePreReleaseShortenedFormIsIgnored() throws Exception {
         Folder a = j.jenkins.createProject(Folder.class, FOLDER_A);
         Folder b = a.createProject(Folder.class, FOLDER_B);
         FreeStyleProject victim = b.createProject(FreeStyleProject.class, VICTIM_LEAF);
@@ -135,10 +136,17 @@ public class StoreFileNameUniquenessTest {
         Files.writeString(legacy, legacyConfig, StandardCharsets.UTF_8);
 
         victim.setDescription("after-upgrade");
-        String diff = lastDiff(VICTIM);
-        assertRemoved(diff, "legacy-baseline-marker", "the CONFIGURE diff must be computed against the snapshot stored under the old"
-                        + " shortened form (#25)");
-        assertTrue(diff.contains("after-upgrade"), "guard: the diff carries the new value:\n" + diff);
+        for (ChangeRecord rec : configures(VICTIM)) {
+            assertFalse(String.valueOf(rec.getDiff()).contains("legacy-baseline-marker"), "a file in the pre-release shortened form must not be used as the job's baseline"
+                    + " (D-43):\n" + rec.getDiff());
+        }
+        assertTrue(Files.exists(legacy), "the pre-release file must not be moved or deleted (D-43)");
+        assertEquals(legacyConfig, Files.readString(legacy, StandardCharsets.UTF_8), "the pre-release file must be left unchanged (D-43)");
+
+        // guard: the job keeps its own baseline under the current form, so the next change is
+        // diffed against the configuration it just saved
+        victim.setDescription("after-upgrade-2");
+        assertRemoved(lastDiff(VICTIM), "after-upgrade", "the job's next change must be diffed against its own current-form baseline");
     }
 
     /**

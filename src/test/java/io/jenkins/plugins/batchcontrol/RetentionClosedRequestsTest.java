@@ -22,6 +22,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationS
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -199,6 +200,53 @@ public class RetentionClosedRequestsTest {
         assertTrue(withClosed - baseline < SCAN_BOUND_MS, "the per-minute expiry work must not scan closed requests (#13): a pass over "
                 + (CLOSED_RUN_FILES + CLOSED_GRANT_FILES) + " closed request files took " + withClosed
                 + " ms against " + baseline + " ms over none");
+    }
+
+    /**
+     * T-04-17 (security-10 S-09): an EXECUTED request is judged by its latest activity, including
+     * the start of its build. A request created, approved and queued three months ago whose build
+     * only started now (no executor until then) is kept by retention, and its run record still
+     * links to it; the negative twin, a request whose build also ran three months ago, is deleted.
+     */
+    @Test
+    public void t_04_17_executedRequestWhoseBuildStartedInsideRetentionIsKept() throws Exception {
+        Instant old = YearMonth.now(ZoneOffset.UTC).minusMonths(3).atDay(15).atTime(12, 0)
+                .toInstant(ZoneOffset.UTC);
+        BatchClock.setForTest(Clock.fixed(old, ZoneOffset.UTC));
+
+        // twin: queued and executed three months ago
+        String executedOld = submitRun();
+        asDo("a1", () -> RunRequestService.get().approve(executedOld, "ok"));
+        j.waitUntilNoActivity();
+        assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(executedOld).getStatus(), "fixture: the old request executed at the old time");
+
+        // queued three months ago, but no executor until now
+        j.jenkins.setNumExecutors(0);
+        String late = submitRun();
+        asDo("a1", () -> RunRequestService.get().approve(late, "ok"));
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(late).getStatus(), "fixture: the late request is approved and waiting in the queue");
+        assertFalse(j.jenkins.getQueue().isEmpty(), "fixture: its build waits in the queue");
+
+        BatchClock.reset();
+        j.jenkins.setNumExecutors(1);
+        j.waitUntilNoActivity();
+        RunRequest executedLate = RunRequestService.get().load(late);
+        assertEquals(RequestStatus.EXECUTED, executedLate.getStatus(), "fixture: the late request executed now");
+        String runId = executedLate.getExecutedRunId();
+        assertTrue(runId != null, "fixture: the late request links its run");
+
+        Path store = StoreDataFixtures.storeDir();
+        Path lateFile = store.resolve("requests/run/" + late + ".xml");
+        Path oldFile = store.resolve("requests/run/" + executedOld + ".xml");
+        assertTrue(Files.exists(lateFile) && Files.exists(oldFile), "fixture: both request files are stored");
+
+        ExtensionList.lookupSingleton(RetentionPeriodicWork.class).doRun();
+
+        assertTrue(Files.exists(lateFile), "an EXECUTED request whose build started inside the retention period must be kept (S-09)");
+        assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(late).getStatus(), "the kept request must still load as EXECUTED");
+        assertTrue(FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
+                .anyMatch(rec -> runId.equals(rec.getRunId()) && late.equals(rec.getRunRequestId())), "the kept run record must still link to the kept request");
+        assertFalse(Files.exists(oldFile), "twin: a request whose build also ran three months ago is deleted");
     }
 
     // ---------------------------------------------------------------------------------------
