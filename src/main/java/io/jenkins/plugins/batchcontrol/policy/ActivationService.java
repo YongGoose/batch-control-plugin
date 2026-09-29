@@ -94,7 +94,7 @@ public final class ActivationService {
     // ---------------------------------------------------------------- read API
 
     /**
-     * Whether an approved activation is stored for this very item (SPEC item 6a). The answer is
+     * Whether an approved activation is stored for this very item. The answer is
      * truthful: a computed child, which nobody activates, reports not activated; whether it may run
      * is {@link #mayRunUnattended(Job)}, which asks its computed-folder ancestor (D-46c).
      *
@@ -129,7 +129,7 @@ public final class ActivationService {
             String current = ItemIdentity.of(item.getRootDir());
             if (current != null && !current.equals(cached.identity())) {
                 LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
-                        + "treating the item as not activated (S-13-09)");
+                        + "treating the item as not activated");
                 return false;
             }
         }
@@ -278,7 +278,7 @@ public final class ActivationService {
         if (!isSubject(job)) {
             Item carrier = activationSubject(job);
             throw new IllegalArgumentException("'" + job.getFullName() + "' does not carry an activation of "
-                    + "its own" + (carrier != job ? "; request it on '" + carrier.getFullName() + "' (D-46)" : "")
+                    + "its own" + (carrier != job ? "; request it on '" + carrier.getFullName() + "'" : "")
                     + ".");
         }
         boolean activated = isActivated(job);
@@ -534,7 +534,7 @@ public final class ActivationService {
     // ---------------------------------------------------------------- item lifecycle (SPEC 6a)
 
     /**
-     * A job was renamed or moved: its activation follows it (SPEC item 6a), and PENDING requests
+     * A job was renamed or moved: its activation follows it, and PENDING requests
      * on the old name end INVALIDATED, as run requests do (D-21: the approver reviewed another
      * identity). Runs regardless of the switches; it is bookkeeping, not control.
      */
@@ -557,7 +557,7 @@ public final class ActivationService {
     }
 
     /**
-     * A job was deleted: its activation is removed (SPEC item 6a) and its PENDING requests end
+     * A job was deleted: its activation is removed and its PENDING requests end
      * INVALIDATED, so a later job of the same name starts not activated and cannot be activated by
      * a request that was about another job. For a deleted folder the same applies to everything
      * stored below it.
@@ -620,7 +620,7 @@ public final class ActivationService {
                     identity));
             store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                     ActivationState.UNCONTROLLED, "Activated at creation: '" + fullName + "' was created while "
-                            + "run control was off, so it counts as in service (D-45)"));
+                            + "run control was off, so it counts as in service"));
         } finally {
             lock.unlock();
         }
@@ -678,7 +678,7 @@ public final class ActivationService {
                         ItemIdentity.of(item.getRootDir())));
                 store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                         ActivationState.UPGRADE, "Activated by upgrade: the job existed when activation "
-                                + "approval was installed, so its schedule keeps running (SPEC item 6a)"));
+                                + "approval was installed, so its schedule keeps running"));
                 seeded++;
             }
             store.markActivationSchema();

@@ -354,7 +354,7 @@ public final class GrantService {
             store.saveGrant(grant);
             replaceInCache(grant);
             LOGGER.info(() -> "Grant " + grant.getId() + ": dropped created-item records of items "
-                    + "that no longer exist (D-35c)");
+                    + "that no longer exist");
         }
     }
 
@@ -480,7 +480,7 @@ public final class GrantService {
             if (grant == null) {
                 LOGGER.warning(() -> "Grant " + cached.getId() + " is active in memory but has no "
                         + "file in the store, so it cannot be revoked as part of switching change "
-                        + "control off; dropping it from the cache instead (S-15).");
+                        + "control off; dropping it from the cache instead.");
                 grants().removeIf(existing -> existing.getId().equals(cached.getId()));
                 continue;
             }
@@ -495,7 +495,7 @@ public final class GrantService {
         }
         int closedCount = closed;
         LOGGER.info(() -> "Change control was switched off by '" + caller + "': " + closedCount
-                + " of " + total + " active permission windows were revoked (S-15)");
+                + " of " + total + " active permission windows were revoked");
         return closed;
     }
 

@@ -1,7 +1,14 @@
 <?jelly escape-by-default='true'?>
 <!-- Serves /job/<name>/batch-control/activation without a trailing slash (the URL the job page
      and the tests use): Stapler would otherwise redirect the getter's index to "activation/".
-     Renders the same page as JobActivationForm/index.jelly, whose links are absolute. -->
+     Renders the same page as JobActivationForm/index.jelly, whose links are absolute.
+
+     e2e-03 DEF-06: served as a view of JobRequestAction, the last request ancestor is that
+     action ("Request Run"), so the breadcrumb bar would end there. activationCrumb asks the
+     included page to append its own "Activation" crumb. It is not set on the trailing-slash URL,
+     where JobActivationForm is itself an ancestor and already supplies that crumb, nor on a
+     computed folder, whose action is already named "Activation". -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <j:set var="activationCrumb" value="${true}"/>
   <st:include page="index.jelly" it="${it.activation}"/>
 </j:jelly>

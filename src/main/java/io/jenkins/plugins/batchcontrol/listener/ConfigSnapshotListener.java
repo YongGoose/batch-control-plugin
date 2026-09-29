@@ -11,7 +11,6 @@ import hudson.model.Saveable;
 import hudson.model.listeners.SaveableListener;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
-import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.store.UnifiedDiff;
@@ -137,7 +136,7 @@ public class ConfigSnapshotListener extends SaveableListener {
             String user = ChangeRecording.currentUser();
             ChangeRecord record = ChangeRecord.create(ChangeType.CONFIGURE, fullName, user, null);
             record.setDiff(diff);
-            record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.CONFIGURE));
+            record.setGrantId(ChangeRecording.configureGrantIdFor(user, item));
             store.saveConfigSnapshot(fullName, newXml);
             store.appendChangeRecord(record);
         } finally {

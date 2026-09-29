@@ -187,7 +187,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             SaveableListener.fireOnChange(this, getConfigFile());
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to save the Batch Control configuration after a switch "
-                    + "change; the change is applied in memory but will not survive a restart (D-42)", e);
+                    + "change; the change is applied in memory but will not survive a restart", e);
         }
     }
 

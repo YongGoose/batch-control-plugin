@@ -34,7 +34,7 @@ public final class ActivationSeeding {
         } catch (RuntimeException e) {
             LOGGER.log(Level.SEVERE, "Seeding existing jobs as activated failed; it is retried at the next "
                     + "start. Until then the timer and upstream triggers of the jobs it did not reach are "
-                    + "refused on run-controlled jobs (SPEC item 6a)", e);
+                    + "refused on run-controlled jobs", e);
         }
     }
 }

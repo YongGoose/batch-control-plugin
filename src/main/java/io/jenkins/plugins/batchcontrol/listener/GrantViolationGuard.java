@@ -132,7 +132,7 @@ public class GrantViolationGuard extends SaveableListener {
             } catch (RuntimeException e) {
                 // S-06: never guess (restoring the baseline could bring removed entries back).
                 LOGGER.log(Level.SEVERE, "Cannot compare the authorization property of '" + fullName
-                        + "' with its baseline (D-35b)", e);
+                        + "' with its baseline", e);
                 Grant grant = namedGrant(user, item);
                 appendViolation(fullName, user, grant,
                         "The authorization property was changed by a user holding " + grantText(grant)
@@ -159,7 +159,7 @@ public class GrantViolationGuard extends SaveableListener {
                 // S-06: fail loudly. The change may still be in place, so it is recorded as a
                 // violation whose restore failed.
                 LOGGER.log(Level.SEVERE, "Could not revert the authorization property of '" + fullName
-                        + "' after a change by '" + user + "' (D-35b)", e);
+                        + "' after a change by '" + user + "'", e);
                 Grant grant = namedGrant(user, item);
                 appendViolation(fullName, user, grant,
                         "The authorization property was changed by a user whose Item/Configure may come only "
@@ -173,8 +173,7 @@ public class GrantViolationGuard extends SaveableListener {
                     "The authorization property was changed by a user whose Item/Configure comes only "
                             + "from " + grantText(grant) + "; the entries the change added were removed.");
             LOGGER.warning(() -> "Reverted additions to the authorization property of '" + fullName
-                    + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant)
-                    + " (D-35b)");
+                    + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant));
         }
     }
 
@@ -499,7 +498,7 @@ public class GrantViolationGuard extends SaveableListener {
                 apply(item, "");
             } catch (IOException | RuntimeException e) {
                 LOGGER.log(Level.SEVERE, "Could not remove the authorization property of '" + fullName
-                        + "' created by '" + user + "' under grant " + grant.getId() + " (D-35c)", e);
+                        + "' created by '" + user + "' under grant " + grant.getId(), e);
                 return;
             }
             BASELINE.put(fullName, "");
@@ -509,7 +508,7 @@ public class GrantViolationGuard extends SaveableListener {
             record.setGrantId(grant.getId());
             Store.get().appendChangeRecord(record);
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
-                    + user + "' through grant " + grant.getId() + " (D-35c)");
+                    + user + "' through grant " + grant.getId());
         }
 
         @Override

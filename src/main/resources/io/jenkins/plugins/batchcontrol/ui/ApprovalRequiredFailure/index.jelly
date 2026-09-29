@@ -1,0 +1,37 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-03 DEF-02 (SPEC item 6): the refusal page of a manual run of an approval-required job.
+     The request form is linked only for a viewer who may open it (ApprovalRequiredFailure
+     #isCanRequest); anyone else is told whom to ask, never shown a URL that answers 404.
+     Only the job name and constant text are rendered; no script. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Approval required" type="one-column">
+    <l:main-panel>
+      <l:app-bar title="Approval required"/>
+      <j:set var="job" value="${it.job}"/>
+      <div class="jenkins-alert jenkins-alert-warning" role="alert">
+        <p>
+          <strong>This build was not started.</strong>
+          Job <strong>${it.jobFullName}</strong> only runs through an approved Batch Control
+          run request.
+        </p>
+        <j:choose>
+          <j:when test="${it.canRequest}">
+            <p style="margin-bottom: 0;">
+              <a href="${rootURL}/${job.url}batch-control/">Request Run</a> to submit a request
+              with a reason and the parameters; the build starts automatically once it is approved.
+            </p>
+          </j:when>
+          <j:otherwise>
+            <p style="margin-bottom: 0;">
+              You may not submit run requests. Ask a user who may, an approver or a Jenkins
+              administrator to request this run for you.
+            </p>
+          </j:otherwise>
+        </j:choose>
+      </div>
+      <j:if test="${job != null}">
+        <p><a href="${rootURL}/${job.url}">Back to ${job.fullDisplayName}</a></p>
+      </j:if>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

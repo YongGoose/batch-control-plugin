@@ -123,7 +123,7 @@ public final class CreateNamePattern {
         } catch (MatchTimeout e) {
             LOGGER.warning(() -> "The name restriction " + source + " took longer than "
                     + TimeUnit.NANOSECONDS.toMillis(MATCH_DEADLINE_NANOS) + " ms on a name of "
-                    + itemName.length() + " characters; treated as no match (D-40a)");
+                    + itemName.length() + " characters; treated as no match");
             return false;
         }
     }

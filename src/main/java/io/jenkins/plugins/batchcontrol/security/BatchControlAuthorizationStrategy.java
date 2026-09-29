@@ -73,7 +73,7 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
             LOGGER.warning(() -> "The withdrawn Batch Control wrapper was around " + savedClass
                     + "; it is installed unwrapped, so grants no longer confer anything. Converting "
                     + "it would make per-item authorization properties effective; the "
-                    + "batch-control-strategy monitor offers that as an explicit action (D-35d).");
+                    + "batch-control-strategy monitor offers that as an explicit action.");
             return saved;
         }
         AuthorizationStrategy converted;
@@ -87,12 +87,12 @@ public class BatchControlAuthorizationStrategy extends AuthorizationStrategy {
         if (converted != null) {
             LOGGER.info(() -> "Converted the withdrawn Batch Control wrapper around "
                     + savedClass + " into " + converted.getClass().getName()
-                    + ", keeping every entry (D-35a).");
+                    + ", keeping every entry.");
             return converted;
         }
         LOGGER.warning(() -> "The withdrawn Batch Control wrapper was around "
                 + savedClass + ", which has no Batch Control variant; it is "
-                + "installed unwrapped and grants no longer confer anything (D-35a).");
+                + "installed unwrapped and grants no longer confer anything.");
         return saved;
     }
 

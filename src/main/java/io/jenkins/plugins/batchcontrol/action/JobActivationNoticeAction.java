@@ -18,8 +18,10 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * The job-page activation notice (SPEC item 6a): whether a run-controlled job is activated, not
- * activated or on hold, with a link to the activation request form.
+ * The job-page Batch Control notice area: whether a run-controlled job is activated, not
+ * activated or on hold, with a link to the activation request form (SPEC item 6a), and, on an
+ * approval-required job, that manual runs need an approved run request, with a link to the
+ * request form (SPEC item 6, e2e-03 DEF-01).
  *
  * <p>Like {@link JobTriggerLockAction} it has no sidebar entry and no URL; its
  * {@code jobMain.jelly} renders on the job page. It is shown to {@code Item/Read} holders while
@@ -67,6 +69,18 @@ public class JobActivationNoticeAction implements Action {
     /** Whether the notice is rendered: run control on and the viewer holds {@code Item/Read}. */
     public boolean isShown() {
         return job.hasPermission(Item.READ) && isRunControlEnabled();
+    }
+
+    /**
+     * e2e-03 DEF-01 (SPEC item 6): whether the "manual runs need an approved request" notice is
+     * rendered. Shown with the activation notice ({@link #isShown()}) on every job whose manual
+     * runs need approval ({@link JobRequestAction#isActive()}), because a build button of another
+     * plugin (Rebuild, Retry, a customised build button) or core's scripted Build Now reports a
+     * refusal only as its own generic failure message; the job page is where the user can still
+     * read why and where to go. The link to the request form follows {@link #isCanRequest()}.
+     */
+    public boolean isApprovalRequired() {
+        return isShown() && new JobRequestAction(job).isActive();
     }
 
     public boolean isActivated() {
