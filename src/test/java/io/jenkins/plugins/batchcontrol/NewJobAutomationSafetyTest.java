@@ -151,18 +151,31 @@ public class NewJobAutomationSafetyTest {
     }
 
     /**
-     * T-08-28 (D-34 scope + SPEC 6 cause policy): a fully locked new job still builds from an SCM
-     * trigger, which is how multibranch and polling jobs run. D-34 locks the timer and the
-     * upstream door; it must not bleed into the SCM cause SPEC 6 keeps open.
+     * T-08-28 (D-34 scope + SPEC 6a as amended by D-46 (b)): an SCM cause is an unattended cause.
+     * On a fully locked new job it is refused until the job is activated — clearing no switch
+     * could open it (D-46) — and once the job is activated it builds with {@code blockTimer} and
+     * {@code blockUpstream} still on: the D-34 lock does not bleed into the SCM cause, which no
+     * job switch governs. (Before D-46 the row asserted the SCM cause passed on a new job with no
+     * activation; note 103.)
      */
     @Test
-    public void t_08_28_lockedNewJobStillBuildsFromScmCause() throws Exception {
+    public void t_08_28_lockedNewJobBuildsFromScmCauseOnceActivated() throws Exception {
         FreeStyleProject generated = newLockedJobUnderRunControl("auto-scm");
 
+        assertNull(generated.scheduleBuild2(0,
+                        new SCMTrigger.SCMTriggerCause("simulated polling detected changes")),
+                "D-46: an SCM cause must not start a new job that is not activated");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
+        j.waitUntilNoActivity();
+        assertEquals(1, generated.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertTrue(generated.getBuilds().isEmpty(), "no build may have run");
+
+        BatchControlFixtures.activate(generated);
+        BatchControlJobProperty property = generated.getProperty(BatchControlJobProperty.class);
+        assertTrue(property.isBlockTimer() && property.isBlockUpstream(), "premise: the D-34 switches are still on");
         Future<FreeStyleBuild> polling = generated.scheduleBuild2(0,
                 new SCMTrigger.SCMTriggerCause("simulated polling detected changes"));
-        assertNotNull(polling, "SPEC 6: an SCM trigger cause must still pass on a newly created, fully "
-                + "locked job");
+        assertNotNull(polling, "SPEC 6: an SCM cause of an activated job must pass, whatever blockTimer/blockUpstream say");
         j.assertBuildStatusSuccess(polling);
         j.waitUntilNoActivity();
         assertEquals(1, generated.getBuilds().size(), "the SCM run must be the job's build #1");

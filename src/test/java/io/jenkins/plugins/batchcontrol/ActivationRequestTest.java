@@ -47,7 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code BatchControl/Request} + {@code Item/Read}, a reason and one or more designated approvers
  * (D-37), decided like a run request (designated approver only, self-approval rules), approval
  * activates and records ACTIVATED, rejection changes nothing; HOLD is the symmetric request that
- * needs approval and records HELD. Matrix rows T-06a-16..26.
+ * needs approval and records HELD; approving one request invalidates the job's other pending ones
+ * (security-13). Matrix rows T-06a-16..26, T-06a-51.
  *
  * <p>Every row fixes a job whose switches are already cleared, so that the timer outcome is
  * decided by activation alone and the behavioural half of each row (timer refused / admitted)
@@ -322,5 +323,38 @@ public class ActivationRequestTest {
         assertClientError(decideActivation(j, "a1", id, "approve", "ok"), "an approval of a cancelled request");
         assertFalse(isActivated(job));
         assertTrue(recordsFor(ChangeType.ACTIVATED, "act-x").isEmpty());
+    }
+
+    /**
+     * T-06a-51 (P0, S-13-07, SPEC 6a): approving one request invalidates the job's other pending
+     * activation requests, so a stale ACTIVATE can never undo an approved HOLD. Two ACTIVATE
+     * requests are pending (a1 and a2 designated); a1 approves the first, which invalidates the
+     * second; a HOLD is then approved; the stale ACTIVATE's approval is refused and the job stays
+     * held, its timer refused.
+     */
+    @Test
+    public void t_06a_51_stalePendingActivateCannotUndoAnApprovedHold() throws Exception {
+        String first = submitActivationOk(j, "u1", job, "ACTIVATE", "go live", "a1");
+        String second = submitActivationOk(j, "u1", job, "ACTIVATE", "go live (again)", "a2");
+        assertEquals(RequestStatus.PENDING, ActivationService.get().load(second).getStatus(), "premise: two pending ACTIVATE requests");
+
+        assertSuccess(decideActivation(j, "a1", first, "approve", "ok"), "a1's approval of the first");
+        assertTrue(isActivated(job), "premise: the first approval activates the job");
+        assertEquals(RequestStatus.INVALIDATED, ActivationService.get().load(second).getStatus(),
+                "approving one request must invalidate the job's other pending activation request");
+
+        String hold = submitActivationOk(j, "u1", job, "HOLD", "vendor outage", "a1");
+        assertSuccess(decideActivation(j, "a1", hold, "approve", "hold it"), "a1's approval of the hold");
+        assertFalse(isActivated(job), "premise: the approved hold stops the job");
+
+        assertClientError(decideActivation(j, "a2", second, "approve", "late"), "the approval of the stale ACTIVATE");
+        assertEquals(RequestStatus.INVALIDATED, ActivationService.get().load(second).getStatus());
+        assertFalse(isActivated(job), "a stale ACTIVATE must never undo an approved HOLD");
+        assertEquals(1, recordsFor(ChangeType.ACTIVATED, "act-x").size(), "only the first approval activated the job");
+        assertEquals(1, recordsFor(ChangeType.HELD, "act-x").size());
+        int next = job.getNextBuildNumber();
+        int builds = job.getBuilds().size();
+        assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "the held job's timer must be refused");
+        assertBlocked(j, job, next, builds);
     }
 }

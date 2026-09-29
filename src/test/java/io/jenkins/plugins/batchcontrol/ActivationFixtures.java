@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.Cause;
+import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.Queue;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
@@ -54,7 +56,7 @@ final class ActivationFixtures {
         // utility class
     }
 
-    static WebResponse submitActivation(JenkinsRule j, String userId, Job<?, ?> job, String action,
+    static WebResponse submitActivation(JenkinsRule j, String userId, Item job, String action,
                                         String reason, String... approvers) throws Exception {
         List<NameValuePair> params = new ArrayList<>();
         params.add(new NameValuePair("action", action));
@@ -69,7 +71,7 @@ final class ActivationFixtures {
     }
 
     /** Submits through the form and returns the id of the one request it created (asserted). */
-    static String submitActivationOk(JenkinsRule j, String userId, Job<?, ?> job, String action,
+    static String submitActivationOk(JenkinsRule j, String userId, Item job, String action,
                                      String reason, String... approvers) throws Exception {
         Set<String> before = activationIds();
         assertSuccess(submitActivation(j, userId, job, action, reason, approvers),
@@ -100,8 +102,20 @@ final class ActivationFixtures {
                 .collect(Collectors.toList());
     }
 
-    static boolean isActivated(Job<?, ?> job) {
+    static boolean isActivated(Item job) {
         return ActivationService.get().isActivated(job);
+    }
+
+    /**
+     * A {@link Cause.UserIdCause} made while authenticated as {@code userId}: a human submission.
+     * Fixtures use it instead of a cause-less {@code scheduleBuild2(0)} / {@code buildAndAssertSuccess}
+     * when a helper job must simply run, because whether a cause-less or {@code LegacyCodeCause}
+     * submission is an "unclassified" (unattended) cause under D-46 is not settled (note 100).
+     */
+    static Cause userCause(String userId) {
+        try (hudson.security.ACLContext ignored = hudson.security.ACL.as2(BatchControlFixtures.token(userId))) {
+            return new Cause.UserIdCause();
+        }
     }
 
     /** Matrix common blocking baseline: empty queue, unchanged next build number, no new build. */

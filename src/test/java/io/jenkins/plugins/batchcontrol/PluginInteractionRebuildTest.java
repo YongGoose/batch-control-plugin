@@ -78,7 +78,7 @@ public class PluginInteractionRebuildTest {
     @Test
     public void t_06_26_rebuildRunsOnUncontrolledJob() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rb-free"));
-        j.buildAndAssertSuccess(job);
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, ActivationFixtures.userCause("u1"))); // a human run (note 100)
 
         post(j, "u1", job.getBuildByNumber(1).getUrl() + "rebuild/");
         j.waitUntilNoActivity();

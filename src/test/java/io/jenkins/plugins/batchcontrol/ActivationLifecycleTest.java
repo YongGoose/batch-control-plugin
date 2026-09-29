@@ -41,8 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 6a (#15, D-39): an activation is per job and survives configuration edits; renaming
- * or moving a job keeps it; deleting a job removes it; computed children (D-32) need none.
- * Matrix rows T-06a-27..31.
+ * or moving a job keeps it; deleting a job removes it; a computed child needs no activation of
+ * its own, its multibranch project carries it (D-46). Activation state fails closed
+ * (security-13). Matrix rows T-06a-27..31, T-06a-48/49.
  *
  * <p>The store layout (ARCHITECTURE "Activation store") is checked from outside: activation
  * state lives in {@code batch-control/activations/*.xml}, one file per job, next to the
@@ -160,13 +161,17 @@ public class ActivationLifecycleTest {
     }
 
     /**
-     * T-06a-31 (P0): computed children (D-32) are not controlled and need no activation. A
-     * multibranch branch job created while run control is on is not activated, yet a timer and
-     * an upstream cause both start it.
+     * T-06a-31 (P0, amended by D-46 (c)): a computed child needs no activation of its own — its
+     * multibranch project carries it. With the multibranch project activated (created under run
+     * control, so through an approved ACTIVATE), the branch job built by indexing passes a timer
+     * and an upstream cause although nobody filed a request for the branch job itself. (Before
+     * D-46 the row asserted that a computed child needed no activation at all; the refusal
+     * while the multibranch project is not activated is T-06a-46.)
      */
     @Test
-    public void t_06a_31_multibranchChildNeedsNoActivation() throws Exception {
+    public void t_06a_31_multibranchChildNeedsNoActivationOfItsOwn() throws Exception {
         WorkflowMultiBranchProject mb = j.jenkins.createProject(WorkflowMultiBranchProject.class, "life-mb");
+        activate(mb);
         mb.getSourcesList().add(new BranchSource(new SingleSCMSource("main", new NullSCM())));
         Queue.Item indexing = mb.scheduleBuild2(0);
         assertNotNull(indexing, "branch indexing must be schedulable");
@@ -174,21 +179,75 @@ public class ActivationLifecycleTest {
         j.waitUntilNoActivity();
         WorkflowJob branch = mb.getItem("main");
         assertNotNull(branch, "indexing must have created the branch child job");
-        assertFalse(isActivated(branch), "premise: nobody activated the branch job");
 
         int next = branch.getNextBuildNumber();
         assertNotNull(branch.scheduleBuild2(0, new hudson.model.CauseAction(new TimerTrigger.TimerTriggerCause())),
-                "a computed child's timer cause must pass without activation");
+                "a computed child's timer cause must pass once its multibranch project is activated");
         j.waitUntilNoActivity();
         assertNotNull(branch.getBuildByNumber(next), "the timer run must exist");
 
         WorkflowJob caller = uncontrolled(j.createProject(WorkflowJob.class, "life-caller"));
         caller.setDefinition(new CpsFlowDefinition("build job: 'life-mb/main', wait: false, propagate: false", true));
-        j.buildAndAssertSuccess(caller);
+        j.assertBuildStatusSuccess(caller.scheduleBuild2(0, new hudson.model.CauseAction(ActivationFixtures.userCause("admin"))));
         j.waitUntilNoActivity();
         WorkflowRun upstreamRun = branch.getBuildByNumber(next + 1);
-        assertNotNull(upstreamRun, "an upstream cause must start the computed child without activation");
+        assertNotNull(upstreamRun, "an upstream cause must start the computed child of an activated multibranch project");
         assertNotNull(upstreamRun.getCause(Cause.UpstreamCause.class));
+        assertTrue(io.jenkins.plugins.batchcontrol.policy.ActivationService.get().list().stream()
+                        .noneMatch(r -> "life-mb/main".equals(r.getJobFullName())),
+                "no activation request exists for the branch job itself");
+    }
+
+    /**
+     * T-06a-48 (P0, S-13-04 / S-13-09, SPEC 6a "fails closed"): an activated job inside a folder
+     * is removed by deleting the folder (the job itself gets no delete of its own), after its
+     * activation was read. A folder and job re-created under the same names start not
+     * activated, the timer is refused, and no activation state file is left behind for the
+     * deleted job.
+     */
+    @Test
+    public void t_06a_48_jobRecreatedAfterItsFolderWasDeletedStartsNotActivated() throws Exception {
+        Folder folder = j.jenkins.createProject(Folder.class, "life-f");
+        FreeStyleProject job = clearedJob(folder.createProject(FreeStyleProject.class, "inner"));
+        activate(job);
+        assertTrue(isActivated(job), "premise: the job is activated and its state has been read");
+        assertEquals(1, stateFiles(), "premise: one state file");
+
+        folder.delete();
+        assertNull(j.jenkins.getItemByFullName("life-f/inner"), "premise: the job is gone with its folder");
+        assertEquals(0, stateFiles(), "deleting the folder must remove the activation of the job inside it");
+
+        Folder again = j.jenkins.createProject(Folder.class, "life-f");
+        FreeStyleProject recreated = clearedJob(again.createProject(FreeStyleProject.class, "inner"));
+        assertFalse(isActivated(recreated), "a job re-created under a deleted job's name must start not activated");
+        assertNull(recreated.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        assertBlocked(j, recreated, 1, 0);
+    }
+
+    /**
+     * T-06a-49 (P0, S-13-05, SPEC 6a "fails closed"): the activated job's state file cannot be
+     * deleted (it is replaced by a non-empty directory of the same name, from outside). The job
+     * is deleted anyway; a job re-created under the same name must start not activated and its
+     * timer must be refused — a failed state-file delete never leaves the activation behind.
+     */
+    @Test
+    public void t_06a_49_undeletableStateFileDoesNotActivateTheRecreatedJob() throws Exception {
+        FreeStyleProject job = activatedJob("life-stuck");
+        assertTrue(isActivated(job), "premise: activated, and the state has been read");
+        File[] states = stateFileList();
+        assertEquals(1, states.length, "premise: exactly one state file, the activated job's");
+        File state = states[0];
+        assertTrue(state.delete(), "fixture: remove the state file");
+        assertTrue(new File(state, "keep").mkdirs(), "fixture: put a non-empty directory where the state file was");
+
+        job.delete();
+        assertNull(j.jenkins.getItemByFullName("life-stuck"), "premise: the job is deleted");
+
+        FreeStyleProject again = clearedJob(j.createFreeStyleProject("life-stuck"));
+        assertFalse(isActivated(again), "a job whose state file could not be deleted must not pass its activation on");
+        assertNull(again.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                "the re-created job's timer must be refused");
+        assertBlocked(j, again, 1, 0);
     }
 
     // ---------------------------------------------------------------- helpers
@@ -209,8 +268,12 @@ public class ActivationLifecycleTest {
 
     /** Number of activation state files (the {@code .schema} marker excluded). */
     private int stateFiles() {
+        return stateFileList().length;
+    }
+
+    private File[] stateFileList() {
         File dir = new File(j.jenkins.getRootDir(), "batch-control/activations");
         File[] files = dir.listFiles((d, n) -> n.endsWith(".xml") && !n.startsWith("."));
-        return files == null ? 0 : files.length;
+        return files == null ? new File[0] : files;
     }
 }

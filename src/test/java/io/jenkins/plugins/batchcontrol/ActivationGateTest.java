@@ -47,14 +47,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 6a (#15, D-39), the queue gate: for a timer or upstream cause on a run-controlled
- * job the gate passes only if the job is activated <em>and</em> its {@code blockTimer} /
- * {@code blockUpstream} does not block the cause. Matrix rows T-06a-01..09.
+ * SPEC item 6a (#15, D-39, D-46), the queue gate: for an unattended cause on any non-computed
+ * job while run control is on, the gate passes only if the job is activated <em>and</em> its
+ * {@code blockTimer} / {@code blockUpstream} does not block the cause, whatever
+ * {@code approvalRequired} says (D-46). Matrix rows T-06a-01..09, T-06a-42.
  *
- * <p>Reading used throughout (matrix note 91): a "run-controlled job" is a job with
- * {@code approvalRequired=true} while run control is on — the same set item 6 and T-06-16 call
- * controlled. Activation is about the unattended causes only: it neither approves a manual run
- * (T-06a-04) nor is needed by an approved run request (T-06a-05).
+ * <p>Reading used throughout: note 91's "run-controlled job" (approvalRequired=true) is
+ * superseded by D-46 for the unattended gate — every non-computed job needs activation while
+ * run control is on (T-06a-07, note 100). Activation is about the unattended causes only: it
+ * neither approves a manual run (T-06a-04) nor is needed by an approved run request (T-06a-05).
  *
  * <p>Written from docs/SPEC.md item 6a, docs/DECISIONS.md D-39 and
  * docs/DESIGN-ACTIVATION-APPROVAL.md only (no src/main knowledge).
@@ -243,25 +244,39 @@ public class ActivationGateTest {
     }
 
     /**
-     * T-06a-07 (P1): a job that is not run-controlled (approvalRequired=false) needs no
-     * activation: its timer passes while run control is on (T-06-16 extended to item 6a).
+     * T-06a-07 (P0, amended by D-46 (a)): {@code approvalRequired} governs human-originated runs
+     * only. A job created under run control whose property says {@code approvalRequired=false}
+     * (switches off) — and a twin with the property removed — is still refused on its timer and
+     * on an upstream cause until it is activated; after an approved activation both build.
+     * (Before D-46 the row asserted that such a job needed no activation, note 91.)
      */
     @Test
-    public void t_06a_07_jobWithoutApprovalRequiredNeedsNoActivation() throws Exception {
+    public void t_06a_07_jobWithoutApprovalRequiredStillNeedsActivation() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("gate-free");
         BatchControlJobProperty free = new BatchControlJobProperty(false);
         free.setBlockTimer(false);
         free.setBlockUpstream(false);
         setBatchControl(job, free);
-        assertFalse(isActivated(job), "premise: the job is not activated");
+        FreeStyleProject bare = uncontrolled(j.createFreeStyleProject("gate-bare"));
 
-        j.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
-        j.assertBuildStatusSuccess(job.scheduleBuild2(0, new Cause.UpstreamCause(upstreamBuild("gate-up-7"))));
+        for (FreeStyleProject target : Arrays.asList(job, bare)) {
+            assertFalse(isActivated(target), "premise: " + target.getName() + " is not activated");
+            assertNull(target.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "D-46: the timer of the non-activated " + target.getName() + " must be refused whatever approvalRequired says");
+            assertBlocked(j, target, 1, 0);
+            assertNull(target.scheduleBuild2(0, new Cause.UpstreamCause(upstreamBuild("gate-up-7-" + target.getName()))),
+                    "D-46: an upstream cause of the non-activated " + target.getName() + " must be refused");
+            assertBlocked(j, target, 1, 0);
+
+            activate(target);
+            j.assertBuildStatusSuccess(target.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+            j.assertBuildStatusSuccess(target.scheduleBuild2(0, new Cause.UpstreamCause(upstreamBuild("gate-up-7b-" + target.getName()))));
+        }
     }
 
     /**
      * T-06a-08 (P0, D-45): a job created while run control is off counts as activated at
-     * creation ({@code activatedBy = uncontrolled}). Turning run control on and then making the
+     * creation ({@code activatedBy = (uncontrolled)}, S-13-10). Turning run control on and then making the
      * job approval-required (switches off) does not stop its timer — no activation request is
      * needed and none exists.
      */
@@ -274,7 +289,7 @@ public class ActivationGateTest {
         assertTrue(isActivated(job), "D-45: a job created while run control is off is activated at creation");
         ActivationState state = ActivationService.get().getState(job);
         assertNotNull(state, "D-45: the creation must be recorded as an activation state");
-        assertEquals("uncontrolled", state.getActivatedBy(), "D-45: activatedBy = uncontrolled");
+        assertEquals("(uncontrolled)", state.getActivatedBy(), "D-45 / S-13-10: activatedBy = (uncontrolled), a value no user id can take");
 
         cfg.setRunControlEnabled(true);
         cfg.save();
@@ -322,7 +337,7 @@ public class ActivationGateTest {
     /**
      * T-06a-09 (P1, #21 applied to item 6a): a timer refused because the job is not activated is
      * not silent in the audit trail — it writes a TRIGGER_BLOCKED record naming the job and TIMER.
-     * Which switch the detail names for a missing activation is not pinned (note 92).
+     * The detail names {@code activation} as the blocking switch (note 101, superseding note 92 (b)).
      */
     @Test
     public void t_06a_09_refusalForMissingActivationIsRecorded() throws Exception {
@@ -334,6 +349,8 @@ public class ActivationGateTest {
         assertEquals(1, records.size(), "one TRIGGER_BLOCKED record for the refused timer: " + records);
         assertNotNull(records.get(0).getDetail());
         assertTrue(records.get(0).getDetail().contains("TIMER"), "the record must name the cause kind: " + records.get(0).getDetail());
+        assertTrue(records.get(0).getDetail().toLowerCase(java.util.Locale.ROOT).contains("activation"),
+                "the record must name activation as what blocked the timer (note 101): " + records.get(0).getDetail());
     }
 
     // ---------------------------------------------------------------- helpers
@@ -367,8 +384,9 @@ public class ActivationGateTest {
         return job;
     }
 
+    /** A finished build of an uncontrolled job, started by a human cause (note 100). */
     private FreeStyleBuild upstreamBuild(String name) throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject(name));
-        return j.buildAndAssertSuccess(upstream);
+        return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, ActivationFixtures.userCause("admin")));
     }
 }

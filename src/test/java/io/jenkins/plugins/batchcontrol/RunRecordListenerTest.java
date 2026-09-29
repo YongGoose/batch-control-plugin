@@ -139,12 +139,15 @@ public class RunRecordListenerTest {
 
         // #1 USER
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, userCause("u1")));
+        // SPEC 6a / D-46: the unattended causes below need an activation even on an uncontrolled
+        // job created under run control (note 103)
+        BatchControlFixtures.activate(target);
         // #2 TIMER (matrix note 4: cron firing reproduced by a TimerTriggerCause schedule)
         j.assertBuildStatusSuccess(target.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
         // #3 UPSTREAM (real build-step invocation, waits for the downstream run)
-        WorkflowJob upstream = j.createProject(WorkflowJob.class, "up");
+        WorkflowJob upstream = uncontrolled(j.createProject(WorkflowJob.class, "up"));
         upstream.setDefinition(new CpsFlowDefinition("build job: 'cause-x', wait: true", true));
-        j.buildAndAssertSuccess(upstream);
+        j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new CauseAction(userCause("u1"))));
         j.waitUntilNoActivity();
         // #4 SCM
         j.assertBuildStatusSuccess(target.scheduleBuild2(0,
@@ -230,6 +233,8 @@ public class RunRecordListenerTest {
     @Test
     public void t_10_07_multibranchChildIsRecordedButNotControlled() throws Exception {
         WorkflowMultiBranchProject mb = j.jenkins.createProject(WorkflowMultiBranchProject.class, "mb");
+        // D-46 (c): the multibranch project carries the activation of its children (note 103)
+        BatchControlFixtures.activate(mb);
         mb.getSourcesList().add(new BranchSource(new SingleSCMSource("main", new NullSCM())));
         Queue.Item indexing = mb.scheduleBuild2(0);
         assertNotNull(indexing, "branch indexing must be schedulable");

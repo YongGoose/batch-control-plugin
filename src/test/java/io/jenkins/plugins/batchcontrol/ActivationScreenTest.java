@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 6a (#15, D-39), what people see: the job page shows whether the job is activated or
  * on hold and links to the activation request form; pending activation and hold requests appear
  * in the approval inbox; the history shows ACTIVATED/HELD records; activation requests notify
- * like run requests (D-36). Matrix rows T-06a-38..41.
+ * like run requests (D-36) and name the action (security-13). Matrix rows T-06a-38..41, T-06a-52.
  *
  * <p>Screen contract used (note 96): the state is recognised by wording, case-insensitively —
  * "not activated" or "on hold" for a job that is not in service, "activated" without either of
@@ -201,6 +201,24 @@ public class ActivationScreenTest {
         List<NotificationCapture> rejected = NotificationCapture.await(NotificationEvent.REJECTED, hold);
         assertEquals(1, rejected.size());
         assertEquals(List.of("u1"), rejected.get(0).recipients, "REJECTED goes to the requester");
+    }
+
+    /**
+     * T-06a-52 (P1, S-13-08, SPEC 6a "Notifications name the action"): the REQUEST_CREATED
+     * notification of a HOLD request says HOLD, and that of an ACTIVATE request says ACTIVATE
+     * (the twin, so a constant cannot pass). The reasons are chosen not to contain either word.
+     */
+    @Test
+    public void t_06a_52_notificationsNameTheAction() throws Exception {
+        String activate = submitActivationOk(j, "u1", job, "ACTIVATE", "new nightly", "a1");
+        NotificationCapture created = NotificationCapture.await(NotificationEvent.REQUEST_CREATED, activate).get(0);
+        assertEquals("ACTIVATE", created.action, "an ACTIVATE request notification must name ACTIVATE: " + created);
+        assertSuccess(decideActivation(j, "a1", activate, "approve", "ok"), "a1's approval");
+
+        String hold = submitActivationOk(j, "u1", job, "HOLD", "vendor outage", "a1");
+        NotificationCapture held = NotificationCapture.await(NotificationEvent.REQUEST_CREATED, hold).get(0);
+        assertEquals("HOLD", held.action, "a HOLD request notification must name HOLD: " + held);
+        assertEquals("ACTIVATION", held.kind, "the kind stays ACTIVATION (T-06a-41)");
     }
 
     // ---------------------------------------------------------------- helpers

@@ -9,7 +9,6 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
@@ -232,11 +231,11 @@ public class HistoryWebTest {
             RunRequestService.get().approve(approved.getId(), "ok");
         }
         j.waitUntilNoActivity();
-        // the second SUCCESS is a timer run of an uncontrolled job: since SPEC item 6a a timer run of
-        // sum-a would need an activation, and whether an activation request counts among the
-        // summary's approved requests is not specified (note 97), so the fixture avoids one
+        // the second SUCCESS is a human run of an uncontrolled job: since D-46 every timer run needs an
+        // activation, and whether an activation request counts among the summary's approved
+        // requests is not specified (notes 97, 103), so the fixture avoids one
         FreeStyleProject sumT = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-t"));
-        j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
 
         FreeStyleProject sumF = j.createFreeStyleProject("sum-f");
         sumF.getBuildersList().add(new FailureBuilder());

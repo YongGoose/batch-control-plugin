@@ -98,6 +98,8 @@ public class IncidentTest {
         // creation is independent of run control, so the job is simply taken out of it.
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("cron-fail"));
         job.getBuildersList().add(new FailureBuilder());
+        // SPEC 6a / D-46: a timer run needs an activation even on an uncontrolled job (note 103)
+        BatchControlFixtures.activate(job);
         // matrix note 4: cron firing reproduced by a TimerTriggerCause schedule
         j.assertBuildStatus(Result.FAILURE,
                 job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));

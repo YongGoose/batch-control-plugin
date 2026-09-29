@@ -96,7 +96,8 @@ public class PluginInteractionNaginatorTest {
         job.getBuildersList().add(new FailureBuilder());
         job.getPublishersList().add(retryOnce());
 
-        j.buildAndAssertStatus(Result.FAILURE, job);
+        // a human first run (note 100): the retry is judged by the causes of the build it retries
+        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
         j.waitUntilNoActivity();
         assertEquals(2, job.getBuilds().size(), "fixture: naginator must retry a failed uncontrolled build automatically");
 

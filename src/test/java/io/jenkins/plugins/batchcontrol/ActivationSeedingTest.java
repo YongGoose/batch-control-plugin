@@ -214,6 +214,40 @@ public class ActivationSeedingTest {
         });
     }
 
+    /**
+     * T-06a-50 (P0, S-13-06, SPEC 6a "fails closed"): a job created under run control, then a
+     * restart with the schema marker removed (a retried or re-run seeding). The seeding may run
+     * again, but the job created under run control is still not activated, has no ACTIVATED
+     * record, and its timer is refused. The rewritten marker is the guard that the seeding was
+     * in fact given the chance to run.
+     */
+    @Test
+    public void t_06a_50_retriedSeedingDoesNotActivateAJobCreatedUnderRunControl() throws Throwable {
+        session.then(r -> {
+            secure(r);
+            BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+            cfg.setRunControlEnabled(true);
+            cfg.setApprovers(Arrays.asList("a1"));
+            cfg.save();
+            FreeStyleProject job = createClearedControlledJob(r, "created-under-control");
+            assertFalse(ActivationService.get().isActivated(job), "premise: not activated at creation");
+            assertTrue(schemaMarker(r).isFile(), "premise: the first start wrote the marker");
+            assertTrue(schemaMarker(r).delete(), "fixture: remove the schema marker");
+        });
+        session.then(r -> {
+            secure(r);
+            assertTrue(schemaMarker(r).isFile(), "guard: the restart ran the seeding and rewrote the marker");
+            FreeStyleProject job = r.jenkins.getItemByFullName("created-under-control", FreeStyleProject.class);
+            assertNotNull(job);
+            assertFalse(ActivationService.get().isActivated(job),
+                    "a job created under run control must not be seeded as activated by a retried seeding");
+            assertTrue(recordsFor(ChangeType.ACTIVATED, "created-under-control").isEmpty(),
+                    "no ACTIVATED record for a job nobody activated");
+            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+            assertBlocked(r, job, 1, 0);
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static void secure(JenkinsRule r) {
@@ -266,7 +300,7 @@ public class ActivationSeedingTest {
             assertTrue(ActivationService.get().isActivated(job), name + " existed before the upgrade and must be activated");
             ActivationState state = ActivationService.get().getState(job);
             assertNotNull(state, name + " must have an activation state");
-            assertEquals("upgrade", state.getActivatedBy(), name + ": activatedBy must be 'upgrade'");
+            assertEquals("(upgrade)", state.getActivatedBy(), name + ": activatedBy must be (upgrade), a value no user id can take (S-13-10)");
             List<?> records = recordsFor(ChangeType.ACTIVATED, name);
             assertEquals(1, records.size(), name + " must have exactly one ACTIVATED record: " + records);
         }

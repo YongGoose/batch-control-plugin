@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.Item;
 import hudson.model.Job;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
@@ -103,8 +104,12 @@ final class BatchControlFixtures {
      * {@code JenkinsRule}); on a secured one the ids must hold what item 6a names
      * ({@code BatchControl/Request} + {@code Item/Read} for the requester, {@code Approve} for the
      * approver).
+     *
+     * <p>The parameter is an {@link Item}, not a {@link Job}: since D-46 a computed folder
+     * (multibranch project, organization folder) carries the activation for its children, so
+     * the same helper activates a {@code WorkflowMultiBranchProject} (matrix note 102).
      */
-    static void activate(Job<?, ?> job, String requester, String approver) throws IOException {
+    static void activate(Item job, String requester, String approver) throws IOException {
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         List<String> before = cfg.getApprovers() == null
                 ? new ArrayList<>() : new ArrayList<>(cfg.getApprovers());
@@ -136,7 +141,7 @@ final class BatchControlFixtures {
     }
 
     /** {@link #activate(Job, String, String)} with the ids most secured fixtures here use. */
-    static void activate(Job<?, ?> job) throws IOException {
+    static void activate(Item job) throws IOException {
         activate(job, "u1", "a1");
     }
 
