@@ -16,6 +16,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import org.htmlunit.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -104,6 +105,48 @@ public class RefusedRerunAuditTest {
 
         assertBlocked(j, job, 2, 1);
         assertRecorded(job, request, "u1");
+    }
+
+    /**
+     * T-06-74 (e2e-run3 DEF-32, PR-05): on a job with naginator's automatic retry, the approved run
+     * fails and the automatic retry is refused and recorded as SYSTEM (D-47: unattended). Within
+     * the same hour u1 presses Retry on the failed run; that refusal must be recorded as u1, with
+     * the retry named, and not folded into the SYSTEM record of the automatic retry (SPEC 6: every
+     * refused retry is recorded; usability line: recorded history names who did what). Note 146.
+     */
+    @Test
+    public void t_06_74_manualRetryRefusalIsRecordedAsTheUserNotMergedIntoSystem() throws Exception {
+        FreeStyleProject job = approvalRequired("rr-nag-both");
+        job.getBuildersList().add(new FailureBuilder());
+        job.getPublishersList().add(new NaginatorPublisher("", false, false, false, 1, new FixedDelay(0)));
+
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        assertBlocked(j, job, 2, 1);
+        FreeStyleBuild failed = job.getBuildByNumber(1);
+        j.assertBuildStatus(Result.FAILURE, failed);
+        List<ChangeRecord> automatic = rerunRecords(job);
+        assertTrue(!automatic.isEmpty(), "fixture: the refused automatic retry must be recorded: " + describe(automatic));
+        assertTrue(automatic.stream().noneMatch(r -> "u1".equals(r.getUser())), "fixture: before u1 acts no refusal"
+                + " record may name u1: " + describe(automatic));
+        assertNotNull(failed.getAction(NaginatorRetryAction.class), "fixture: naginator must offer Retry");
+
+        post(j, "u1", failed.getUrl() + "retry/");
+        assertBlocked(j, job, 2, 1);
+
+        List<ChangeRecord> records = rerunRecords(job);
+        List<ChangeRecord> byU1 = records.stream().filter(r -> "u1".equals(r.getUser())).collect(Collectors.toList());
+        assertTrue(!byU1.isEmpty(), "u1's refused Retry must be recorded with user = u1, not merged into the automatic"
+                + " retry's record: " + describe(records));
+        for (ChangeRecord record : byU1) {
+            if (record.getType() == ChangeType.TRIGGER_BLOCKED) {
+                assertTrue(String.valueOf(record.getDetail()).toLowerCase(Locale.ROOT).contains("retry"),
+                        "u1's TRIGGER_BLOCKED record must name the retry as its cause kind: " + describe(byU1));
+            }
+        }
+        assertTrue(records.stream().anyMatch(r -> !"u1".equals(r.getUser())
+                        && String.valueOf(r.getUser()).equalsIgnoreCase("SYSTEM")),
+                "the automatic retry's record stays attributed to SYSTEM (D-47): " + describe(records));
     }
 
     /**

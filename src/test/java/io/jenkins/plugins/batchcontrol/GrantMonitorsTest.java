@@ -169,6 +169,10 @@ public class GrantMonitorsTest {
             strategy.add(Item.READ, PermissionEntry.user(member));
             hudson.model.User.getById(member, true).save(); // a known account, as after a login
         }
+        // a known account with no entry of its own at all: everything it holds comes from the
+        // authenticated group (SPEC 8: the warning is about holders "from the strategy"; this
+        // account holds Configure only as a member of the listed group)
+        hudson.model.User.getById("member29d", true).save();
         j.jenkins.setAuthorizationStrategy(strategy);
         StrategyFixtures.configureBuildAuthenticator(); // keep the other monitor's warning out of the way
 
@@ -191,10 +195,12 @@ public class GrantMonitorsTest {
                 + " entry: " + excerpt(text));
         assertTrue(groupLine.toLowerCase(java.util.Locale.ROOT).contains("group"), "the entry must say that"
                 + " 'authenticated' is a group: " + groupLine);
-        for (String member : members) {
-            assertFalse(text.contains(member), "a user without a Configure entry of their own must not be listed as a"
-                    + " holder (the group is listed instead): " + excerpt(text));
+        for (String member : new String[] {"member29a", "member29b", "member29c", "member29d"}) {
+            assertFalse(text.contains(member), "a user whose Configure comes only from the authenticated group must not"
+                    + " be listed as a user entry (the group entry is listed instead): " + excerpt(text));
         }
+        assertFalse(text.matches("(?s).*\\bUser SYSTEM\\b.*"), "the internal SYSTEM identity is not an account holding"
+                + " Configure from the strategy and must not be listed as a user entry: " + excerpt(text));
     }
 
     private static String excerpt(String text) {
