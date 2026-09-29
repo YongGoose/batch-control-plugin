@@ -51,7 +51,7 @@ public final class NotificationDispatcher {
                     new ArrayBlockingQueue<>(QUEUE_CAPACITY),
                     new NamingThreadFactory(new DaemonThreadFactory(), "BatchControlNotifier"),
                     (task, pool) -> LOGGER.warning("Notification queue full or shutting down; dropping a "
-                            + "notification (D-36)"));
+                            + "notification"));
         }
         return executor;
     }

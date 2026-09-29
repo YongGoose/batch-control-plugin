@@ -1,10 +1,13 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.AbstractItem;
+import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import java.io.File;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -45,6 +48,19 @@ final class ChangeRecording {
     @CheckForNull
     static String activeGrantIdFor(String user, String itemFullName, @CheckForNull GrantAction action) {
         Grant grant = GrantService.get().findActiveGrant(user, itemFullName, action);
+        return grant == null ? null : grant.getId();
+    }
+
+    /**
+     * The id of the active grant through which {@code user} holds Item/Configure on {@code item},
+     * or {@code null}: a grant with the CONFIGURE action covering the item, or the Create grant
+     * through which the user created it, which confers Configure on that item while it is active
+     * (D-35c; e2e-03 DEF-05). The CONFIGURE record links it like any other grant (SPEC item 9).
+     */
+    @CheckForNull
+    static String configureGrantIdFor(String user, Item item) {
+        File rootDir = item instanceof AbstractItem ? ((AbstractItem) item).getRootDir() : null;
+        Grant grant = GrantService.get().findConfigureGrant(user, item.getFullName(), rootDir);
         return grant == null ? null : grant.getId();
     }
 

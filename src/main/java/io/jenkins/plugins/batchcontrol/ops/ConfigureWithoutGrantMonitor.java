@@ -8,12 +8,14 @@ import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.AuthorizationStrategy;
 import hudson.security.Permission;
+import hudson.security.SecurityRealm;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -24,6 +26,8 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 /**
@@ -67,16 +71,62 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
     private static final Permission[] CHANGE_PERMISSIONS =
             {Item.CONFIGURE, Item.CREATE, Item.DELETE};
 
+    /** Principal of the group probe: never a real account, so only group entries apply to it. */
+    private static final String GROUP_PROBE_PRINCIPAL = "batch-control:group-probe";
+
+    /** The group sid matrix-auth uses for every logged-in user. */
+    private static final String AUTHENTICATED = "authenticated";
+
+    /**
+     * One user or group that holds Item/Configure, Item/Create or Item/Delete from the
+     * authorization strategy itself, outside any grant (e2e-03 DEF-07). Immutable.
+     */
+    public static final class StandingHolder {
+        private final String sid;
+        private final boolean group;
+        private final List<String> permissions;
+
+        StandingHolder(String sid, boolean group, List<String> permissions) {
+            this.sid = sid;
+            this.group = group;
+            this.permissions = Collections.unmodifiableList(new ArrayList<>(permissions));
+        }
+
+        /** The user id or group name as written in the authorization strategy. */
+        public String getSid() {
+            return sid;
+        }
+
+        /** {@code true} for a security-realm group (including {@code authenticated}), else a user. */
+        public boolean isGroup() {
+            return group;
+        }
+
+        /** The standing change permissions held, e.g. {@code "Job/Configure"}, in a fixed order. */
+        public List<String> getPermissions() {
+            return permissions;
+        }
+
+        /** The user's display name when Jenkins knows the user, otherwise the sid. */
+        public String getDisplayName() {
+            if (group) {
+                return sid;
+            }
+            User user = User.getById(sid, false);
+            return user == null ? sid : user.getDisplayName();
+        }
+    }
+
     /** The cached result of one expensive candidate scan (immutable snapshot). */
     private static final class CachedScan {
         final AuthorizationStrategy strategy; // identity key: a swapped strategy recomputes
-        final boolean standingPermissionFound;
+        final List<StandingHolder> holders;
         final long computedAtNanos;
 
-        CachedScan(AuthorizationStrategy strategy, boolean standingPermissionFound,
+        CachedScan(AuthorizationStrategy strategy, List<StandingHolder> holders,
                    long computedAtNanos) {
             this.strategy = strategy;
-            this.standingPermissionFound = standingPermissionFound;
+            this.holders = Collections.unmodifiableList(new ArrayList<>(holders));
             this.computedAtNanos = computedAtNanos;
         }
     }
@@ -98,12 +148,52 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             return false;
         }
-        AuthorizationStrategy strategy = Jenkins.get().getAuthorizationStrategy();
-        if (!GrantLayer.isGrantLayered(strategy)) {
+        if (isStrategyMissing()) {
             // Without a Batch Control strategy, grants can never apply: change control is a no-op.
             return true;
         }
-        return cachedScanResult(strategy);
+        return !cachedScanResult(Jenkins.get().getAuthorizationStrategy()).isEmpty();
+    }
+
+    /**
+     * Whether the installed authorization strategy is not a Batch Control strategy, so grants can
+     * never apply (D-35a). When {@code true} the holder lists are empty: there is no grant layer
+     * to bypass, and the message should name the strategy instead.
+     */
+    public boolean isStrategyMissing() {
+        return !GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy());
+    }
+
+    /**
+     * Every user and group found holding a standing change permission (users first, then groups),
+     * from the same TTL-cached scan as {@link #isActivated()}. Empty when change control is off or
+     * the strategy is not a Batch Control strategy. Best effort: per-item entries are not seen.
+     */
+    public List<StandingHolder> getStandingHolders() {
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled() || isStrategyMissing()) {
+            return Collections.emptyList();
+        }
+        return cachedScanResult(Jenkins.get().getAuthorizationStrategy());
+    }
+
+    /** The users of {@link #getStandingHolders()}. */
+    public List<StandingHolder> getStandingUsers() {
+        return filter(false);
+    }
+
+    /** The groups of {@link #getStandingHolders()} (including {@code authenticated}). */
+    public List<StandingHolder> getStandingGroups() {
+        return filter(true);
+    }
+
+    private List<StandingHolder> filter(boolean groups) {
+        List<StandingHolder> out = new ArrayList<>();
+        for (StandingHolder holder : getStandingHolders()) {
+            if (holder.isGroup() == groups) {
+                out.add(holder);
+            }
+        }
+        return out;
     }
 
     /**
@@ -111,21 +201,27 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
      * fresh and keyed to the same strategy instance, otherwise recomputes and stores. Static
      * because the cache is static — the monitor is an extension singleton either way.
      */
-    private static boolean cachedScanResult(AuthorizationStrategy strategy) {
+    private static List<StandingHolder> cachedScanResult(AuthorizationStrategy strategy) {
         CachedScan cached = cachedScan;
         long now = System.nanoTime();
         if (cached != null && cached.strategy == strategy
                 && now - cached.computedAtNanos < CACHE_TTL_NANOS) {
-            return cached.standingPermissionFound;
+            return cached.holders;
         }
-        boolean found = scanForStandingPermissions(strategy);
-        cachedScan = new CachedScan(strategy, found, now);
-        return found;
+        CachedScan fresh = new CachedScan(strategy, scanForStandingPermissions(strategy), now);
+        cachedScan = fresh;
+        return fresh.holders;
     }
 
-    /** The expensive part: impersonates candidate sids against the strategy's root ACL. */
-    private static boolean scanForStandingPermissions(AuthorizationStrategy strategy) {
+    /**
+     * The expensive part: impersonates candidate user sids against the strategy's root ACL, then
+     * probes each granted group with an authentication that carries only that group. A group's
+     * permissions are those its probe holds beyond what every logged-in user holds, so a grant
+     * to {@code authenticated} is reported once, on {@code authenticated}.
+     */
+    private static List<StandingHolder> scanForStandingPermissions(AuthorizationStrategy strategy) {
         ACL rootAcl = strategy.getRootACL();
+        List<StandingHolder> holders = new ArrayList<>();
         for (String sid : candidateSids(strategy)) {
             Authentication auth = authenticate(sid);
             if (auth == null) {
@@ -134,13 +230,59 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             if (rootAcl.hasPermission2(auth, Jenkins.ADMINISTER)) {
                 continue; // admin bypass is out of scope (SPEC section 1)
             }
-            for (Permission permission : CHANGE_PERMISSIONS) {
-                if (rootAcl.hasPermission2(auth, permission)) {
-                    return true;
-                }
+            List<String> held = heldPermissions(rootAcl, auth, Collections.emptyList());
+            if (!held.isEmpty()) {
+                holders.add(new StandingHolder(sid, false, held));
             }
         }
-        return false;
+        Set<String> groups = strategyGroupSids(strategy);
+        if (groups.isEmpty()) {
+            return holders;
+        }
+        Authentication everyLoggedIn = groupProbe(null);
+        List<String> baseline = new ArrayList<>();
+        if (!rootAcl.hasPermission2(everyLoggedIn, Jenkins.ADMINISTER)) {
+            baseline = heldPermissions(rootAcl, everyLoggedIn, Collections.emptyList());
+            if (groups.contains(AUTHENTICATED) && !baseline.isEmpty()) {
+                holders.add(new StandingHolder(AUTHENTICATED, true, baseline));
+            }
+        }
+        for (String group : groups) {
+            if (AUTHENTICATED.equals(group)) {
+                continue;
+            }
+            Authentication probe = groupProbe(group);
+            if (rootAcl.hasPermission2(probe, Jenkins.ADMINISTER)) {
+                continue; // an administrators group: admin bypass is out of scope
+            }
+            List<String> held = heldPermissions(rootAcl, probe, baseline);
+            if (!held.isEmpty()) {
+                holders.add(new StandingHolder(group, true, held));
+            }
+        }
+        return holders;
+    }
+
+    /** The change permissions {@code auth} holds on the root ACL, minus those in {@code except}. */
+    private static List<String> heldPermissions(ACL rootAcl, Authentication auth, List<String> except) {
+        List<String> held = new ArrayList<>();
+        for (Permission permission : CHANGE_PERMISSIONS) {
+            String name = permission.group.title + "/" + permission.name;
+            if (!except.contains(name) && rootAcl.hasPermission2(auth, permission)) {
+                held.add(name);
+            }
+        }
+        return held;
+    }
+
+    /** A logged-in authentication that is no real account and carries only {@code group}, if any. */
+    private static Authentication groupProbe(@CheckForNull String group) {
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        authorities.add(SecurityRealm.AUTHENTICATED_AUTHORITY2);
+        if (group != null) {
+            authorities.add(new SimpleGrantedAuthority(group));
+        }
+        return new UsernamePasswordAuthenticationToken(GROUP_PROBE_PRINCIPAL, "", authorities);
     }
 
     /** Known users plus (reflectively) the sids a matrix-family strategy grants anything to. */
@@ -202,17 +344,53 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
     }
 
     /**
+     * The group sids a matrix-family strategy grants anything to: {@code GROUP} and legacy
+     * {@code EITHER} entries (an EITHER sid may name a group or an account, so it is probed both
+     * ways), read reflectively like {@link #strategyPermissionSids}. Capped at
+     * {@value #MAX_CANDIDATES}.
+     */
+    private static Set<String> strategyGroupSids(AuthorizationStrategy strategy) {
+        Set<String> groups = new LinkedHashSet<>();
+        try {
+            Method method = strategy.getClass().getMethod("getAllPermissionEntries");
+            Object result = method.invoke(strategy);
+            if (result instanceof Collection) {
+                for (Object entry : (Collection<?>) result) {
+                    if (groups.size() >= MAX_CANDIDATES) {
+                        break;
+                    }
+                    String type = typeOf(entry);
+                    String sid = sidOf(entry);
+                    if (sid != null && !sid.isEmpty() && ("GROUP".equals(type) || "EITHER".equals(type))) {
+                        groups.add(sid);
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LOGGER.log(Level.FINE,
+                    "No getAllPermissionEntries() on " + strategy.getClass().getName(), e);
+        }
+        return groups;
+    }
+
+    /** A permission entry's {@code getType()} constant name (reflective), or {@code null}. */
+    @CheckForNull
+    private static String typeOf(Object entry) {
+        try {
+            Object type = entry.getClass().getMethod("getType").invoke(entry);
+            return type instanceof Enum ? ((Enum<?>) type).name() : null;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
      * Whether a (reflectively read) permission entry's {@code getType()} is matrix-auth's
      * {@code GROUP} constant; {@code false} for {@code USER}, {@code EITHER}, or anything
      * reflection cannot resolve.
      */
     private static boolean isGroupEntry(Object entry) {
-        try {
-            Object type = entry.getClass().getMethod("getType").invoke(entry);
-            return type instanceof Enum && "GROUP".equals(((Enum<?>) type).name());
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return false;
-        }
+        return "GROUP".equals(typeOf(entry));
     }
 
     /** A permission entry's {@code getSid()} (reflective), or {@code null} if it cannot be read. */

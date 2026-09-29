@@ -462,7 +462,7 @@ public final class GrantRequestService {
             Store.get().appendChangeRecord(record);
         }
         LOGGER.info(() -> "Refused to let '" + user + "' have a permission window for '" + target
-                + "' " + attemptedTransition + ": change control is off (S-15)");
+                + "' " + attemptedTransition + ": change control is off");
         throw new IllegalStateException("Change control is off, so permission windows cannot be "
                 + attemptedTransition + ". While the switch is off a window would confer nothing, "
                 + "and it would take effect unreviewed as soon as the switch was turned back on. "

@@ -208,13 +208,13 @@ final class GrantAwareACL extends ACL {
                 BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION, attemptKey, target, user,
                         "Refused to create or rename to '" + itemName + "' in '" + group + "': the name is "
                                 + "outside the name restriction '" + grant.getCreateNamePattern() + "' of grant "
-                                + grant.getId() + " (D-40)", grant.getId());
+                                + grant.getId(), grant.getId());
             } catch (RuntimeException e) {
                 // The refusal stands whatever happens to the record.
                 LOGGER.log(Level.WARNING, "Could not record the refused name '" + target + "'", e);
             }
             LOGGER.info(() -> "Refused the name '" + itemName + "' in '" + group + "' for '" + user
-                    + "': outside the name restriction of grant " + grant.getId() + " (D-40)");
+                    + "': outside the name restriction of grant " + grant.getId());
         }
     }
 

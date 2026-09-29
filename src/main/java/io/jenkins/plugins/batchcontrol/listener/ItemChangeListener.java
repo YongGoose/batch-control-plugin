@@ -152,7 +152,7 @@ public class ItemChangeListener extends ItemListener {
         if (isComputedChild(job)) {
             LOGGER.fine(() -> "Job '" + fullName + "' is a computed child of '"
                     + job.getParent().getFullName() + "'; the new-job activation lock does "
-                    + "not apply to it (D-32). Its runs are still recorded.");
+                    + "not apply to it. Its runs are still recorded.");
             return;
         }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
@@ -186,10 +186,10 @@ public class ItemChangeListener extends ItemListener {
             }
             LOGGER.info(() -> "New job '" + fullName + "' starts locked while run control is on: "
                     + "approvalRequired, blockTimer and blockUpstream are all on, so creating the "
-                    + "job has not put it into service (D-31, D-34)");
+                    + "job has not put it into service");
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Failed to apply the new-job activation lock to the "
-                    + "newly created job '" + fullName + "' (D-31, D-34)", e);
+                    + "newly created job '" + fullName + "'", e);
         } finally {
             ChangeRecording.endSuppression(previouslySuppressed);
         }
@@ -211,13 +211,13 @@ public class ItemChangeListener extends ItemListener {
             addProperty(job, existing);
             LOGGER.log(Level.WARNING, () -> "Applying the new-job activation lock to '"
                     + fullName + "' failed; the job's previous batch-control property was restored,"
-                    + " so its existing controls stay in force (D-31, D-34, S-20)");
+                    + " so its existing controls stay in force");
         } catch (IOException restoreFailure) {
             failure.addSuppressed(restoreFailure);
             LOGGER.log(Level.SEVERE, () -> "Job '" + fullName + "' was left with no batch-control"
                     + " property: applying the new-job activation lock failed and restoring"
                     + " the previous property failed as well. The job is not run-controlled until"
-                    + " its configuration is saved again (D-31, D-34, S-20)");
+                    + " its configuration is saved again");
         }
     }
 

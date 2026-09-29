@@ -17,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
+import io.jenkins.plugins.batchcontrol.ui.ApprovalRequiredFailure;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,7 @@ import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Stapler;
 
 /**
  * The queue gate (SPEC item 6, D-03): every run path goes through
@@ -92,6 +94,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     static final String KIND_REPLAY = "REPLAY";
     static final String KIND_SCM = "SCM";
     static final String KIND_OTHER = "OTHER";
+    static final String KIND_RETRY = "RETRY";
+    static final String KIND_REBUILD = "REBUILD";
+
+    /** The rebuild plugin is not a dependency; its cause is matched by name (e2e-03 DEF-03). */
+    private static final String REBUILD_CAUSE_CLASS = "com.sonyericsson.rebuild.RebuildCause";
 
     /** Bound on the rate-limit map; it is simply cleared when full. */
     private static final int MAX_RATE_LIMIT_ENTRIES = 10_000;
@@ -175,9 +182,17 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
 
             // 4. User-originated (UI button, REST build endpoints, CLI): guide, never fail silently.
+            // A refused Rebuild is also recorded (SPEC item 6, e2e-03 DEF-03): it re-runs an earlier
+            // build without a new approval, and the plugin's own toast hides the guidance.
             for (Cause cause : causes) {
                 if (cause instanceof Cause.UserIdCause) {
-                    throw new Failure(approvalRequiredMessage(job));
+                    if (hasCause(causes, REBUILD_CAUSE_CLASS)) {
+                        recordTriggerBlocked(job, KIND_REBUILD, "approvalRequired",
+                                "Blocked a Rebuild of job '" + job.getFullName() + "' by '"
+                                        + Jenkins.getAuthentication2().getName()
+                                        + "' - a rebuild does not reuse an earlier approval; submit a new run request");
+                    }
+                    throw refusal(job);
                 }
             }
 
@@ -191,6 +206,14 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause) {
                     logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
                             + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
+                    // Recorded, not only logged (SPEC item 6, e2e-03 DEF-03).
+                    String kind = isAutomaticRetry(causes) ? KIND_RETRY
+                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : KIND_OTHER;
+                    String what = KIND_RETRY.equals(kind) ? "a retry" : KIND_REBUILD.equals(kind) ? "a Rebuild" : "a re-run";
+                    recordTriggerBlocked(job, kind, "approvalRequired", "Blocked " + what + " of job '"
+                            + job.getFullName() + "' that re-uses an earlier "
+                            + (cause instanceof ApprovedCause ? "approved" : "manual")
+                            + " run without a new approval - submit a new run request");
                     return false;
                 }
             }
@@ -274,6 +297,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         for (Cause cause : causes) {
             if (cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause
                     || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasCause(List<Cause> causes, String className) {
+        for (Cause cause : causes) {
+            if (className.equals(cause.getClass().getName())) {
                 return true;
             }
         }
@@ -395,6 +427,17 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
         return causes;
+    }
+
+    /**
+     * The refusal of a user-originated run (e2e-03 DEF-02). Inside an HTTP request it is the
+     * {@link ApprovalRequiredFailure} page, which links the request form only for users who may
+     * open it; elsewhere (CLI, scripts) the plain {@link Failure} with the same message as before.
+     */
+    private static Failure refusal(Job<?, ?> job) {
+        String message = approvalRequiredMessage(job);
+        return Stapler.getCurrentRequest2() != null
+                ? new ApprovalRequiredFailure(job, message) : new Failure(message);
     }
 
     /**

@@ -72,10 +72,10 @@ public class CreatedItemGrantListener extends ItemListener {
             // switch this plugin does not make outside its two documented places); it confers
             // nothing through the grant, and the record makes it visible to an administrator.
             LOGGER.severe(() -> "Item '" + fullName + "' was created by '" + user + "' although its name "
-                    + "is outside the name restriction of every active Create grant (D-40)");
+                    + "is outside the name restriction of every active Create grant");
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
                     "The item was created under a Create grant whose name restriction does not allow the name '"
-                            + item.getName() + "'; an administrator must check it (D-40).");
+                            + item.getName() + "'; an administrator must check it.");
             Store.get().appendChangeRecord(record);
             return;
         }
@@ -83,7 +83,7 @@ public class CreatedItemGrantListener extends ItemListener {
                 item instanceof AbstractItem ? ItemIdentity.of(((AbstractItem) item).getRootDir()) : null);
         if (grant != null) {
             LOGGER.fine(() -> "Item '" + fullName + "' created by '" + user + "' through grant "
-                    + grant.getId() + " (D-35c)");
+                    + grant.getId());
         }
     }
 

@@ -169,7 +169,7 @@ public final class BlockedAttemptAudit {
         if (previous != null && !previous.plus(cooldown).isBefore(now)) {
             LOGGER.fine(() -> "Not appending a second " + type + " record for '" + target
                     + "' by user '" + user + "' within " + cooldown + " of the last one"
-                    + " (S-21 bound); the attempt stays in the log: " + detail);
+                    + "; the attempt stays in the log: " + detail);
             return false;
         }
         ChangeRecord record = ChangeRecord.create(type, target, user, detail);

@@ -329,7 +329,7 @@ public final class RunRequestService {
             if (request.getQueuedAt() != null || request.getExecutedRunId() != null
                     || request.getStatus() == RequestStatus.EXECUTED) {
                 LOGGER.warning(() -> "Refusing re-use of the already consumed approval marker of request "
-                        + requestId + " (D-23 single consumption)");
+                        + requestId);
                 recordMarkerReuseBlocked(requestId, jobFullName,
                         "its single submission ticket was already claimed");
                 return false;
