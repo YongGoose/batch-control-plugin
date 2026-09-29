@@ -83,6 +83,7 @@ public class RequestIntegrityTest {
 
         WorkflowJob caller = j.createProject(WorkflowJob.class, "caller-a");
         caller.setDefinition(new CpsFlowDefinition("build job: 'protected-b', wait: false", true));
+        BatchControlFixtures.activateAsAdmin(caller); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertStatus(Result.FAILURE, caller); // PoC side effect: blocked build step fails the caller
 
         j.waitUntilNoActivity();

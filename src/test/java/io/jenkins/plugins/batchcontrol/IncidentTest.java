@@ -164,6 +164,7 @@ public class IncidentTest {
 
         FreeStyleProject unstable = j.createFreeStyleProject("unstable-x");
         unstable.getBuildersList().add(new UnstableBuilder());
+        BatchControlFixtures.activateAsAdmin(unstable); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.UNSTABLE, unstable.scheduleBuild2(0));
         j.waitUntilNoActivity();
         assertNull(incidentForRun("unstable-x#1"), "UNSTABLE is outside incidentResults=[FAILURE], no incident may open");
@@ -171,6 +172,7 @@ public class IncidentTest {
         // positive control so the negative assertion cannot pass vacuously
         FreeStyleProject failing = j.createFreeStyleProject("fail-x");
         failing.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(failing); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, failing.scheduleBuild2(0));
         j.waitUntilNoActivity();
         assertNotNull(incidentForRun("fail-x#1"), "FAILURE stays inside the configured results and must open an incident");
@@ -274,6 +276,7 @@ public class IncidentTest {
 
         WorkflowJob pipeline = j.createProject(WorkflowJob.class, "abort-inc");
         pipeline.setDefinition(new CpsFlowDefinition("sleep 60", true));
+        BatchControlFixtures.activateAsAdmin(pipeline); // D-46: a cause-less submission needs an activation (note 109)
         QueueTaskFuture<WorkflowRun> future = pipeline.scheduleBuild2(0);
         assertNotNull(future);
         WorkflowRun run = future.waitForStart();
@@ -346,6 +349,7 @@ public class IncidentTest {
     private Incident openIncident(String jobName) throws Exception {
         FreeStyleProject job = j.createFreeStyleProject(jobName);
         job.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
         Incident incident = incidentForRun(jobName + "#1");

@@ -125,6 +125,7 @@ public class ActivationGateTest {
 
         WorkflowJob upstream = uncontrolled(j.createProject(WorkflowJob.class, "gate-caller"));
         upstream.setDefinition(new CpsFlowDefinition("build job: 'gate-live', wait: true", true));
+        BatchControlFixtures.activateAsAdmin(upstream); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 
@@ -351,6 +352,34 @@ public class ActivationGateTest {
         assertTrue(records.get(0).getDetail().contains("TIMER"), "the record must name the cause kind: " + records.get(0).getDetail());
         assertTrue(records.get(0).getDetail().toLowerCase(java.util.Locale.ROOT).contains("activation"),
                 "the record must name activation as what blocked the timer (note 101): " + records.get(0).getDetail());
+    }
+
+    /**
+     * T-06a-53 (P0, D-46 amended, SPEC 6a): a queue submission with no cause at all and one
+     * carrying only {@code LegacyCodeCause} are unclassified, unattended causes. On a job created
+     * under run control with its property removed, both are refused until the job is activated,
+     * and both build afterwards.
+     */
+    @Test
+    @SuppressWarnings("deprecation") // Cause.LegacyCodeCause is exactly the cause under test
+    public void t_06a_53_causelessAndLegacyCodeSubmissionsNeedActivation() throws Exception {
+        FreeStyleProject job = uncontrolled(createUnderRunControl("gate-legacy"));
+        assertFalse(isActivated(job), "premise: the job is not activated");
+
+        assertTrue(j.jenkins.getQueue().schedule2(job, 0, java.util.Collections.emptyList()).isRefused(),
+                "D-46: a cause-less submission of a non-activated job must be refused");
+        assertBlocked(j, job, 1, 0);
+        assertNull(job.scheduleBuild2(0, new Cause.LegacyCodeCause()),
+                "D-46: a LegacyCodeCause submission of a non-activated job must be refused");
+        assertBlocked(j, job, 1, 0);
+
+        activate(job);
+        assertFalse(j.jenkins.getQueue().schedule2(job, 0, java.util.Collections.emptyList()).isRefused(),
+                "an activated job must accept a cause-less submission");
+        j.waitUntilNoActivity();
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, new Cause.LegacyCodeCause()));
+        j.waitUntilNoActivity();
+        assertEquals(2, job.getBuilds().size(), "both submissions must have built once activated");
     }
 
     // ---------------------------------------------------------------- helpers

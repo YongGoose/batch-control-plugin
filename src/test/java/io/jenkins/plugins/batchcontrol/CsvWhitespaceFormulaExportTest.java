@@ -137,6 +137,7 @@ public class CsvWhitespaceFormulaExportTest {
 
         // 2. A run record and a run request naming that job.
         BatchControlFixtures.uncontrolled(hostile);
+        BatchControlFixtures.activateAsAdmin(hostile); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(hostile);
         j.waitUntilNoActivity();
         try (ACLContext ignored = as("u1")) {

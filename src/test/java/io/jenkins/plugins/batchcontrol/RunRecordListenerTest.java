@@ -112,6 +112,7 @@ public class RunRecordListenerTest {
         WorkflowJob pipeline = j.createProject(WorkflowJob.class, "abort-x");
         pipeline.setDefinition(new CpsFlowDefinition("sleep 60", true));
 
+        BatchControlFixtures.activateAsAdmin(pipeline); // D-46: a cause-less submission needs an activation (note 109)
         QueueTaskFuture<WorkflowRun> future = pipeline.scheduleBuild2(0);
         assertNotNull(future);
         WorkflowRun run = future.waitForStart();

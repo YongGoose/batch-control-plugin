@@ -232,6 +232,7 @@ public class RequesterBuildPermissionTest {
     private Incident failingJobIncident(String name) throws Exception {
         FreeStyleProject failing = uncontrolled(j.createFreeStyleProject(name));
         failing.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activateAsAdmin(failing); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, failing.scheduleBuild2(0));
         j.waitUntilNoActivity();
         failing.getBuildersList().clear();

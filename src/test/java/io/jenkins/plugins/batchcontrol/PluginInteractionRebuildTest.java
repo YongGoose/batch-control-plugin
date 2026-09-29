@@ -44,6 +44,7 @@ public class PluginInteractionRebuildTest {
     @Test
     public void t_06_24_rebuildOfUnapprovedBuildIsBlocked() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rb-x"));
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(job);
         setBatchControl(job, new BatchControlJobProperty(true));
         FreeStyleBuild first = job.getBuildByNumber(1);

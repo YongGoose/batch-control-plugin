@@ -88,6 +88,7 @@ public class StoreReadRegressionTest {
             definitions.add(new StringParameterDefinition(name(i), value(i)));
         }
         job.addProperty(new ParametersDefinitionProperty(definitions));
+        BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(job);
         j.waitUntilNoActivity();
 

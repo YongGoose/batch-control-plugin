@@ -80,6 +80,7 @@ public class PluginInteractionParameterizedTriggerTest {
         upstream.getPublishersList().add(new BuildTrigger(new BuildTriggerConfig(
                 "pt-x", ResultCondition.ALWAYS, true, parameters())));
 
+        BatchControlFixtures.activateAsAdmin(upstream); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(upstream);
         j.waitUntilNoActivity();
 

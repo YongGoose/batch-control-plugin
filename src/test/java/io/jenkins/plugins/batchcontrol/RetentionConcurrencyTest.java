@@ -106,6 +106,7 @@ public class RetentionConcurrencyTest {
         // Warm-up outside the measurement: the first refused POST (page rendering, Stapler) and
         // the first build of a fresh instance are slow for reasons unrelated to the store.
         assertTrue(refuseBuild(gated) >= 400, "fixture: the gated job refuses an unapproved run");
+        BatchControlFixtures.activate(free); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(free);
         j.waitUntilNoActivity();
 
@@ -214,6 +215,7 @@ public class RetentionConcurrencyTest {
         diffJob.setDescription("template-change");
         FreeStyleProject failJob = uncontrolled(j.createFreeStyleProject("tpl-fail"));
         failJob.getBuildersList().add(new FailureBuilder());
+        BatchControlFixtures.activate(failJob); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, failJob.scheduleBuild2(0));
         j.waitUntilNoActivity();
 

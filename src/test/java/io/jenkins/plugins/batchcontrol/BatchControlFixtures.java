@@ -145,6 +145,17 @@ final class BatchControlFixtures {
         activate(job, "u1", "a1");
     }
 
+    /**
+     * {@link #activate(Item, String, String)} as the administrator deciding their own request
+     * (allowAdminSelfApproval, default true). For rows whose point is not activation but which
+     * submit a cause-less / {@code LegacyCodeCause} build of a job created under run control —
+     * an unclassified, unattended cause under D-46 (matrix note 109). Needs a user {@code admin}
+     * holding Jenkins/Administer (or an unsecured instance).
+     */
+    static void activateAsAdmin(Item job) throws IOException {
+        activate(job, "admin", "admin");
+    }
+
     /** An authenticated principal that needs no security realm (works on unsecured instances). */
     static Authentication token(String userId) {
         return new UsernamePasswordAuthenticationToken(userId, "",

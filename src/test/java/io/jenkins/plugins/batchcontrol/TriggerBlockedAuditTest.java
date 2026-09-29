@@ -140,6 +140,7 @@ public class TriggerBlockedAuditTest {
     public void t_06_45_refusedReplayWritesOneTriggerBlockedRecord() throws Exception {
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "tb-replay"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        BatchControlFixtures.activate(pipeline, "admin", "admin"); // D-46: a cause-less submission needs an activation (note 109)
         j.buildAndAssertSuccess(pipeline);
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(false);
@@ -373,6 +374,7 @@ public class TriggerBlockedAuditTest {
 
     private FreeStyleBuild upstreamBuild(String name) throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject(name));
+        activateAsAdmin(upstream); // D-46: a cause-less submission needs an activation (note 109)
         return j.buildAndAssertSuccess(upstream);
     }
 

@@ -120,6 +120,7 @@ public class StoreLocaleIndependenceTest {
 
             String jobName = "locale-job-" + tag.substring(0, 2);
             FreeStyleProject job = BatchControlFixtures.uncontrolled(j.createFreeStyleProject(jobName));
+            BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
             j.buildAndAssertSuccess(job);
             j.waitUntilNoActivity();
             RunRequest request = RunRequest.create(jobName, new LinkedHashMap<>(), "locale probe", "u1", "admin");
