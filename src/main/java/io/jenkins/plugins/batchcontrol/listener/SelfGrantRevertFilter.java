@@ -62,6 +62,9 @@ public final class SelfGrantRevertFilter implements Filter {
     /** Request attribute holding the {@link SelfGrantRevertedFailure} of the first reverted item. */
     static final String ATTRIBUTE = SelfGrantRevertFilter.class.getName() + ".failure";
 
+    /** Request attribute set when this filter wraps the response (S-20-01). */
+    static final String GUARDED = SelfGrantRevertFilter.class.getName() + ".guarded";
+
     /** Registers the filter once the plugin has started. */
     @Initializer(after = InitMilestone.PLUGINS_STARTED)
     public static void register() throws ServletException {
@@ -79,6 +82,12 @@ public final class SelfGrantRevertFilter implements Filter {
     static void flag(Item item) {
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         if (req != null && req.getAttribute(ATTRIBUTE) == null) {
+            if (req.getAttribute(GUARDED) == null) {
+                // S-20-01: change control was off when the request began; the revert is recorded,
+                // but this request's answer cannot carry the notice.
+                LOGGER.warning(() -> "Revert of the authorization entries of '" + item.getFullName()
+                        + "' not shown to the user: the request was not guarded");
+            }
             req.setAttribute(ATTRIBUTE, new SelfGrantRevertedFailure(item));
         }
     }
@@ -94,6 +103,7 @@ public final class SelfGrantRevertFilter implements Filter {
             return;
         }
         HttpServletRequest req = (HttpServletRequest) request;
+        req.setAttribute(GUARDED, Boolean.TRUE);
         GuardedResponse guarded = new GuardedResponse(req, (HttpServletResponse) response);
         chain.doFilter(request, guarded);
         guarded.finish();
@@ -103,7 +113,7 @@ public final class SelfGrantRevertFilter implements Filter {
     private static boolean changeControlOn() {
         try {
             return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
-        } catch (IllegalStateException e) {
+        } catch (RuntimeException e) { // S-20-01: a broken lookup leaves POSTs unwrapped, never a 500
             return false;
         }
     }
@@ -251,7 +261,7 @@ public final class SelfGrantRevertFilter implements Filter {
             // While rendering the notice the raw writer is used; otherwise the endpoint gets a gated
             // one, so output it writes through a reference taken before the save never lands after
             // the notice (S-19-05 (a)).
-            return state == State.RENDERING ? raw : new PrintWriter(new GatedWriter(raw), false);
+            return state == State.RENDERING ? raw : new GatedPrintWriter(raw);
         }
 
         @Override
@@ -261,6 +271,25 @@ public final class SelfGrantRevertFilter implements Filter {
             }
             ServletOutputStream raw = super.getOutputStream();
             return state == State.RENDERING ? raw : new GatedStream(raw);
+        }
+
+        /**
+         * The endpoint's writer while watching (S-20-02): behaves like the container's writer for
+         * an unmarked request, including {@link #checkError()} after a client disconnect, which the
+         * container's writer records instead of throwing.
+         */
+        private final class GatedPrintWriter extends PrintWriter {
+            private final PrintWriter raw;
+
+            GatedPrintWriter(PrintWriter raw) {
+                super(new GatedWriter(raw), false);
+                this.raw = raw;
+            }
+
+            @Override
+            public boolean checkError() {
+                return super.checkError() || raw.checkError();
+            }
         }
 
         /** A writer that diverts to the notice on first use once the request is marked. */
@@ -276,6 +305,36 @@ public final class SelfGrantRevertFilter implements Filter {
                 if (!divert()) {
                     raw.write(cbuf, off, len);
                 }
+            }
+
+            @Override
+            public void write(String str, int off, int len) throws IOException {
+                if (!divert()) {
+                    raw.write(str, off, len); // no char[] copy (S-20-02)
+                }
+            }
+
+            @Override
+            public void write(int c) throws IOException {
+                if (!divert()) {
+                    raw.write(c);
+                }
+            }
+
+            @Override
+            public Writer append(CharSequence csq) throws IOException {
+                if (!divert()) {
+                    raw.append(csq);
+                }
+                return this;
+            }
+
+            @Override
+            public Writer append(CharSequence csq, int start, int end) throws IOException {
+                if (!divert()) {
+                    raw.append(csq, start, end);
+                }
+                return this;
             }
 
             @Override
