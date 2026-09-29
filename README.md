@@ -145,9 +145,11 @@ offers no channel for the message; a build-token submission, whose caller is a
 script reading an HTTP status; and a timer or upstream trigger turned away by
 one of the per-job options or by activation. None of these are untraceable afterwards: each is
 logged, and each writes a change record to the audit history — a blocked-token
-attempt its own record, and a blocked Replay, timer or upstream submission, or
-any unattended submission refused because the job is not activated, a
-coalesced `TRIGGER_BLOCKED` record (at most one per job and cause per hour).
+attempt its own record; a blocked Replay its own `TRIGGER_BLOCKED` record per
+attempt (a repeat of the same attempt within a minute is merged); and a timer or
+upstream submission, or any other unattended submission refused because the job
+is not activated, a coalesced `TRIGGER_BLOCKED` record (at most one per job and
+cause per hour).
 While a job's `Block cron (timer) triggers` or `Block upstream triggers` switch
 is on, that job's own page also shows a notice naming it to anyone who can read
 the job.
@@ -468,8 +470,9 @@ an approved `ACTIVATE` request can. A generated nightly job therefore does not
 run its first night — but the refusal is recorded and shown, not silent: the
 job's own page carries a notice saying it is not activated (and naming
 `blockTimer`/`blockUpstream` while a switch is on), each refused attempt writes
-a `TRIGGER_BLOCKED` change record (coalesced to at most one per job and cause
-per hour), and the controller log carries a line at most once an hour per job.
+a `TRIGGER_BLOCKED` change record (unattended refusals are coalesced to at
+most one per job and cause per hour), and the controller log carries a line
+at most once an hour per job.
 A generated job that must run unattended needs a second pass to clear the
 switches and an approver to activate it. Jobs that already exist when the
 plugin is installed, and jobs created while run control is off, are activated

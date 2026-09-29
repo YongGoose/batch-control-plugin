@@ -128,11 +128,16 @@ from scripts.
     describe all of this, which is where an operator whose cron did not fire
     looks first.
 
-    **Records are coalesced, so the trail shows that a job is locked, not how
-    often each attempt recurred.** A `TRIGGER_BLOCKED` record merges every
-    refusal of one job and cause kind into at most one record per hour, whoever
-    the attempt ran as — a per-minute cron on a locked job would otherwise write
-    1,440 identical rows a day. A generated nightly job whose Job DSL or JCasC
+    **Unattended refusals are coalesced, so the trail shows that a job is
+    locked, not how often each attempt recurred.** For unattended submissions
+    (timer, upstream, SCM, scripts, automatic retries), a `TRIGGER_BLOCKED`
+    record merges every refusal of one job and cause kind into at most one
+    record per hour, whoever the attempt ran as — a per-minute cron on a locked
+    job would otherwise write 1,440 identical rows a day. A refusal of something
+    a person did, such as a clicked Retry, Rebuild or Replay, is not merged
+    that way: each attempt writes its own record naming the user and the build
+    it re-runs, and only a repeat of the same attempt by the same user within
+    one minute is merged, so a double click stays one record. A generated nightly job whose Job DSL or JCasC
     definition pins `blockTimer: false` (or an allow list) still does not run its
     first night, since that value does not survive a fresh creation (above); the
     difference now is that the first refusal already produced the notice, the
@@ -332,8 +337,12 @@ code does on purpose.
     `CONFIGURE` window covers: the administrative monitor on Manage Jenkins
     names the jobs whose builds still run as SYSTEM and says how to fix them,
     and the detail page of a `CONFIGURE` request on such a job warns the
-    approver before the decision. The same monitor also warns when no build
-    authenticator (a `QueueItemAuthenticator`) is configured at all.
+    approver before the decision. The check is bounded: it examines at most
+    500 jobs across the scopes of `CONFIGURE` windows and names at most 50 of
+    them, and when it stops early a WARNING is written to the controller log,
+    so on a larger instance the list may be incomplete. The same monitor also
+    warns when no build authenticator (a `QueueItemAuthenticator`) is
+    configured at all.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
