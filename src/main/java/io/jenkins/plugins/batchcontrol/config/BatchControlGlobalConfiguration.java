@@ -8,7 +8,6 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -115,25 +114,28 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     /**
-     * Programmatic / JCasC switch change. Same transaction as {@link #configure}: the new value
-     * is written to disk first; on failure the field is rolled back and the error is thrown, so no
-     * toggle record is written.
+     * Direct switch change (JCasC, script console). D-42 / security-09 S-01: this never fails
+     * the caller. The new value is applied in memory, the toggle record and side effects follow,
+     * and the configuration is then persisted; a failed write is logged at SEVERE and swallowed,
+     * so a boot-time JCasC apply cannot abort startup and a switch JCasC turns on is on. The web
+     * form path ({@link #configure}) stays transactional (#19).
      */
-    public void setRunControlEnabled(boolean runControlEnabled) {
-        if (this.runControlEnabled == runControlEnabled) {
+    public void setRunControlEnabled(boolean enabled) {
+        if (this.runControlEnabled == enabled) {
             return;
         }
-        if (candidate) {
-            this.runControlEnabled = runControlEnabled;
+        if (this.candidate) {
+            this.runControlEnabled = enabled;
             return;
         }
         synchronized (this) {
-            boolean previous = this.runControlEnabled;
-            if (previous == runControlEnabled) {
+            boolean previousRun = this.runControlEnabled;
+            if (previousRun == enabled) {
                 return;
             }
-            persistSwitches(runControlEnabled, changeControlEnabled);
-            afterSwitchesChanged(previous, changeControlEnabled);
+            this.runControlEnabled = enabled;
+            afterSwitchesChanged(previousRun, this.changeControlEnabled);
+            persistBestEffort();
         }
     }
 
@@ -153,61 +155,57 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * judged the worse of the two, so long as the cut is recorded — which
      * {@code GrantService#revokeAllActive} does, one {@code GRANT_REVOKE} record per closed window.
      *
-     * <p>#19: the revocation runs only once the new value is durable (see
-     * {@link #setRunControlEnabled} for the transaction).
+     * <p>#19 / D-42: on the form path the revocation runs only once the new value is durable; a
+     * direct call revokes even if persisting then fails (revocation only removes permissions).
      */
-    public void setChangeControlEnabled(boolean changeControlEnabled) {
-        if (this.changeControlEnabled == changeControlEnabled) {
+    public void setChangeControlEnabled(boolean enabled) {
+        if (this.changeControlEnabled == enabled) {
             return;
         }
-        if (candidate) {
-            this.changeControlEnabled = changeControlEnabled;
+        if (this.candidate) {
+            this.changeControlEnabled = enabled;
             return;
         }
         synchronized (this) {
-            boolean previous = this.changeControlEnabled;
-            if (previous == changeControlEnabled) {
+            boolean previousChange = this.changeControlEnabled;
+            if (previousChange == enabled) {
                 return;
             }
-            persistSwitches(runControlEnabled, changeControlEnabled);
-            afterSwitchesChanged(runControlEnabled, previous);
+            this.changeControlEnabled = enabled;
+            afterSwitchesChanged(this.runControlEnabled, previousChange);
+            persistBestEffort();
         }
     }
 
     /**
-     * Writes the configuration with the given switch values, then applies them in memory. The
-     * write goes through a detached copy, so a failed write leaves this instance untouched.
+     * D-42: persists after a direct switch change. A write failure is logged at SEVERE and does
+     * not throw; the in-memory value stays applied.
      */
-    private void persistSwitches(boolean run, boolean change) {
-        BatchControlGlobalConfiguration next = new BatchControlGlobalConfiguration(this);
-        next.runControlEnabled = run;
-        next.changeControlEnabled = change;
+    private void persistBestEffort() {
         try {
-            next.writeConfigFile();
+            writeConfigFile();
+            SaveableListener.fireOnChange(this, getConfigFile());
         } catch (IOException e) {
-            throw new UncheckedIOException("The Batch Control configuration could not be saved, "
-                    + "so the switch change was not applied", e);
+            LOGGER.log(Level.SEVERE, "Failed to save the Batch Control configuration after a switch "
+                    + "change; the change is applied in memory but will not survive a restart (D-42)", e);
         }
-        this.runControlEnabled = run;
-        this.changeControlEnabled = change;
-        SaveableListener.fireOnChange(this, getConfigFile());
     }
 
     /**
-     * Toggle records and side effects of a durable switch change (#19: never called before the
-     * new state is on disk). The toggle record is written before the revocations, so the audit
+     * Toggle records and side effects of a switch change (#19: on the form path only after the
+     * new state is on disk; D-42: on a direct setter call before the best-effort write). The toggle record is written before the revocations, so the audit
      * history reads in causal order: the switch went off, and then these windows were closed.
      */
     private void afterSwitchesChanged(boolean previousRun, boolean previousChange) {
-        if (previousRun != runControlEnabled) {
-            recordToggle("runControlEnabled", previousRun, runControlEnabled);
+        if (previousRun != this.runControlEnabled) {
+            recordToggle("runControlEnabled", previousRun, this.runControlEnabled);
         }
-        if (previousChange != changeControlEnabled) {
-            recordToggle("changeControlEnabled", previousChange, changeControlEnabled);
+        if (previousChange != this.changeControlEnabled) {
+            recordToggle("changeControlEnabled", previousChange, this.changeControlEnabled);
             // S-05: the standing-permission warning caches its expensive scan; a toggle must show
             // the fresh state on the next admin page render, not after the TTL.
             io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
-            if (!changeControlEnabled) {
+            if (!this.changeControlEnabled) {
                 io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
             }
         }
