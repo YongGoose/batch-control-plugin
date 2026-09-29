@@ -50,7 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 1 (#19): a switch change takes effect only once the new configuration is saved.
  * If the save fails, the in-memory switch, the toggle record and any side effect (revoking the
  * active grants when change control goes off) are not applied. Matrix rows T-01-07 .. T-01-10
- * (note 72).
+ * (note 72). D-42 carves out the direct setters (script console, JCasC): rows T-01-11/12
+ * (note 74). S-02, one switch leaves the other untouched: rows T-01-13/14 (note 75).
  *
  * <p>How the save is made to fail from outside: the global configuration's standard file
  * ({@code $JENKINS_HOME/<descriptor id>.xml}, ARCHITECTURE section 5) is replaced by a
@@ -182,7 +183,98 @@ public class SwitchSaveFailureTest {
         assertTrue(job.getBuilds().isEmpty(), "a manual build must now be blocked");
     }
 
+    /**
+     * T-01-11 (D-42, security-09 S-01): with the configuration file unwritable, a direct
+     * {@code setChangeControlEnabled(true)} (script console, JCasC) does not throw, the switch is
+     * on in memory and a CONFIG_TOGGLE record is written.
+     */
+    @Test
+    public void t_01_11_directSetterWithUnwritableFileAppliesAndDoesNotThrow() throws Exception {
+        assertFalse(cfg.isChangeControlEnabled(), "fixture: change control must start off");
+        int toggles = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size();
+        breakConfigFile();
+
+        BatchControlGlobalConfiguration.get().setChangeControlEnabled(true); // must not throw (D-42)
+
+        assertTrue(BatchControlGlobalConfiguration.get().isChangeControlEnabled(), "a direct setter applies the value in memory even if persisting fails (D-42)");
+        List<ChangeRecord> added = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled");
+        assertEquals(toggles + 1, added.size(), "the direct setter must write the toggle record (D-42)");
+        assertEquals("false -> true", added.get(added.size() - 1).getDetail());
+    }
+
+    /**
+     * T-01-12 (D-42, security-09 S-01): a JCasC apply of {@code unclassified: batchControl:} turning
+     * change control on against the unwritable file does not throw, and the switch is on.
+     */
+    @Test
+    public void t_01_12_cascApplyWithUnwritableFileDoesNotThrow() throws Exception {
+        String exported = cascExport();
+        assertTrue(exported.contains("batchControl:"), "fixture: the global configuration must use the JCasC symbol batchControl:\n" + exported);
+        assertFalse(cfg.isChangeControlEnabled(), "fixture: change control must start off");
+        int toggles = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size();
+        breakConfigFile();
+
+        io.jenkins.plugins.casc.ConfigurationAsCode.get().configureWith(io.jenkins.plugins.casc.yaml.YamlSource.of(
+                new java.io.ByteArrayInputStream(("unclassified:\n  batchControl:\n    changeControlEnabled: true\n")
+                        .getBytes(StandardCharsets.UTF_8)))); // must not throw: a boot-time apply may not abort startup (D-42)
+
+        assertTrue(BatchControlGlobalConfiguration.get().isChangeControlEnabled(), "a switch JCasC turns on must be on (D-42)");
+        assertEquals(toggles + 1, records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size(), "the JCasC toggle must be recorded");
+    }
+
+    /**
+     * T-01-13 (security-09 S-02): both switches on; {@code setRunControlEnabled(false)} leaves
+     * change control on in memory, writes no CONFIG_TOGGLE for changeControlEnabled, and a reload
+     * from disk still reads change control on (run control off).
+     */
+    @Test
+    public void t_01_13_togglingRunControlLeavesChangeControlUntouched() throws Exception {
+        bothSwitchesOn();
+        int changeToggles = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size();
+
+        cfg.setRunControlEnabled(false);
+        cfg.save();
+
+        assertFalse(cfg.isRunControlEnabled(), "premise: run control must be off");
+        assertTrue(cfg.isChangeControlEnabled(), "turning run control off must leave change control on in memory (S-02)");
+        assertEquals(changeToggles, records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size(), "no CONFIG_TOGGLE may be written for the untouched switch (S-02)");
+        cfg.load();
+        assertTrue(cfg.isChangeControlEnabled(), "on disk change control must still be on (S-02)");
+        assertFalse(cfg.isRunControlEnabled(), "on disk run control must be off");
+    }
+
+    /** T-01-14 (S-02, mirror of T-01-13): {@code setChangeControlEnabled(false)} leaves run control on, in memory, in the records and on disk. */
+    @Test
+    public void t_01_14_togglingChangeControlLeavesRunControlUntouched() throws Exception {
+        bothSwitchesOn();
+        int runToggles = records(ChangeType.CONFIG_TOGGLE, "runControlEnabled").size();
+
+        cfg.setChangeControlEnabled(false);
+        cfg.save();
+
+        assertFalse(cfg.isChangeControlEnabled(), "premise: change control must be off");
+        assertTrue(cfg.isRunControlEnabled(), "turning change control off must leave run control on in memory (S-02)");
+        assertEquals(runToggles, records(ChangeType.CONFIG_TOGGLE, "runControlEnabled").size(), "no CONFIG_TOGGLE may be written for the untouched switch (S-02)");
+        cfg.load();
+        assertTrue(cfg.isRunControlEnabled(), "on disk run control must still be on (S-02)");
+        assertFalse(cfg.isChangeControlEnabled(), "on disk change control must be off");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private void bothSwitchesOn() {
+        cfg.setRunControlEnabled(true);
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        cfg.load();
+        assertTrue(cfg.isRunControlEnabled() && cfg.isChangeControlEnabled(), "fixture: both switches must be on, on disk");
+    }
+
+    private static String cascExport() throws Exception {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        io.jenkins.plugins.casc.ConfigurationAsCode.get().export(out);
+        return out.toString(StandardCharsets.UTF_8);
+    }
 
     /** Turns change control on (saved) and gives u1 an approved 60-minute CONFIGURE window on batch-x. */
     private Grant changeControlOnWithActiveGrant() throws Exception {
