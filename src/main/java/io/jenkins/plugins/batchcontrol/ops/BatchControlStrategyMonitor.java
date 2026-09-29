@@ -8,9 +8,11 @@ import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.StrategyMigration;
+import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.List;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import jenkins.security.QueueItemAuthenticator;
@@ -74,7 +76,17 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     @Override
     public boolean isActivated() {
         return BatchControlGlobalConfiguration.get().isChangeControlEnabled()
-                && (strategyUnsupported() || buildAuthenticatorMissing());
+                && (strategyUnsupported() || buildAuthenticatorMissing()
+                        || !SystemBuildCheck.jobsRunningAsSystem().isEmpty());
+    }
+
+    /**
+     * Condition 3 (D-50): jobs in the scope of a pending or active CONFIGURE grant whose builds
+     * still run as SYSTEM although a build authenticator may be configured (for example Authorize
+     * Project per-project with no strategy on the job). Empty while change control is off.
+     */
+    public List<String> getJobsRunningAsSystem() {
+        return SystemBuildCheck.jobsRunningAsSystem();
     }
 
     /**
