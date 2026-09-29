@@ -103,25 +103,32 @@ from scripts.
     exempt list; the pipeline's next run would then execute their job with no
     approval and no window.
 
-    **The consequence is silent, and this is the part to plan for.** A Job DSL or
-    JCasC definition that pins `blockTimer: false` (or an allow list) *appears to
-    be ignored* on a fresh creation: the seed run creates the job locked, and only
-    a later seed run, which is an update rather than a creation, restores the
-    pinned values. So a generated nightly job does not run its first night, and
-    because an unattended refusal is silent by contract, a locked job looks exactly
-    like a job whose cron never fires.
+    **A refused timer, upstream or Replay submission is recorded and shown, not
+    silent (#21).** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
+    record naming the job, the cause kind (`TIMER`, `UPSTREAM`, `REPLAY`) and the
+    switch that blocked it (`blockTimer`, `blockUpstream`, `approvalRequired`),
+    listed on the change-history screens and exported in `changes.csv`. While run
+    control is on and the switch is checked, the job's own main page carries a
+    notice to any viewer holding `Item/Read`, naming the switch and pointing at
+    the job configuration to clear it; clearing it is itself a recorded change
+    and, with change control on, needs a permission window. The controller log
+    line ("Blocked timer-triggered run of job" / "Blocked upstream-triggered run
+    of job", INFO at most once an hour per job, FINE otherwise) and the job's own
+    `CREATE`-with-no-later-`CONFIGURE` history remain, as before, additional
+    evidence. The `help-blockTimer` and `help-blockUpstream` inline help texts
+    describe all of this, which is where an operator whose cron did not fire
+    looks first.
 
-    Three things tell those two cases apart. The job's **configuration screen** is
-    the first: if `Block cron (timer) triggers` is checked on a job whose Job DSL
-    definition says otherwise, the lock is the reason. The **controller log** is
-    the second: a refused timer run logs a "Blocked timer-triggered run of job"
-    line at INFO at most once an hour per job (repeats go to FINE), and a cron that never fired logs nothing at all. The
-    **change history** is the third: the job has a `CREATE` record and no
-    subsequent `CONFIGURE` record clearing the switches, which is the positive
-    evidence that nothing has unlocked it since. The same three steps are in the
-    product as the inline help of `Block cron (timer) triggers`
-    (`help-blockTimer`), which is where an operator whose cron did not fire looks
-    first; the other trigger and run-control help texts point at it.
+    **Records are coalesced, so the trail shows that a job is locked, not how
+    often each attempt recurred.** A `TRIGGER_BLOCKED` record merges every
+    refusal of one job and cause kind into at most one record per hour, whoever
+    the attempt ran as — a per-minute cron on a locked job would otherwise write
+    1,440 identical rows a day. A generated nightly job whose Job DSL or JCasC
+    definition pins `blockTimer: false` (or an allow list) still does not run its
+    first night, since that value does not survive a fresh creation (above); the
+    difference now is that the first refusal already produced the notice, the
+    change record and the log line, rather than looking exactly like a cron that
+    never fired.
 
     This is not theoretical. The seed jobs in this repository's own e2e
     environment stopped building silently the first time the approval default

@@ -92,13 +92,17 @@ build that is already running, not a global switch, not a job property, not a
 configuration change, and not a permission window expiring mid-build.
 
 A person refused at "Build Now", at a REST `build` call or at the CLI gets an
-"approval required" page or CLI message linking to the request form. Two refusals
-are silent instead, because neither caller has a screen to read them: Pipeline
-Replay, whose UI offers no channel for the message, and a build-token submission,
-whose caller is a script reading an HTTP status. Both are logged, and the token
-case is also written to the audit history as a blocked attempt, so a refusal nobody
-saw is still answerable afterwards. Automation refused by one of the per-job
-options is likewise turned away quietly and logged.
+"approval required" page or CLI message linking to the request form. Some
+refusals have no screen to read them at the time: Pipeline Replay, whose UI
+offers no channel for the message; a build-token submission, whose caller is a
+script reading an HTTP status; and a timer or upstream trigger turned away by
+one of the per-job options. None of these are untraceable afterwards: each is
+logged, and each writes a change record to the audit history — a blocked-token
+attempt its own record, and a blocked Replay, timer or upstream submission a
+coalesced `TRIGGER_BLOCKED` record (at most one per job and cause per hour).
+While a job's `Block cron (timer) triggers` or `Block upstream triggers` switch
+is on, that job's own page also shows a notice naming it to anyone who can read
+the job.
 
 ## Requirements
 
@@ -228,9 +232,11 @@ Values in the creation payload do not survive the lock. An `approvalRequired=fal
 a `blockTimer=false` or an allowed-upstream list in a `config.xml` POST, a CLI
 `create-job`, a Job DSL seed or a copied job is overwritten; only the job-level
 approver list is carried over, because it can only narrow who may approve. If your
-instance generates jobs from scripts this will bite on the first run, silently, so
-read [the automation note](docs/LIMITATIONS.md#automation-and-generated-jobs)
-before turning run control on.
+instance generates jobs from scripts this will bite on the first run — the job's
+own page and change history say so, but a generated job that must run unattended
+still needs a second pass to clear the switches — so read
+[the automation note](docs/LIMITATIONS.md#automation-and-generated-jobs) before
+turning run control on.
 
 A working reference configuration, with a Dockerfile, plugin list, security
 bootstrap and global settings, lives under [`e2e/`](e2e/). It exists to run the
@@ -362,17 +368,20 @@ say plainly that per-item properties become effective from that point.
 step that hits the gate ends the upstream job as `FAILURE`, even with
 `wait: false`. That is Jenkins' behaviour, not a choice made here.
 
-**Plan for the new-job lock before enabling run control, because it fails
-silently.** Every job created while run control is on starts with approval
-required and both trigger overrides on, and any value the creation payload supplied
-for those is overwritten, so a Job DSL or JCasC definition that pins
-`blockTimer: false` is not idempotent against a fresh creation and appears simply to
-be ignored. A generated nightly job therefore does not run its first night, and
-because an unattended refusal is silent by contract, that looks exactly like a cron
-that never fired. The job's own configuration screen is what tells the two apart:
-if `Block cron (timer) triggers` is checked, the lock is why. The controller log
-also carries a "blocked timer-triggered run" line, at most once an hour per job. The seed jobs in
-this repository's own e2e environment stopped building the first time this landed.
+**Plan for the new-job lock before enabling run control.** Every job created
+while run control is on starts with approval required and both trigger
+overrides on, and any value the creation payload supplied for those is
+overwritten, so a Job DSL or JCasC definition that pins `blockTimer: false` is
+not idempotent against a fresh creation and appears simply to be ignored. A
+generated nightly job therefore does not run its first night — but the refusal
+is recorded and shown, not silent: the job's own page carries a notice naming
+`blockTimer`/`blockUpstream` while the switch is on, each refused attempt writes
+a `TRIGGER_BLOCKED` change record (coalesced to at most one per job and cause
+per hour), and the controller log carries a "blocked timer-triggered run" line
+at most once an hour per job. The seed jobs in this repository's own e2e
+environment stopped building the first time this landed, and the fix was to
+make the seed script clear the switches right after creating them; a generated
+job that must run unattended needs that same second pass.
 
 **Secrets survive only as far as detection reaches.** A stored incident log tail
 masks the build's own sensitive parameter values and Jenkins `Secret` plaintexts
