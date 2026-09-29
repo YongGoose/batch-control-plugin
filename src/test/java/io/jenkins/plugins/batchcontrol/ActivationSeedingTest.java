@@ -146,6 +146,8 @@ public class ActivationSeedingTest {
     public void t_06a_35_freshInstallSeedsNothing() throws Throwable {
         session.then(r -> {
             secure(r);
+            BatchControlGlobalConfiguration.get().setRunControlEnabled(true); // D-45: created under run control
+            BatchControlGlobalConfiguration.get().save();
             assertTrue(schemaMarker(r).isFile(), "the first start must write the activations/.schema marker");
             assertTrue(ApproverFormFixtures.records(ChangeType.ACTIVATED).isEmpty(), "nothing to seed on a fresh install");
             FreeStyleProject job = createClearedControlledJob(r, "fresh-x");
@@ -223,8 +225,7 @@ public class ActivationSeedingTest {
     }
 
     /**
-     * Session 1: the jobs a previous release held, created while run control is off so no
-     * creation default applies, then made the way an operator had them — a controlled cron job
+     * Session 1: the jobs a previous release held, created (with run control on, see D-45 below) and then made the way an operator had them — a controlled cron job
      * with its switches off, an uncontrolled job, and a controlled Pipeline inside a folder. Then
      * the activation store the previous release never had is removed.
      */
@@ -233,18 +234,23 @@ public class ActivationSeedingTest {
         assertTrue(ApproverFormFixtures.records(ChangeType.ACTIVATED).isEmpty(),
                 "premise: the first boot saw no jobs, so nothing was seeded");
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
-        cfg.setRunControlEnabled(false);
+        // run control on while the jobs are created: under D-45 a job created with run control off
+        // would be activated at creation (activatedBy = uncontrolled) and could leave an ACTIVATED
+        // record behind, which would blur the one-record-per-job assertion of the seeding
+        cfg.setRunControlEnabled(true);
         cfg.setApprovers(Arrays.asList("a1"));
         cfg.save();
 
         FreeStyleProject cron = r.createFreeStyleProject("legacy-cron");
         cron.addTrigger(new TimerTrigger("0 3 * * *"));
         setBatchControl(cron, cleared());
-        r.createFreeStyleProject("legacy-free");
+        BatchControlFixtures.uncontrolled(r.createFreeStyleProject("legacy-free"));
         Folder folder = r.jenkins.createProject(Folder.class, "legacy-f");
         WorkflowJob inner = folder.createProject(WorkflowJob.class, "inner");
         inner.setDefinition(new CpsFlowDefinition("echo 'nightly'", true));
         setBatchControl(inner, cleared());
+        assertTrue(ApproverFormFixtures.records(ChangeType.ACTIVATED).isEmpty(),
+                "premise: jobs created under run control leave no ACTIVATED record before the upgrade");
 
         cfg.setRunControlEnabled(runControlOnAtEnd);
         cfg.save();

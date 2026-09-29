@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.recipes.WithTimeout;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
@@ -257,6 +258,80 @@ public class TriggerBlockedAuditTest {
         assertTrue(rows.get(0).contains("tb-visible"), "the exported row must name the job: " + rows);
         assertTrue(rows.get(0).contains("TIMER") && rows.get(0).contains("blockTimer"),
                 "the exported row must carry the detail (cause kind and switch): " + rows);
+    }
+
+    /**
+     * T-06-52 (security-12 S-12-01, P1): the coalescing memory is bounded (10,000 keys by the
+     * review) but its bound must never suppress a record. 10,001 distinct locked jobs are each
+     * refused once within one hour: every job has exactly one TRIGGER_BLOCKED record and no
+     * submission throws. Guard: the most recently refused job refused again in the same hour
+     * still coalesces (one record). The jobs are created under run control, so they start locked
+     * (D-34) and not activated (SPEC 6a); either reason refuses the timer.
+     */
+    @Test
+    @WithTimeout(900)
+    public void t_06_52_coalescingBoundNeverSuppressesARecord() throws Exception {
+        clockAt(T0);
+        int count = 10_001;
+        List<FreeStyleProject> jobs = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            jobs.add(j.jenkins.createProject(FreeStyleProject.class, "tb-many-" + i));
+        }
+        for (FreeStyleProject job : jobs) {
+            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "fixture: " + job.getName() + " must be refused");
+        }
+        j.waitUntilNoActivity();
+
+        java.util.Map<String, Long> perJob = FileStore.get().listChangeRecords(MONTH).stream()
+                .filter(r -> r.getType() == ChangeType.TRIGGER_BLOCKED)
+                .filter(r -> r.getTarget() != null && r.getTarget().startsWith("tb-many-"))
+                .collect(Collectors.groupingBy(ChangeRecord::getTarget, Collectors.counting()));
+        assertEquals(count, perJob.size(), "every refused job must have a TRIGGER_BLOCKED record");
+        List<String> notOne = perJob.entrySet().stream().filter(e -> e.getValue() != 1L)
+                .map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.toList());
+        assertTrue(notOne.isEmpty(), "each job must have exactly one record: " + notOne);
+
+        FreeStyleProject last = jobs.get(count - 1);
+        assertNull(last.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
+        assertEquals(1, triggerBlocked(last.getName()).size(), "a recent key must still coalesce within the hour");
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "no refused run may be queued");
+    }
+
+    /**
+     * T-06-53 (security-12 S-12-01, P0 — run blocking): the refusal fails closed when the audit
+     * write fails. The month's change file is replaced by a directory of the same name, so no
+     * append can succeed; the timer cause is still refused quietly (no exception) with the
+     * blocking baseline. Guard: once the file is writable again, a refusal an hour later is
+     * recorded, so the first refusal really went through the failing write path.
+     */
+    @Test
+    public void t_06_53_refusalHoldsWhenTheAuditWriteFails() throws Exception {
+        clockAt(T0);
+        FreeStyleProject job = timerLocked("tb-failing-write");
+        java.io.File month = new java.io.File(j.jenkins.getRootDir(), "batch-control/changes/" + MONTH + ".jsonl");
+        if (month.isFile()) {
+            assertTrue(month.delete(), "fixture: remove the month file");
+        }
+        assertTrue(month.mkdirs(), "fixture: a directory now stands where the month file is written");
+
+        try {
+            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                    "a refused timer must stay refused when its audit record cannot be written");
+        } catch (RuntimeException e) {
+            throw new AssertionError("a failed audit write must not surface from the queue gate", e);
+        }
+        assertEquals(0, j.jenkins.getQueue().getItems().length, "the queue must stay empty");
+        j.waitUntilNoActivity();
+        assertEquals(1, job.getNextBuildNumber(), "nextBuildNumber must not move");
+        assertTrue(job.getBuilds().isEmpty(), "no build may have run");
+
+        assertTrue(month.delete(), "fixture: restore a writable month file");
+        clockAt(T0.plusSeconds(2 * 3600));
+        assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
+        assertEquals(1, triggerBlocked("tb-failing-write").size(),
+                "guard: with the file writable the next refusal (a new hour) is recorded");
+        assertTrue(job.getBuilds().isEmpty());
     }
 
     // ---------------------------------------------------------------- helpers

@@ -9,7 +9,9 @@ import hudson.security.ACLContext;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -258,28 +260,60 @@ public class ActivationGateTest {
     }
 
     /**
-     * T-06a-08 (P1): "jobs created afterwards start not activated" holds for a job created while
-     * run control was off. When it is later made approval-required, its timer is refused until
-     * an activation is approved (matrix note 92 flags this consequence for the owner).
+     * T-06a-08 (P0, D-45): a job created while run control is off counts as activated at
+     * creation ({@code activatedBy = uncontrolled}). Turning run control on and then making the
+     * job approval-required (switches off) does not stop its timer — no activation request is
+     * needed and none exists.
      */
     @Test
-    public void t_06a_08_jobCreatedWhileRunControlOffNeedsActivationOnceControlled() throws Exception {
+    public void t_06a_08_jobCreatedWhileRunControlOffKeepsRunningOnceControlled() throws Exception {
         cfg.setRunControlEnabled(false);
         cfg.save();
         FreeStyleProject job = j.createFreeStyleProject("gate-later");
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        assertTrue(isActivated(job), "D-45: a job created while run control is off is activated at creation");
+        ActivationState state = ActivationService.get().getState(job);
+        assertNotNull(state, "D-45: the creation must be recorded as an activation state");
+        assertEquals("uncontrolled", state.getActivatedBy(), "D-45: activatedBy = uncontrolled");
+
         cfg.setRunControlEnabled(true);
         cfg.save();
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
 
         BatchControlJobProperty controlled = new BatchControlJobProperty(true);
         controlled.setBlockTimer(false);
         controlled.setBlockUpstream(false);
         setBatchControl(job, controlled);
-        assertFalse(isActivated(job), "a job created after the first start is not activated");
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        assertEquals(3, job.getBuilds().size(), "every timer run must have built");
+        assertTrue(ActivationService.get().list().isEmpty(), "no activation request was needed");
+
+        // guard: the job switch still applies to it (the AND, T-06a-03)
+        controlled.setBlockTimer(true);
+        job.save();
+        assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "blockTimer on must still refuse");
+        assertBlocked(j, job, 4, 3);
+    }
+
+    /**
+     * T-06a-42 (P0, D-45 counterpart): a job created while run control is on is not activated at
+     * creation, has no activation state claiming otherwise, and — switches cleared — its timer is
+     * refused until an activation is approved.
+     */
+    @Test
+    public void t_06a_42_jobCreatedWhileRunControlOnIsNotActivated() throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("gate-on");
+        BatchControlJobProperty controlled = new BatchControlJobProperty(true);
+        controlled.setBlockTimer(false);
+        controlled.setBlockUpstream(false);
+        setBatchControl(job, controlled);
+        assertFalse(isActivated(job), "a job created while run control is on starts not activated");
+        ActivationState state = ActivationService.get().getState(job);
+        assertTrue(state == null || !state.isActivated(), "no activation state may say it is activated");
 
         assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
                 "a controlled, non-activated job must not run on its timer");
-        assertBlocked(j, job, 2, 1);
+        assertBlocked(j, job, 1, 0);
 
         activate(job);
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
