@@ -576,6 +576,62 @@ public class ChangeRecordNoOpSaveTest {
         assertTrue(String.valueOf(wrapper.get(wrapper.size() - 1).getDiff()).contains("baz"), "the diff must carry the edit");
     }
 
+    /**
+     * T-09-23 (security-19 S-19-02): a numeric {@code configVersion} leaf that carries an attribute
+     * ({@code <configVersion x="...">1</configVersion>}) is not the bare numeric leaf T-09-21 may
+     * ignore. A POST whose only difference is that attribute ({@code x="a"} to {@code x="hidden"})
+     * writes one CONFIGURE record whose diff carries {@code x="hidden"} (SPEC 9). Core
+     * re-serialises a posted config.xml, so the attribute is backed by a test property field
+     * serialised as {@code <configVersion x="...">value</configVersion>} (note 155).
+     */
+    @Test
+    public void t_09_23_attributeOnNumericConfigVersionLeafIsRecorded() throws Exception {
+        hudson.model.Items.XSTREAM2.processAnnotations(AttributedProperty.Versioned.class);
+        FreeStyleProject job = j.createFreeStyleProject("cv-attr");
+        job.addProperty(new AttributedProperty("a", "1"));
+        String stored = job.getConfigFile().asString();
+        assertTrue(stored.contains("<configVersion x=\"a\">1</configVersion>"), "fixture: the attributed numeric leaf"
+                + " must be stored: " + stored);
+
+        int before = configureRecords("cv-attr").size();
+        String edited = stored.replace("<configVersion x=\"a\">1</configVersion>",
+                "<configVersion x=\"hidden\">1</configVersion>");
+        assertEquals(200, postConfigXml(job, edited));
+        FreeStyleProject after = j.jenkins.getItemByFullName("cv-attr", FreeStyleProject.class);
+        assertEquals("hidden", after.getProperty(AttributedProperty.class).configVersion.x,
+                "fixture: the POST must have changed the attribute");
+        assertTrue(after.getConfigFile().asString().contains("<configVersion x=\"hidden\">1</configVersion>"),
+                "fixture: the stored file must carry the new attribute");
+        List<ChangeRecord> records = configureRecords("cv-attr");
+        assertEquals(before + 1, records.size(), "a change of an attribute on a numeric configVersion leaf must write one"
+                + " CONFIGURE record");
+        assertTrue(String.valueOf(records.get(records.size() - 1).getDiff()).contains("x=\"hidden\""),
+                "the diff must carry the attribute: " + records.get(records.size() - 1).getDiff());
+    }
+
+    /** A job property whose configVersion field serialises as a numeric leaf with an attribute. */
+    public static class AttributedProperty extends hudson.model.JobProperty<hudson.model.Job<?, ?>> {
+        public Versioned configVersion;
+
+        public AttributedProperty(String x, String value) {
+            this.configVersion = new Versioned();
+            this.configVersion.x = x;
+            this.configVersion.value = value;
+        }
+
+        @com.thoughtworks.xstream.annotations.XStreamConverter(
+                value = com.thoughtworks.xstream.converters.extended.ToAttributedValueConverter.class,
+                strings = {"value"})
+        public static class Versioned {
+            public String x;
+            public String value;
+        }
+
+        @TestExtension("t_09_23_attributeOnNumericConfigVersionLeafIsRecorded")
+        public static class DescriptorImpl extends hudson.model.JobPropertyDescriptor {
+        }
+    }
+
     /** A job property whose own fields are named configVersion: a leaf string and a wrapper object. */
     public static class VersionedProperty extends hudson.model.JobProperty<hudson.model.Job<?, ?>> {
         public String configVersion;

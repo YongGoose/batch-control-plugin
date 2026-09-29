@@ -187,6 +187,76 @@ public class RefusedRerunAuditTest {
                 + " remote run submission: " + describe(remoteRunBlocked(job)));
     }
 
+    /**
+     * T-06-76 (security-19 S-19-01): a submission made inside an HTTP request by u1 that carries a
+     * naginator retry cause and a copied RemoteCause but no UserIdCause is not a person's Retry
+     * (T-06-74 needs the fresh UserIdCause naginator adds on a click); it is an unattended re-run
+     * of an approved run and must be refused on an activated approval-required job, as the same
+     * submission is on a non-request thread (T-06-34). Produced through a test root action that
+     * calls the public {@code Queue.schedule2}. The false-positive guard: the same action queues a
+     * build of an uncontrolled, activated job. Note 154.
+     */
+    @Test
+    public void t_06_76_retryCauseWithRemoteCauseButNoUserOnRequestThreadIsRefused() throws Exception {
+        io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration cfg =
+                io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+
+        FreeStyleProject free = uncontrolled(j.createFreeStyleProject("rr-s19-free"));
+        BatchControlFixtures.activate(free);
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatusSuccess(free.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
+        Page guard = post(j, "u1", "s19-probe/schedule?job=rr-s19-free");
+        assertEquals(200, guard.getWebResponse().getStatusCode(), "fixture: the probe action must answer");
+        j.waitUntilNoActivity();
+        assertEquals(2, free.getBuilds().size(), "fixture: the probe must queue a build of an uncontrolled, activated"
+                + " job, or this row measures nothing: " + guard.getWebResponse().getContentAsString());
+
+        FreeStyleProject job = approvalRequired("rr-s19");
+        requestAndApprove(job);
+        FreeStyleBuild approved = (FreeStyleBuild) assertApprovedRunQueuedExactlyOnce(j, job);
+        j.assertBuildStatusSuccess(approved);
+
+        post(j, "u1", "s19-probe/schedule?job=rr-s19");
+
+        assertBlocked(j, job, 2, 1);
+    }
+
+    /**
+     * Test-only root action: on a request thread, as the calling user, schedules build #1's job
+     * with a {@code NaginatorCause} (of build #1) and a {@code RemoteCause}, and no UserIdCause.
+     */
+    @org.jvnet.hudson.test.TestExtension("t_06_76_retryCauseWithRemoteCauseButNoUserOnRequestThreadIsRefused")
+    public static class ScheduleProbe implements hudson.model.RootAction {
+        @Override
+        public String getIconFileName() {
+            return null;
+        }
+
+        @Override
+        public String getDisplayName() {
+            return null;
+        }
+
+        @Override
+        public String getUrlName() {
+            return "s19-probe";
+        }
+
+        @org.kohsuke.stapler.verb.POST
+        public org.kohsuke.stapler.HttpResponse doSchedule(@org.kohsuke.stapler.QueryParameter String job) {
+            jenkins.model.Jenkins.get().checkPermission(jenkins.model.Jenkins.READ);
+            FreeStyleProject p = jenkins.model.Jenkins.get().getItemByFullName(job, FreeStyleProject.class);
+            FreeStyleBuild first = p.getBuildByNumber(1);
+            hudson.model.queue.ScheduleResult result = jenkins.model.Jenkins.get().getQueue().schedule2(p, 0,
+                    new hudson.model.CauseAction(new com.chikli.hudson.plugin.naginator.NaginatorCause(first),
+                            new Cause.RemoteCause("127.0.0.1", "token call")));
+            return org.kohsuke.stapler.HttpResponses.text(result.isRefused() ? "refused" : "scheduled");
+        }
+    }
+
     private static List<ChangeRecord> remoteRunBlocked(FreeStyleProject job) {
         List<ChangeRecord> out = new ArrayList<>();
         for (ChangeType type : ChangeType.values()) {
