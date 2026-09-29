@@ -26,7 +26,6 @@ import io.jenkins.plugins.batchcontrol.queue.ApprovedRunAction;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
 import java.time.Instant;
@@ -70,7 +69,7 @@ public final class RunRequestService {
     private static final RunRequestService INSTANCE = new RunRequestService();
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Store store = FileStore.get();
+    private final Store store = Store.get();
 
     private RunRequestService() {
     }

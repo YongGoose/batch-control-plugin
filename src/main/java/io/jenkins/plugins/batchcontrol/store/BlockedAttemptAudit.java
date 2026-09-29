@@ -16,8 +16,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * The single writer of the "an attempt was refused" audit records ({@link
- * ChangeType#MARKER_REUSE_BLOCKED}, {@link ChangeType#REMOTE_RUN_BLOCKED}), with a bound on how
- * often one repeated attempt may append (S-21).
+ * ChangeType#MARKER_REUSE_BLOCKED}, {@link ChangeType#REMOTE_RUN_BLOCKED},
+ * {@link ChangeType#TRIGGER_BLOCKED}), with a bound on how often one repeated attempt may append
+ * (S-21, #21).
  *
  * <p><b>Why a bound is needed.</b> Both callers run inside queue scheduling, and core takes the
  * global queue lock <em>before</em> it runs the {@code Queue.QueueDecisionHandler}s
@@ -62,18 +63,30 @@ public final class BlockedAttemptAudit {
     /** Maximum number of distinct keys tracked at once; the least recently written is evicted. */
     private static final int MAX_TRACKED_KEYS = 512;
 
+    /**
+     * Bound of the coalesced (per target, long cooldown) keys of {@link #recordCoalesced}. Larger
+     * than {@link #MAX_TRACKED_KEYS} because every locked job with a cron is one key for the
+     * whole hour: an instance with thousands of locked generated jobs (D-34) must not evict keys
+     * inside their hour and so write a record per job per minute. A key is about 100 bytes, so
+     * the bound caps the map at roughly a megabyte.
+     */
+    static final int MAX_COALESCED_KEYS = 10_000;
+
     /** Key separator; a character no id, job full name or user id contains. */
     private static final String KEY_SEPARATOR = "";
 
     private static final BlockedAttemptAudit INSTANCE = new BlockedAttemptAudit();
 
-    private final Store store = FileStore.get();
+    private final Store store = Store.get();
 
     /**
      * Key to the instant of the last record written under it. Insertion-ordered and re-inserted on
      * every write, so the front of the map is always the least recently written key.
      */
     private final Map<String, Instant> lastWritten = new LinkedHashMap<>();
+
+    /** As {@link #lastWritten}, for the keys of {@link #recordCoalesced} (no user in the key). */
+    private final Map<String, Instant> lastCoalesced = new LinkedHashMap<>();
 
     /** The Jenkins instance {@link #lastWritten} belongs to; a change drops the whole map. */
     private WeakReference<Jenkins> trackedFor = new WeakReference<>(null);
@@ -113,22 +126,47 @@ public final class BlockedAttemptAudit {
                                        String user, String detail, String grantId) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(attemptKey, "attemptKey");
-        Instant now = BatchClock.now();
         forgetOtherInstance();
         String key = type.name() + KEY_SEPARATOR + attemptKey + KEY_SEPARATOR + user;
-        Instant previous = lastWritten.get(key);
-        if (previous != null && !previous.plus(COOLDOWN).isBefore(now)) {
-            LOGGER.fine(() -> "Not appending a second " + type + " record for '" + attemptKey
-                    + "' by user '" + user + "' within " + COOLDOWN + " of the last one"
+        return append(lastWritten, MAX_TRACKED_KEYS, key, COOLDOWN, type, target, user, detail, grantId);
+    }
+
+    /**
+     * Appends one refused-attempt record unless one was already written under the same
+     * {@code type} and {@code attemptKey} inside {@code cooldown}, <em>whoever</em> made the
+     * attempt (#21). Used for refusals where the account says nothing new: a blocked timer run is
+     * always {@code SYSTEM}, and a blocked upstream run is whatever the upstream build ran as, so
+     * a per-user key would neither shorten the history nor add information.
+     *
+     * @param cooldown how long a written key merges further attempts
+     * @return {@code true} if a record was appended, {@code false} if it was merged
+     */
+    public synchronized boolean recordCoalesced(ChangeType type, String attemptKey, Duration cooldown,
+                                                String target, String user, String detail) {
+        Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(attemptKey, "attemptKey");
+        Objects.requireNonNull(cooldown, "cooldown");
+        forgetOtherInstance();
+        String key = type.name() + KEY_SEPARATOR + attemptKey;
+        return append(lastCoalesced, MAX_COALESCED_KEYS, key, cooldown, type, target, user, detail, null);
+    }
+
+    private boolean append(Map<String, Instant> tracked, int bound, String key, Duration cooldown,
+                           ChangeType type, String target, String user, String detail, String grantId) {
+        Instant now = BatchClock.now();
+        Instant previous = tracked.get(key);
+        if (previous != null && !previous.plus(cooldown).isBefore(now)) {
+            LOGGER.fine(() -> "Not appending a second " + type + " record for '" + target
+                    + "' by user '" + user + "' within " + cooldown + " of the last one"
                     + " (S-21 bound); the attempt stays in the log: " + detail);
             return false;
         }
         ChangeRecord record = ChangeRecord.create(type, target, user, detail);
         record.setGrantId(grantId);
         store.appendChangeRecord(record);
-        lastWritten.remove(key);
-        lastWritten.put(key, now);
-        evictOldest();
+        tracked.remove(key);
+        tracked.put(key, now);
+        evictOldest(tracked, bound);
         return true;
     }
 
@@ -137,14 +175,15 @@ public final class BlockedAttemptAudit {
         Jenkins current = Jenkins.getInstanceOrNull();
         if (trackedFor.get() != current) {
             lastWritten.clear();
+            lastCoalesced.clear();
             trackedFor = new WeakReference<>(current);
         }
     }
 
-    /** Keeps the map at {@link #MAX_TRACKED_KEYS} by dropping the least recently written keys. */
-    private void evictOldest() {
-        Iterator<Map.Entry<String, Instant>> it = lastWritten.entrySet().iterator();
-        while (lastWritten.size() > MAX_TRACKED_KEYS && it.hasNext()) {
+    /** Keeps a map at {@code bound} entries by dropping the least recently written keys. */
+    private static void evictOldest(Map<String, Instant> tracked, int bound) {
+        Iterator<Map.Entry<String, Instant>> it = tracked.entrySet().iterator();
+        while (tracked.size() > bound && it.hasNext()) {
             it.next();
             it.remove();
         }

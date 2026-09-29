@@ -114,25 +114,20 @@ public class RequestItem implements ModelObject {
             return null;
         }
         int hash = runId.lastIndexOf('#');
-        if (hash <= 0 || hash == runId.length() - 1) {
-            return null;
-        }
         // Only link inside the request's own job: the id is stored data, not a routing input.
-        if (!runId.substring(0, hash).equals(request.getJobFullName())) {
+        if (hash <= 0 || !runId.substring(0, hash).equals(request.getJobFullName())) {
             return null;
         }
-        int number;
-        try {
-            number = Integer.parseInt(runId.substring(hash + 1));
-        } catch (NumberFormatException e) {
+        // The run-link rule shared by every screen (D-44): Item/Read on the job, else plain text.
+        String url = Visibility.runUrlFromRunId(runId);
+        if (url == null) {
             return null;
         }
+        // The detail screen additionally drops the link of a build deleted since it ran.
         Job<?, ?> job = findJob();
-        if (job == null) {
-            return null;
-        }
-        Run<?, ?> run = job.getBuildByNumber(number);
-        return run == null ? null : run.getUrl();
+        return job != null && job.getBuildByNumber(Integer.parseInt(runId.substring(hash + 1))) != null
+                ? url
+                : null;
     }
 
     /**

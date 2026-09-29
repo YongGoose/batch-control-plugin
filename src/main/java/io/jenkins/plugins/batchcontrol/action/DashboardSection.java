@@ -1,17 +1,19 @@
 package io.jenkins.plugins.batchcontrol.action;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -40,7 +42,7 @@ import org.kohsuke.stapler.StaplerResponse2;
 public class DashboardSection implements ModelObject, StaplerProxy {
 
     /** Page size for the run record list. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /** Default look-back window in days (SPEC item 10). */
     public static final int DEFAULT_DAYS = 7;
@@ -98,21 +100,9 @@ public class DashboardSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- paging (used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter. */
+    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
     public int getPage() {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("page");
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
+        return Paging.currentPage();
     }
 
     /** The run records shown on the current page, newest first. */
@@ -130,8 +120,16 @@ public class DashboardSection implements ModelObject, StaplerProxy {
         return page().isTruncated();
     }
 
+    /**
+     * Over-long lines (over 1 MiB) skipped while reading this page (security-11 N-02); the CSV
+     * export skips the same lines, so the screen says so rather than look complete.
+     */
+    public int getOversized() {
+        return page().getOversized();
+    }
+
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
@@ -163,9 +161,10 @@ public class DashboardSection implements ModelObject, StaplerProxy {
         return RunLinks.formatDuration(durationMs);
     }
 
-    /** Root-relative build URL ({@code job/a/job/b/12/}). */
+    /** Root-relative build URL ({@code job/a/job/b/12/}), or null for plain text (D-44). */
+    @CheckForNull
     public String runUrl(RunRecord record) {
-        return RunLinks.runUrl(record.getJobFullName(), record.getNumber());
+        return Visibility.runUrl(record.getJobFullName(), record.getNumber());
     }
 
     /** One-line parameter rendering; values come from the record already masked. */
@@ -186,9 +185,9 @@ public class DashboardSection implements ModelObject, StaplerProxy {
             }
             // Bounded read (#13): newest first, stops at the record cap.
             // Only records inside the window count toward the cap (S-03).
-            page = FileStore.get().pageRunRecords(months, new Period(cutoff, null),
+            page = Store.get().pageRunRecords(months, new Period(cutoff, null),
                     r -> !r.getStartedAt().isBefore(cutoff),
-                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
+                    Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;
     }

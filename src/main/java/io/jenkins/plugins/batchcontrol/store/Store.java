@@ -25,6 +25,21 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public interface Store {
 
+    /**
+     * The store every caller uses (D-44). This is the one place that names the implementation,
+     * so a database-backed store (D-11) replaces this line and nothing else.
+     */
+    static Store get() {
+        return FileStore.get();
+    }
+
+    /**
+     * Prepares derived in-memory data (indexes, caches) ahead of the first request so no later
+     * save pays for it. Called once at startup; an implementation without such data does nothing.
+     */
+    default void warmUp() {
+    }
+
     /** Writes (or rewrites, on a status transition) the request XML atomically. */
     void saveRunRequest(RunRequest request);
 

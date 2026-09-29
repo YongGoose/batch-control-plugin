@@ -44,6 +44,25 @@ public final class HttpVerbs {
         throw new MethodNotAllowed();
     }
 
+    /**
+     * The GET-only guard for a read-only URL served by a {@code do*} method (JSON and CSV
+     * exports, redirect stubs): answers 405 with {@code Allow: GET, HEAD} unless the request is
+     * {@code GET} or {@code HEAD}. Call it after the permission check.
+     *
+     * @return true when the request was refused and the caller must return without writing
+     */
+    public static boolean refuseNonGet(StaplerRequest2 req, StaplerResponse2 rsp)
+            throws IOException {
+        String method = req.getMethod();
+        if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+            return false;
+        }
+        rsp.setHeader("Allow", "GET, HEAD");
+        rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
+                "This URL is read-only; only GET is allowed");
+        return true;
+    }
+
     /** 405 with an {@code Allow} header. */
     private static final class MethodNotAllowed extends HttpResponses.HttpResponseException {
 

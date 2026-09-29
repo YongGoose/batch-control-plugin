@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,19 +35,28 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <ol>
  *   <li>run control off, task not a job, or job not approval-required → pass;</li>
  *   <li>approval marker present → validate and consume it (D-23), pass or refuse quietly;</li>
- *   <li>Pipeline Replay → refuse quietly (the replay UI has no error channel for a Failure);</li>
+ *   <li>Pipeline Replay → refuse quietly (the replay UI has no error channel for a Failure) and
+ *       record it (#21);</li>
  *   <li>remote (build-token) cause → refuse quietly and record the attempt (S-14);</li>
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
  *   <li>automatic retry → judged by the retried build's causes; a retry of an approved or
  *       manual run is refused quietly (#36);</li>
- *   <li>timer cause → pass unless {@code blockTimer}, refused quietly (unattended);</li>
+ *   <li>timer cause → pass unless {@code blockTimer}, refused quietly (unattended) and
+ *       recorded (#21);</li>
  *   <li>upstream cause → D-16 policy: pass unless {@code blockUpstream}; with
  *       {@code blockUpstream} only allow-listed upstream jobs pass, an empty/unset list
- *       blocks all; refused quietly (unattended, the upstream build surfaces the failure);</li>
+ *       blocks all; refused quietly (unattended, the upstream build surfaces the failure) and
+ *       recorded (#21);</li>
  *   <li>SCM causes and anything unknown/empty → pass (logged).</li>
  * </ol>
+ *
+ * <p>A quiet refusal of a timer, upstream or Replay submission writes a
+ * {@link ChangeType#TRIGGER_BLOCKED} record, coalesced per job and cause kind to one per
+ * {@link #TRIGGER_AUDIT_INTERVAL} through {@link BlockedAttemptAudit}. The append is the only
+ * store I/O on this path and it touches one file under that file's own lock stripe (#18), so it
+ * never waits behind retention or any other bulk work.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -64,6 +74,14 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
 
     /** An INFO line per job and kind is written at most this often; the rest go to FINE. */
     static final long INFO_INTERVAL_MILLIS = 60L * 60L * 1000L;
+
+    /** At most one {@link ChangeType#TRIGGER_BLOCKED} record per job and cause kind this often (#21). */
+    static final Duration TRIGGER_AUDIT_INTERVAL = Duration.ofHours(1);
+
+    /** Cause kinds of a {@link ChangeType#TRIGGER_BLOCKED} record. */
+    static final String KIND_TIMER = "TIMER";
+    static final String KIND_UPSTREAM = "UPSTREAM";
+    static final String KIND_REPLAY = "REPLAY";
 
     /** Bound on the rate-limit map; it is simply cleared when full. */
     private static final int MAX_RATE_LIMIT_ENTRIES = 10_000;
@@ -110,6 +128,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                 logRateLimited("replay", job,
                         () -> "Blocked replay of approval-required job '" + job.getFullName() + "'");
+                recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
+                        "Blocked a Pipeline Replay of job '" + job.getFullName()
+                                + "' - the job requires an approved batch-control run request");
                 return false;
             }
         }
@@ -170,6 +191,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 if (property.isBlockTimer()) {
                     logRateLimited("timer", job, () -> "Blocked timer-triggered run of job '"
                             + job.getFullName() + "' (blockTimer=true)");
+                    recordTriggerBlocked(job, KIND_TIMER, "blockTimer",
+                            "Blocked a timer-triggered run of job '" + job.getFullName()
+                                    + "' - clear blockTimer in the job configuration to let its schedule run");
                     return false;
                 }
                 return true;
@@ -191,6 +215,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 logRateLimited("upstream", job, () -> "Blocked upstream-triggered run of job '"
                         + job.getFullName()
                         + "' from '" + upstream + "' (blockUpstream=true, not on the allow list)");
+                recordTriggerBlocked(job, KIND_UPSTREAM, "blockUpstream",
+                        "Blocked an upstream-triggered run of job '" + job.getFullName() + "' from '"
+                                + upstream + "' - clear blockUpstream or add the upstream job to the"
+                                + " allow list in the job configuration");
                 return false;
             }
         }
@@ -205,6 +233,27 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 + job.getFullName()
                 + "' pass the approval gate with unclassified causes: " + causes);
         return true;
+    }
+
+    /**
+     * Writes the coalesced {@link ChangeType#TRIGGER_BLOCKED} record of a quiet refusal (#21). The
+     * detail starts with the cause kind and the blocking switch so the history and
+     * {@code changes.csv} can be filtered on them. A store failure is logged and does not turn the
+     * refusal into an exception: the queue gate must keep refusing even when the audit write
+     * fails, and the refusal is already in the controller log.
+     */
+    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
+        String fullName = job.getFullName();
+        try {
+            BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
+                    fullName + '|' + kind, TRIGGER_AUDIT_INTERVAL, fullName,
+                    Jenkins.getAuthentication2().getName(),
+                    "cause=" + kind + " switch=" + blockingSwitch + ": " + text
+                            + " (repeats within an hour are merged into this record)");
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
+                    + " submission of job '" + fullName + "'");
+        }
     }
 
     /**

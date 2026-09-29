@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import com.cloudbees.hudson.plugins.folder.AbstractFolder;
+import com.thoughtworks.xstream.io.xml.DomReader;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.BulkChange;
 import hudson.Extension;
@@ -24,8 +25,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
-import com.thoughtworks.xstream.io.xml.DomReader;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.Collections;
@@ -286,7 +286,7 @@ public class GrantViolationGuard extends SaveableListener {
     private static void appendViolation(String fullName, String user, @CheckForNull Grant grant, String detail) {
         ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user, detail);
         record.setGrantId(grant == null ? null : grant.getId());
-        FileStore.get().appendChangeRecord(record);
+        Store.get().appendChangeRecord(record);
     }
 
     /**
@@ -302,7 +302,7 @@ public class GrantViolationGuard extends SaveableListener {
         }
         String snapshot;
         try {
-            snapshot = FileStore.get().loadConfigSnapshot(item.getFullName());
+            snapshot = Store.get().loadConfigSnapshot(item.getFullName());
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Cannot read the configuration snapshot of '" + item.getFullName() + "'", e);
             return null;
@@ -507,7 +507,7 @@ public class GrantViolationGuard extends SaveableListener {
                     "The item was created by a user whose Item/Create comes only from grant "
                             + grant.getId() + " and carried an authorization property; the property was removed.");
             record.setGrantId(grant.getId());
-            FileStore.get().appendChangeRecord(record);
+            Store.get().appendChangeRecord(record);
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
                     + user + "' through grant " + grant.getId() + " (D-35c)");
         }

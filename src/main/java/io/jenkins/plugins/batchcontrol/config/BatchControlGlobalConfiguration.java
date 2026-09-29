@@ -6,7 +6,7 @@ import hudson.model.listeners.SaveableListener;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -234,7 +234,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
 
     private static void recordToggle(String key, boolean previous, boolean current) {
         String user = Jenkins.getAuthentication2().getName();
-        FileStore.get().appendChangeRecord(
+        Store.get().appendChangeRecord(
                 ChangeRecord.create(ChangeType.CONFIG_TOGGLE, key, user, previous + " -> " + current));
     }
 

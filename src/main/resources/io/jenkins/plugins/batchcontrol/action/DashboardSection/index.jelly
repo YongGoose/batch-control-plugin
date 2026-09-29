@@ -16,6 +16,14 @@
       </form>
 
       <j:set var="requestLinks" value="${it.links.requests}"/>
+      <!-- security-11 N-02: lines over 1 MiB are skipped on every read path, CSV included. -->
+      <j:if test="${it.oversized > 0}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          ${it.oversized} over-long record(s) (larger than 1 MiB) were skipped while reading this
+          period and are not listed here. The CSV export skips them too; the controller log names
+          the file that holds them.
+        </div>
+      </j:if>
       <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
       <j:if test="${it.truncated}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
@@ -47,7 +55,14 @@
             <tbody>
               <j:forEach var="r" items="${it.pageItems}">
                 <tr>
-                  <td><a href="${rootURL}/${it.runUrl(r)}">#${r.number}</a></td>
+                  <td>
+                    <!-- Linked only with Item/Read on the job (D-44, Visibility#runUrl). -->
+                    <j:set var="runUrl" value="${it.runUrl(r)}"/>
+                    <j:choose>
+                      <j:when test="${runUrl != null}"><a href="${rootURL}/${runUrl}">#${r.number}</a></j:when>
+                      <j:otherwise>#${r.number}</j:otherwise>
+                    </j:choose>
+                  </td>
                   <td>${r.jobFullName}</td>
                   <td>${r.causeType}</td>
                   <td>${r.user}</td>

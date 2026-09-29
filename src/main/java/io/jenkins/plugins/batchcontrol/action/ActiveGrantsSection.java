@@ -4,7 +4,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import jakarta.servlet.http.HttpServletResponse;
+import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import java.io.IOException;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -32,11 +32,7 @@ public class ActiveGrantsSection {
     // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
     @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "Only GET is allowed on this URL");
+        if (HttpVerbs.refuseNonGet(req, rsp)) {
             return;
         }
         rsp.sendRedirect2("..");
@@ -72,11 +68,7 @@ public class ActiveGrantsSection {
         // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
         @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
         public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
-            String method = req.getMethod();
-            if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-                rsp.setHeader("Allow", "GET, HEAD");
-                rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                        "Only GET is allowed on this URL");
+            if (HttpVerbs.refuseNonGet(req, rsp)) {
                 return;
             }
             rsp.sendRedirect2("../..");

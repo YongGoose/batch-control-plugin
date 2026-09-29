@@ -10,9 +10,9 @@ import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
@@ -117,6 +117,10 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * The file store instance. Callers go through {@link Store#get()} (D-44); only that method
+     * and the tests of this class name {@code FileStore} directly.
+     */
     public static FileStore get() {
         return INSTANCE;
     }
@@ -801,6 +805,7 @@ public final class FileStore implements Store {
     }
 
     /** Builds the entity index now (startup), so no later save pays for it. */
+    @Override
     public void warmUp() {
         index();
     }
@@ -946,7 +951,10 @@ public final class FileStore implements Store {
      * Parses every non-blank line of a month bucket, streaming the file (no list of raw lines).
      * A line that is not valid JSON or does not map to a record (missing field, unknown enum
      * constant) is skipped with a warning naming the file and line number, so one bad line cannot
-     * break the whole month.
+     * break the whole month. A line longer than {@link ReverseLineReader#MAX_LINE_BYTES} is never
+     * materialised: its excess bytes are dropped as they are read, the line is skipped and the
+     * skips are counted and logged once, exactly like the page path (security-11 N-01), so a CSV
+     * export and a screen agree on which records exist.
      */
     private <T> List<T> parseLines(Path dir, YearMonth month, Function<JSONObject, T> parser) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
@@ -954,32 +962,85 @@ public final class FileStore implements Store {
         if (!Files.isRegularFile(file)) {
             return result;
         }
-        try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            String line;
+        int oversized = 0;
+        try (InputStream in = Files.newInputStream(file, StandardOpenOption.READ)) {
+            byte[] chunk = new byte[STATS_CHUNK];
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            boolean discarding = false;
             int lineNumber = 0;
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                if (line.isBlank()) {
-                    continue;
+            int read;
+            while ((read = in.read(chunk)) > 0) {
+                int from = 0;
+                for (int i = 0; i < read; i++) {
+                    if (chunk[i] != '\n') {
+                        continue;
+                    }
+                    discarding = appendCapped(line, chunk, from, i - from, discarding);
+                    from = i + 1;
+                    lineNumber++;
+                    if (discarding) {
+                        oversized++;
+                    } else {
+                        parseLine(line, lineNumber, file, parser, result);
+                    }
+                    line.reset();
+                    discarding = false;
                 }
-                T value;
-                try {
-                    value = parser.apply(JSONObject.fromObject(line));
-                } catch (RuntimeException e) {
-                    LOGGER.log(Level.WARNING, "Skipping unparseable line {0} of {1}: {2}",
-                            new Object[] {lineNumber, file, e.getClass().getName()});
-                    continue;
-                }
-                if (value != null) {
-                    result.add(value);
-                }
+                discarding = appendCapped(line, chunk, from, read - from, discarding);
+            }
+            // A last line without a separator is still a record.
+            if (discarding) {
+                oversized++;
+            } else if (line.size() > 0) {
+                parseLine(line, lineNumber + 1, file, parser, result);
             }
         } catch (NoSuchFileException e) {
             return result;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read " + file, e);
         }
+        if (oversized > 0) {
+            int count = oversized;
+            LOGGER.warning(() -> "Skipped " + count + " record line(s) longer than "
+                    + ReverseLineReader.MAX_LINE_BYTES + " bytes in " + file);
+        }
         return result;
+    }
+
+    /**
+     * Appends {@code length} bytes to {@code line} unless that would take it past
+     * {@link ReverseLineReader#MAX_LINE_BYTES}; returns whether the line is (now) being discarded.
+     */
+    private static boolean appendCapped(ByteArrayOutputStream line, byte[] bytes, int offset, int length,
+                                        boolean discarding) {
+        if (discarding) {
+            return true;
+        }
+        if ((long) line.size() + length > ReverseLineReader.MAX_LINE_BYTES) {
+            line.reset();
+            return true;
+        }
+        line.write(bytes, offset, length);
+        return false;
+    }
+
+    private static <T> void parseLine(ByteArrayOutputStream line, int lineNumber, Path file,
+                                      Function<JSONObject, T> parser, List<T> result) {
+        String text = line.toString(StandardCharsets.UTF_8);
+        if (text.isBlank()) {
+            return;
+        }
+        T value;
+        try {
+            value = parser.apply(JSONObject.fromObject(text.strip()));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Skipping unparseable line {0} of {1}: {2}",
+                    new Object[] {lineNumber, file, e.getClass().getName()});
+            return;
+        }
+        if (value != null) {
+            result.add(value);
+        }
     }
 
     /**
@@ -1108,7 +1169,7 @@ public final class FileStore implements Store {
         List<T> items = from >= sorted.size()
                 ? new ArrayList<>()
                 : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
-        return new RecordPage<>(items, from, matched, scanned, truncated);
+        return new RecordPage<>(items, from, matched, scanned, truncated, oversized);
     }
 
     // ---------------------------------------------------------------- JSON codecs

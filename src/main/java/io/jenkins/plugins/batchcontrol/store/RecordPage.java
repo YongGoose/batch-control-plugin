@@ -23,13 +23,19 @@ public final class RecordPage<T> {
     private final int matched;
     private final int scanned;
     private final boolean truncated;
+    private final int oversized;
 
     RecordPage(List<T> items, int offset, int matched, int scanned, boolean truncated) {
+        this(items, offset, matched, scanned, truncated, 0);
+    }
+
+    RecordPage(List<T> items, int offset, int matched, int scanned, boolean truncated, int oversized) {
         this.items = Collections.unmodifiableList(items);
         this.offset = offset;
         this.matched = matched;
         this.scanned = scanned;
         this.truncated = truncated;
+        this.oversized = Math.max(0, oversized);
     }
 
     /** The rows of this page, newest first. */
@@ -50,6 +56,16 @@ public final class RecordPage<T> {
     /** Whether the scan cap stopped the query before the oldest requested record. */
     public boolean isTruncated() {
         return truncated;
+    }
+
+    /**
+     * Lines of the months read that were longer than {@code ReverseLineReader.MAX_LINE_BYTES} and
+     * therefore skipped (security-11 N-02). Every read path, CSV exports included, skips such a
+     * line, so a screen showing a non-zero count should say that records were skipped rather than
+     * look complete.
+     */
+    public int getOversized() {
+        return oversized;
     }
 
     /** Whether a further page of matches exists among the records read. */

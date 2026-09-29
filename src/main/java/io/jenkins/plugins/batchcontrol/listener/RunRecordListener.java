@@ -13,7 +13,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Instant;
 import java.util.List;
 import java.util.logging.Level;
@@ -48,7 +48,7 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
         }
         // The three concerns are isolated: a failure in one must not lose the others.
         try {
-            FileStore.get().appendRunRecord(buildRecord(run));
+            Store.get().appendRunRecord(buildRecord(run));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, e, () -> "Failed to append the run record of "
                     + run.getFullDisplayName());

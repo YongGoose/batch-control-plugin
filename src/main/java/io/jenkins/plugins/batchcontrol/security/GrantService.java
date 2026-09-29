@@ -9,7 +9,6 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.File;
 import java.time.Instant;
@@ -50,7 +49,7 @@ public final class GrantService {
 
     private static final GrantService INSTANCE = new GrantService();
 
-    private final Store store = FileStore.get();
+    private final Store store = Store.get();
 
     /** All known grants (active or not); guarded by {@code this}. */
     private List<Grant> cache;
