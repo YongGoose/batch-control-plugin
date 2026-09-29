@@ -62,14 +62,14 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
     strategy, and grants stop conferring anything from that point. Selecting a
     strategy that is not one of the two variants gets you run control and
     recording only, with an administrative monitor saying so.
-9. **role-strategy's own "Manage Roles" save reinstalls the plain
-    `RoleBasedAuthorizationStrategy`**, replacing the Batch Control variant.
-    From that save onward, grants stop conferring until an administrator
-    re-installs the Batch Control variant. This is deliberately fail-safe:
-    no permission is left standing that nobody can see, the role page itself
-    keeps working, and an administrative monitor detects the swap and offers a
-    one-click reinstall of the variant, carrying over every role and
-    assignment.
+9. **role-strategy's own "Manage Roles" and "Assign Roles" saves keep the
+    Batch Control variant in place**, tested against role-strategy 918: neither
+    save reinstalls the plain `RoleBasedAuthorizationStrategy`, so grants keep
+    conferring afterwards; an earlier assumption that they did is not reproduced
+    on this version (e2e-03 DD-09). The administrative monitor that detects a
+    swap and offers a one-click reinstall of the variant, carrying over every
+    role and assignment, stays in place as a safety net should a different
+    role-strategy release replace it another way.
 10. **Change control is permission-based, not save-based.** Jenkins offers no way
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no
@@ -193,13 +193,21 @@ from scripts.
     visible to `Manage` holders, its requester, its designated approver, and
     anyone with `Item/Read` on the target job. In an instance where `Item/Read`
     is granted broadly, reasons and parameter values are broadly visible.
-22. **An `Approve` holder who is not the designated approver sees nothing** of
-    that request, which is consistent, since only the designated approver can
-    decide it. Approver absence is handled by the requester changing the approver
-    before a decision is made; there is no delegation or deputy chain.
-23. **Grant requests have no approver change.** Unlike run requests, changing the
-    approver on a pending grant request means cancelling it and creating a new
-    one.
+22. **Holding `Approve` does not by itself add visibility.** An `Approve` holder
+    who is not the designated approver of a request, and who does not otherwise
+    qualify under item 21 (not `Manage`, not the requester, not `Item/Read` on
+    the target job), sees nothing of it; the permission to decide requests in
+    general is not the same as being able to see this one. It is not an
+    exception to item 21: the same holder does see the request, as anyone
+    would, if they separately hold `Item/Read` on the job. Only the designated
+    approver can decide it either way. Approver absence is handled by the
+    requester changing the approver before a decision is made; there is no
+    delegation or deputy chain. (e2e-03 DD-07)
+23. **A grant request's approver set can be changed while it is pending**, from
+    the **Change Approvers** action on the grant request's own detail screen,
+    the same as a run request (item 3, D-37): the requester edits the
+    designated set at any time before a decision is made, and the change is
+    recorded (previous set, new set, changed by, time). (e2e-03 DD-08)
 24. **Active grants are visible only to their own holder** and to `Manage`
     holders.
 25. **Approver accounts must map one-to-one to real people.** The plugin can only
