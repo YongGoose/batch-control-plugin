@@ -50,5 +50,29 @@
         <a href="${rootURL}/manage/configureSecurity">Security</a>.
       </p>
     </j:if>
+    <!-- D-50 (SPEC item 2): jobs in the scope of a pending or active Configure grant whose builds
+         run as SYSTEM under the configured build authenticators (at most 50, empty while change
+         control is off), from BatchControlStrategyMonitor#getJobsRunningAsSystem (which returns
+         SystemBuildCheck.jobsRunningAsSystem()). Administrator-only page; job names are escaped
+         by default. -->
+    <j:set var="systemJobs" value="${it.jobsRunningAsSystem}"/>
+    <j:if test="${!empty(systemJobs)}">
+      <p>
+        <strong>Batch Control:</strong> builds of these jobs run as SYSTEM, so a holder of a
+        Configure permission window on them can make a build change the job's permissions
+        permanently:
+      </p>
+      <ul>
+        <j:forEach var="job" items="${systemJobs}">
+          <li><code>${job}</code></li>
+        </j:forEach>
+      </ul>
+      <p>
+        Set a default build authorization in
+        <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a> under
+        <a href="${rootURL}/manage/configureSecurity">Security</a>, or give each of these jobs its
+        own build authorization.
+      </p>
+    </j:if>
   </l:adminMonitor>
 </j:jelly>

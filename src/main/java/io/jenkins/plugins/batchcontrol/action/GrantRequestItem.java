@@ -2,20 +2,27 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import hudson.Util;
 import hudson.model.Failure;
+import hudson.model.Item;
+import hudson.model.Job;
 import hudson.model.ModelObject;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -118,6 +125,62 @@ public class GrantRequestItem implements ModelObject {
     public boolean isCanCancel() {
         return isPending()
                 && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
+    }
+
+    // ---------------------------------------------------------------- SYSTEM builds (D-50)
+
+    /**
+     * D-50 (SPEC item 2): the jobs in this pending CONFIGURE request's scope whose builds run as
+     * SYSTEM under the configured build authenticators, so that a Configure window on them lets
+     * the requester make a build change the job's permissions permanently. Shown to the approver
+     * before the decision. Empty for any other request, and while change control is off
+     * ({@link SystemBuildCheck}).
+     *
+     * <p>This page is only reachable for a viewer who may see the request (the Grants section
+     * and {@code GrantsSection} gate it). Only jobs the viewer may read are named; the others are
+     * counted by {@link #getSystemBuildHiddenCount()}. The scope's own name is shown on this page
+     * anyway, so a job scope is named even when the viewer cannot read the job.
+     */
+    public List<String> getSystemBuildJobs() {
+        return systemBuildJobs(true);
+    }
+
+    /** How many jobs of {@link #getSystemBuildJobs()}'s kind the viewer may not read (folder scope). */
+    public int getSystemBuildHiddenCount() {
+        if (request.getScope().getType() == GrantScope.Type.JOB) {
+            return 0; // a job scope is named in getSystemBuildJobs() whatever the viewer may read
+        }
+        int hidden = 0;
+        for (String job : systemBuildJobs(false)) {
+            if (Visibility.findVisibleItem(job) == null) {
+                hidden++;
+            }
+        }
+        return hidden;
+    }
+
+    private List<String> systemBuildJobs(boolean visibleOnly) {
+        if (!isPending() || request.getActions() == null
+                || !request.getActions().contains(GrantAction.CONFIGURE)) {
+            return List.of();
+        }
+        GrantScope scope = request.getScope();
+        String name = scope.getFullName();
+        if (scope.getType() == GrantScope.Type.JOB) {
+            Item item = Visibility.findVisibleItem(name);
+            boolean system = item instanceof Job
+                    ? SystemBuildCheck.runsAsSystem((Job<?, ?>) item)
+                    : SystemBuildCheck.jobsRunningAsSystem().contains(name);
+            return system ? List.of(name) : List.of();
+        }
+        String prefix = name + "/";
+        List<String> jobs = new ArrayList<>();
+        for (String job : SystemBuildCheck.jobsRunningAsSystem()) {
+            if (job.startsWith(prefix) && (!visibleOnly || Visibility.findVisibleItem(job) != null)) {
+                jobs.add(job);
+            }
+        }
+        return jobs;
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)
