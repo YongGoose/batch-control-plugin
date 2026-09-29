@@ -387,6 +387,15 @@ code does on purpose.
     `Request` holder; the activation notice says whether unattended runs are
     allowed, with a **Request activation** link (e2e-03 DEF-01).
 
+41. **Naginator's Retry link cannot be hidden on a job that requires approval.**
+    Naginator contributes its own sidebar/task link unconditionally, and Batch
+    Control has no extension point to suppress another plugin's link, so it
+    stays visible on a protected job. Clicking it is still refused at queue
+    entry like any other unattended trigger (item 40), and the job page's own
+    notice explains why: on a job that requires approval it names the switch
+    and points at **Request Run**, the same notice a manual Build Now attempt
+    shows (e2e-03 DEF-25, DEF-01).
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting
