@@ -5,6 +5,10 @@
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
   <l:layout title="Activation - ${it.item.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.item}"/>
+    <!-- e2e-03 DEF-06: see JobRequestAction/activation.jelly. -->
+    <j:if test="${activationCrumb}">
+      <l:breadcrumb title="Activation" href="${rootURL}/${it.item.url}batch-control/activation"/>
+    </j:if>
     <l:main-panel>
       <l:app-bar title="Activation: ${it.item.fullDisplayName}"/>
 

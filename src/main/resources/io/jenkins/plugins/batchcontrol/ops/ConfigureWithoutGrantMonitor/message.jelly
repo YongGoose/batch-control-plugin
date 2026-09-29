@@ -1,12 +1,43 @@
 <?jelly escape-by-default='true'?>
+<!-- SPEC item 8 monitor. e2e-03 DEF-07: the message says which of its two causes applies and names
+     the users and groups the scan found, so the administrator knows what to fix.
+     View model (ConfigureWithoutGrantMonitor): isStrategyMissing(), getStandingUsers(),
+     getStandingGroups(); each StandingHolder has getSid(), getDisplayName(), isGroup() and
+     getPermissions(). User and group names are user input: escaped by default, never raw. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <j:set var="controls">
     <a class="jenkins-button" href="${rootURL}/manage/configureSecurity">Review authorization strategy</a>
   </j:set>
   <l:adminMonitor severity="warning" controls="${controls}">
-    <strong>Batch Control:</strong> change control is enabled, but some users hold direct
-    Item Create/Configure/Delete permissions outside the just-in-time grant flow (or the
-    installed authorization strategy is not a Batch Control strategy). Changes made by those
-    users bypass grant control and are only recorded in the audit history.
+    <j:choose>
+      <j:when test="${it.strategyMissing}">
+        <strong>Batch Control:</strong> change control is enabled, but the installed
+        authorization strategy is not a Batch Control strategy, so change permission windows
+        (grants) can never apply. Choose "Batch Control: Matrix-based security" or
+        "Batch Control: Role-Based Strategy" under Manage Jenkins, Security. Until then changes
+        are only recorded in the audit history.
+      </j:when>
+      <j:otherwise>
+        <strong>Batch Control:</strong> change control is enabled, but the users and groups
+        below hold Item Create/Configure/Delete directly from the authorization strategy,
+        outside the just-in-time grant flow. Their changes bypass grant control and are only
+        recorded in the audit history.
+        <ul style="margin: 0.5rem 0;">
+          <j:forEach var="h" items="${it.standingUsers}">
+            <li>
+              User <code>${h.sid}</code><j:if test="${h.displayName != h.sid}"> (${h.displayName})</j:if>:
+              <j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach>
+            </li>
+          </j:forEach>
+          <j:forEach var="h" items="${it.standingGroups}">
+            <li>
+              Group <code>${h.sid}</code>:
+              <j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach>
+            </li>
+          </j:forEach>
+        </ul>
+        Only the global authorization is scanned; per-folder and per-job entries are not listed.
+      </j:otherwise>
+    </j:choose>
   </l:adminMonitor>
 </j:jelly>

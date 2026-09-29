@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<!-- SPEC item 6a: the job page says whether the job is in service for unattended triggers and
+<!-- SPEC item 6a (and item 6 for the approval notice below): the job page says whether the job is in service for unattended triggers and
      links to the activation request form. Rendered for every action by the job main page; shown
      while run control is on to viewers holding Item/Read, whatever approvalRequired says (D-46a,
      JobActivationNoticeAction#isShown). The form link is rendered only for a Request holder. A
@@ -11,6 +11,27 @@
      two states, so "Request a hold" rather than any phrase with "on hold" in it. -->
 <j:jelly xmlns:j="jelly:core">
   <j:if test="${it.shown}">
+    <!-- e2e-03 DEF-01 (SPEC item 6): on an approval-required job the page always says that manual
+         runs need an approved request, since another plugin's build button (Rebuild, Retry, a
+         customised Build Now) only reports a refusal as its own generic failure. The Request Run
+         link is rendered only for a Request holder (the form answers 404 to anyone else). -->
+    <j:if test="${it.approvalRequired}">
+      <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
+        <strong>Batch Control: manual runs of this job need an approved run request.</strong>
+        A build started directly (Direct Build, Rebuild, Retry or another plugin's build button)
+        is refused without one, even where the button only reports a generic failure.
+        <j:choose>
+          <j:when test="${it.canRequest}">
+            <a href="${rootURL}/${it.job.url}batch-control/">Request Run</a>; the build starts
+            automatically once the request is approved.
+          </j:when>
+          <j:otherwise>
+            Ask a user who may submit run requests, an approver or a Jenkins administrator to
+            request the run for you.
+          </j:otherwise>
+        </j:choose>
+      </div>
+    </j:if>
     <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control/activation"/>
     <j:set var="carrier" value="${it.carrier}"/>
     <j:choose>
