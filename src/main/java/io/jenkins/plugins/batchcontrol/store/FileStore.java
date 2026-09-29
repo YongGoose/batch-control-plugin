@@ -1009,8 +1009,9 @@ public final class FileStore implements Store {
         int cap = Math.max(0, maxScanned);
         int keep = (int) Math.min((long) from + size, cap);
         PriorityQueue<T> newest = new PriorityQueue<>(Math.max(1, Math.min(keep, 1024)), newestFirst.reversed());
-        long stopBefore = period.from() == null ? Long.MIN_VALUE
-                : period.from().toEpochMilli() - APPEND_ORDER_SLACK_MILLIS;
+        Instant periodStart = period.from();
+        long stopBefore = periodStart == null ? Long.MIN_VALUE
+                : periodStart.toEpochMilli() - APPEND_ORDER_SLACK_MILLIS;
         int scanned = 0;
         int matched = 0;
         int unreadable = 0;
