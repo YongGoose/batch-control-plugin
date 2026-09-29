@@ -430,19 +430,23 @@ in its folder, since Jenkins allows a rename to anyone who may configure the job
 the rename is recorded with the window. Under a `CREATE` window with a name
 restriction, renames of what that window created are limited to matching names.
 
-**Builds that run as SYSTEM are outside the self-grant guard.** A build that
-runs as SYSTEM can write a permanent authorization entry on its job, so a
-`CONFIGURE` window holder could use one to keep access after the window ends.
-Authorize Project closes this only with a global default build authorization,
-which gives every build a user identity. A strategy on a single job is not
-enough: anyone who can configure the job, a window holder included, can remove
+**Builds that run as SYSTEM, or as an account with Configure, are outside the
+self-grant guard.** Such a build can write a permanent authorization entry on
+its job, so a `CONFIGURE` window holder could use one to keep access after the
+window ends. Authorize Project closes this only with a global default build
+authorization that runs every build as the user who started it, or as an
+account that has no Configure permission. A service account with
+`Overall/Administer` or `Item/Configure` is not safe: its builds' entries are
+kept. A strategy on a single job is not enough: anyone who can configure the job, a window holder included, can remove
 it, and a strategy that follows the triggering user leaves timer and SCM builds
-running as SYSTEM. While change control is on and builds can run as SYSTEM, the
-administrative monitor says so for the whole instance, and the detail page of a
+running as SYSTEM. While change control is on and builds can run as SYSTEM or as
+an account with Configure, the administrative monitor says so for the whole instance, and the detail page of a
 pending `CONFIGURE` request shows the same warning to its approvers and to
 `BatchControl/Manage` holders. The check is cached for five minutes, so after
 the build authenticators change the warning can take that long to appear or
 clear; replacing them through the security configuration updates it at once.
+The check cannot judge authenticators that decide by job type, folder or the
+caller's identity, so with those the warning may be missing.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
