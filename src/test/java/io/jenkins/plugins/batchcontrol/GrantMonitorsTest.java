@@ -146,6 +146,57 @@ public class GrantMonitorsTest {
                 + " warning must not suggest it is not one: " + excerpt(text));
     }
 
+    /**
+     * T-08-53 (e2e-run3 DEF-29, A-03): the group {@code authenticated} holds Job/Configure on the
+     * Batch Control matrix strategy; three known users hold only Overall/Read and Job/Read. The
+     * warning lists the group as a group, by its name, with the permission it holds; it does not
+     * turn the group into per-user entries for accounts that have no Configure entry of their own
+     * (note 141).
+     */
+    @Test
+    public void t_08_53_monitorListsGroupHolderAsGroupNotAsItsMembers() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String[] members = {"member29a", "member29b", "member29c"};
+        BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
+        strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
+        strategy.add(Jenkins.READ, PermissionEntry.group("authenticated"));
+        strategy.add(Item.READ, PermissionEntry.group("authenticated"));
+        strategy.add(Item.CONFIGURE, PermissionEntry.group("authenticated"));
+        for (String member : members) {
+            strategy.add(Jenkins.READ, PermissionEntry.user(member));
+            strategy.add(Item.READ, PermissionEntry.user(member));
+            hudson.model.User.getById(member, true).save(); // a known account, as after a login
+        }
+        j.jenkins.setAuthorizationStrategy(strategy);
+        StrategyFixtures.configureBuildAuthenticator(); // keep the other monitor's warning out of the way
+
+        AdministrativeMonitor monitor = AdministrativeMonitor.all().get(ConfigureWithoutGrantMonitor.class);
+        assertTrue(monitor.isActivated(), "fixture: a group holding Job/Configure must activate the monitor");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        HtmlPage manage = wc.goTo("manage/");
+        assertEquals(200, manage.getWebResponse().getStatusCode());
+        String text = manage.asNormalizedText();
+
+        String groupLine = null;
+        for (String line : text.split("\\R")) {
+            if (line.contains("authenticated") && line.toLowerCase(java.util.Locale.ROOT).contains("configure")) {
+                groupLine = line;
+                break;
+            }
+        }
+        assertNotNull(groupLine, "the warning must list the group 'authenticated' with its Configure permission on one"
+                + " entry: " + excerpt(text));
+        assertTrue(groupLine.toLowerCase(java.util.Locale.ROOT).contains("group"), "the entry must say that"
+                + " 'authenticated' is a group: " + groupLine);
+        for (String member : members) {
+            assertFalse(text.contains(member), "a user without a Configure entry of their own must not be listed as a"
+                    + " holder (the group is listed instead): " + excerpt(text));
+        }
+    }
+
     private static String excerpt(String text) {
         String flat = text.replaceAll("\\s+", " ");
         return flat.length() > 2000 ? flat.substring(0, 2000) + "..." : flat;
