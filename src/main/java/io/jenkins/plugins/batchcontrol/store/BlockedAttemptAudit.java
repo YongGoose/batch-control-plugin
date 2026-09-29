@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -69,8 +70,18 @@ public final class BlockedAttemptAudit {
      * whole hour: an instance with thousands of locked generated jobs (D-34) must not evict keys
      * inside their hour and so write a record per job per minute. A key is about 100 bytes, so
      * the bound caps the map at roughly a megabyte.
+     *
+     * <p>The default; the system property {@code <this class>.maxCoalescedKeys} overrides it, read
+     * at every use ({@link #maxCoalescedKeys()}), so it can be set before Jenkins starts or at run time.
      */
     static final int MAX_COALESCED_KEYS = 10_000;
+
+    /** The coalesced-key bound in force: the system property, else {@link #MAX_COALESCED_KEYS}. */
+    static int maxCoalescedKeys() {
+        Integer configured = SystemProperties.getInteger(BlockedAttemptAudit.class.getName() + ".maxCoalescedKeys",
+                MAX_COALESCED_KEYS);
+        return configured == null || configured < 1 ? MAX_COALESCED_KEYS : configured;
+    }
 
     /** Key separator; a character no id, job full name or user id contains. */
     private static final String KEY_SEPARATOR = "";
@@ -148,7 +159,7 @@ public final class BlockedAttemptAudit {
         Objects.requireNonNull(cooldown, "cooldown");
         forgetOtherInstance();
         String key = type.name() + KEY_SEPARATOR + attemptKey;
-        return append(lastCoalesced, MAX_COALESCED_KEYS, key, cooldown, type, target, user, detail, null);
+        return append(lastCoalesced, maxCoalescedKeys(), key, cooldown, type, target, user, detail, null);
     }
 
     private boolean append(Map<String, Instant> tracked, int bound, String key, Duration cooldown,
