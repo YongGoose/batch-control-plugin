@@ -104,6 +104,22 @@ $JENKINS_HOME/batch-control/
 - 보관: `retentionMonths` 초과 월 파일 삭제 + ChangeRecord(RETENTION).
 - 잡 이름 인코딩: `/` → `%2F`, 기타 URL-safe 인코딩. 디코딩 시 경로 탈출(`..`) 검증.
 
+### Activation store (#15, D-39)
+
+```
+$JENKINS_HOME/batch-control/
+  activations/<encoded job full name>.xml   ActivationState: activated, activatedBy, activatedAt, requestId,
+                                            deactivatedBy, deactivatedAt
+  activations/.schema                       marker: existing jobs were seeded as activated (written once)
+  activation-requests/<id>.xml              ActivationRequest: id, jobFullName, action (ACTIVATE|HOLD), reason,
+                                            requester, approvers[], decidedBy, status, createdAt, decidedAt,
+                                            decisionComment, approverChanges[]
+```
+
+- `policy.ActivationService#isActivated(Job)` is the single read the queue gate uses for timer and upstream causes; it is ANDed with `blockTimer`/`blockUpstream`.
+- Activation state is written only by an approved ACTIVATION request (or the one-time seeding), never by job configuration, so no config write path can activate a job.
+- Rename/move relocates the state file; deletion removes it. The file name uses `PathCodec` like snapshots.
+
 ## 6. 요청 흐름
 
 ```
