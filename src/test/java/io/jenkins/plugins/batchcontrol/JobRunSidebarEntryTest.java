@@ -24,7 +24,6 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -32,10 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * entries both reading "Request Run", and the one a user was most likely to click was core's own
  * build link, whose href schedules a run with no approved marker and is refused (e2e-01 UX-1).
  *
- * <p>Core's build entry cannot be hidden or re-pointed from a plugin, so the fix renamed it. These
- * rows therefore assert the pairing rather than a single caption: exactly one entry reads
- * "Request Run" and it is the one that opens the request form, while the relabelled core entry
- * says what it is and still points at the build URL.
+ * <p>The first fix renamed core's build entry to "Direct Build (needs approval)". The SPEC section 6
+ * usability line (e2e-03 DEF-25, matrix note 131) now requires that an entry which can never
+ * succeed is not offered at all, so these rows assert exactly one "Request Run" entry opening the
+ * request form and no entry at core's build URL under any caption.
  *
  * <p>Relationship to the existing SPEC row: T-06-15 pins the acceptance criterion of SPEC item 6
  * ("Build Now" is replaced by "Request Run") at page level and keeps passing unchanged. These rows
@@ -78,11 +77,11 @@ public class JobRunSidebarEntryTest {
 
     /**
      * T-UI-16: on a controlled Freestyle job exactly one entry reads "Request Run" and it opens
-     * the request form; a separate, differently named entry is core's build link; and no entry
-     * reads "Build Now".
+     * the request form; no entry reads "Build Now" and, since e2e-03 DEF-25 (note 131), no entry
+     * at core's build URL is offered at all (it was the relabelled "Direct Build (needs approval)").
      */
     @Test
-    public void t_ui_16_exactlyOneRequestRunEntryAndARenamedDirectBuildEntry() throws Exception {
+    public void t_ui_16_exactlyOneRequestRunEntryAndNoDirectBuildEntry() throws Exception {
         assertSidebarPairing(job);
     }
 
@@ -147,19 +146,24 @@ public class JobRunSidebarEntryTest {
         assertTrue(requestRun.get(0).getHrefAttribute().endsWith(target.getUrl() + "batch-control"), target.getFullName() + ": the Request Run entry must open the plugin's request"
                 + " form, but pointed at " + requestRun.get(0).getHrefAttribute());
 
+        // T-06-70 / e2e-03 DEF-25 (SPEC 6 usability line, note 131): core's build entry can never
+        // succeed on an approval-required job, so it is no longer offered at all — neither under
+        // the former "Direct Build (needs approval)" caption nor at core's build URL.
         List<HtmlAnchor> directBuild = captionedEntries(page, DIRECT_BUILD);
-        assertEquals(1, directBuild.size(), target.getFullName() + ": core's build entry must be present exactly once under its"
-                + " own caption, but " + directBuild.size() + " entries matched: " + hrefs(directBuild));
-        assertTrue(directBuild.get(0).getHrefAttribute().contains("build"), target.getFullName() + ": the relabelled entry must still be core's build link,"
-                + " but pointed at " + directBuild.get(0).getHrefAttribute());
-        assertNotNull(directBuild.get(0).getHrefAttribute(), "the relabelled entry must carry an href");
+        assertTrue(directBuild.isEmpty(), target.getFullName() + ": no \"" + DIRECT_BUILD + "\" entry may be offered, but "
+                + directBuild.size() + " entries matched: " + hrefs(directBuild));
+        for (HtmlAnchor anchor : page.getAnchors()) {
+            String href = anchor.getHrefAttribute();
+            if (href == null || href.isEmpty() || href.startsWith("#")) {
+                continue;
+            }
+            String resolved = UsabilityFixtures.stripQueryAndSlash(page.getFullyQualifiedUrl(href).toExternalForm());
+            assertFalse(resolved.endsWith("/" + target.getUrl() + "build") || resolved.endsWith("/" + target.getUrl() + "buildWithParameters"),
+                    target.getFullName() + ": no entry may point at core's build URL, but " + href + " did");
+        }
 
         assertFalse(text.contains(BUILD_NOW), target.getFullName() + ": the Build Now caption must not be visible (SPEC item 6);"
                 + " the page read: " + excerpt(text));
-
-        // The two entries must be different links: the whole finding was two entries with the same
-        // caption going to different places, and a fix that merged them would lose the request form.
-        assertFalse(requestRun.get(0).getHrefAttribute().equals(directBuild.get(0).getHrefAttribute()), target.getFullName() + ": the two entries must be distinct links");
     }
 
     // ---------------------------------------------------------------- helpers
