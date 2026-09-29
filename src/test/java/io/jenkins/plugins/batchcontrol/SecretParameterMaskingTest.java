@@ -222,6 +222,10 @@ public class SecretParameterMaskingTest {
                 new PasswordParameterDefinition(SECRET_PARAM,
                         Secret.fromString(SECRET_DEFAULT), "service token"),
                 new StringParameterDefinition(PLAIN_PARAM, PLAIN_DEFAULT, "batch date")));
+        // D-46: a cause-less submission is an unattended cause and needs the job activated,
+        // regardless of approvalRequired, even though this job is otherwise uncontrolled
+        // (matrix note 109); the point of this row is masking, not activation.
+        BatchControlFixtures.activateAsAdmin(job);
 
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, (hudson.model.Cause) null,
                 new ParametersAction(

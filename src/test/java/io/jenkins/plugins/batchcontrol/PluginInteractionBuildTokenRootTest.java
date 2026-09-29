@@ -68,6 +68,11 @@ public class PluginInteractionBuildTokenRootTest {
     @Test
     public void t_06_32_buildByTokenRunsOnUncontrolledJob() throws Exception {
         FreeStyleProject free = uncontrolled(withToken(j.createFreeStyleProject("btr-free")));
+        // SPEC 6a / D-46: a build-token-root submission is an unattended RemoteCause and needs
+        // the job activated regardless of approvalRequired, even on an otherwise uncontrolled
+        // job (matrix note 109). The row's point is unchanged: the token path works on a job
+        // the gate lets through.
+        BatchControlFixtures.activate(free);
 
         get(j, null, "buildByToken/build?job=btr-free&token=" + TOKEN);
         j.waitUntilNoActivity();

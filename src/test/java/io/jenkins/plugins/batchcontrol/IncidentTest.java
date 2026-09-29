@@ -318,6 +318,9 @@ public class IncidentTest {
                 return false; // fail the build so an incident opens
             }
         });
+        // D-46: a cause-less submission is an unattended cause and needs the job activated,
+        // regardless of approvalRequired (matrix note 109).
+        BatchControlFixtures.activateAsAdmin(job);
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, (hudson.model.Cause) null,
                 new ParametersAction(new PasswordParameterValue("TOKEN", secretValue))));
         j.waitUntilNoActivity();
