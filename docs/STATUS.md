@@ -13,6 +13,12 @@
 
 ---
 
+## 2026-09-30 — security-19/20 follow-up (hardening of the part-3 fixes)
+- #47 merged (GitHub `build` 546 tests green).
+- security-19 0/0/0/3/3 and security-20 0/0/0/1/3 fixed on `fix/security-19`: a Retry skips the token step only with the clicking user's cause (S-19-01); a numeric `configVersion` is dropped only without attributes (S-19-02); the self-grant filter leaves POSTs unwrapped while change control is off, its fallback never fails, it is async-safe and its writer keeps `checkError()` without copying (S-19-03..05, S-20-01/02); both group caps of the monitor log a WARNING and truncated users are probed in full (S-19-06, S-20-03). S-20-04 (async output edges not reachable from a save path) is left as INFO.
+- Rows T-06-76, T-09-23, T-01-16, T-02-50 (notes 154-157). Gate at d4bff88: 550 tests, 0 failures, SpotBugs 0.
+- e2e re-verification on the #46/#47 build is running; the DEF-35 rows are re-run after this merges.
+
 ## 2026-09-30 — e2e-03 re-audit defects DEF-28..35 fixed (part 3); part-2 fixes merged (#46)
 - #46 merged (DEF-08..27, DD-07..12; GitHub `build` 530 tests green).
 - The rubric re-audit of 215 rows (run on the #45 build) found DEF-28..35; 30 of its new FAILs were part-2 defects already fixed in #46. Part 3 fixes: DEF-28 no "Back to" links on refusal pages; DEF-29 the standing-holder monitor lists each user only for their own entries and each group once (also under role-strategy groups, S-18-01); DEF-30 plugin-version and numeric `configVersion` re-serialisation is not a change; DEF-31 build pages carry the approval notice (only while approval is required, S-18-06); DEF-32 a user-clicked Retry is recorded as that user; DEF-33/34 a refused token run answers 403 with a plain message; DEF-35 the self-grant guard answers 403 and tells the user (D-48, SPEC item 2); DEF-06 activation crumbs read `<item> > Activation`.
