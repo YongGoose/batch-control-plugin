@@ -327,55 +327,67 @@ code does on purpose.
 ## SYSTEM builds and the global-matrix upgrade
 
 35. **A build that runs as SYSTEM, or as an account with Configure
-    permission, can still write a permanent authorization entry.** A Pipeline `properties([authorizationMatrix(...)])` step, or a Job
-    DSL seed job, executes as SYSTEM unless the instance runs builds under a
-    real user; the guard that reverts a grant holder's self-escalating edit to
-    a job's authorization property looks at who saved the item, and SYSTEM is
-    not a grant holder, so nothing is reverted or recorded. The same holds for
-    a build that runs as an account which already holds `Overall/Administer`
-    or `Item/Configure` in the installed strategy, such as a service account:
-    that account's save is a legitimate Configure save, so the guard keeps the
-    entry. This is not new
-    exposure: any user who already holds standing `Item/Configure` on that job
-    has the identical path today, with or without Batch Control, since Jenkins
-    itself does not distinguish a script's save from a human one.
+    permission, can still write a permanent authorization entry.** A Pipeline
+    `properties([authorizationMatrix(...)])` step, or a Job DSL seed job,
+    executes as SYSTEM unless the instance runs builds under a real user; the
+    guard that reverts a grant holder's self-escalating edit to a job's
+    authorization property looks at who saved the item, and SYSTEM is not a
+    grant holder, so nothing is reverted or recorded. The same holds for a
+    build that runs as an account which already holds `Overall/Administer` or
+    `Item/Configure`, such as a privileged service account: that account's
+    save is a legitimate Configure save, so the guard keeps the entry. This is
+    not new exposure: any user who already holds standing `Item/Configure` on
+    that job has the identical path today, with or without Batch Control,
+    since Jenkins itself does not distinguish a script's save from a human
+    one.
 
     The remedy is **Authorize Project** with a **global default build
-    authorization** that gives every build, whatever the job's own
-    configuration and whatever started it, an identity that is neither SYSTEM
-    nor an account holding Configure: the user who started the build, or an
-    account without Configure permission. A build that runs as the user who
-    started it comes under the same guard as that user's manual save. A
-    service account with `Overall/Administer` or `Item/Configure` is not safe
-    as the default. Installing the plugin is not enough, and a strategy set on
-    a single job does not protect that job: anyone who can configure the job,
-    a `CONFIGURE` window holder included, can remove the strategy, and a
-    strategy that runs builds as the user who triggered them leaves timer and
-    SCM builds, which no user triggered, running as SYSTEM. With Authorize
-    Project's per-project setting and no global default, a job without a
-    strategy of its own also builds as SYSTEM. Conversely, a job whose own
-    build authorization runs as an administrator is exposed to anyone who can
+    authorization** that runs every build, whatever the job's own
+    configuration and whatever started it, as an account without Configure
+    permission: for example **Run as Specific User** with a dedicated
+    low-privilege build account. Do not give that account `Overall/Administer`
+    or `Item/Configure`, neither globally nor through a folder's or a job's own
+    authorization entries. **Run as the user who triggered the build** is safe
+    only together with such a fallback: timer and SCM builds have no
+    triggering user, so without one they run as SYSTEM. (A build that does run
+    as the person who triggered it comes under the same guard as that
+    person's manual save.) Installing the plugin is not enough, and a strategy
+    set on a single job does not protect that job: anyone who can configure
+    the job, a `CONFIGURE` window holder included, can remove the strategy.
+    With Authorize Project's per-project setting and no global default, a job
+    without a strategy of its own builds as SYSTEM. A job whose own build
+    authorization runs as an administrator is exposed to anyone who can
     configure that job, and the instance-wide check below does not see it.
 
     While change control is on, Batch Control checks this once for the whole
     instance, not job by job. If builds can run as SYSTEM or as an account
     with Configure permission, the administrative monitor on Manage Jenkins
-    says so and that a suitable global default build authorization fixes it, and the detail page of a pending request that
-    includes `CONFIGURE` shows the same warning to the users who may decide it
-    and to `BatchControl/Manage` holders, before the decision. The same monitor
-    also warns when no build authenticator (a `QueueItemAuthenticator`) is
-    configured at all. The answer is cached for five minutes, so after the
-    build authenticators change the warning can take up to five minutes to
-    appear or disappear; when they are replaced by saving the security
-    configuration, it is re-evaluated at once. The check asks the configured
-    authenticators about one representative job, so it cannot judge an
-    authenticator that decides by job type, by folder or by the identity of
-    the caller; with such an authenticator the warning may be absent although
-    some jobs still build as SYSTEM or as an account with Configure. When
-    Authorize Project's "Run as Specific User" names an account that has no
-    Jenkins user record yet, builds run as anonymous, and the warning judges
-    anonymous's permissions. Once that account exists, the warning reflects
-    its permissions within five minutes.
+    says so and that a suitable global default build authorization fixes it,
+    and the detail page of a pending request that includes `CONFIGURE` shows
+    the same warning to the users who may decide it and to
+    `BatchControl/Manage` holders, before the decision. The same monitor also
+    warns when no build authenticator (a `QueueItemAuthenticator`) is
+    configured at all. The check has these limits:
+
+    - It looks at the build account's permissions at the Jenkins root only
+      (for example a global matrix entry). If the account gets Configure from
+      a folder's or a job's own authorization entries, the warning does not
+      see it; hence the advice above never to give the build account
+      item-level Configure.
+    - It asks the configured authenticators about one representative job, so
+      it cannot judge an authenticator that decides by job type, by folder or
+      by the identity of the caller; with such an authenticator the warning
+      may be absent although some jobs still build as SYSTEM or as an account
+      with Configure.
+    - The answer is cached for five minutes. After the build authenticators
+      change, or the build account's permissions change, the warning can take
+      up to five minutes to appear or disappear; when the authenticators are
+      replaced by saving the security configuration, it is re-evaluated at
+      once.
+    - When "Run as Specific User" names an account that has no Jenkins user
+      record yet, builds run as anonymous, and the warning judges anonymous's
+      permissions. Once that account exists, the warning reflects its
+      permissions within the same five minutes.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
