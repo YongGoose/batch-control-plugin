@@ -13,8 +13,8 @@
   <j:if test="${it.shown}">
     <!-- e2e-03 DEF-01 (SPEC item 6): on an approval-required job the page always says that manual
          runs need an approved request, since another plugin's build button (Rebuild, Retry, a
-         customised Build Now) only reports a refusal as its own generic failure. The Request Run
-         link is rendered only for a Request holder (the form answers 404 to anyone else). -->
+         customised Build Now) only reports a refusal as its own generic failure. The request form
+         link (not worded "Request Run": exactly one element, the sidebar entry, reads that, U-02) is rendered only for a Request holder (the form answers 404 to anyone else). -->
     <j:if test="${it.approvalRequired}">
       <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
         <strong>Batch Control: manual runs of this job need an approved run request.</strong>
@@ -22,8 +22,8 @@
         is refused without one, even where the button only reports a generic failure.
         <j:choose>
           <j:when test="${it.canRequest}">
-            <a href="${rootURL}/${it.job.url}batch-control/">Request Run</a>; the build starts
-            automatically once the request is approved.
+            <a href="${rootURL}/${it.job.url}batch-control/">Open the run request form</a>; the
+            build starts automatically once the request is approved.
           </j:when>
           <j:otherwise>
             Ask a user who may submit run requests, an approver or a Jenkins administrator to
