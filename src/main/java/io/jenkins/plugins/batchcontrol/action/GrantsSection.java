@@ -19,6 +19,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import java.time.Instant;
@@ -65,7 +66,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Page size for both the request list and the active grant list. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /**
      * What a caller is told when they reach this screen while change control is off (P-15).
@@ -365,12 +366,12 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Current 1-based page of the request table, from the {@code page} query parameter. */
     public int getPage() {
-        return pageParameter("page");
+        return Paging.currentPage();
     }
 
     /** The grant requests shown on the current page, newest first. */
     public List<GrantRequest> getPageItems() {
-        return slice(allRequestsSorted(), getPage());
+        return Paging.slice(allRequestsSorted(), getPage());
     }
 
     public int getTotal() {
@@ -378,23 +379,23 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return Paging.hasNext(getPage(), getTotal());
     }
 
     // ---------------------------------------------------------------- paging: active grants
 
     /** Current 1-based page of the active grant table, from {@code activePage}. */
     public int getActivePage() {
-        return pageParameter("activePage");
+        return Paging.currentPage("activePage");
     }
 
     /** The active grants shown on the current page, newest first. */
     public List<Grant> getActivePageItems() {
-        return slice(allActiveSorted(), getActivePage());
+        return Paging.slice(allActiveSorted(), getActivePage());
     }
 
     public int getActiveTotal() {
@@ -402,38 +403,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasActivePrevious() {
-        return getActivePage() > 1;
+        return Paging.hasPrevious(getActivePage());
     }
 
     public boolean isHasActiveNext() {
-        return getActivePage() * PAGE_SIZE < getActiveTotal();
+        return Paging.hasNext(getActivePage(), getActiveTotal());
     }
 
     // ---------------------------------------------------------------- helpers
-
-    private static int pageParameter(String name) {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter(name);
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
-    }
-
-    private static <T> List<T> slice(List<T> all, int page) {
-        int from = (page - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
-    }
 
     private List<GrantRequest> allRequestsSorted() {
         if (sortedRequests == null) {

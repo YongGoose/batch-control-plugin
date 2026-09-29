@@ -14,7 +14,6 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.IncidentSummary;
 import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
@@ -26,7 +25,9 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FilterParser;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -80,7 +81,7 @@ import org.kohsuke.stapler.StaplerResponse2;
 public class HistorySection implements ModelObject, StaplerProxy {
 
     /** Page size for every table. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /** How many blocked marker re-use attempts the always-visible alert lists at most. */
     public static final int REUSE_ALERT_LIMIT = 10;
@@ -135,7 +136,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doSummary(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String month)
             throws IOException {
-        if (refuseNonGet(req, rsp)) {
+        if (HttpVerbs.refuseNonGet(req, rsp)) {
             return;
         }
         YearMonth target;
@@ -175,7 +176,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
             rsp.sendError(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
-        if (refuseNonGet(req, rsp)) {
+        if (HttpVerbs.refuseNonGet(req, rsp)) {
             return;
         }
         // S-05: an export has no span cap (it must be complete), so bound how many run at once
@@ -214,7 +215,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
                 .thenComparing(RunRecord::getRunId).reversed();
         for (YearMonth m : newestMonthFirst()) {
             List<RunRecord> month = new ArrayList<>();
-            for (RunRecord r : FileStore.get().listRunRecords(m)) {
+            for (RunRecord r : Store.get().listRunRecords(m)) {
                 if (match.test(r)) {
                     month.add(r);
                 }
@@ -259,7 +260,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
                 .thenComparing(ChangeRecord::getId).reversed();
         for (YearMonth m : newestMonthFirst()) {
             List<ChangeRecord> month = new ArrayList<>();
-            for (ChangeRecord c : FileStore.get().listChangeRecords(m)) {
+            for (ChangeRecord c : Store.get().listChangeRecords(m)) {
                 if (match.test(c)) {
                     month.add(c);
                 }
@@ -296,7 +297,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     /** The store's existing month buckets inside the filter range (no month cap, #13). */
     private List<YearMonth> storedMonths() {
         if (storedMonths == null) {
-            storedMonths = getFilter().months(FileStore.get().listStoredMonths());
+            storedMonths = getFilter().months(Store.get().listStoredMonths());
         }
         return storedMonths;
     }
@@ -400,7 +401,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private List<RequestSummary> matchingRequestSummaries() {
         FilterParser.Filter f = getFilter();
         List<RequestSummary> matched = new ArrayList<>();
-        for (RequestSummary q : FileStore.get().listRunRequestSummaries()) {
+        for (RequestSummary q : Store.get().listRunRequestSummaries()) {
             if (f.inRange(q.createdAt()) && f.matchesJob(q.jobFullName())
                     && f.matchesUser(q.requester()) && f.matchesStatus(q.status())) {
                 matched.add(q);
@@ -429,7 +430,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private RecordPage<ChangeRecord> markerReusePage() {
         if (markerReuse == null) {
             Predicate<ChangeRecord> match = changeFilter();
-            markerReuse = FileStore.get().pageChangeRecords(storedMonths(), period(),
+            markerReuse = Store.get().pageChangeRecords(storedMonths(), period(),
                     c -> c.getType() == ChangeType.MARKER_REUSE_BLOCKED && match.test(c),
                     0, REUSE_ALERT_LIMIT, Store.MAX_SCANNED_RECORDS);
         }
@@ -457,35 +458,39 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     /** One page of the selected kind (#13): rows, match count, and whether the read was capped. */
-    private record Listing(List<?> items, int total, boolean hasNext, boolean truncated) {
+    private record Listing(List<?> items, int total, boolean hasNext, boolean truncated,
+            int oversized) {
         static Listing of(RecordPage<?> page) {
-            return new Listing(page.getItems(), page.getMatched(), page.isHasNext(), page.isTruncated());
+            return new Listing(page.getItems(), page.getMatched(), page.isHasNext(), page.isTruncated(),
+                    page.getOversized());
         }
     }
 
     private Listing listing() {
         if (listing == null) {
-            int offset = (getPage() - 1) * PAGE_SIZE;
+            int offset = Paging.offset(getPage());
             List<YearMonth> months = storedMonths();
             int cap = Store.MAX_SCANNED_RECORDS;
             switch (getKind()) {
-                case "incidents" -> listing = Listing.of(FileStore.get().pageIncidents(
+                case "incidents" -> listing = Listing.of(Store.get().pageIncidents(
                         months, period(), incidentIndexFilter(), incidentFilter(),
                         offset, PAGE_SIZE, cap));
-                case "changes" -> listing = Listing.of(FileStore.get().pageChangeRecords(
+                case "changes" -> listing = Listing.of(Store.get().pageChangeRecords(
                         months, period(), changeFilter(), offset, PAGE_SIZE, cap));
                 case "requests" -> {
                     List<RequestSummary> all = matchingRequestSummaries();
                     List<RunRequest> rows = new ArrayList<>();
-                    for (int k = offset; k < Math.min(offset + PAGE_SIZE, all.size()); k++) {
-                        RunRequest q = RunRequestService.get().load(all.get(k).id());
+                    for (RequestSummary summary : Paging.slice(all, getPage())) {
+                        RunRequest q = RunRequestService.get().load(summary.id());
                         if (q != null) {
                             rows.add(q);
                         }
                     }
-                    listing = new Listing(rows, all.size(), offset + PAGE_SIZE < all.size(), false);
+                    // Requests are XML entities, not month lines: nothing is ever skipped as oversized.
+                    listing = new Listing(rows, all.size(), Paging.hasNext(getPage(), all.size()),
+                            false, 0);
                 }
-                default -> listing = Listing.of(FileStore.get().pageRunRecords(
+                default -> listing = Listing.of(Store.get().pageRunRecords(
                         months, period(), runFilter(), offset, PAGE_SIZE, cap));
             }
         }
@@ -494,21 +499,9 @@ public class HistorySection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- paging (used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter. */
+    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
     public int getPage() {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("page");
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
+        return Paging.currentPage();
     }
 
     /** The rows of the selected kind shown on the current page, newest first. */
@@ -526,8 +519,16 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return listing().truncated();
     }
 
+    /**
+     * Over-long lines (over 1 MiB) skipped while reading this table (security-11 N-02); the CSV
+     * export skips the same lines, so the screen says so rather than look complete.
+     */
+    public int getOversized() {
+        return listing().oversized();
+    }
+
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
@@ -553,7 +554,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
      */
     private Map<String, Long> summarize(YearMonth month) {
         // Run counters are maintained incrementally by the store (#13).
-        RunMonthStats stats = FileStore.get().runMonthStats(month);
+        RunMonthStats stats = Store.get().runMonthStats(month);
         long incidentsOpen = 0;
         long incidentsResolved = 0;
         for (Incident i : IncidentService.get().list(month)) {
@@ -565,7 +566,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
         }
         long requestsApproved = 0;
         long requestsRejected = 0;
-        for (RequestSummary q : FileStore.get().listRunRequestSummaries()) {
+        for (RequestSummary q : Store.get().listRunRequestSummaries()) {
             Instant decided = q.decidedAt();
             if (decided == null
                     || !YearMonth.from(decided.atZone(BatchClock.clock().getZone())).equals(month)) {
@@ -607,15 +608,16 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return RunLinks.formatDuration(durationMs);
     }
 
-    /** Root-relative build URL for a run record. */
+    /** Root-relative build URL for a run record, or null for plain text (D-44). */
+    @CheckForNull
     public String runUrl(RunRecord record) {
-        return RunLinks.runUrl(record.getJobFullName(), record.getNumber());
+        return Visibility.runUrl(record.getJobFullName(), record.getNumber());
     }
 
-    /** Root-relative build URL for an incident's originating run, or null. */
+    /** Root-relative build URL for an incident's originating run, or null for plain text (D-44). */
     @CheckForNull
     public String incidentRunUrl(Incident incident) {
-        return RunLinks.runUrlFromRunId(incident.getRunId());
+        return Visibility.runUrlFromRunId(incident.getRunId());
     }
 
     /** Creation timestamp of an incident. */
@@ -627,20 +629,5 @@ public class HistorySection implements ModelObject, StaplerProxy {
     /** One-line parameter rendering; values come from the record already masked. */
     public String parameters(Map<String, String> parameters) {
         return RunLinks.formatParameters(parameters);
-    }
-
-    // ---------------------------------------------------------------- helpers
-
-    /** @return true when the request was refused (non-GET verb on a read-only URL). */
-    private static boolean refuseNonGet(StaplerRequest2 req, StaplerResponse2 rsp)
-            throws IOException {
-        String method = req.getMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
-            rsp.setHeader("Allow", "GET, HEAD");
-            rsp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                    "The history section is read-only; only GET is allowed");
-            return true;
-        }
-        return false;
     }
 }

@@ -16,7 +16,6 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
-import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
@@ -69,16 +68,19 @@ public class IncidentItem implements ModelObject {
         return Dates.format(instant);
     }
 
-    /** Root-relative build URL for the originating run, or null when the id is malformed. */
+    /**
+     * Root-relative build URL for the originating run; null (plain text) when the id is
+     * malformed or the viewer lacks Item/Read on the job (D-44, {@link Visibility#runUrlFromRunId}).
+     */
     @CheckForNull
     public String getRunUrl() {
-        return RunLinks.runUrlFromRunId(incident.getRunId());
+        return Visibility.runUrlFromRunId(incident.getRunId());
     }
 
-    /** Root-relative build URL for the resolving run, or null. */
+    /** Root-relative build URL for the resolving run, or null (same rule as {@link #getRunUrl()}). */
     @CheckForNull
     public String getResolvedByRunUrl() {
-        return RunLinks.runUrlFromRunId(incident.getResolvedByRunId());
+        return Visibility.runUrlFromRunId(incident.getResolvedByRunId());
     }
 
     /** Incident creation time (first transition). */

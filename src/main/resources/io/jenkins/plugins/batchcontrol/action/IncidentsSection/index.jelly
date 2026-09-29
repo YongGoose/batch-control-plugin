@@ -18,6 +18,14 @@
         </j:if>
       </form>
 
+      <!-- security-11 N-02: lines over 1 MiB are skipped on every read path, CSV included. -->
+      <j:if test="${it.oversized > 0}">
+        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
+          ${it.oversized} over-long record(s) (larger than 1 MiB) were skipped while reading this
+          period and are not listed here. The CSV export skips them too; the controller log names
+          the file that holds them.
+        </div>
+      </j:if>
       <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
       <j:if test="${it.truncated}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">

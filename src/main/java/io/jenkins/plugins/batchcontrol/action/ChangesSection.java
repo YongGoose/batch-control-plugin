@@ -5,13 +5,13 @@ import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.DiffSummary;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -38,7 +38,7 @@ import org.kohsuke.stapler.StaplerResponse2;
 public class ChangesSection implements ModelObject, StaplerProxy {
 
     /** Page size for the change record list. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /** Lazily computed, per-request cached page of the selected month. */
     private RecordPage<ChangeRecord> page;
@@ -107,21 +107,9 @@ public class ChangesSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- paging (used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter. */
+    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
     public int getPage() {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("page");
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
+        return Paging.currentPage();
     }
 
     /** The change records shown on the current page, newest first. */
@@ -140,6 +128,14 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     }
 
     /**
+     * Over-long lines (over 1 MiB) skipped while reading this page (security-11 N-02); the CSV
+     * export skips the same lines, so the screen says so rather than look complete.
+     */
+    public int getOversized() {
+        return page().getOversized();
+    }
+
+    /**
      * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
      * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
      * Only ISO dates and constant names go into it, so no encoding is needed.
@@ -150,7 +146,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
@@ -184,8 +180,8 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     private RecordPage<ChangeRecord> page() {
         if (page == null) {
             // Bounded read (#13): only this page's window is held and only its diffs are read.
-            page = FileStore.get().pageChangeRecords(List.of(getMonth()), monthPeriod(), c -> true,
-                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
+            page = Store.get().pageChangeRecords(List.of(getMonth()), monthPeriod(), c -> true,
+                    Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;
     }

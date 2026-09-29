@@ -9,6 +9,7 @@ import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -17,9 +18,7 @@ import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
-import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 
 /**
@@ -35,7 +34,7 @@ import org.kohsuke.stapler.StaplerResponse2;
 public class RequestsSection implements ModelObject, StaplerProxy {
 
     /** Page size for the request list. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /** Lazily computed, per-request cached sorted snapshot. */
     private List<RunRequest> sorted;
@@ -89,31 +88,14 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- paging (used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter. */
+    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
     public int getPage() {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("page");
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
+        return Paging.currentPage();
     }
 
     /** The requests shown on the current page, newest first. */
     public List<RunRequest> getPageItems() {
-        List<RunRequest> all = allSorted();
-        int from = (getPage() - 1) * PAGE_SIZE;
-        if (from >= all.size()) {
-            return new ArrayList<>();
-        }
-        return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+        return Paging.slice(allSorted(), getPage());
     }
 
     public int getTotal() {
@@ -121,11 +103,11 @@ public class RequestsSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
-        return getPage() * PAGE_SIZE < getTotal();
+        return Paging.hasNext(getPage(), getTotal());
     }
 
     /** Jelly helper: an approver set for display ({@code a1, a2}). */

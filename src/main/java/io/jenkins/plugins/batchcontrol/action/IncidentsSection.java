@@ -7,14 +7,14 @@ import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
-import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
@@ -40,7 +40,7 @@ import org.kohsuke.stapler.StaplerResponse2;
 public class IncidentsSection implements ModelObject, StaplerProxy {
 
     /** Page size for the incident list. */
-    public static final int PAGE_SIZE = 50;
+    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
 
     /** Lazily computed, per-request cached page of the selected month. */
     private RecordPage<Incident> page;
@@ -124,21 +124,9 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- paging (used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter. */
+    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
     public int getPage() {
-        int page = 1;
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("page");
-            if (raw != null) {
-                try {
-                    page = Integer.parseInt(raw.trim());
-                } catch (NumberFormatException ignored) {
-                    // Fall back to page 1 on garbage input.
-                }
-            }
-        }
-        return Math.max(1, page);
+        return Paging.currentPage();
     }
 
     /** The incidents shown on the current page, newest first. */
@@ -157,6 +145,14 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     }
 
     /**
+     * Over-long lines (over 1 MiB) skipped while reading this page (security-11 N-02); the CSV
+     * export skips the same lines, so the screen says so rather than look complete.
+     */
+    public int getOversized() {
+        return page().getOversized();
+    }
+
+    /**
      * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
      * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
      * Only ISO dates and constant names go into it, so no encoding is needed.
@@ -167,7 +163,7 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     }
 
     public boolean isHasPrevious() {
-        return getPage() > 1;
+        return Paging.hasPrevious(getPage());
     }
 
     public boolean isHasNext() {
@@ -181,10 +177,10 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return Dates.format(instant);
     }
 
-    /** Root-relative build URL for the incident's originating run, or null. */
+    /** Root-relative build URL for the incident's originating run, or null for plain text (D-44). */
     @CheckForNull
     public String runUrl(Incident incident) {
-        return RunLinks.runUrlFromRunId(incident.getRunId());
+        return Visibility.runUrlFromRunId(incident.getRunId());
     }
 
     /** Creation timestamp of an incident (Jelly helper for the list column). */
@@ -214,8 +210,8 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     private RecordPage<Incident> page() {
         if (page == null) {
             // Bounded read (#13): the monthly index is walked newest first up to the record cap.
-            page = FileStore.get().pageIncidents(List.of(getMonth()), monthPeriod(), s -> true, i -> true,
-                    (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
+            page = Store.get().pageIncidents(List.of(getMonth()), monthPeriod(), s -> true, i -> true,
+                    Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;
     }
