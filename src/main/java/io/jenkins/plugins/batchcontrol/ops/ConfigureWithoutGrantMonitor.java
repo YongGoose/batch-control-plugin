@@ -224,12 +224,16 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
      * granted to the account itself (DEF-29). A group's permissions are those its probe holds
      * beyond what every logged-in user holds, so a grant to {@code authenticated} is reported
      * once, on {@code authenticated}. When no group at all can be enumerated, a user is probed
-     * with all of their authorities minus that baseline instead, so nothing goes unreported.
+     * with all of their authorities minus that baseline instead, so nothing goes unreported; so
+     * is a user in a group left out by the {@value #MAX_CANDIDATES}-group cap, which is logged at
+     * WARNING (S-19-06).
      */
     private static List<StandingHolder> scanForStandingPermissions(AuthorizationStrategy strategy) {
         ACL rootAcl = strategy.getRootACL();
         Map<String, Authentication> users = new LinkedHashMap<>();
         Set<String> groups = new LinkedHashSet<>(strategyGroupSids(strategy));
+        Set<String> unchecked = new LinkedHashSet<>();
+        Set<String> truncatedUsers = new LinkedHashSet<>();
         for (String sid : candidateSids(strategy)) {
             Authentication auth = authenticate(sid);
             if (auth == null) {
@@ -241,12 +245,24 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             users.put(sid, auth);
             for (GrantedAuthority authority : auth.getAuthorities()) {
                 String name = authority.getAuthority();
-                if (groups.size() < MAX_CANDIDATES && name != null && !name.isEmpty()) {
+                if (name == null || name.isEmpty() || AUTHENTICATED.equals(name) || groups.contains(name)) {
+                    continue;
+                }
+                if (groups.size() < MAX_CANDIDATES) {
                     groups.add(name);
+                } else {
+                    // S-19-06: this group is not probed, so its members are probed in full below.
+                    unchecked.add(name);
+                    truncatedUsers.add(sid);
                 }
             }
         }
         groups.remove(AUTHENTICATED);
+        if (!unchecked.isEmpty()) {
+            LOGGER.warning(() -> "Standing-permission scan: " + unchecked.size() + " more groups were not"
+                    + " checked (limit " + MAX_CANDIDATES + "); their " + truncatedUsers.size()
+                    + " members are checked with all their groups instead");
+        }
 
         List<StandingHolder> groupHolders = new ArrayList<>();
         Authentication everyLoggedIn = groupProbe(null);
@@ -276,7 +292,7 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             // DEF-29: with the groups enumerated, a user is listed for what the strategy grants the
             // account itself; the probe carries the account name without its authorities (not even
             // authenticated), so a permission held through a group is reported once, on that group.
-            List<String> held = groupsKnown
+            List<String> held = groupsKnown && !truncatedUsers.contains(user.getKey())
                     ? heldPermissions(rootAcl, principalOnly(user.getValue()), Collections.emptyList())
                     : heldPermissions(rootAcl, user.getValue(), baseline);
             if (!held.isEmpty()) {
