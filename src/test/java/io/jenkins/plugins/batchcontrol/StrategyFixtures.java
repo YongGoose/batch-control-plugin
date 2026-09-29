@@ -175,6 +175,12 @@ final class StrategyFixtures {
      * half cannot mask them (notes 53, 164).
      */
     static void configureBuildAuthenticator() {
+        // an existing account: SpecificUsersAuthorizationStrategy falls back to anonymous otherwise
+        try {
+            User.getById("batch-builder", true).save();
+        } catch (java.io.IOException e) {
+            throw new AssertionError("fixture: cannot create the build account", e);
+        }
         jenkins.security.QueueItemAuthenticatorConfiguration.get().getAuthenticators()
                 .add(new org.jenkinsci.plugins.authorizeproject.GlobalQueueItemAuthenticator(
                         new org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy("batch-builder")));

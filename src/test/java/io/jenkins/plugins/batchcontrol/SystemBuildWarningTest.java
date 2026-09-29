@@ -104,6 +104,7 @@ public class SystemBuildWarningTest {
         strategy.add(hudson.model.Item.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("batch"));
         strategy.add(hudson.model.Item.BUILD, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("batch"));
         j.jenkins.setAuthorizationStrategy(strategy);
+        User.getById("batch", true).save(); // an existing account, or the strategy falls back to anonymous
         QueueItemAuthenticatorConfiguration.get().getAuthenticators()
                 .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("batch")));
         j.createFreeStyleProject("sys-job");
@@ -190,6 +191,8 @@ public class SystemBuildWarningTest {
         strategy.add(hudson.model.Item.READ, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("svc"));
         strategy.add(hudson.model.Item.CONFIGURE, org.jenkinsci.plugins.matrixauth.PermissionEntry.user("svc"));
         j.jenkins.setAuthorizationStrategy(strategy);
+        // SpecificUsersAuthorizationStrategy falls back to anonymous for an account without a User record
+        User.getById("svc", true).save();
         QueueItemAuthenticatorConfiguration.get().getAuthenticators()
                 .add(new GlobalQueueItemAuthenticator(new SpecificUsersAuthorizationStrategy("svc")));
         j.createFreeStyleProject("sys-job");
