@@ -83,6 +83,14 @@ public class HistorySection implements ModelObject, StaplerProxy {
     /** How many blocked marker re-use attempts the always-visible alert lists at most. */
     public static final int REUSE_ALERT_LIMIT = 10;
 
+    /** Most CSV exports that may run at the same time, instance-wide (S-05). */
+    public static final int MAX_CONCURRENT_EXPORTS = 2;
+
+    private static final java.util.concurrent.Semaphore CSV_EXPORTS =
+            new java.util.concurrent.Semaphore(MAX_CONCURRENT_EXPORTS);
+
+    private static final int TOO_MANY_REQUESTS = 429;
+
     private static final List<String> KINDS = List.of("runs", "incidents", "changes", "requests");
 
     private FilterParser.Filter filter;
@@ -168,11 +176,23 @@ public class HistorySection implements ModelObject, StaplerProxy {
         if (refuseNonGet(req, rsp)) {
             return;
         }
-        switch (rest) {
-            case "/runs.csv" -> writeRunsCsv(rsp);
-            case "/incidents.csv" -> writeIncidentsCsv(rsp);
-            case "/changes.csv" -> writeChangesCsv(rsp);
-            default -> writeRequestsCsv(rsp);
+        // S-05: an export has no span cap (it must be complete), so bound how many run at once
+        // instance-wide; a further one is refused rather than queued.
+        if (!CSV_EXPORTS.tryAcquire()) {
+            rsp.setHeader("Retry-After", "30");
+            rsp.sendError(TOO_MANY_REQUESTS,
+                    "Too many CSV exports are running; try again in a moment");
+            return;
+        }
+        try {
+            switch (rest) {
+                case "/runs.csv" -> writeRunsCsv(rsp);
+                case "/incidents.csv" -> writeIncidentsCsv(rsp);
+                case "/changes.csv" -> writeChangesCsv(rsp);
+                default -> writeRequestsCsv(rsp);
+            }
+        } finally {
+            CSV_EXPORTS.release();
         }
     }
 
@@ -316,6 +336,15 @@ public class HistorySection implements ModelObject, StaplerProxy {
     public String query(String kind) {
         String safe = KINDS.contains(kind) ? kind : "runs";
         return "kind=" + safe + "&" + getBaseQuery();
+    }
+
+    /**
+     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
+     * Only ISO dates and constant names go into it, so no encoding is needed.
+     */
+    public String getCsvUrl() {
+        return getKind() + ".csv?" + getBaseQuery();
     }
 
     // ---------------------------------------------------------------- filters

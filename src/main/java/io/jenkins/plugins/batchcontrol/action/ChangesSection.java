@@ -138,6 +138,16 @@ public class ChangesSection implements ModelObject, StaplerProxy {
         return page().isTruncated();
     }
 
+    /**
+     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
+     * Only ISO dates and constant names go into it, so no encoding is needed.
+     */
+    public String getCsvUrl() {
+        YearMonth month = getMonth();
+        return "../history/changes.csv?from=" + month.atDay(1) + "&to=" + month.atEndOfMonth();
+    }
+
     public boolean isHasPrevious() {
         return getPage() > 1;
     }
