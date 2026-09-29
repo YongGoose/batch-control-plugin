@@ -81,12 +81,27 @@ public enum ChangeType {
      * <p>{@code target} is the job full name. {@code detail} starts with {@code cause=<KIND>
      * switch=<name>}, where the kind is {@code TIMER}, {@code UPSTREAM} or {@code REPLAY} and the
      * switch is the job setting that refused it ({@code blockTimer}, {@code blockUpstream}, or
-     * {@code approvalRequired} for a replay). {@code user} is the account the submission ran as
+     * {@code approvalRequired} for a replay), or {@code activation} when the job's settings let the
+     * cause through but the job is not activated (SPEC item 6a). {@code user} is the account the submission ran as
      * (for a timer normally {@code SYSTEM}). {@code grantId}/{@code diff} stay {@code null}.
      *
      * <p>Coalesced per job and cause kind to at most one record per hour, whoever submitted it
      * (see {@code store.BlockedAttemptAudit#recordCoalesced}): a per-minute cron on a locked job
      * would otherwise write 1,440 identical rows a day.
      */
-    TRIGGER_BLOCKED
+    TRIGGER_BLOCKED,
+    /**
+     * A job was put into service (SPEC item 6a, D-39): an ACTIVATE request was approved, or the job
+     * existed when this plugin version was first installed and was seeded as activated.
+     *
+     * <p>{@code target} is the job full name, {@code user} the deciding approver (or
+     * {@code upgrade} for the seeding), and {@code detail} names the request id and the requester.
+     * {@code grantId}/{@code diff} stay {@code null}.
+     */
+    ACTIVATED,
+    /**
+     * A job was put on hold (SPEC item 6a): a HOLD request was approved, so timer and upstream
+     * causes no longer run it. Fields as for {@link #ACTIVATED}.
+     */
+    HELD
 }

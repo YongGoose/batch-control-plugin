@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.ops;
 
 import hudson.Extension;
 import hudson.model.PeriodicWork;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
@@ -54,11 +55,18 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         RunRequestService.get().expireOverdue(queuedIds, queueSnapshotAt);
         // Pending grant requests expire on the same cadence (SPEC item 8, T-08-12).
         GrantRequestService.get().expireOverduePending();
+        // Pending activation and hold requests follow the run-request timeout (SPEC item 6a).
+        try {
+            ActivationService.get().expireOverduePending();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry of pending activation requests failed", e);
+        }
         // D-36: EXPIRING / GRANT_EXPIRING once per request or window, notifyBeforeExpiryMinutes
         // before the expiry. Guarded so a notification problem never stops the expiry work.
         try {
             RunRequestService.get().notifyExpiring();
             GrantRequestService.get().notifyExpiring();
+            ActivationService.get().notifyExpiring();
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Expiry notifications failed; expiry itself is unaffected", e);
         }

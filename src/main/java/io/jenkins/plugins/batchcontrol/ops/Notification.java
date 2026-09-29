@@ -16,6 +16,8 @@ public final class Notification {
     public static final String KIND_RUN = "RUN";
     /** {@link #getKind()} of a change (grant) request or window. */
     public static final String KIND_GRANT = "GRANT";
+    /** {@link #getKind()} of an activation or hold request for a job (SPEC item 6a). */
+    public static final String KIND_ACTIVATION = "ACTIVATION";
 
     private final String kind;
     private final String requestId;
@@ -37,7 +39,10 @@ public final class Notification {
         this.url = url;
     }
 
-    /** {@code "RUN"} for a run request, {@code "GRANT"} for a change request or window. */
+    /**
+     * {@code "RUN"} for a run request, {@code "GRANT"} for a change request or window,
+     * {@code "ACTIVATION"} for an activation or hold request.
+     */
     public String getKind() {
         return kind;
     }
@@ -47,7 +52,7 @@ public final class Notification {
         return requestId;
     }
 
-    /** The job full name (run) or the scope full name (grant). */
+    /** The job full name (run, activation) or the scope full name (grant). */
     public String getSubject() {
         return subject;
     }

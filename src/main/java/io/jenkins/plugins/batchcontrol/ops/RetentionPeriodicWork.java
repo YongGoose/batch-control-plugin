@@ -97,7 +97,10 @@ public class RetentionPeriodicWork extends PeriodicWork {
             }
             String detail = "Deleted " + result.runRequests() + " closed run requests, "
                     + result.grantRequests() + " closed grant requests and " + result.grantIds().size()
-                    + " ended grants last active before " + oldestKept + ": older than retentionMonths="
+                    + " ended grants"
+                    + (result.activationRequests() > 0
+                            ? " (and " + result.activationRequests() + " closed activation requests)" : "")
+                    + " last active before " + oldestKept + ": older than retentionMonths="
                     + retentionMonths;
             store.appendChangeRecord(ChangeRecord.create(ChangeType.RETENTION, "requests",
                     Jenkins.getAuthentication2().getName(), detail));

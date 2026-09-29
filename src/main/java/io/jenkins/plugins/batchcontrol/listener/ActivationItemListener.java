@@ -1,0 +1,68 @@
+package io.jenkins.plugins.batchcontrol.listener;
+
+import hudson.Extension;
+import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.Job;
+import hudson.model.listeners.ItemListener;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+
+/**
+ * Keeps the activation store in step with the items (SPEC item 6a): a rename or move keeps the
+ * job's activation under its new full name, a deletion removes it, and a newly created job never
+ * inherits a state left under its name; a job created while run control is off is recorded as
+ * activated (D-45). Runs regardless of the switches: this is bookkeeping, so that turning run
+ * control on later finds the right state for every job.
+ *
+ * <p>{@code onLocationChanged} fires for renames and moves, and recursively for the children of a
+ * renamed or moved folder, so every job's state follows it.
+ */
+@Extension
+@Restricted(NoExternalUse.class)
+public class ActivationItemListener extends ItemListener {
+
+    private static final Logger LOGGER = Logger.getLogger(ActivationItemListener.class.getName());
+
+    @Override
+    public void onCreated(Item item) {
+        if (!(item instanceof Job)) {
+            return;
+        }
+        try {
+            ActivationService.get().onJobCreated((Job<?, ?>) item);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not check the activation state of the new job '"
+                    + item.getFullName() + "'");
+        }
+    }
+
+    @Override
+    public void onLocationChanged(Item item, String oldFullName, String newFullName) {
+        if (!(item instanceof Job)) {
+            return;
+        }
+        try {
+            ActivationService.get().relocate(oldFullName, newFullName);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not move the activation state of '" + oldFullName
+                    + "' to '" + newFullName + "'");
+        }
+    }
+
+    @Override
+    public void onDeleted(Item item) {
+        if (!(item instanceof Job) && !(item instanceof ItemGroup)) {
+            return;
+        }
+        try {
+            ActivationService.get().remove(item.getFullName(), item instanceof ItemGroup);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not remove the activation state of '"
+                    + item.getFullName() + "'");
+        }
+    }
+}

@@ -12,6 +12,7 @@ import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
@@ -44,11 +45,11 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>automatic retry → judged by the retried build's causes; a retry of an approved or
  *       manual run is refused quietly (#36);</li>
  *   <li>timer cause → pass unless {@code blockTimer}, refused quietly (unattended) and
- *       recorded (#21);</li>
+ *       recorded (#21); what the setting lets through must also be activated (SPEC item 6a);</li>
  *   <li>upstream cause → D-16 policy: pass unless {@code blockUpstream}; with
  *       {@code blockUpstream} only allow-listed upstream jobs pass, an empty/unset list
  *       blocks all; refused quietly (unattended, the upstream build surfaces the failure) and
- *       recorded (#21);</li>
+ *       recorded (#21); what the setting lets through must also be activated (SPEC item 6a);</li>
  *   <li>SCM causes and anything unknown/empty → pass (logged).</li>
  * </ol>
  *
@@ -196,20 +197,18 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                                     + "' - clear blockTimer in the job configuration to let its schedule run");
                     return false;
                 }
-                return true;
+                // SPEC item 6a: clearing blockTimer never activates a job on its own.
+                return activatedOrRefuse(job, KIND_TIMER, "a timer-triggered run");
             }
         }
 
         // 7. Upstream (includes the Pipeline build step's BuildUpstreamCause subtype): D-16.
         for (Cause cause : effective) {
             if (cause instanceof Cause.UpstreamCause) {
-                if (!property.isBlockUpstream()) {
-                    return true;
-                }
                 String upstream = ((Cause.UpstreamCause) cause).getUpstreamProject();
-                List<String> allowed = property.getAllowedUpstreamJobs();
-                if (allowed.contains(upstream)) {
-                    return true;
+                if (!property.isBlockUpstream() || property.getAllowedUpstreamJobs().contains(upstream)) {
+                    // SPEC item 6a: the job settings let it through; activation must say yes too.
+                    return activatedOrRefuse(job, KIND_UPSTREAM, "an upstream-triggered run from '" + upstream + "'");
                 }
                 // D-16: with blockUpstream an empty/unset allow list blocks every upstream job.
                 logRateLimited("upstream", job, () -> "Blocked upstream-triggered run of job '"
@@ -233,6 +232,24 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 + job.getFullName()
                 + "' pass the approval gate with unclassified causes: " + causes);
         return true;
+    }
+
+    /**
+     * The second input of the unattended gate (SPEC item 6a, D-39): a timer or upstream cause the
+     * job's own settings let through passes only if the job is activated. Activation lives in the
+     * plugin store, outside the job configuration, so no configuration write can substitute for
+     * it. A refusal is quiet and recorded like the other unattended refusals, with
+     * {@code switch=activation}.
+     */
+    private static boolean activatedOrRefuse(Job<?, ?> job, String kind, String what) {
+        if (ActivationService.get().isActivated(job)) {
+            return true;
+        }
+        logRateLimited("activation-" + kind, job, () -> "Blocked " + what + " of job '" + job.getFullName()
+                + "' (not activated)");
+        recordTriggerBlocked(job, kind, "activation", "Blocked " + what + " of job '" + job.getFullName()
+                + "' - the job is not activated; an approved activation request puts it into service");
+        return false;
     }
 
     /**
