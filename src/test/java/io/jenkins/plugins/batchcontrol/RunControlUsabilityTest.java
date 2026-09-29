@@ -55,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class RunControlUsabilityTest {
 
     private static final Pattern APPROVAL = Pattern.compile("(?i)approv");
+    private static final Pattern MANUAL = Pattern.compile("(?i)manual");
     private static final Pattern TIMER = Pattern.compile("(?i)block\\s*timer");
     private static final Pattern UPSTREAM = Pattern.compile("(?i)block\\s*upstream");
 
@@ -120,13 +121,19 @@ public class RunControlUsabilityTest {
     }
 
     /**
-     * T-06-68 (DEF-16): Replay is not offered on a build of an approval-required Pipeline job
-     * (it can never succeed there), and a Replay submitted anyway is refused with a plain message
-     * naming approval, not the "Oops!" crash page; no build is queued. Control: Replay is offered on
-     * an uncontrolled Pipeline job to the same user.
+     * T-06-68 (DEF-16): a Replay submitted on a build of an approval-required Pipeline job is
+     * refused with a plain-words page naming approval and linking the request form for a user who
+     * may open it, not the "Oops!" crash page; no build is queued; the job page carries the
+     * approval notice.
+     *
+     * <p>Coordinator ruling (e2e-03 part 2, the SPEC section 6 usability line applied to controls
+     * Batch Control does not own): workflow-cps contributes the Replay link and no other plugin can
+     * hide it, so the link may stay visible (docs/LIMITATIONS.md items 40/41 describe the same
+     * situation for other plugins' build links). Its absence is therefore not asserted; the refusal
+     * and the notice are. Control: Replay is offered on an uncontrolled build.
      */
     @Test
-    public void t_06_68_replayIsNotOfferedAndItsRefusalIsPlain() throws Exception {
+    public void t_06_68_replayRefusalIsPlainAndLinksTheRequestForm() throws Exception {
         WorkflowJob controlled = pipeline("replay-x");
         WorkflowJob free = pipeline("replay-free");
         setBatchControl(controlled, new BatchControlJobProperty(true));
@@ -134,10 +141,6 @@ public class RunControlUsabilityTest {
         HtmlPage freeBuild = UsabilityFixtures.htmlPage(j, "admin", free.getUrl() + "1/");
         assertTrue(UsabilityFixtures.hasLinkTo(j, freeBuild, free.getUrl() + "1/replay"),
                 "control: Replay is offered on an uncontrolled Pipeline build; anchors were " + UsabilityFixtures.resolvedHrefs(freeBuild));
-
-        HtmlPage controlledBuild = UsabilityFixtures.htmlPage(j, "admin", controlled.getUrl() + "1/");
-        assertFalse(UsabilityFixtures.hasLinkTo(j, controlledBuild, controlled.getUrl() + "1/replay"),
-                "Replay must not be offered on a build of an approval-required job (it can never succeed there)");
 
         JenkinsRule.WebClient wc = UsabilityFixtures.client(j, "admin");
         List<NameValuePair> params = new ArrayList<>();
@@ -147,15 +150,24 @@ public class RunControlUsabilityTest {
         request.setRequestParameters(params);
         Page answer = wc.getPage(request);
         UsabilityFixtures.assertPlainRefusal("Replay of an approval-required job", UsabilityFixtures.text(answer), APPROVAL);
+        assertRefusalLinksRequestForm("Replay refusal as admin", answer, controlled.getUrl());
         assertBlocked(j, controlled, 2, 1);
+
+        assertApprovalNotice(UsabilityFixtures.htmlPage(j, "admin", controlled.getUrl()), controlled.getFullName());
     }
 
     /**
      * T-06-70 (DEF-25): on an approval-required job nobody is offered a build entry that can never
      * succeed: no entry at core's build URL ("Direct Build (needs approval)", "Build Now"), no
-     * "Rebuild Last", and on its builds no Rebuild or Retry — for the requester and for the
-     * administrator. Request Run stays. Control: the same plugins offer Rebuild and Retry on an
-     * uncontrolled job, so the row measures the entries, not their absence from the instance.
+     * "Rebuild Last", and on its builds no Rebuild — for the requester and for the administrator.
+     * Request Run stays. Control: the same plugins offer Rebuild and Retry on an uncontrolled job,
+     * so the row measures the entries, not their absence from the instance.
+     *
+     * <p>Coordinator ruling (e2e-03 part 2): naginator contributes its Retry link itself and no
+     * other plugin can hide it (docs/LIMITATIONS.md item 41), so Retry may stay visible. Instead,
+     * a click on it is refused with a plain-words page naming approval and linking the request form
+     * for the requester (no "Oops!", no generic toast), nothing is queued, and the job page carries
+     * the approval notice.
      */
     @Test
     public void t_06_70_noNeverSucceedingBuildEntriesOnApprovalRequiredJobs() throws Exception {
@@ -192,15 +204,20 @@ public class RunControlUsabilityTest {
             for (String href : UsabilityFixtures.resolvedHrefs(jobPage)) {
                 assertFalse(href.endsWith("/rebuild"), user + ": no Rebuild entry may be offered on the job page: " + href);
             }
+            assertApprovalNotice(jobPage, user + " on " + job.getFullName());
             HtmlPage buildPage = UsabilityFixtures.htmlPage(j, user, job.getUrl() + "1/");
             assertFalse(UsabilityFixtures.hasLinkTo(j, buildPage, job.getUrl() + "1/rebuild"),
                     user + ": Rebuild must not be offered on a build of an approval-required job");
-            assertFalse(UsabilityFixtures.hasLinkTo(j, buildPage, job.getUrl() + "1/retry"),
-                    user + ": Retry must not be offered on a build of an approval-required job");
+            // naginator's Retry may stay visible (ruling above); its click is asserted below
         }
         HtmlPage requester = UsabilityFixtures.htmlPage(j, "u1", job.getUrl());
         assertFalse(UsabilityFixtures.anchorsCaptioned(requester, Pattern.compile("Request Run")).isEmpty(),
                 "Request Run must still be offered to the requester (SPEC 6)");
+
+        Page retry = PluginInteractionFixtures.post(j, "u1", job.getUrl() + "1/retry/");
+        UsabilityFixtures.assertPlainRefusal("naginator Retry of an approved run", UsabilityFixtures.text(retry), APPROVAL);
+        assertRefusalLinksRequestForm("naginator Retry refusal as u1", retry, job.getUrl());
+        assertBlocked(j, job, 2, 1);
     }
 
     /**
@@ -272,6 +289,32 @@ public class RunControlUsabilityTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** The refusal is an HTML page (not a toast) linking the job's request form, which the viewer may open. */
+    private void assertRefusalLinksRequestForm(String what, Page answer, String jobUrl) throws Exception {
+        assertTrue(answer instanceof HtmlPage, what + ": the refusal must be a page the user reads, got "
+                + answer.getWebResponse().getContentType() + ": " + excerpt(UsabilityFixtures.text(answer)));
+        assertTrue(UsabilityFixtures.hasLinkTo(j, (HtmlPage) answer, jobUrl + "batch-control"), what
+                + ": the refusal must link the request form " + jobUrl + "batch-control/; anchors were "
+                + UsabilityFixtures.resolvedHrefs((HtmlPage) answer));
+    }
+
+    /** The job page's approval notice (T-06-56, note 116): a main-panel element naming a manual run and approval. */
+    private static void assertApprovalNotice(HtmlPage page, String where) {
+        org.htmlunit.html.DomElement main = page.getElementById("main-panel");
+        boolean found = false;
+        if (main != null) {
+            for (org.htmlunit.html.DomElement element : main.getHtmlElementDescendants()) {
+                String text = element.getTextContent();
+                if (text != null && MANUAL.matcher(text).find() && APPROVAL.matcher(text).find()) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assertTrue(found, where + ": the job page must carry the approval notice (manual runs need an approved request): "
+                + excerpt(page.asNormalizedText()));
+    }
 
     private FreeStyleProject approvalRequired(String name) throws Exception {
         FreeStyleProject job = j.createFreeStyleProject(name);
