@@ -10,8 +10,10 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.TreeSet;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -24,16 +26,21 @@ import org.kohsuke.stapler.StaplerRequest2;
  * <p>All parsing is forgiving: garbage values fall back to the default instead of failing, so a
  * hand-edited URL can never produce a stack trace.
  *
- * <p>Caps (#13): the primary bound on a page load is by records — the store's page queries stop
- * after {@code Store.MAX_SCANNED_RECORDS} and the screen asks the user to narrow the filter. The
- * date range is additionally capped at {@value #MAX_MONTHS} months as a secondary limit on how
- * many monthly files one request (and one CSV export) may open.
+ * <p>Bounds (#13, SPEC item 4): a query span is capped by records, not by files — the store's
+ * page queries stop after {@code Store.MAX_SCANNED_RECORDS} and the screen asks the user to
+ * narrow the filter. There is no month cap on the span. Dates themselves are validated: only
+ * plain {@code yyyy-MM-dd} with a year in {@value #MIN_YEAR}..{@value #MAX_YEAR} is accepted,
+ * and {@link Filter#months(Collection)} only yields months that exist in the store, so a wide
+ * span never iterates over empty months.
  */
 @Restricted(NoExternalUse.class)
 public final class FilterParser {
 
-    /** Secondary cap on the number of monthly buckets one request may open (#13). */
-    public static final int MAX_MONTHS = 36;
+    /** Lowest accepted year of a {@code from}/{@code to} date (input validation). */
+    public static final int MIN_YEAR = 1970;
+
+    /** Highest accepted year of a {@code from}/{@code to} date (input validation). */
+    public static final int MAX_YEAR = 9999;
 
     /** Default range length in days (inclusive of today) when no dates are given. */
     public static final int DEFAULT_RANGE_DAYS = 30;
@@ -59,11 +66,6 @@ public final class FilterParser {
             from = to;
             to = swap;
         }
-        // Cap the span so one request cannot scan an unbounded number of monthly files.
-        YearMonth firstAllowed = YearMonth.from(to).minusMonths(MAX_MONTHS - 1L);
-        if (YearMonth.from(from).isBefore(firstAllowed)) {
-            from = firstAllowed.atDay(1);
-        }
         return new Filter(from, to,
                 text(param(req, "job")),
                 text(param(req, "user")),
@@ -81,8 +83,14 @@ public final class FilterParser {
         if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
+        String trimmed = raw.trim();
+        // Plain ISO dates only: no signed or extended years.
+        if (!trimmed.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return null;
+        }
         try {
-            return LocalDate.parse(raw.trim());
+            LocalDate date = LocalDate.parse(trimmed);
+            return date.getYear() < MIN_YEAR || date.getYear() > MAX_YEAR ? null : date;
         } catch (DateTimeParseException e) {
             return null;
         }
@@ -187,12 +195,18 @@ public final class FilterParser {
             return to.plusDays(1).atStartOfDay(zone()).toInstant();
         }
 
-        /** The monthly store buckets covered by the range, oldest first (capped by the parser). */
-        public List<YearMonth> months() {
-            List<YearMonth> months = new ArrayList<>();
+        /**
+         * The months of {@code stored} (the store's existing buckets) that the range covers,
+         * oldest first. Bounded by what exists, not by the span, so a wide range is cheap.
+         */
+        public List<YearMonth> months(Collection<YearMonth> stored) {
+            YearMonth first = YearMonth.from(from);
             YearMonth last = YearMonth.from(to);
-            for (YearMonth m = YearMonth.from(from); !m.isAfter(last); m = m.plusMonths(1)) {
-                months.add(m);
+            List<YearMonth> months = new ArrayList<>();
+            for (YearMonth m : new TreeSet<>(stored)) {
+                if (!m.isBefore(first) && !m.isAfter(last)) {
+                    months.add(m);
+                }
             }
             return months;
         }

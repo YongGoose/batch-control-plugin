@@ -88,6 +88,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private FilterParser.Filter filter;
     private Listing listing;
     private RecordPage<ChangeRecord> markerReuse;
+    private List<YearMonth> storedMonths;
 
     @Override
     public Object getTarget() {
@@ -176,8 +177,8 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     /*
-     * CSV exports (#13) stay complete for the requested span (capped by FilterParser at
-     * MAX_MONTHS files) but are written month by month, newest month first, so at most one
+     * CSV exports (#13) stay complete for the requested span (only months that exist in the
+     * store are opened) but are written month by month, newest month first, so at most one
      * month's records are held at a time rather than every row of the span. The store has no
      * row-streaming read yet; see the ui-dev report.
      */
@@ -270,8 +271,16 @@ public class HistorySection implements ModelObject, StaplerProxy {
         }
     }
 
+    /** The store's existing month buckets inside the filter range (no month cap, #13). */
+    private List<YearMonth> storedMonths() {
+        if (storedMonths == null) {
+            storedMonths = getFilter().months(FileStore.get().listStoredMonths());
+        }
+        return storedMonths;
+    }
+
     private List<YearMonth> newestMonthFirst() {
-        List<YearMonth> months = new ArrayList<>(getFilter().months());
+        List<YearMonth> months = new ArrayList<>(storedMonths());
         java.util.Collections.reverse(months);
         return months;
     }
@@ -372,7 +381,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private RecordPage<ChangeRecord> markerReusePage() {
         if (markerReuse == null) {
             Predicate<ChangeRecord> match = changeFilter();
-            markerReuse = FileStore.get().pageChangeRecords(getFilter().months(),
+            markerReuse = FileStore.get().pageChangeRecords(storedMonths(),
                     c -> c.getType() == ChangeType.MARKER_REUSE_BLOCKED && match.test(c),
                     0, REUSE_ALERT_LIMIT, Store.MAX_SCANNED_RECORDS);
         }
@@ -409,7 +418,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private Listing listing() {
         if (listing == null) {
             int offset = (getPage() - 1) * PAGE_SIZE;
-            List<YearMonth> months = getFilter().months();
+            List<YearMonth> months = storedMonths();
             int cap = Store.MAX_SCANNED_RECORDS;
             switch (getKind()) {
                 case "incidents" -> listing = Listing.of(FileStore.get().pageIncidents(
