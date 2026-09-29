@@ -5,14 +5,15 @@ import hudson.model.User;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Locale;
+import java.util.regex.Pattern;
 import jenkins.security.QueueItemAuthenticatorConfiguration;
-import org.htmlunit.html.HtmlPage;
 import org.htmlunit.WebResponse;
+import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.authorizeproject.AuthorizeProjectProperty;
 import org.jenkinsci.plugins.authorizeproject.GlobalQueueItemAuthenticator;
 import org.jenkinsci.plugins.authorizeproject.ProjectQueueItemAuthenticator;
 import org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy;
+import org.jenkinsci.plugins.authorizeproject.strategy.TriggeringUsersAuthorizationStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -24,22 +25,26 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 8, the acceptance line after the batch-control-strategy monitor (D-50, e2e-03
- * DEF-37): "while change control is on, jobs in the scope of a pending or active CONFIGURE grant
- * whose builds would run as SYSTEM under the configured build authenticators (for example
- * Authorize Project per-project with no strategy on the job) are listed by that monitor, and the
- * detail page of a CONFIGURE grant request on such a job warns the approver before the decision."
- * Matrix rows T-08-59 and T-08-60 (note 160).
+ * SPEC item 8, the acceptance line after the batch-control-strategy monitor (D-50, D-50a,
+ * security-21): "while change control is on and the configured build authenticators would let a
+ * build of a job without its own build authorization and without a user cause run as SYSTEM, the
+ * {@code batch-control-strategy} monitor shows one fixed warning (no job names) and the detail
+ * page of a pending request that includes CONFIGURE shows the same warning to users who may decide
+ * it or hold BatchControl/Manage, not to the requester. A global default build authorization
+ * removes both." Matrix rows T-08-59 .. T-08-62 (notes 160, 163).
  *
- * <p>bob (RequestGrant) files a CONFIGURE request for {@code sys-job}; a1 is the approver
- * (StrategyFixtures). The warning is recognised by the word "SYSTEM" together with the job name
- * on Manage Jenkins, and by "SYSTEM" on the request's detail page.
+ * <p>bob (RequestGrant) files the CONFIGURE requests; a1 is the designated approver; m1 holds
+ * BatchControl/Manage (StrategyFixtures). The warning is recognised by the word "SYSTEM"; the
+ * wording is not pinned.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-50 and docs/TEST-MATRIX.md only (no src/main
- * knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-50/D-50a, docs/reports/security-21.md and
+ * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class SystemBuildWarningTest {
+
+    /** A count of jobs the viewer cannot see (D-50a withdrew it). */
+    private static final Pattern HIDDEN_COUNT = Pattern.compile("(?i)\\d+\\s+more\\s+jobs?|cannot see|can't see");
 
     private JenkinsRule j;
 
@@ -53,44 +58,41 @@ public class SystemBuildWarningTest {
     }
 
     /**
-     * T-08-59 (D-50 a, b): Authorize Project per-project (ProjectQueueItemAuthenticator) is the
-     * only build authenticator; {@code sys-job} has no strategy of its own, {@code own-job} runs as
-     * admin through its own AuthorizeProjectProperty. Pending CONFIGURE requests on both: the
-     * monitor on Manage Jenkins names {@code sys-job} with "SYSTEM" and not {@code own-job}; the
-     * detail page of the {@code sys-job} request warns a1 ("SYSTEM"), the {@code own-job} one does
-     * not.
+     * T-08-59 (D-50a): Authorize Project per-project (ProjectQueueItemAuthenticator) with no global
+     * default; {@code sys-job} has no strategy; a pending CONFIGURE request by bob on it. Manage
+     * Jenkins shows the fixed warning without naming the job; the request's detail page shows it
+     * to a1 (who may decide) and to m1 (BatchControl/Manage), not to bob (the requester), and no
+     * page carries a hidden-job count.
      */
     @Test
-    public void t_08_59_perProjectAuthenticatorWithoutJobStrategyIsNamedAndWarned() throws Exception {
-        String strategyId = j.jenkins.getDescriptorOrDie(SpecificUsersAuthorizationStrategy.class).getId();
-        QueueItemAuthenticatorConfiguration.get().getAuthenticators()
-                .add(new ProjectQueueItemAuthenticator(Collections.singletonMap(strategyId, true)));
-        assertTrue(ProjectQueueItemAuthenticator.isConfigured(), "fixture: the per-project authenticator must be configured");
+    public void t_08_59_perProjectWithoutGlobalDefaultShowsFixedWarningToDecidersOnly() throws Exception {
+        perProject();
         j.createFreeStyleProject("sys-job");
-        FreeStyleProject own = j.createFreeStyleProject("own-job");
-        own.addProperty(new AuthorizeProjectProperty(new SpecificUsersAuthorizationStrategy("admin")));
-
-        String sysRequest = request("sys-job");
-        String ownRequest = request("own-job");
+        String id = request("sys-job");
 
         String manage = manageText();
-        assertTrue(manage.contains("sys-job") && manage.contains("SYSTEM"), "the batch-control-strategy monitor must name"
-                + " sys-job, whose builds run as SYSTEM: " + UsabilityFixtures.excerpt(manage));
-        assertFalse(manage.contains("own-job"), "a job whose builds run as a user must not be listed: "
+        assertTrue(manage.contains("SYSTEM"), "the batch-control-strategy monitor must show the SYSTEM-build warning: "
                 + UsabilityFixtures.excerpt(manage));
+        assertFalse(manage.contains("sys-job"), "the warning is instance-wide and names no job: "
+                + UsabilityFixtures.excerpt(manage));
+        assertFalse(HIDDEN_COUNT.matcher(manage).find(), "no hidden-job count: " + UsabilityFixtures.excerpt(manage));
 
-        String sysDetail = detailText(sysRequest);
-        assertTrue(sysDetail.contains("SYSTEM"), "the detail page of a CONFIGURE request on sys-job must warn the"
-                + " approver that its builds run as SYSTEM: " + UsabilityFixtures.excerpt(sysDetail));
-        String ownDetail = detailText(ownRequest);
-        assertFalse(ownDetail.contains("SYSTEM"), "no SYSTEM warning on the request for a job that runs as a user: "
-                + UsabilityFixtures.excerpt(ownDetail));
+        for (String decider : new String[] {"a1", "m1"}) {
+            String detail = detailText(decider, id);
+            assertTrue(detail.contains("SYSTEM"), decider + " must see the SYSTEM-build warning on the request: "
+                    + UsabilityFixtures.excerpt(detail));
+            assertFalse(HIDDEN_COUNT.matcher(detail).find(), decider + ": no hidden-job count: "
+                    + UsabilityFixtures.excerpt(detail));
+        }
+        String requester = detailText("bob", id);
+        assertTrue(requester.contains("sys-job"), "fixture: bob sees his own request");
+        assertFalse(requester.contains("SYSTEM"), "the requester must not see the SYSTEM-build warning: "
+                + UsabilityFixtures.excerpt(requester));
     }
 
     /**
-     * T-08-60 (D-50 negative twin): a global default build authorization (GlobalQueueItemAuthenticator
-     * running builds as admin) gives {@code sys-job}'s builds a user identity: with the same
-     * pending CONFIGURE request neither Manage Jenkins nor the detail page carries the warning.
+     * T-08-60 (D-50a twin): a global default build authorization (GlobalQueueItemAuthenticator
+     * running builds as admin): neither Manage Jenkins nor the detail page carries the warning.
      */
     @Test
     public void t_08_60_globalDefaultStrategyShowsNoSystemWarning() throws Exception {
@@ -100,13 +102,59 @@ public class SystemBuildWarningTest {
         String id = request("sys-job");
 
         String manage = manageText();
-        assertFalse(manage.contains("sys-job"), "with a global default build authorization sys-job must not be listed: "
-                + UsabilityFixtures.excerpt(manage));
-        String detail = detailText(id);
-        assertTrue(detail.toLowerCase(Locale.ROOT).contains("sys-job"), "fixture: the detail page must show the request: "
+        assertFalse(manage.contains("SYSTEM"), "with a global default build authorization there is no SYSTEM-build"
+                + " warning: " + UsabilityFixtures.excerpt(manage));
+        String detail = detailText("a1", id);
+        assertTrue(detail.contains("sys-job"), "fixture: the detail page must show the request");
+        assertFalse(detail.contains("SYSTEM"), "no SYSTEM-build warning when builds run as a user: "
                 + UsabilityFixtures.excerpt(detail));
-        assertFalse(detail.contains("SYSTEM"), "no SYSTEM warning when builds run as a user: "
+    }
+
+    /**
+     * T-08-61 (D-50a, security-21 S-21-01 case 1): the only build authenticator is a global default
+     * that follows the triggering user (TriggeringUsersAuthorizationStrategy). A build without a
+     * user cause (a timer, an SCM poll) still runs as SYSTEM, so the warning appears on Manage
+     * Jenkins and to the approver.
+     */
+    @Test
+    public void t_08_61_triggeringUserStrategyAloneStillWarns() throws Exception {
+        QueueItemAuthenticatorConfiguration.get().getAuthenticators()
+                .add(new GlobalQueueItemAuthenticator(new TriggeringUsersAuthorizationStrategy()));
+        j.createFreeStyleProject("sys-job");
+        String id = request("sys-job");
+
+        String manage = manageText();
+        assertTrue(manage.contains("SYSTEM"), "a strategy that follows the triggering user leaves timer and SCM builds"
+                + " as SYSTEM, so the warning must appear: " + UsabilityFixtures.excerpt(manage));
+        String detail = detailText("a1", id);
+        assertTrue(detail.contains("SYSTEM"), "the approver must see the warning: " + UsabilityFixtures.excerpt(detail));
+    }
+
+    /**
+     * T-08-62 (D-50a, S-21-01 case 2): per-project mode without a global default, and the only job
+     * in the request's scope has its own build authorization (running as admin). A Configure
+     * holder can remove it, so the warning still appears on Manage Jenkins and to the approver.
+     */
+    @Test
+    public void t_08_62_jobsOwnBuildAuthorizationDoesNotRemoveTheWarning() throws Exception {
+        perProject();
+        FreeStyleProject own = j.createFreeStyleProject("own-job");
+        own.addProperty(new AuthorizeProjectProperty(new SpecificUsersAuthorizationStrategy("admin")));
+        String id = request("own-job");
+
+        String manage = manageText();
+        assertTrue(manage.contains("SYSTEM"), "a job's own build authorization can be removed by a Configure holder, so"
+                + " the warning must stay: " + UsabilityFixtures.excerpt(manage));
+        String detail = detailText("a1", id);
+        assertTrue(detail.contains("SYSTEM"), "the approver must see the warning for own-job too: "
                 + UsabilityFixtures.excerpt(detail));
+    }
+
+    private void perProject() {
+        String strategyId = j.jenkins.getDescriptorOrDie(SpecificUsersAuthorizationStrategy.class).getId();
+        QueueItemAuthenticatorConfiguration.get().getAuthenticators()
+                .add(new ProjectQueueItemAuthenticator(Collections.singletonMap(strategyId, true)));
+        assertTrue(ProjectQueueItemAuthenticator.isConfigured(), "fixture: the per-project authenticator must be configured");
     }
 
     private String request(String job) throws Exception {
@@ -120,9 +168,9 @@ public class SystemBuildWarningTest {
         return manage.asNormalizedText();
     }
 
-    private String detailText(String requestId) throws Exception {
-        WebResponse detail = ApproverFormFixtures.get(j, "a1", "batch-control/grants/" + requestId + "/");
-        assertEquals(200, detail.getStatusCode(), "fixture: a1 must open the request's detail page");
+    private String detailText(String userId, String requestId) throws Exception {
+        WebResponse detail = ApproverFormFixtures.get(j, userId, "batch-control/grants/" + requestId + "/");
+        assertEquals(200, detail.getStatusCode(), "fixture: " + userId + " must open the request's detail page");
         return detail.getContentAsString();
     }
 }
