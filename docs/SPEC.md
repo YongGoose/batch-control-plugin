@@ -31,7 +31,7 @@
 - 수용 기준: 설치 직후 기존 잡의 빌드·설정·삭제가 이전과 동일하게 동작한다.
 - 수용 기준: 실행 통제만 켜면 변경 통제 관련 UI·차단은 나타나지 않는다(반대도 동일).
 - 수용 기준: 스위치 on/off 시 ChangeRecord(type=CONFIG_TOGGLE, 사용자, 시각, 이전/이후 값)가 남는다.
-- Acceptance: a switch change takes effect only once the new configuration is saved. If the save fails, the in-memory switch, the toggle record and any side effect (such as revoking active grants when change control is turned off) are not applied; side effects run only after the new state is durable. (#19)
+- Acceptance: a switch change takes effect only once the new configuration is saved. If the save fails, the in-memory switch, the toggle record and any side effect (such as revoking active grants when change control is turned off) are not applied; side effects run only after the new state is durable. A direct setter call (JCasC, script console) never throws: it applies the value and logs a failed write (D-42). (#19)
 
 **2. 권한 체계**
 `BatchControl/Request`, `BatchControl/Approve`, `BatchControl/RequestGrant`, `BatchControl/ViewHistory`, `BatchControl/Manage` 권한을 정의합니다.
