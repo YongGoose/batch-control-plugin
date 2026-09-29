@@ -26,9 +26,19 @@ public final class Notification {
     private final String reason;
     private final List<String> recipients;
     private final String url;
+    private final String action;
 
     public Notification(String kind, String requestId, String subject, String requester,
                         String reason, List<String> recipients, String url) {
+        this(kind, requestId, subject, requester, reason, recipients, url, null);
+    }
+
+    /**
+     * @param action for an activation request the requested action ({@code ACTIVATE} or
+     *               {@code HOLD}, security-13 S-13-08); {@code null} for other kinds
+     */
+    public Notification(String kind, String requestId, String subject, String requester,
+                        String reason, List<String> recipients, String url, String action) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.requestId = Objects.requireNonNull(requestId, "requestId");
         this.subject = subject;
@@ -37,6 +47,12 @@ public final class Notification {
         this.recipients = recipients == null
                 ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(recipients));
         this.url = url;
+        this.action = action;
+    }
+
+    /** {@code ACTIVATE} or {@code HOLD} for an activation request; {@code null} for other kinds. */
+    public String getAction() {
+        return action;
     }
 
     /**
@@ -77,6 +93,6 @@ public final class Notification {
 
     @Override
     public String toString() {
-        return kind + " request " + requestId + " (" + subject + ") -> " + recipients;
+        return kind + (action == null ? "" : " " + action) + " request " + requestId + " (" + subject + ") -> " + recipients;
     }
 }

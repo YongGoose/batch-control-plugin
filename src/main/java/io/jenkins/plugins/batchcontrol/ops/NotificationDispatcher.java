@@ -122,7 +122,7 @@ public final class NotificationDispatcher {
             List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
             dispatch(event, new Notification(Notification.KIND_ACTIVATION, request.getId(),
                     request.getJobFullName(), request.getRequester(), request.getReason(), recipients,
-                    url("batch-control/activations/" + request.getId() + "/")));
+                    url("batch-control/activations/" + request.getId() + "/"), request.getAction().name()));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of activation request "
                     + request.getId(), e);

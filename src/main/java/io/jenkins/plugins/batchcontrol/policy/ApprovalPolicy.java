@@ -67,6 +67,21 @@ public final class ApprovalPolicy {
         }
     }
 
+    /**
+     * As {@link #jobForPolicy(String)} for any item (an activation request's subject may be a
+     * computed folder, D-46). Same SYSTEM switch and the same precondition: the caller's
+     * permission checks are complete, and the item is only looked up, never acted on.
+     */
+    public static hudson.model.Item itemForPolicy(String fullName) {
+        if (fullName == null) {
+            return null;
+        }
+        // ACL.SYSTEM2 switch: the caller's permission checks are complete (see javadoc).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return Jenkins.get().getItemByFullName(fullName);
+        }
+    }
+
     /** Whether the current caller is an administrator (Overall/Administer). */
     public static boolean callerIsAdmin() {
         return Jenkins.get().hasPermission(Jenkins.ADMINISTER);

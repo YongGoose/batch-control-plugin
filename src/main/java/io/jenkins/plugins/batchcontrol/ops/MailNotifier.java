@@ -101,6 +101,9 @@ public class MailNotifier extends BatchControlNotifier {
         text.append("Request: ").append(n.getRequestId())
                 .append(" (").append(kindLabel(n)).append(')').append('\n');
         text.append(grant ? "Scope: " : "Job: ").append(nullToEmpty(n.getSubject())).append('\n');
+        if (n.getAction() != null) {
+            text.append("Action: ").append(oneLine(n.getAction())).append('\n');
+        }
         text.append("Requester: ").append(nullToEmpty(n.getRequester())).append('\n');
         // security-08 S-08: the link comes before the free-text reason, and every reason line is
         // quoted, so a multi-line reason cannot pose as another field (such as a forged link).
@@ -119,7 +122,8 @@ public class MailNotifier extends BatchControlNotifier {
             return "change request";
         }
         if (Notification.KIND_ACTIVATION.equals(n.getKind())) {
-            return "activation request";
+            // security-13 S-13-08: say which of the two opposite actions is asked for.
+            return n.getAction() == null ? "activation request" : n.getAction() + " activation request";
         }
         return "run request";
     }

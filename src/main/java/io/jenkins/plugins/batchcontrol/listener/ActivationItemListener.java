@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import hudson.Extension;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
@@ -15,7 +16,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * Keeps the activation store in step with the items (SPEC item 6a): a rename or move keeps the
  * job's activation under its new full name, a deletion removes it, and a newly created job never
  * inherits a state left under its name; a job created while run control is off is recorded as
- * activated (D-45). Runs regardless of the switches: this is bookkeeping, so that turning run
+ * activated (D-45). Computed folders carry the activation of their children (D-46) and are
+ * handled like jobs. Runs regardless of the switches: this is bookkeeping, so that turning run
  * control on later finds the right state for every job.
  *
  * <p>{@code onLocationChanged} fires for renames and moves, and recursively for the children of a
@@ -29,11 +31,11 @@ public class ActivationItemListener extends ItemListener {
 
     @Override
     public void onCreated(Item item) {
-        if (!(item instanceof Job)) {
+        if (!(item instanceof Job) && !(item instanceof ComputedFolder)) {
             return;
         }
         try {
-            ActivationService.get().onJobCreated((Job<?, ?>) item);
+            ActivationService.get().onItemCreated(item);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, e, () -> "Could not check the activation state of the new job '"
                     + item.getFullName() + "'");
@@ -42,7 +44,7 @@ public class ActivationItemListener extends ItemListener {
 
     @Override
     public void onLocationChanged(Item item, String oldFullName, String newFullName) {
-        if (!(item instanceof Job)) {
+        if (!(item instanceof Job) && !(item instanceof ComputedFolder)) {
             return;
         }
         try {

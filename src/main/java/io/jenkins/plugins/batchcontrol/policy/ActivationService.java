@@ -3,6 +3,8 @@ package io.jenkins.plugins.batchcontrol.policy;
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import hudson.model.Item;
 import hudson.model.Job;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
@@ -13,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.lang.ref.WeakReference;
@@ -23,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -64,9 +68,20 @@ public final class ActivationService {
     private final ReentrantLock lock = new ReentrantLock();
     private final Store store = Store.get();
 
-    /** Job full name to "activated", for the current Jenkins session only. */
-    private final Map<String, Boolean> activatedCache = new ConcurrentHashMap<>();
+    /** A cached state: whether it is activated and the directory marker it is bound to. */
+    private record Cached(boolean activated, String identity) {
+        static final Cached NOT_ACTIVATED = new Cached(false, null);
+    }
+
+    /** Item full name to its cached state, for the current Jenkins session only. */
+    private final Map<String, Cached> activatedCache = new ConcurrentHashMap<>();
     private final Object cacheMonitor = new Object();
+    /**
+     * security-13 S-13-04: bumped by every cache write, under {@link #cacheMonitor}. A reader fills
+     * the cache from the store only if no write happened since it started reading, so a HOLD or a
+     * deletion can never be overwritten by a value read before it.
+     */
+    private final AtomicLong generation = new AtomicLong();
     private volatile WeakReference<Jenkins> cacheFor = new WeakReference<>(null);
 
     private ActivationService() {
@@ -79,42 +94,97 @@ public final class ActivationService {
     // ---------------------------------------------------------------- read API
 
     /**
-     * Whether the job may run on timer and upstream causes as far as activation is concerned
-     * (SPEC item 6a). The queue gate ANDs this with {@code blockTimer}/{@code blockUpstream}.
+     * Whether an approved activation is stored for this very item (SPEC item 6a). The answer is
+     * truthful: a computed child, which nobody activates, reports not activated; whether it may run
+     * is {@link #mayRunUnattended(Job)}, which asks its computed-folder ancestor (D-46c).
      *
-     * <p>The answer is truthful: a job is activated only if an activated state is stored for it,
-     * so a computed child (D-32), which nobody activates, reports not activated. It is the queue
-     * gate that exempts computed children from the activation check, because they are not
-     * controlled. A state that cannot be read counts as not activated (fail closed).
+     * <p>Fails closed: a state that cannot be read, or one bound to another directory than the
+     * item's current one (a re-created item under an old name, S-13-09), counts as not activated.
      */
-    public boolean isActivated(Job<?, ?> job) {
-        Objects.requireNonNull(job, "job");
-        String fullName = job.getFullName();
-        Map<String, Boolean> cache = cache();
-        Boolean cached = cache.get(fullName);
-        if (cached != null) {
-            return cached;
+    public boolean isActivated(Item item) {
+        Objects.requireNonNull(item, "item");
+        String fullName = item.getFullName();
+        Cached cached = cache().get(fullName);
+        if (cached == null) {
+            long before = generation.get();
+            try {
+                ActivationState state = store.loadActivationState(fullName);
+                cached = state == null ? Cached.NOT_ACTIVATED
+                        : new Cached(state.isActivated(), state.getItemIdentity());
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, e, () -> "Could not read the activation state of '" + fullName
+                        + "'; treating it as not activated");
+                return false;
+            }
+            synchronized (cacheMonitor) {
+                if (generation.get() == before) {
+                    cache().putIfAbsent(fullName, cached);
+                }
+            }
         }
-        try {
-            ActivationState state = store.loadActivationState(fullName);
-            boolean activated = state != null && state.isActivated();
-            cache.put(fullName, activated);
-            return activated;
-        } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, e, () -> "Could not read the activation state of '" + fullName
-                    + "'; treating the job as not activated");
+        if (!cached.activated()) {
             return false;
         }
+        if (cached.identity() != null) {
+            String current = ItemIdentity.of(item.getRootDir());
+            if (current != null && !current.equals(cached.identity())) {
+                LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
+                        + "treating the item as not activated (S-13-09)");
+                return false;
+            }
+        }
+        return true;
     }
 
-    /** The stored activation state of a job, or {@code null} if the job was never activated or held. */
+    /** Job form of {@link #isActivated(Item)}. */
+    public boolean isActivated(Job<?, ?> job) {
+        return isActivated((Item) job);
+    }
+
+    /**
+     * The queue gate's activation input (SPEC item 6a, D-46): whether the job may start on a cause
+     * that is not a human submission. A computed child asks the item that carries its activation
+     * ({@link #activationSubject}); any other job asks itself.
+     */
+    public boolean mayRunUnattended(Job<?, ?> job) {
+        return isActivated(activationSubject(job));
+    }
+
+    /**
+     * The item whose activation governs {@code item} (D-46c): the item itself, or for a computed
+     * child its nearest computed-folder ancestor, resolved again while that folder is itself a
+     * computed child (a repository project of an organization folder is carried by the
+     * organization folder, which is the item that was created and can be requested on).
+     */
+    public static Item activationSubject(Item item) {
+        Item subject = item;
+        while (subject.getParent() instanceof ComputedFolder) {
+            subject = (Item) subject.getParent();
+        }
+        return subject;
+    }
+
+    /**
+     * Whether the item carries an activation of its own: a job or a computed folder that is not
+     * itself a computed child (D-46).
+     */
+    public static boolean isSubject(Item item) {
+        return (item instanceof Job || item instanceof ComputedFolder) && !isComputedChild(item);
+    }
+
+    /** The stored activation state of an item, or {@code null} if none is stored. */
     public ActivationState getState(String jobFullName) {
         return store.loadActivationState(jobFullName);
     }
 
-    /** The stored activation state of a job, or {@code null}. */
+    /** The stored activation state of an item (a job or a computed folder), or {@code null}. */
+    public ActivationState getState(Item item) {
+        return getState(item.getFullName());
+    }
+
+    /** Job form of {@link #getState(Item)}. */
     public ActivationState getState(Job<?, ?> job) {
-        return getState(job.getFullName());
+        return getState((Item) job);
     }
 
     /** Loads an activation request by id, or {@code null}. */
@@ -173,6 +243,12 @@ public final class ActivationService {
 
     // ---------------------------------------------------------------- creation (SPEC 6a)
 
+    /** Job form of {@link #create(Item, ActivationRequest.Action, String, List)}. */
+    public ActivationRequest create(Job<?, ?> job, ActivationRequest.Action action, String reason,
+                                    List<String> approvers) {
+        return create((Item) job, action, reason, approvers);
+    }
+
     /**
      * Creates a PENDING activation or hold request for the job. The requester is the current
      * authentication and needs {@code BatchControl/Request} plus {@code Item/Read} on the job
@@ -184,7 +260,7 @@ public final class ActivationService {
      * that is not, since neither could change anything. A computed child (D-32) is not controlled
      * and cannot be the subject of a request.
      */
-    public ActivationRequest create(Job<?, ?> job, ActivationRequest.Action action, String reason,
+    public ActivationRequest create(Item job, ActivationRequest.Action action, String reason,
                                     List<String> approvers) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(action, "action");
@@ -199,9 +275,11 @@ public final class ActivationService {
             throw new IllegalArgumentException("The reason must not exceed "
                     + MAX_REASON_LENGTH + " characters.");
         }
-        if (isComputedChild(job)) {
-            throw new IllegalArgumentException("Job '" + job.getFullName() + "' is generated by its folder "
-                    + "and is not run-controlled, so it needs no activation (D-32).");
+        if (!isSubject(job)) {
+            Item carrier = activationSubject(job);
+            throw new IllegalArgumentException("'" + job.getFullName() + "' does not carry an activation of "
+                    + "its own" + (carrier != job ? "; request it on '" + carrier.getFullName() + "' (D-46)" : "")
+                    + ".");
         }
         boolean activated = isActivated(job);
         if (action == ActivationRequest.Action.ACTIVATE && activated) {
@@ -211,7 +289,8 @@ public final class ActivationService {
             throw new IllegalArgumentException("Job '" + job.getFullName() + "' is not activated, so it "
                     + "cannot be put on hold.");
         }
-        List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
+        List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers,
+                job instanceof Job ? (Job<?, ?>) job : null);
 
         ActivationRequest request = ActivationRequest.create(job.getFullName(), action, reason,
                 requester, designated);
@@ -255,7 +334,8 @@ public final class ActivationService {
             }
             // The decision checks are complete; jobForPolicy looks the job up as SYSTEM so an
             // approver without Item/Read on the job can still decide (#26 rule for run requests).
-            if (ApprovalPolicy.jobForPolicy(request.getJobFullName()) == null) {
+            Item subject = ApprovalPolicy.itemForPolicy(request.getJobFullName());
+            if (subject == null || !isSubject(subject)) {
                 request.setStatus(RequestStatus.INVALIDATED);
                 request.setDecisionComment("Target job no longer exists");
                 store.saveActivationRequest(request);
@@ -269,7 +349,11 @@ public final class ActivationService {
             request.setDecisionComment(comment);
             request.setSelfApproved(selfApproval);
             store.saveActivationRequest(request);
-            applyApproved(request, decider, now, selfApproval);
+            applyApproved(request, decider, now, selfApproval, ItemIdentity.of(subject.getRootDir()));
+            // S-13-07: the other pending requests of the item were asked against the state before
+            // this decision; a stale ACTIVATE must not be able to undo this HOLD (or the reverse).
+            invalidatePending(request.getJobFullName(), "Superseded by the approval of activation request "
+                    + request.getId());
         } finally {
             lock.unlock();
         }
@@ -278,16 +362,17 @@ public final class ActivationService {
     }
 
     /** Writes the state and the change record of an approved request; under {@link #lock}. */
-    private void applyApproved(ActivationRequest request, String decider, Instant now, boolean selfApproval) {
+    private void applyApproved(ActivationRequest request, String decider, Instant now, boolean selfApproval,
+                               String identity) {
         String fullName = request.getJobFullName();
         boolean activate = request.getAction() == ActivationRequest.Action.ACTIVATE;
         ActivationState state;
         if (activate) {
-            state = ActivationState.activated(fullName, decider, now, request.getId());
+            state = ActivationState.activated(fullName, decider, now, request.getId(), identity);
         } else {
             ActivationState existing = store.loadActivationState(fullName);
             state = existing == null
-                    ? ActivationState.held(fullName, decider, now, request.getId())
+                    ? ActivationState.notActivated(fullName, identity).heldBy(decider, now, request.getId())
                     : existing.heldBy(decider, now, request.getId());
         }
         saveState(state);
@@ -502,35 +587,47 @@ public final class ActivationService {
     }
 
     /**
-     * A job was created. While run control is on it starts not activated (SPEC item 6a): any state
-     * stored under its name belongs to a job that no longer exists and is discarded. While run
-     * control is off it is recorded as activated at creation with
-     * {@code activatedBy = uncontrolled} (D-45), so turning run control on later never stops a
-     * schedule created in between; an {@link ChangeType#ACTIVATED} record is written when change
-     * recording is active (change control on). A computed child (D-32) needs no state.
+     * An item was created (SPEC item 6a, D-45, D-46). For an item that carries its own activation
+     * (a job or a computed folder that is not a computed child):
+     * <ul>
+     *   <li>run control on: an explicit not-activated state is stored (S-13-06), so a retried
+     *       seeding never activates it and nothing left under the name is inherited (S-13-04);</li>
+     *   <li>run control off: it is recorded as activated by {@link ActivationState#UNCONTROLLED}
+     *       with an {@link ChangeType#ACTIVATED} record (S-13-10), so turning run control on later
+     *       never stops a schedule created in between.</li>
+     * </ul>
+     * A computed child carries no state of its own; anything stored under its name is discarded.
+     * The state is bound to the item's directory marker (S-13-09).
      */
-    public void onJobCreated(Job<?, ?> job) {
-        Objects.requireNonNull(job, "job");
-        String fullName = job.getFullName();
-        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+    public void onItemCreated(Item item) {
+        Objects.requireNonNull(item, "item");
+        String fullName = item.getFullName();
         lock.lock();
         try {
-            if (cfg.isRunControlEnabled() || isComputedChild(job)) {
-                if (store.loadActivationState(fullName) != null) {
-                    LOGGER.info(() -> "Discarding a stale activation state stored for the new job '" + fullName + "'");
+            if (!isSubject(item)) {
+                if (item instanceof Job) {
                     deleteState(fullName);
                 }
                 return;
             }
-            saveState(ActivationState.activated(fullName, ActivationState.UNCONTROLLED, BatchClock.now(), null));
-            if (cfg.isChangeControlEnabled()) {
-                store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
-                        ActivationState.UNCONTROLLED, "Activated at creation: the job was created while run "
-                                + "control was off, so it counts as in service (D-45)"));
+            String identity = ItemIdentity.of(item.getRootDir());
+            if (BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
+                saveState(ActivationState.notActivated(fullName, identity));
+                return;
             }
+            saveState(ActivationState.activated(fullName, ActivationState.UNCONTROLLED, BatchClock.now(), null,
+                    identity));
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
+                    ActivationState.UNCONTROLLED, "Activated at creation: '" + fullName + "' was created while "
+                            + "run control was off, so it counts as in service (D-45)"));
         } finally {
             lock.unlock();
         }
+    }
+
+    /** Job form of {@link #onItemCreated(Item)}. */
+    public void onJobCreated(Job<?, ?> job) {
+        onItemCreated(job);
     }
 
     // ---------------------------------------------------------------- upgrade seeding (SPEC 6a)
@@ -552,6 +649,15 @@ public final class ActivationService {
      * @return the number of jobs seeded, or {@code -1} when the marker was already present
      */
     public int seedExistingJobs() {
+        // ACL.SYSTEM2 switch (S-13-11): seeding must see every job and computed folder whoever the
+        // calling thread runs as. No permission check precedes it because nothing is decided for a
+        // user here: it only records the items that exist at first install, once.
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return seedAsSystem();
+        }
+    }
+
+    private int seedAsSystem() {
         lock.lock();
         try {
             if (store.isActivationSchemaMarked()) {
@@ -559,15 +665,16 @@ public final class ActivationService {
             }
             Instant now = BatchClock.now();
             int seeded = 0;
-            for (Job<?, ?> job : Jenkins.get().allItems(Job.class)) {
-                if (isComputedChild(job)) {
+            for (Item item : Jenkins.get().allItems(Item.class)) {
+                if (!isSubject(item)) {
                     continue;
                 }
-                String fullName = job.getFullName();
+                String fullName = item.getFullName();
                 if (store.loadActivationState(fullName) != null) {
                     continue;
                 }
-                saveState(ActivationState.activated(fullName, ActivationState.UPGRADE, now, null));
+                saveState(ActivationState.activated(fullName, ActivationState.UPGRADE, now, null,
+                        ItemIdentity.of(item.getRootDir())));
                 store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                         ActivationState.UPGRADE, "Activated by upgrade: the job existed when activation "
                                 + "approval was installed, so its schedule keeps running (SPEC item 6a)"));
@@ -595,13 +702,40 @@ public final class ActivationService {
     }
 
     private void saveState(ActivationState state) {
+        // S-13-04/05: the cache is reset before the write, so a failed write can only leave the
+        // item not activated in memory, never activated.
+        setCached(state.getJobFullName(), Cached.NOT_ACTIVATED);
         store.saveActivationState(state);
-        cache().put(state.getJobFullName(), state.isActivated());
+        setCached(state.getJobFullName(), new Cached(state.isActivated(), state.getItemIdentity()));
     }
 
+    /**
+     * Removes the stored state (S-13-05): the cache says "not activated" first, and when the file
+     * cannot be deleted an explicit not-activated state is written over it, so a failure never
+     * leaves the item activated.
+     */
     private void deleteState(String fullName) {
-        store.deleteActivationState(fullName);
-        cache().remove(fullName);
+        setCached(fullName, Cached.NOT_ACTIVATED);
+        try {
+            store.deleteActivationState(fullName);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not delete the activation state of '" + fullName
+                    + "'; overwriting it with a not-activated state");
+            try {
+                store.saveActivationState(ActivationState.notActivated(fullName, null));
+            } catch (RuntimeException again) {
+                e.addSuppressed(again);
+                LOGGER.log(Level.SEVERE, e, () -> "The activation state of '" + fullName + "' could neither be "
+                        + "deleted nor overwritten; it stays not activated until the next restart reads the file");
+            }
+        }
+    }
+
+    private void setCached(String fullName, Cached value) {
+        synchronized (cacheMonitor) {
+            generation.incrementAndGet();
+            cache().put(fullName, value);
+        }
     }
 
     /** Ends the PENDING requests of one job as INVALIDATED; under {@link #lock}. */
@@ -618,7 +752,7 @@ public final class ActivationService {
     }
 
     /** The cache of the current Jenkins session; a new session (restart, next test) starts empty. */
-    private Map<String, Boolean> cache() {
+    private Map<String, Cached> cache() {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (cacheFor.get() != jenkins) {
             synchronized (cacheMonitor) {

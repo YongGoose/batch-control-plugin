@@ -18,11 +18,14 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class ActivationState {
 
-    /** {@link #getActivatedBy()} of a job that existed when the plugin version was first installed. */
-    public static final String UPGRADE = "upgrade";
+    /**
+     * {@link #getActivatedBy()} of a job that existed when the plugin version was first installed.
+     * Parenthesised so it can never be taken for a user id (security-13 S-13-10).
+     */
+    public static final String UPGRADE = "(upgrade)";
 
-    /** {@link #getActivatedBy()} of a job created while run control was off (D-45). */
-    public static final String UNCONTROLLED = "uncontrolled";
+    /** {@link #getActivatedBy()} of a job created while run control was off (D-45); see {@link #UPGRADE}. */
+    public static final String UNCONTROLLED = "(uncontrolled)";
 
     private final String jobFullName;
     private boolean activated;
@@ -31,6 +34,12 @@ public final class ActivationState {
     private String requestId;
     private String deactivatedBy;
     private Long deactivatedAtMillis;
+    /**
+     * security-13 S-13-09: the marker of the item's root directory ({@code security.ItemIdentity})
+     * when this state was written; {@code null} in states written without one. A state whose
+     * marker differs from the item's current directory belongs to another item of the same name.
+     */
+    private String itemIdentity;
 
     private ActivationState(String jobFullName) {
         this.jobFullName = Objects.requireNonNull(jobFullName, "jobFullName");
@@ -38,7 +47,14 @@ public final class ActivationState {
 
     /** An activated state, granted by {@code by} through {@code requestId} ({@code null} for the upgrade seeding). */
     public static ActivationState activated(String jobFullName, String by, Instant at, String requestId) {
+        return activated(jobFullName, by, at, requestId, null);
+    }
+
+    /** As {@link #activated(String, String, Instant, String)}, bound to the item's directory marker. */
+    public static ActivationState activated(String jobFullName, String by, Instant at, String requestId,
+                                            String itemIdentity) {
         ActivationState state = new ActivationState(jobFullName);
+        state.itemIdentity = itemIdentity;
         state.activated = true;
         state.activatedBy = by;
         state.activatedAtMillis = at == null ? null : at.toEpochMilli();
@@ -64,6 +80,17 @@ public final class ActivationState {
         return new ActivationState(jobFullName).heldBy(by, at, holdRequestId);
     }
 
+    /**
+     * An explicit "not activated" state (security-13 S-13-06): written when an item is created under
+     * run control, and when a state file could not be deleted (S-13-05), so a later seeding or a
+     * stale file can never make the item activated.
+     */
+    public static ActivationState notActivated(String jobFullName, String itemIdentity) {
+        ActivationState state = new ActivationState(jobFullName);
+        state.itemIdentity = itemIdentity;
+        return state;
+    }
+
     /** The same state under another full name (rename or move keeps the activation). */
     public ActivationState copyFor(String newFullName) {
         ActivationState copy = new ActivationState(newFullName);
@@ -73,6 +100,7 @@ public final class ActivationState {
         copy.requestId = requestId;
         copy.deactivatedBy = deactivatedBy;
         copy.deactivatedAtMillis = deactivatedAtMillis;
+        copy.itemIdentity = itemIdentity;
         return copy;
     }
 
@@ -105,6 +133,11 @@ public final class ActivationState {
 
     public Instant getDeactivatedAt() {
         return deactivatedAtMillis == null ? null : Instant.ofEpochMilli(deactivatedAtMillis);
+    }
+
+    /** The directory marker this state is bound to, or {@code null} (S-13-09). */
+    public String getItemIdentity() {
+        return itemIdentity;
     }
 
     /** Whether this state came from the one-time upgrade seeding. */
