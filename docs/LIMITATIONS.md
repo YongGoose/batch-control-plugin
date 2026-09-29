@@ -142,7 +142,11 @@ from scripts.
     that user in the same 10 minutes writes one summary record saying that
     further refusals are counted, not listed; later ones are only counted, and
     when the 10 minutes end one closing record gives their number and the
-    builds they named. No record is ever rewritten to update a count. A generated nightly job whose Job DSL or JCasC
+    builds they named. No record is ever rewritten to update a count. On a
+    clean shutdown, the closing record of every open summary is written
+    before Jenkins stops and says that the window ended early because Jenkins
+    was shutting down. On a crash the open count is lost: those counted
+    refusals remain only in the controller log, one INFO line each. A generated nightly job whose Job DSL or JCasC
     definition pins `blockTimer: false` (or an allow list) still does not run its
     first night, since that value does not survive a fresh creation (above); the
     difference now is that the first refusal already produced the notice, the
@@ -367,7 +371,11 @@ code does on purpose.
     authenticators about one representative job, so it cannot judge an
     authenticator that decides by job type, by folder or by the identity of
     the caller; with such an authenticator the warning may be absent although
-    some jobs still build as SYSTEM or as an account with Configure.
+    some jobs still build as SYSTEM or as an account with Configure. When
+    Authorize Project's "Run as Specific User" names an account that has no
+    Jenkins user record yet, builds run as anonymous, and the warning judges
+    anonymous's permissions. Once that account exists, the warning reflects
+    its permissions within five minutes.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
