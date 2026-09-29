@@ -180,8 +180,19 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 
 ### 1. Turn on what you need
 
-**Manage Jenkins → System → Batch Control**, which needs `BatchControl/Manage`
-(implied by `Overall/Administer`). Flipping either switch is itself recorded.
+The settings are in two places, with the same fields and the same checks:
+
+- **Batch Control → Configuration** (`/batch-control-configuration/`), the
+  entry in the Batch Control sidebar. It needs only `BatchControl/Manage`, so a
+  user who holds that permission but not `Overall/Administer` opens and saves the
+  configuration here. The same page is listed as **Batch Control** on
+  **Manage Jenkins** for users who can open Manage Jenkins.
+- The Batch Control section of **Manage Jenkins → System**. That is Jenkins'
+  own page and needs `Overall/Manage`, so a holder of `BatchControl/Manage`
+  alone gets 403 there.
+
+`BatchControl/Manage` is implied by `Overall/Administer`. Flipping either switch
+is itself recorded, whichever page it was saved from.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -197,7 +208,7 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 | Retention period (months) | 24 | Month files older than this are deleted, and the deletion is recorded |
 | Notify before expiry (minutes) | 10 | How long before an active grant window expires its holder is notified |
 | Send e-mail notifications | off | Shown only while the Mailer plugin is installed |
-| Batch Control strategy | shown only while installed | Not a saved field: **Revert to the plain strategy** appears here while a Batch Control authorization strategy variant is installed (step 2) |
+| Batch Control strategy | shown only while installed | Not a saved field: **Revert to the plain strategy** appears here while a Batch Control authorization strategy variant is installed (step 2); using it needs `Overall/Administer` |
 
 A request cannot be created unless its designated approver is on the Approvers
 list, and `BatchControl/Approve` is checked on them again at the moment they
@@ -263,7 +274,7 @@ variant is selected *and* change control is on.
 | `BatchControl/Approve` | Approve or reject run, activation, hold and window requests |
 | `BatchControl/RequestGrant` | Request temporary change permissions |
 | `BatchControl/ViewHistory` | View the history screens, dashboards and CSV exports |
-| `BatchControl/Manage` | Manage the global configuration and revoke windows |
+| `BatchControl/Manage` | Manage the global configuration on **Batch Control → Configuration**, and revoke windows |
 
 `Manage` is implied by `Overall/Administer` and implies the other four, so
 administrators pass every check. A requester typically holds `Overall/Read`,
@@ -408,7 +419,19 @@ that a non-administrator approved while being shown only the word `CONFIGURE`.
 `Run/Replay` is the one to know about: run control still refuses a replay of a job
 that requires approval, so it is not a way around the run gate there, but on a job
 without run control a window holder can replay a build with a modified Pipeline
-script.
+script. A `CONFIGURE` window also lets its holder rename the job to any free name
+in its folder, since Jenkins allows a rename to anyone who may configure the job;
+the rename is recorded with the window. Under a `CREATE` window with a name
+restriction, renames of what that window created are limited to matching names.
+
+**Builds that run as SYSTEM are outside the self-grant guard.** A build that
+runs as SYSTEM can write a permanent authorization entry on its job, so a
+`CONFIGURE` window holder could use one to keep access after the window ends.
+Authorize Project closes this only if it actually gives the job's builds a user
+identity: set a global default build authorization, or a strategy on the job.
+With its per-project setting and no default, a job without its own strategy
+still builds as SYSTEM. Batch Control names such jobs in its administrative
+monitor and warns the approver on the detail page of a `CONFIGURE` request.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
@@ -452,10 +475,17 @@ switches and an approver to activate it. Jobs that already exist when the
 plugin is installed, and jobs created while run control is off, are activated
 and keep their schedules.
 
+**Some re-run links stay visible on a job that requires approval.** Jenkins'
+own build link (relabelled **Direct Build (needs approval)**), Pipeline's
+**Replay** and naginator's **Retry** are drawn for everyone with the underlying
+permission, and Batch Control has no way to remove them. A click is refused,
+nothing is queued, and the job and build pages explain why and point to
+**Request Run**. The rebuild plugin's **Rebuild** can be hidden, and is.
+
 **Other plugins' build buttons fail with their own generic message.** When
-Batch Control refuses a run started from Rebuild, Rebuild Last, naginator's
-Retry or a button customised by another plugin, that plugin shows its own
-message ("Failed to schedule build", "Failed.") and says nothing about
+Batch Control refuses a run started from naginator's Retry, Rebuild or Rebuild
+Last where they are shown, or a button customised by another plugin, that
+plugin shows its own message ("Failed to schedule build", "Failed.") and says nothing about
 approval. The run was refused correctly and nothing was queued; the job's own
 page is where the reason is shown: on a job that requires approval a notice
 says that manual runs need an approved run request and links to **Request

@@ -113,8 +113,17 @@ mvn hpi:run         # http://localhost:8080/jenkins 에 로컬 Jenkins
 
 ### 1. 필요한 것을 켠다
 
-**Manage Jenkins → System → Batch Control**에서 하며, `BatchControl/Manage`가 필요합니다
-(`Overall/Administer`가 이를 함의합니다). 스위치를 뒤집는 것 자체도 기록에 남습니다.
+설정은 두 곳에 있으며, 항목과 검사는 같습니다.
+
+- **Batch Control → Configuration**(`/batch-control-configuration/`), Batch Control
+  사이드바의 항목입니다. `BatchControl/Manage`만 있으면 되므로, 그 권한은 있지만
+  `Overall/Administer`는 없는 사용자는 여기서 설정을 열고 저장합니다. Manage Jenkins를 열 수
+  있는 사용자에게는 같은 페이지가 **Manage Jenkins**에 **Batch Control**로도 나옵니다.
+- **Manage Jenkins → System**의 Batch Control 절. Jenkins 자체 페이지라 `Overall/Manage`가
+  필요하므로, `BatchControl/Manage`만 가진 사용자는 여기서 403을 받습니다.
+
+`BatchControl/Manage`는 `Overall/Administer`가 함의합니다. 스위치를 뒤집는 것 자체도 어느
+페이지에서 저장했든 기록에 남습니다.
 
 | 항목 | 기본값 | 의미 |
 |---|---|---|
@@ -175,7 +184,7 @@ History 와 Change Records 는 실제로 존재했던 창과 그 아래에서 �
 | `BatchControl/Approve` | 실행 요청과 권한 창 요청의 승인 또는 반려 |
 | `BatchControl/RequestGrant` | 임시 변경 권한 요청 |
 | `BatchControl/ViewHistory` | 이력 화면, 대시보드, CSV 내보내기 조회 |
-| `BatchControl/Manage` | 전역 설정 관리와 권한 창 회수 |
+| `BatchControl/Manage` | **Batch Control → Configuration**에서 전역 설정 관리, 권한 창 회수 |
 
 `Manage`는 `Overall/Administer`가 함의하고 나머지 넷을 함의하므로, 관리자는 모든 검사를
 통과합니다. 요청자에게는 보통 `Overall/Read`, `Item/Read`, `Item/Build`, `Request`,
@@ -264,7 +273,10 @@ Dashboard**는 인스턴스 전체의 모든 빌드를 원인(`USER`, `TIMER`, `
 `CONFIGURE`라는 단어만 본 비관리자가 승인한 창입니다. 특히 알아 둘 것은 `Run/Replay`입니다.
 승인이 필요한 잡의 Replay는 실행 통제가 그대로 거부하므로 그 잡에서 실행 게이트를 우회하는
 길이 되지는 않지만, 실행 통제가 걸려 있지 않은 잡에서는 창을 가진 사람이 Pipeline 스크립트를
-고쳐서 다시 실행할 수 있습니다.
+고쳐서 다시 실행할 수 있습니다. 또한 Jenkins는 잡을 구성할 수 있는 사람에게 이름 변경도
+허용하므로, `CONFIGURE` 창을 가진 사람은 잡의 이름을 그 폴더 안의 비어 있는 어떤 이름으로든
+바꿀 수 있고, 이름 변경은 그 창과 함께 기록됩니다. 이름 제한이 있는 `CREATE` 창에서는 그 창으로
+만든 것의 이름 변경이 제한에 맞는 이름으로만 허용됩니다.
 
 **적시(JIT) 변경 통제는 matrix 계열 권한 전략에서만 동작합니다.** **Role-Based Authorization
 Strategy**를 쓰고 있다면 실행 통제와 기록만 동작하고 권한 창은 동작하지 않습니다. Role

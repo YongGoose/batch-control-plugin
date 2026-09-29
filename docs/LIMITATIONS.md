@@ -288,6 +288,16 @@ code does on purpose.
     queue gate still refuses a replay of a job that requires approval, so it is not
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
+
+    A `CONFIGURE` window also lets its holder **rename** the job, to any free
+    name in its folder, because Jenkins allows a rename to anyone who may
+    configure the job. The rename is recorded as `RENAME` with the window it was
+    made under, and like any rename it ends the job's pending requests (item 30).
+    An approver who wants to rule out renames has no narrower window to grant.
+    A `CREATE` window with a name restriction is different: renaming a job its
+    holder created through that window, or a rename that relies on the window's
+    Create permission on the folder, is allowed only to a name that matches the
+    restriction, and any other name is refused and recorded as a violation.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
@@ -310,11 +320,20 @@ code does on purpose.
     not a grant holder, so nothing is reverted or recorded. This is not new
     exposure: any user who already holds standing `Item/Configure` on that job
     has the identical path today, with or without Batch Control, since Jenkins
-    itself does not distinguish a script's save from a human one. Installing
-    **Authorize Project** so the build runs as the configuring user brings
-    that save under the same guard as a manual one. While change control is
-    on, an administrative monitor warns when no build authenticator (a
-    `QueueItemAuthenticator`) is configured.
+    itself does not distinguish a script's save from a human one.
+
+    The remedy is **Authorize Project**, but installing it is not enough: it
+    must actually give the job's builds a user identity, so that the build's
+    save comes under the same guard as a manual one. Either set a global
+    default build authorization, or give the job its own authorization
+    strategy. With Authorize Project's per-project setting and no default, a
+    job that has no strategy of its own still builds as SYSTEM. While change
+    control is on, Batch Control checks every job that a pending or active
+    `CONFIGURE` window covers: the administrative monitor on Manage Jenkins
+    names the jobs whose builds still run as SYSTEM and says how to fix them,
+    and the detail page of a `CONFIGURE` request on such a job warns the
+    approver before the decision. The same monitor also warns when no build
+    authenticator (a `QueueItemAuthenticator`) is configured at all.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
@@ -376,8 +395,8 @@ code does on purpose.
     name starts not activated.
 40. **Other plugins' build buttons show their own generic failure message.**
     When Batch Control refuses a run started from another plugin's button
-    (Rebuild, Rebuild Last, naginator's Retry, a button relabelled or replaced by
-    customize-build-now), the refusal happens at queue entry, but that plugin
+    (Rebuild or Rebuild Last where they are shown, naginator's Retry, a button
+    relabelled or replaced by customize-build-now), the refusal happens at queue entry, but that plugin
     submits by script and shows only its own message, such as "Failed to
     schedule build. Reload the page and try again." or "Failed.", which says
     nothing about approval or activation. The run was correctly refused and
@@ -387,14 +406,19 @@ code does on purpose.
     `Request` holder; the activation notice says whether unattended runs are
     allowed, with a **Request activation** link (e2e-03 DEF-01).
 
-41. **Naginator's Retry link cannot be hidden on a job that requires approval.**
-    Naginator contributes its own sidebar/task link unconditionally, and Batch
-    Control has no extension point to suppress another plugin's link, so it
-    stays visible on a protected job. Clicking it is still refused at queue
-    entry like any other unattended trigger (item 40), and the job page's own
-    notice explains why: on a job that requires approval it names the switch
-    and points at **Request Run**, the same notice a manual Build Now attempt
-    shows (e2e-03 DEF-25, DEF-01).
+41. **Some re-run links cannot be hidden on a job that requires approval.**
+    Three entries are drawn for every user who holds the underlying
+    permission, and no extension point lets Batch Control remove them:
+    Jenkins' own build link (relabelled **Direct Build (needs approval)** on
+    such a job), Pipeline's **Replay**, and naginator's **Retry**. They
+    therefore stay visible, and a click is refused at queue entry with an
+    explanation: the job page and the build page carry the approval notice,
+    and the refusal page, or the other plugin's failure message next to that
+    notice (item 40), points to **Request Run**. Nothing is queued. The rebuild
+    plugin's **Rebuild** is different: that plugin lets Batch Control hide it,
+    so it does not appear on such a job. A user who may see the job but not
+    build it is not offered the rerun form, and a rerun submitted anyway is
+    refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
 
 ## Out of scope by design
 
