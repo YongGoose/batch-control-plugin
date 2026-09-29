@@ -246,8 +246,8 @@ public class ApprovalNoticeTest {
      */
     @Test
     public void t_ui_23_refusalPageHasNoBackLink() throws Exception {
-        FreeStyleProject plain = approvalRequired("back-plain");
-        FreeStyleProject param = parameterized("back-param");
+        FreeStyleProject plain = approvalRequired("nolink-plain");
+        FreeStyleProject param = parameterized("nolink-param");
 
         List<Page> answers = new ArrayList<>();
         answers.add(PluginInteractionFixtures.post(j, "u1", plain.getUrl() + "build?delay=0sec"));
