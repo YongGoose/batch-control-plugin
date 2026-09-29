@@ -1,0 +1,22 @@
+<?jelly escape-by-default='true'?>
+<!-- SPEC item 2 (the self-grant guard feedback): the browser page of SelfGrantRevertedFailure,
+     answered with HTTP 403 after a save whose authorization part was reverted. Only the item's
+     full name (escaped by default) and constant text are rendered; no script and no Back link,
+     the breadcrumb bar leads back. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Authorization entries not kept" type="one-column">
+    <l:main-panel>
+      <l:app-bar title="Authorization entries not kept"/>
+      <div class="jenkins-alert jenkins-alert-warning" role="alert">
+        <p>
+          <strong>The authorization entries of ${it.itemFullName} were not kept.</strong>
+          Your Configure permission on it comes only from a temporary grant, which cannot add
+          permanent permission entries.
+        </p>
+        <p style="margin-bottom: 0;">
+          Your other changes were saved. Ask an administrator for a permanent entry.
+        </p>
+      </div>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>
