@@ -2,7 +2,8 @@
 <!-- SPEC item 6a: the activation request form. The action is the one that can change anything
      (ACTIVATE when the job is not activated, HOLD when it is), posted as the "action" query
      parameter with the reason and the repeated "approvers" field to JobActivationForm#doSubmit. -->
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Activation - ${it.item.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.item}"/>
     <!-- e2e-03 DEF-06: see JobRequestAction/activation.jelly. -->
@@ -105,9 +106,14 @@
           <!-- The action travels in the query string, not as a field named "action": a form
                control of that name would shadow the form element's own "action" property in
                the browser (DOM clobbering) and break the standard form submission script. -->
+          <!-- e2e-03 DEF-09: a refused submission comes back here with the messages next to the
+               fields and the input kept (ui.FormErrors). -->
+          <j:set var="errors" value="${it.formErrors}"/>
+          <bc:formError errors="${errors}"/>
           <f:form method="post" action="${rootURL}/${it.item.url}batch-control/activation/submit?action=${it.nextAction}" name="batch-control-activation">
             <f:entry title="Reason" description="Why this change is needed (required).">
-              <f:textarea name="reason" value=""/>
+              <f:textarea name="reason" value="${errors.value('reason')}"/>
+              <bc:fieldError errors="${errors}" field="reason"/>
             </f:entry>
             <f:entry title="Approvers" description="Any one of the checked approvers may decide."
                      help="/plugin/batch-control/help/approvers.html">
@@ -115,9 +121,10 @@
               <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
                 <div class="jenkins-!-margin-bottom-1">
                   <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
-                              title="${a}" checked="${singleApprover}"/>
+                              title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
                 </div>
               </j:forEach>
+              <bc:fieldError errors="${errors}" field="approvers"/>
             </f:entry>
             <f:bottomButtonBar>
               <f:submit value="Submit Request"/>

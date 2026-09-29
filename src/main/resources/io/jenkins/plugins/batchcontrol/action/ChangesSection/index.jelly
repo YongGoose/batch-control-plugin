@@ -18,7 +18,8 @@
         </j:if>
       </form>
 
-      <j:set var="grantLinks" value="${it.links.grants}"/>
+      <j:set var="links" value="${it.links}"/>
+      <j:set var="grantLinks" value="${links.grants}"/>
       <!-- security-11 N-02: lines over 1 MiB are skipped on every read path, CSV included. -->
       <j:if test="${it.oversized > 0}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
@@ -61,7 +62,7 @@
                   <td>
                     <j:choose>
                       <!-- Linked only for a user who may open the Grants screen (SPEC item 2). -->
-                      <j:when test="${r.grantId != null and grantLinks}">
+                      <j:when test="${r.grantId != null and grantLinks and links.grant(r.grantId)}">
                         <a href="${rootURL}/batch-control/grants/${r.grantId}/">${r.grantId}</a>
                       </j:when>
                       <j:when test="${r.grantId != null}">${r.grantId}</j:when>

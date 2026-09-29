@@ -22,6 +22,12 @@
           <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning-outline plugin-ionicons-api" title="Incidents"/>
           <l:task href="${rootURL}/batch-control/history/" icon="symbol-search-outline plugin-ionicons-api" title="History"/>
         </j:if>
+        <!-- e2e-03 DEF-10: the configuration page for BatchControl/Manage holders (shown only to
+             them, and only while the page exists). -->
+        <j:set var="configurationLink" value="${it.configurationLink}"/>
+        <j:if test="${configurationLink != null}">
+          <l:task href="${rootURL}/${configurationLink.urlName}/" icon="symbol-settings-outline plugin-ionicons-api" title="Configuration"/>
+        </j:if>
       </l:tasks>
     </l:side-panel>
     <l:main-panel>

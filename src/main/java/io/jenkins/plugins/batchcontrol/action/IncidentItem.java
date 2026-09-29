@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.Job;
@@ -16,8 +17,10 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -118,9 +121,25 @@ public class IncidentItem implements ModelObject {
         return true;
     }
 
-    /** View gating for the rerun form; the endpoint re-checks the Request permission. */
+    /**
+     * View gating for the rerun form (e2e-03 DEF-12): {@code BatchControl/Request} and
+     * {@code Item/Build} on the incident's job, the permissions a run request needs (D-38).
+     * The endpoint and the service re-check.
+     */
     public boolean isCanRerun() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        Job<?, ?> job = findJob();
+        return job != null && job.hasPermission(Item.BUILD)
+                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+    }
+
+    /** Whether the incident's job still exists and is visible, so a rerun is possible at all. */
+    public boolean isJobAvailable() {
+        return findJob() != null;
+    }
+
+    /** The refusal of form {@code form} on this request, or an empty one (DEF-09, Jelly). */
+    public FormErrors formErrors(String form) {
+        return FormErrors.current(form);
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)
@@ -141,28 +160,35 @@ public class IncidentItem implements ModelObject {
     /** POST {@code acknowledge?comment=...} — OPEN → ACKNOWLEDGED. */
     @RequirePOST
     public void doAcknowledge(StaplerRequest2 req, StaplerResponse2 rsp,
-            @QueryParameter String comment) throws IOException {
+            @QueryParameter String comment)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
-        call(() -> IncidentService.get().acknowledge(incident.getId(), comment));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("acknowledge"),
+                () -> IncidentService.get().acknowledge(incident.getId(), comment));
     }
 
     /** POST {@code resolve?comment=...} — ACKNOWLEDGED → RESOLVED. */
     @RequirePOST
     public void doResolve(StaplerRequest2 req, StaplerResponse2 rsp,
-            @QueryParameter String comment) throws IOException {
+            @QueryParameter String comment)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
-        call(() -> IncidentService.get().resolve(incident.getId(), comment));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("resolve"),
+                () -> IncidentService.get().resolve(incident.getId(), comment));
     }
 
     /** POST {@code comment?comment=...} — adds a comment without a status change. */
     @RequirePOST
     public void doComment(StaplerRequest2 req, StaplerResponse2 rsp,
-            @QueryParameter String comment) throws IOException {
+            @QueryParameter String comment)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
-        call(() -> IncidentService.get().addComment(incident.getId(), comment));
-        rsp.sendRedirect2(".");
+        FormErrors errors = new FormErrors("comment");
+        if (comment == null || comment.trim().isEmpty()) {
+            refresh().renderRefusal(req, rsp, errors.field("comment", "Enter a comment."));
+            return;
+        }
+        call(req, rsp, errors, () -> IncidentService.get().addComment(incident.getId(), comment));
     }
 
     /**
@@ -172,7 +198,8 @@ public class IncidentItem implements ModelObject {
      * request's detail page.
      */
     @RequirePOST
-    public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+    public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
         // S-06: mirror JobRequestAction.doSubmit — no run requests for jobs the caller cannot
         // read. The existence lookup runs as SYSTEM2 because the caller-scoped lookup returns
@@ -189,30 +216,60 @@ public class IncidentItem implements ModelObject {
         }
         if (job != null) {
             job.checkPermission(Item.READ);
+            // D-38: a run request needs Job/Build; the service checks it too. Checking it before
+            // the input keeps the answer a 403 whatever else is wrong with the submission.
+            job.checkPermission(Item.BUILD);
         }
-        List<String> approvers = ApproverInput.read(req, null);
-        RunRequest created;
+        FormErrors errors = new FormErrors("rerun");
+        List<String> approvers = List.of();
         try {
-            created = IncidentService.get().rerun(incident.getId(), approvers);
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The rerun request was rejected"
-                    : e.getMessage());
+            approvers = ApproverInput.read(req, null);
+        } catch (Failure e) {
+            errors.field("approvers", e.getMessage());
         }
-        rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/" + created.getId() + "/");
+        if (approvers.isEmpty()) {
+            errors.field("approvers", "Check at least one approver.");
+        }
+        if (errors.isEmpty()) {
+            try {
+                RunRequest created = IncidentService.get().rerun(incident.getId(), approvers);
+                rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
+                        + Util.rawEncode(created.getId()) + "/");
+                return;
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                errors.fromService(e.getMessage(), "approver", "approvers");
+            }
+        }
+        refresh().renderRefusal(req, rsp, errors);
     }
 
     // ---------------------------------------------------------------- helpers
 
     /**
-     * Runs a service call and converts its validation errors into {@link Failure} so the user
-     * sees the message instead of a stack trace. No state logic here.
+     * Runs a service call and redirects back to this page; a refusal is shown on this page next
+     * to the form it concerns, with the input kept (e2e-03 DEF-09), instead of a bare error page.
+     * No state logic here.
      */
-    private static void call(Runnable serviceCall) {
+    private void call(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors,
+                      Runnable serviceCall) throws IOException, ServletException {
         try {
             serviceCall.run();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The operation was rejected" : e.getMessage());
+            refresh().renderRefusal(req, rsp, errors.fromService(e.getMessage(), "comment", "comment"));
+            return;
         }
+        rsp.sendRedirect2(".");
+    }
+
+    /** This incident as stored now, so a refusal is shown with the current state. */
+    private IncidentItem refresh() {
+        Incident current = IncidentService.get().load(incident.getId());
+        return current == null ? this : new IncidentItem(current);
+    }
+
+    private void renderRefusal(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors)
+            throws IOException, ServletException {
+        errors.render(req, rsp, this);
     }
 
     /**

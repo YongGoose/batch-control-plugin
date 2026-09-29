@@ -1,0 +1,14 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-03 DEF-09: the refusal message of one field, rendered right below it. Plain escaped text
+     only; nothing is rendered when the field was not refused. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <st:documentation>
+    The message a refused submission left for one field (ui.FormErrors).
+    <st:attribute name="errors" use="required">The FormErrors of the form.</st:attribute>
+    <st:attribute name="field" use="required">The field name.</st:attribute>
+  </st:documentation>
+  <j:set var="bcFieldErrorText" value="${attrs.errors.get(attrs.field)}"/>
+  <j:if test="${bcFieldErrorText != null}">
+    <div class="error" role="alert" data-batch-control-field-error="${attrs.field}">${bcFieldErrorText}</div>
+  </j:if>
+</j:jelly>

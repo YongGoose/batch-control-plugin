@@ -15,7 +15,8 @@
         <button type="submit" class="jenkins-button">Show</button>
       </form>
 
-      <j:set var="requestLinks" value="${it.links.requests}"/>
+      <j:set var="links" value="${it.links}"/>
+      <j:set var="requestLinks" value="${links.requests}"/>
       <!-- security-11 N-02: lines over 1 MiB are skipped on every read path, CSV included. -->
       <j:if test="${it.oversized > 0}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
@@ -72,9 +73,9 @@
                   <td>${it.duration(r.durationMs)}</td>
                   <td>${r.abortedBy}</td>
                   <td>
-                    <!-- Linked only for a user who may open the Run Requests screen (SPEC item 2). -->
+                    <!-- Linked only for a user who may open this request (SPEC item 2, DEF-11). -->
                     <j:choose>
-                      <j:when test="${r.runRequestId != null and requestLinks}">
+                      <j:when test="${r.runRequestId != null and requestLinks and links.request(r.runRequestId)}">
                         <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
                       </j:when>
                       <j:otherwise>${r.runRequestId}</j:otherwise>

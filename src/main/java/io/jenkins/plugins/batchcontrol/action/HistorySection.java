@@ -593,6 +593,22 @@ public class HistorySection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- Jelly helpers
 
+    /** Row labels of the on-page monthly summary (e2e-03 DEF-22); the JSON keeps the keys. */
+    private static final Map<String, String> SUMMARY_LABELS = Map.of(
+            "runs", "Runs",
+            "success", "Successful runs",
+            "failure", "Failed runs",
+            "unstable", "Unstable runs",
+            "incidentsOpen", "Incidents still open",
+            "incidentsResolved", "Incidents resolved",
+            "requestsApproved", "Run requests approved",
+            "requestsRejected", "Run requests rejected");
+
+    /** The label of a monthly summary row; an unknown key is shown as it is. */
+    public String summaryLabel(String key) {
+        return SUMMARY_LABELS.getOrDefault(key, key);
+    }
+
     /** An approver set for display ({@code a1, a2}). */
     public String join(@CheckForNull List<String> approvers) {
         return Approvers.display(approvers);

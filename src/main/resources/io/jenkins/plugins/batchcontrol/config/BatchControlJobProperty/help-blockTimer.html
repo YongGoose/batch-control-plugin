@@ -1,42 +1,37 @@
 <div>
-  If checked, cron (timer) triggered builds of this job are blocked; by default they pass through.
+  If checked, cron (timer) triggered builds of this job are refused while <b>Enable run control</b>
+  is on; unchecked, they pass this switch. It applies whether or not <b>Require approval to run</b>
+  is checked.
   <p>
-    <b>A job created while run control is on does not start at that default.</b> Every newly
-    created job starts locked — <b>Require approval to run</b>, <b>Block cron (timer) triggers</b>
-    and <b>Block upstream triggers</b> all on and the allowed-upstream list empty — whoever created
-    it and however. Creating a job therefore does not put it into service. Bringing it into service
-    means turning a switch off here, and that change is recorded and, with change control on, needs
-    a permission window. Jobs that already existed when run control was turned on are untouched.
+    <b>This switch is not what puts a job into service.</b> A cron run starts only if the job is
+    <b>activated</b> (an approved activation request, made from the job page) <b>and</b> this switch
+    is off. Unchecking it on a job that is not activated changes nothing: the run is still refused,
+    for the activation. A job created while run control is on starts not activated and with this
+    switch checked, so a new scheduled job needs both: request its activation, then uncheck this
+    switch. Jobs that already existed when run control was turned on were recorded as activated.
   </p>
   <p>
-    A value supplied when the job was created does not survive the lock: a
+    A value supplied when the job was created does not survive the creation lock: a
     <code>blockTimer=false</code> in a <code>config.xml</code> POST, a CLI <code>create-job</code>,
-    a Job DSL seed or the job this one was copied from is overwritten. Only the job-level approver
-    list is carried over, because it can only narrow who may approve. So a definition that pins
-    <code>blockTimer: false</code> is not idempotent against a fresh creation and appears simply to
-    have been ignored; a later run of the same seed is an update rather than a creation and does
-    restore it.
+    a Job DSL seed or the job this one was copied from is overwritten. A later run of the same seed
+    is an update rather than a creation and does apply it.
   </p>
   <p>
-    <b>If this job's cron did not fire, read this first.</b> A blocked timer run is refused without
-    a message at the time, because an unattended trigger has nobody to show one to. It is not
-    invisible afterwards:
+    <b>If this job's cron did not fire, read this first.</b> A refused timer run has nobody to show a
+    message to, but it leaves traces:
   </p>
   <ul>
-    <li>the job page — while run control is on and this switch is checked, the job's main page
-      shows a notice naming <b>Block cron (timer) triggers</b> and saying it is cleared here, in
-      the job configuration;</li>
+    <li>the job page — it says whether the job is activated, and, while this switch is checked,
+      shows a notice naming <b>Block cron (timer) triggers</b>;</li>
     <li>the change history — a refused timer run writes a <code>TRIGGER_BLOCKED</code> change
-      record (job, cause kind and the switch that blocked it), at most one per job and cause kind
-      per hour, listed under Change Records and History and exported in <code>changes.csv</code>;
-      a cron that never fired writes nothing;</li>
-    <li>the controller log — the same refusal logs a "Blocked timer-triggered run of job" line at
-      most once an hour per job (repeats are logged at FINE);</li>
-    <li>the job's own history — a <code>CREATE</code> record and no later <code>CONFIGURE</code>
-      record clearing the switches is positive evidence that nothing has unlocked it since.</li>
+      record naming the job, the cause kind and what blocked it (the activation or this switch), at
+      most one per job and cause kind per hour, listed under Change Records and History and in
+      <code>changes.csv</code>; a cron that never fired writes nothing;</li>
+    <li>the controller log — a "Blocked timer-triggered run of job" line, at most once an hour per
+      job (repeats are logged at FINE).</li>
   </ul>
   <p>
-    Unchecking this switch is itself a recorded configuration change and, with change control on,
-    needs a permission window.
+    Unchecking this switch is a recorded configuration change and, with change control on, needs a
+    permission window.
   </p>
 </div>

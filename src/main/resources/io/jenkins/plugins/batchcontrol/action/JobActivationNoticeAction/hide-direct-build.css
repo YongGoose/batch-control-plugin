@@ -1,0 +1,27 @@
+/*
+ * e2e-03 DEF-25 (SPEC item 6: on an approval-required job "Build Now" is replaced by
+ * "Request Run"). Loaded only on the page of an approval-required job, or of one of its builds,
+ * while run control is on (JobActivationNoticeAction#isHideDirectBuild,
+ * RunBuildEntriesAction#isHidden). There every click on these entries is refused by the queue
+ * gate for every user, so they are hidden rather than offered:
+ *   - core's build link ("Direct Build (needs approval)"), href or data-url ".../build?delay=0sec";
+ *   - the rebuild plugin's "Rebuild Last" (job, ".../lastCompletedBuild/rebuild/...") and
+ *     "Rebuild" (build, ".../<n>/rebuild" or ".../rebuild/parameterized");
+ *   - the naginator plugin's "Retry" (build), ".../retry".
+ * Item URLs always end in "/", so a job that happens to be named "rebuild" or "retry" is not
+ * matched. The plugin's own "Request Run" entry and the job-page notice stay. The URLs themselves remain
+ * refused by the gate; this only stops offering them.
+ */
+.task:has(a[href$="/build?delay=0sec"]),
+.task:has(a[data-url$="/build?delay=0sec"]),
+.task:has(a[href*="/lastCompletedBuild/rebuild"]),
+.task:has(a[href$="/rebuild"]),
+.task:has(a[href$="/rebuild/parameterized"]),
+.task:has(a[href$="/retry"]),
+a.jenkins-dropdown__item[href$="/build?delay=0sec"],
+a.jenkins-dropdown__item[href*="/lastCompletedBuild/rebuild"],
+a.jenkins-dropdown__item[href$="/rebuild"],
+a.jenkins-dropdown__item[href$="/rebuild/parameterized"],
+a.jenkins-dropdown__item[href$="/retry"] {
+  display: none !important;
+}

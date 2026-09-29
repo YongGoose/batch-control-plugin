@@ -1,0 +1,29 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-03 DEF-19 (SPEC item 8, D-40): included by the folder page for every action. Lists the
+     viewer's own active Create windows on this folder with the new job names each allows, so a
+     refused New Item or Rename is not a mystery. Nothing is shown without such a window. Only the
+     stored name or pattern and constant text are rendered (escaped); no script. -->
+<j:jelly xmlns:j="jelly:core">
+  <j:set var="windows" value="${it.windows}"/>
+  <j:if test="${!empty(windows)}">
+    <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
+      <strong>Batch Control: you hold a Create permission window here.</strong>
+      <ul style="margin: 0.5rem 0;">
+        <j:forEach var="g" items="${windows}">
+          <j:set var="allowed" value="${it.restriction(g)}"/>
+          <li>
+            <j:choose>
+              <j:when test="${allowed == null}">Any new job name is allowed</j:when>
+              <j:when test="${it.isPattern(g)}">New job names must match <code>${allowed}</code> (the whole name)</j:when>
+              <j:otherwise>The new job must be named <code>${allowed}</code></j:otherwise>
+            </j:choose>
+            until ${it.format(g.expiresAt)} (${it.remaining(g.expiresAt)} left).
+          </li>
+        </j:forEach>
+      </ul>
+      <p style="margin: 0;">
+        New Item and Rename refuse any other name while the window lasts.
+      </p>
+    </div>
+  </j:if>
+</j:jelly>

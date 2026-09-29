@@ -107,7 +107,8 @@ public final class Visibility {
     /**
      * The one run-link rule of every Batch Control screen (D-44, #22): a run links to its build
      * page only when the viewer holds {@code Item/Read} on the job; otherwise the view renders
-     * the run as plain text. The history screens follow it too: they stay outside the P-09
+     * the run as plain text, and a build that has been deleted since is plain text too (e2e-03
+     * DEF-23). The history screens follow it too: they stay outside the P-09
      * record-visibility boundary (S-12, every {@code ViewHistory} holder sees every row), but a
      * link to a job the viewer cannot read would only advertise the job's URL and answer 404.
      *
@@ -115,7 +116,16 @@ public final class Visibility {
      */
     @CheckForNull
     public static String runUrl(@CheckForNull String jobFullName, int number) {
-        if (number <= 0 || !canReadJob(jobFullName)) {
+        if (number <= 0) {
+            return null;
+        }
+        Job<?, ?> job = findVisibleJob(jobFullName);
+        if (job == null || !job.hasPermission(Item.READ)) {
+            return null;
+        }
+        // e2e-03 DEF-23: a build deleted since it was recorded (log rotation, a manual delete)
+        // answers 404, so it is plain text too. The history record itself stays.
+        if (job.getBuildByNumber(number) == null) {
             return null;
         }
         return RunLinks.runUrl(jobFullName, number);
@@ -136,7 +146,15 @@ public final class Visibility {
         if (url == null) {
             return null;
         }
-        return canReadJob(runId.substring(0, runId.lastIndexOf('#'))) ? url : null;
+        int hash = runId.lastIndexOf('#');
+        int number;
+        try {
+            number = Integer.parseInt(runId.substring(hash + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        // Same rule as runUrl(String, int): readable job and a build that still exists.
+        return runUrl(runId.substring(0, hash), number) != null ? url : null;
     }
 
     /**

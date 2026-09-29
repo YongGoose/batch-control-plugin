@@ -61,13 +61,17 @@ public class JobTriggerLockAction implements Action {
 
     /**
      * The switches that refuse unattended runs of this job right now, for a viewer holding
-     * {@code Item/Read}; empty when run control is off, both switches are off, or the viewer may
-     * not read the job (the notice is then not rendered).
+     * {@code Item/Read}, whether or not the job requires approval for manual runs; empty when run
+     * control is off, both switches are off, or the viewer may not read the job (the notice is
+     * then not rendered).
      */
     public List<String> getBlockingSwitches() {
         if (!job.hasPermission(Item.READ)) {
             return List.of();
         }
+        // e2e-03 DEF-15 (SPEC item 6 #21, D-46a): the switches are enforced whatever
+        // approvalRequired says, and BatchControlJobProperty#getBlockingSwitches() now answers
+        // that way too, so the notice follows enforcement.
         BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
         return property == null ? List.of() : property.getBlockingSwitches();
     }

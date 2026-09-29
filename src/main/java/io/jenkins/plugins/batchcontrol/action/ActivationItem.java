@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.Job;
@@ -15,8 +16,10 @@ import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -138,47 +141,88 @@ public class ActivationItem implements ModelObject {
     /** POST {@code approve} with an optional {@code comment}. */
     @RequirePOST
     public void doApprove(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String comment)
-            throws IOException {
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
-        call(() -> ActivationService.get().approve(request.getId(), comment));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("approve"),
+                () -> ActivationService.get().approve(request.getId(), comment), "comment", "comment");
     }
 
     /** POST {@code reject} with a {@code comment} (the service refuses an empty one). */
     @RequirePOST
     public void doReject(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String comment)
-            throws IOException {
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
-        call(() -> ActivationService.get().reject(request.getId(), comment));
-        rsp.sendRedirect2(".");
+        FormErrors errors = new FormErrors("reject");
+        if (Util.fixEmptyAndTrim(comment) == null) {
+            // A rejection needs a comment; the service refuses it too.
+            refresh().renderRefusal(req, rsp, errors.field("comment",
+                    "Enter a rejection comment: the requester sees it as the reason."));
+            return;
+        }
+        call(req, rsp, errors, () -> ActivationService.get().reject(request.getId(), comment),
+                "comment", "comment");
     }
 
     /** POST {@code cancel}; Request or Manage, and the service enforces requester-or-Manage. */
     @RequirePOST
-    public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+    public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         Jenkins.get().checkAnyPermission(BatchControlPermissions.REQUEST, BatchControlPermissions.MANAGE);
-        call(() -> ActivationService.get().cancel(request.getId()));
-        rsp.sendRedirect2(".");
+        call(req, rsp, new FormErrors("cancel"), () -> ActivationService.get().cancel(request.getId()));
     }
 
     /** POST {@code changeApprover} with the repeated {@code approvers} field (D-26, D-37). */
     @RequirePOST
-    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
+    public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp)
+            throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        List<String> approvers = ApproverInput.read(req, null);
-        call(() -> ActivationService.get().changeApprovers(request.getId(), approvers));
-        rsp.sendRedirect2(".");
+        FormErrors errors = new FormErrors("changeApprover");
+        List<String> approvers;
+        try {
+            approvers = ApproverInput.read(req, null);
+        } catch (Failure e) {
+            refresh().renderRefusal(req, rsp, errors.field("approvers", e.getMessage()));
+            return;
+        }
+        if (approvers.isEmpty()) {
+            refresh().renderRefusal(req, rsp, errors.field("approvers", "Check at least one approver."));
+            return;
+        }
+        call(req, rsp, errors, () -> ActivationService.get().changeApprovers(request.getId(), approvers),
+                "approver", "approvers");
     }
 
     // ---------------------------------------------------------------- helpers
 
-    /** Turns the service's validation errors into a {@link Failure} (HTTP 400) with the message. */
-    private static void call(Runnable serviceCall) {
+    /** The refusal of form {@code form} on this request, or an empty one (DEF-09, Jelly). */
+    public FormErrors formErrors(String form) {
+        return FormErrors.current(form);
+    }
+
+    /**
+     * Runs a service call and redirects back to this page; a refusal is shown on this page next
+     * to the form it concerns, with the input kept (e2e-03 DEF-09), instead of a bare error page.
+     * No state logic here.
+     */
+    private void call(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors,
+                      Runnable serviceCall, String... keywords) throws IOException, ServletException {
         try {
             serviceCall.run();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            throw new Failure(e.getMessage() == null ? "The operation was rejected" : e.getMessage());
+            refresh().renderRefusal(req, rsp, errors.fromService(e.getMessage(), keywords));
+            return;
         }
+        rsp.sendRedirect2(".");
+    }
+
+    /** This request as stored now, so a refusal is shown with the current state. */
+    private ActivationItem refresh() {
+        ActivationRequest current = ActivationService.get().load(request.getId());
+        return current == null ? this : new ActivationItem(current);
+    }
+
+    private void renderRefusal(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors)
+            throws IOException, ServletException {
+        errors.render(req, rsp, this);
     }
 
     /**

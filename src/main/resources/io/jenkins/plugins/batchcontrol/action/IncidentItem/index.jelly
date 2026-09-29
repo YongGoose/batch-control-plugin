@@ -1,8 +1,25 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<!-- e2e-03 DEF-09: a refused acknowledge, resolve, comment or rerun comes back to this page
+     (ui.FormErrors) with the message next to the field or above the form and the input kept;
+     form targets are absolute because the refusal is rendered at the POST URL. DEF-12: the rerun
+     form is offered only to a user who can submit it (Request + Job/Build on the job). -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Incident ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Incident ${it.id}"/>
+      <j:set var="base" value="${rootURL}/batch-control/incidents/${it.id}/"/>
+      <!-- DEF-09: a refusal whose form is no longer shown (the incident moved on meanwhile) is
+           reported here, above the current state. -->
+      <j:if test="${!it.canAcknowledge}">
+        <bc:formError errors="${it.formErrors('acknowledge')}"/>
+      </j:if>
+      <j:if test="${!it.canResolve}">
+        <bc:formError errors="${it.formErrors('resolve')}"/>
+      </j:if>
+      <j:if test="${!it.canRerun or empty(it.approverOptions)}">
+        <bc:formError errors="${it.formErrors('rerun')}"/>
+      </j:if>
 
       <table class="jenkins-table jenkins-table--small">
         <tbody>
@@ -39,10 +56,11 @@
               <th style="text-align: left;">Rerun requests</th>
               <td>
                 <!-- Linked only for a user who may open the Run Requests screen (SPEC item 2). -->
-                <j:set var="requestLinks" value="${it.links.requests}"/>
+                <j:set var="links" value="${it.links}"/>
+                <j:set var="requestLinks" value="${links.requests}"/>
                 <j:forEach var="rid" items="${it.incident.rerunRequestIds}">
                   <j:choose>
-                    <j:when test="${requestLinks}">
+                    <j:when test="${requestLinks and links.request(rid)}">
                       <a href="${rootURL}/batch-control/requests/${rid}/" style="margin-right: 0.5rem;">${rid}</a>
                     </j:when>
                     <j:otherwise>
@@ -110,9 +128,12 @@
 
       <j:if test="${it.canAcknowledge}">
         <h2>Acknowledge</h2>
-        <f:form method="post" action="acknowledge" name="acknowledge">
+        <j:set var="ackErrors" value="${it.formErrors('acknowledge')}"/>
+        <bc:formError errors="${ackErrors}"/>
+        <f:form method="post" action="${base}acknowledge" name="acknowledge">
           <f:entry title="Comment (optional)">
-            <f:textarea name="comment" value=""/>
+            <f:textarea name="comment" value="${ackErrors.value('comment')}"/>
+            <bc:fieldError errors="${ackErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
             <f:submit value="Acknowledge"/>
@@ -122,9 +143,12 @@
 
       <j:if test="${it.canResolve}">
         <h2>Resolve</h2>
-        <f:form method="post" action="resolve" name="resolve">
+        <j:set var="resolveErrors" value="${it.formErrors('resolve')}"/>
+        <bc:formError errors="${resolveErrors}"/>
+        <f:form method="post" action="${base}resolve" name="resolve">
           <f:entry title="Comment (optional)" description="Resolution is final: a resolved incident cannot be reopened (comments stay possible).">
-            <f:textarea name="comment" value=""/>
+            <f:textarea name="comment" value="${resolveErrors.value('comment')}"/>
+            <bc:fieldError errors="${resolveErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
             <f:submit value="Resolve"/>
@@ -137,10 +161,13 @@
         <!-- The form name must differ from the control name it contains: with both called
              "comment" the entry rendered without its label and the textarea collapsed
              (e2e-01, incident-detail-open.jpg). Same shape as the Acknowledge form above. -->
-        <f:form method="post" action="comment" name="addComment">
+        <j:set var="commentErrors" value="${it.formErrors('comment')}"/>
+        <bc:formError errors="${commentErrors}"/>
+        <f:form method="post" action="${base}comment" name="addComment">
           <f:entry title="Comment (required)"
                    description="The comment is appended to the incident history; the status does not change.">
-            <f:textarea name="comment" value=""/>
+            <f:textarea name="comment" value="${commentErrors.value('comment')}"/>
+            <bc:fieldError errors="${commentErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
             <f:submit value="Add Comment"/>
@@ -160,15 +187,21 @@
             </div>
           </j:when>
           <j:otherwise>
-            <f:form method="post" action="rerun" name="rerun">
-              <f:entry title="Approver">
-                <div class="jenkins-select">
-                  <select name="approver" class="jenkins-select__input">
-                    <j:forEach var="a" items="${it.approverOptions}">
-                      <option value="${a}">${a}</option>
-                    </j:forEach>
-                  </select>
-                </div>
+            <j:set var="rerunErrors" value="${it.formErrors('rerun')}"/>
+            <bc:formError errors="${rerunErrors}"/>
+            <f:form method="post" action="${base}rerun" name="rerun">
+              <!-- D-37: repeated "approvers" fields, one user id per checked box, like the job's
+                   own request form (U-16). -->
+              <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                       help="/plugin/batch-control/help/approvers.html">
+                <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
+                <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                  <div class="jenkins-!-margin-bottom-1">
+                    <f:checkbox name="approvers" value="${a}" id="batch-control-rerun-approver-${s.index}"
+                                title="${a}" checked="${rerunErrors.present ? rerunErrors.checked('approvers', a) : singleApprover}"/>
+                  </div>
+                </j:forEach>
+                <bc:fieldError errors="${rerunErrors}" field="approvers"/>
               </f:entry>
               <f:bottomButtonBar>
                 <f:submit value="Request Rerun"/>
@@ -176,6 +209,16 @@
             </f:form>
           </j:otherwise>
         </j:choose>
+      </j:if>
+      <!-- DEF-12 / U-24: a user who cannot rerun is told who can, instead of being given a
+           form the server refuses. -->
+      <j:if test="${!it.canRerun and it.jobAvailable}">
+        <h2>Request Rerun</h2>
+        <p class="jenkins-description">
+          A rerun is a run request for this job, pre-filled with the original parameters. It is
+          made by a user with the <b>Batch Control/Request</b> permission and <b>Job/Build</b> on
+          the job; ask one of them, or a Jenkins administrator, to request it from this page.
+        </p>
       </j:if>
     </l:main-panel>
   </l:layout>

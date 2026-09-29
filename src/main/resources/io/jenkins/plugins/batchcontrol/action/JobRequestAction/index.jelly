@@ -1,5 +1,10 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<!-- e2e-03 DEF-09: a refused submission comes back to this page (JobRequestAction#doSubmit,
+     ui.FormErrors) with each message next to its field and the reason, approvers and parameter
+     values the user entered kept. DEF-12: a user without Job/Build on the job is told why the form
+     is not offered instead of being given a form the server will refuse. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Request Run - ${it.job.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.job}"/>
     <l:main-panel>
@@ -8,6 +13,13 @@
         <j:when test="${!it.active}">
           <div class="jenkins-alert jenkins-alert-info">
             This job does not require run approval, or run control is disabled.
+          </div>
+        </j:when>
+        <j:when test="${!it.canRequestRun}">
+          <div class="jenkins-alert jenkins-alert-warning" role="status">
+            You may not request runs of this job: a run request needs the <b>Job/Build</b>
+            permission on the job in addition to <b>Batch Control/Request</b>. Ask a Jenkins
+            administrator for the permission, or ask a user who has both to request the run.
           </div>
         </j:when>
         <j:when test="${empty(it.approverOptions)}">
@@ -21,9 +33,12 @@
             approvers and confirm the parameters; the build starts automatically once any one of
             them approves the request.
           </p>
+          <j:set var="errors" value="${it.formErrors}"/>
+          <bc:formError errors="${errors}"/>
           <f:form method="post" action="submit" name="batch-control-request">
             <f:entry title="Reason" description="Why this run is needed (required).">
-              <f:textarea name="reason" value=""/>
+              <f:textarea name="reason" value="${errors.value('reason')}"/>
+              <bc:fieldError errors="${errors}" field="reason"/>
             </f:entry>
             <!-- D-37: posted as repeated "approvers" fields, one user id per checked box, which
                  JobRequestAction#doSubmit reads with getParameterValues. A single candidate starts
@@ -34,12 +49,14 @@
               <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
                 <div class="jenkins-!-margin-bottom-1">
                   <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
-                              title="${a}" checked="${singleApprover}"/>
+                              title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
                 </div>
               </j:forEach>
+              <bc:fieldError errors="${errors}" field="approvers"/>
             </f:entry>
             <j:if test="${!empty(it.parameterDefinitions)}">
               <f:section title="Parameters"/>
+              <bc:fieldError errors="${errors}" field="parameters"/>
               <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
                 <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
                 <st:include it="${parameterDefinition}" page="index.jelly"/>
