@@ -30,7 +30,9 @@ import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Ancestor;
 import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * The queue gate (SPEC item 6, D-03): every run path goes through
@@ -99,6 +101,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     static final String KIND_OTHER = "OTHER";
     static final String KIND_RETRY = "RETRY";
     static final String KIND_REBUILD = "REBUILD";
+
+    /** build-token-root's root action; not a dependency, matched by name (S-18-03). */
+    private static final String BUILD_TOKEN_ROOT_ACTION_CLASS =
+            "org.jenkinsci.plugins.build_token_root.BuildRootAction";
 
     /** The CLI {@code build} command's cause (a {@code UserIdCause} subtype), matched by name. */
     private static final String CLI_CAUSE_CLASS = "hudson.cli.BuildCommand$CLICause";
@@ -184,7 +190,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // re-audit DEF-33/34): otherwise core answers its "scheduled" 302 and build-token-root
             // an empty 403. Without a current request (queue maintenance, Groovy, other plugins'
             // background threads) the refusal stays a quiet false, so nothing is thrown there.
-            for (Cause cause : causes) {
+            // S-18-03: a Retry a person clicks copies the retried build's causes, a RemoteCause
+            // included, next to that person's fresh UserIdCause. It is that person's submission
+            // (D-47, DEF-32), so it skips this step and is refused and recorded at step 4.
+            boolean userClickedRetry = isAutomaticRetry(causes) && isUserClickedRetry();
+            for (Cause cause : userClickedRetry ? List.<Cause>of() : causes) {
                 if (cause instanceof Cause.RemoteCause) {
                     LOGGER.warning(() -> "Blocked a remote (build-token) run of approval-required job '"
                             + job.getFullName() + "': " + cause.getShortDescription());
@@ -201,7 +211,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                         LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked remote run of job '"
                                 + job.getFullName() + "'");
                     }
-                    if (Stapler.getCurrentRequest2() != null) {
+                    if (isTokenBuildEndpoint(job)) {
                         throw new RemoteRunRefusal(remoteRefusedMessage(job));
                     }
                     return false;
@@ -216,7 +226,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // Retry a person clicks (NaginatorCause plus that person's fresh UserIdCause, inside
             // their HTTP request) is handled here.
             boolean retry = isAutomaticRetry(causes);
-            if (!retry || isUserClickedRetry()) {
+            if (!retry || userClickedRetry) {
                 for (Cause cause : causes) {
                     if (cause instanceof Cause.UserIdCause) {
                         String rerun = retry ? KIND_RETRY
@@ -360,6 +370,40 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      */
     private static boolean isUserClickedRetry() {
         return Stapler.getCurrentRequest2() != null && !ACL.SYSTEM2.equals(Jenkins.getAuthentication2());
+    }
+
+    /**
+     * Whether the current HTTP request is one of the build-token endpoints (S-18-03): core's
+     * {@code build} or {@code buildWithParameters} web method of {@code job} itself, or
+     * build-token-root's action (matched by class name; it is not a dependency). Only those callers
+     * get the plain-text refusal; any other code scheduling with a {@code RemoteCause} on a request
+     * thread keeps the quiet {@code false} it always got.
+     */
+    private static boolean isTokenBuildEndpoint(Job<?, ?> job) {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null) {
+            return false;
+        }
+        List<Ancestor> ancestors = req.getAncestors();
+        if (ancestors.isEmpty()) {
+            return false;
+        }
+        Object last = ancestors.get(ancestors.size() - 1).getObject();
+        if (last != null && BUILD_TOKEN_ROOT_ACTION_CLASS.equals(last.getClass().getName())) {
+            return true;
+        }
+        if (last != job) {
+            return false;
+        }
+        String path = req.getRequestURI();
+        if (path == null) {
+            return false;
+        }
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        String lastToken = path.substring(path.lastIndexOf('/') + 1);
+        return "build".equals(lastToken) || "buildWithParameters".equals(lastToken);
     }
 
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
