@@ -117,6 +117,7 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - Acceptance: the job page shows whether the job is activated or on hold and links to the activation request form; pending activation and hold requests appear in the approval inbox; the history shows `ACTIVATED`/`HELD` records.
 - Acceptance: with run control off nothing changes (unattended runs pass as before).
 - Acceptance: activation state is truthful and fails closed: a job re-created under a deleted job's name, a job whose state file could not be deleted, or a job created while a failed seeding is retried starts not activated; an approved HOLD or a deletion is never undone by a stale cached value or by a stale pending ACTIVATE (approving one request invalidates the job's other pending activation requests). Notifications name the action (ACTIVATE or HOLD). (security-13)
+- Acceptance: an automatic retry of a build is unattended even when the retried build was started by a person, so it needs activation on every job (D-47); a Rebuild click is a person acting. Where an item's activation is carried by a computed-folder ancestor, the ancestor's name and state are shown only to viewers with Item/Read on it. (security-14)
 
 **7. 요청 만료와 취소**
 승인 대기 요청은 설정된 기간이 지나면 자동 만료되고, 요청자는 결재 전까지 취소할 수 있습니다.
