@@ -1,174 +1,146 @@
 package io.jenkins.plugins.batchcontrol.security;
 
-import hudson.model.Cause;
-import hudson.model.CauseAction;
-import hudson.model.Item;
-import hudson.model.ItemGroup;
-import hudson.model.Items;
-import hudson.model.Job;
+import hudson.model.Action;
+import hudson.model.FreeStyleProject;
 import hudson.model.Queue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
-import io.jenkins.plugins.batchcontrol.model.Grant;
-import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantRequest;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
-import io.jenkins.plugins.batchcontrol.model.RequestStatus;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.security.QueueItemAuthenticator;
+import jenkins.security.QueueItemAuthenticatorProvider;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.core.Authentication;
 
 /**
- * D-50 (SPEC item 2, e2e-03 DEF-37): whether builds of a job run as SYSTEM under the configured
- * build authenticators, and which jobs in the scope of a pending or active CONFIGURE grant do.
+ * D-50, D-50a (SPEC item 2, e2e-03 DEF-37, security-21): whether builds on this instance may run
+ * as SYSTEM although change control is on.
  *
- * <p>A configured authenticator does not mean a job's builds run as a user: with Authorize
- * Project's per-project setting, a job without its own strategy still runs as SYSTEM. So the
- * question is asked the way the queue asks it. A probe {@link Queue.WaitingItem} of the job, never
- * scheduled, carrying the cause of a person pressing Build Now, is passed to
- * {@link Queue.Item#authenticate2()}: every {@link jenkins.security.QueueItemAuthenticatorProvider}'s
- * authenticators in order (each defaults to core's generic
- * {@code QueueItemAuthenticator#authenticate2(Queue.Task)}; Authorize Project answers per item),
- * the first identity wins, and without one the task's default, which is SYSTEM for a job. The item
- * form is used because Authorize Project implements only that form; asking the task form alone
- * would call every job SYSTEM.
+ * <p>A job's own build authorization does not protect it (a Configure holder can remove it, and a
+ * strategy that follows the triggering user leaves timer and SCM builds as SYSTEM). So one
+ * instance-wide question is asked: would a build of a job that has no build authorization of its
+ * own and no user cause get an identity other than SYSTEM from the configured authenticators?
  *
- * <p>Bounded and exception-safe: at most {@value #MAX_SCANNED} jobs are examined and
- * {@value #MAX_RESULTS} names returned per call; the scopes come from the active grants and the
- * open-request index, so no closed request is read; nothing is cached, so a change to a job's
- * build authorization shows at once; any failure of an authenticator counts as "cannot tell",
- * never as an exception to the caller.
+ * <p>The question is asked the way the queue asks it, {@link Queue.Item#authenticate2()}: every
+ * {@link QueueItemAuthenticatorProvider}'s authenticators in order, the first identity wins, and
+ * without one the task's default, SYSTEM for a job. The probe is an in-memory
+ * {@link FreeStyleProject} that is never added to Jenkins, saved or scheduled, wrapped in a
+ * {@link Queue.WaitingItem} that never enters the queue and carries no cause. Nothing is
+ * scheduled and no listener fires. Constructing the item takes one queue id from
+ * {@code QueueIdStrategy} (core's own {@code QueueItemAuthenticator#authenticate2(Queue.Task)}
+ * does the same, and {@code Queue.Item} cannot be subclassed outside core); with the cache below
+ * that is at most one id per {@value #CACHE_TTL_MINUTES} minutes (S-21-07).
+ *
+ * <p>The probe runs in one fixed context, as anonymous, whoever renders the page, so an
+ * authenticator that consults the current authentication answers the same on every path
+ * (S-21-07). No {@code ACL.SYSTEM2} switch is made. An authenticator that fails counts as
+ * "SYSTEM" (fail-safe). The answer is cached for {@value #CACHE_TTL_MINUTES} minutes and
+ * recomputed at once when the set of configured authenticators changes (a save of the global
+ * security page replaces them), so the monitor's {@code isActivated()} does not probe on every
+ * page (S-21-06).
  */
 @Restricted(NoExternalUse.class)
 public final class SystemBuildCheck {
 
     private static final Logger LOGGER = Logger.getLogger(SystemBuildCheck.class.getName());
 
-    /** At most this many names are returned. */
-    static final int MAX_RESULTS = 50;
+    static final long CACHE_TTL_MINUTES = 5;
 
-    /** At most this many jobs are examined per computation. */
-    static final int MAX_SCANNED = 500;
+    /** The probe job's name: it is never registered, so it names nothing. */
+    private static final String PROBE_NAME = "batch-control-system-build-probe";
 
-    /** The probe's user id: never a real account, so it names nobody. */
-    private static final String PROBE_USER = "batch-control:system-build-probe";
+    private static final class Cached {
+        final Jenkins owner;
+        final List<QueueItemAuthenticator> authenticators;
+        final boolean value;
+        final long atNanos;
+
+        Cached(Jenkins owner, List<QueueItemAuthenticator> authenticators, boolean value, long atNanos) {
+            this.owner = owner;
+            this.authenticators = authenticators;
+            this.value = value;
+            this.atNanos = atNanos;
+        }
+
+        boolean fresh(Jenkins jenkins, List<QueueItemAuthenticator> current, long now) {
+            if (owner != jenkins || now - atNanos >= TimeUnit.MINUTES.toNanos(CACHE_TTL_MINUTES)
+                    || authenticators.size() != current.size()) {
+                return false;
+            }
+            for (int i = 0; i < current.size(); i++) {
+                if (authenticators.get(i) != current.get(i)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    private static volatile Cached cached;
 
     private SystemBuildCheck() {
     }
 
     /**
-     * Whether the configured build authenticators give builds of {@code job} no identity other
-     * than SYSTEM. {@code false} for a job that cannot be queued, and when an authenticator fails
-     * (logged at FINE).
+     * Whether, with change control on, a build of a job without its own build authorization and
+     * without a user cause would get no identity other than SYSTEM from the configured
+     * authenticators. {@code false} while change control is off. Cached; never throws.
      */
-    public static boolean runsAsSystem(Job<?, ?> job) {
-        if (!(job instanceof Queue.Task)) {
-            return false;
-        }
+    public static boolean buildsMayRunAsSystem() {
         try {
-            List<hudson.model.Action> actions = new ArrayList<>();
-            actions.add(new CauseAction(new Cause.UserIdCause(PROBE_USER)));
-            // A WaitingItem is a plain object: constructing it does not touch the queue.
-            Queue.WaitingItem probe = new Queue.WaitingItem(Calendar.getInstance(), (Queue.Task) job, actions);
-            Authentication identity = probe.authenticate2();
+            if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+                return false;
+            }
+            Jenkins jenkins = Jenkins.get();
+            List<QueueItemAuthenticator> current = authenticators();
+            long now = System.nanoTime();
+            Cached c = cached;
+            if (c != null && c.fresh(jenkins, current, now)) {
+                return c.value;
+            }
+            boolean value = probe(jenkins);
+            cached = new Cached(jenkins, current, value, now);
+            return value;
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.WARNING, "Could not tell whether builds run as SYSTEM; assuming they may", e);
+            return true;
+        }
+    }
+
+    /** Drops the cached answer (the next call probes again). */
+    public static void invalidate() {
+        cached = null;
+    }
+
+    private static List<QueueItemAuthenticator> authenticators() {
+        List<QueueItemAuthenticator> list = new ArrayList<>();
+        for (QueueItemAuthenticator authenticator : QueueItemAuthenticatorProvider.authenticators()) {
+            list.add(authenticator);
+        }
+        return list;
+    }
+
+    private static boolean probe(Jenkins jenkins) {
+        // A fixed, unprivileged context for third-party authenticators (S-21-07); not SYSTEM.
+        try (ACLContext ignored = ACL.as2(Jenkins.ANONYMOUS2)) {
+            FreeStyleProject job = new FreeStyleProject(jenkins, PROBE_NAME);
+            List<Action> noCause = Collections.emptyList();
+            Queue.WaitingItem item = new Queue.WaitingItem(Calendar.getInstance(), job, noCause);
+            Authentication identity = item.authenticate2();
             return identity == null || ACL.SYSTEM2.equals(identity)
                     || ACL.SYSTEM_USERNAME.equals(identity.getName());
         } catch (RuntimeException | LinkageError e) {
-            LOGGER.log(Level.FINE, e, () -> "Cannot tell whether builds of '" + job.getFullName() + "' run as SYSTEM");
-            return false;
+            LOGGER.log(Level.WARNING, "A build authenticator failed on the SYSTEM-build probe; assuming builds may"
+                    + " run as SYSTEM", e);
+            return true;
         }
-    }
-
-    /**
-     * Full names of the jobs in the scope of a pending or active CONFIGURE grant (a folder scope
-     * expands to the jobs below it) whose builds {@linkplain #runsAsSystem run as SYSTEM}; sorted,
-     * at most {@value #MAX_RESULTS}. Empty while change control is off. Names are not filtered by
-     * the caller's permissions: callers show only what their viewer may read.
-     */
-    public static List<String> jobsRunningAsSystem() {
-        try {
-            if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
-                return Collections.emptyList();
-            }
-            return Collections.unmodifiableList(compute(Jenkins.get()));
-        } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, "Could not determine the jobs whose builds run as SYSTEM", e);
-            return Collections.emptyList();
-        }
-    }
-
-    private static List<String> compute(Jenkins jenkins) {
-        Set<GrantScope> scopes = configureScopes();
-        if (scopes.isEmpty()) {
-            return new ArrayList<>();
-        }
-        TreeSet<String> found = new TreeSet<>();
-        int[] scanned = {0};
-        // ACL.SYSTEM2 (D-50): a read-only walk of item names below the grant scopes, so the list
-        // does not depend on who asks. Nothing is changed and no permission is decided here; the
-        // callers are an administrator-only monitor and the grant request page (reached only after
-        // its section's permission check), and they name only jobs their viewer may read.
-        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
-            for (GrantScope scope : scopes) {
-                if (scanned[0] >= MAX_SCANNED) {
-                    break;
-                }
-                Item item = jenkins.getItemByFullName(scope.getFullName());
-                if (item instanceof Job) {
-                    consider((Job<?, ?>) item, found, scanned);
-                } else if (scope.getType() == GrantScope.Type.FOLDER && item instanceof ItemGroup) {
-                    for (Job<?, ?> job : Items.allItems2(ACL.SYSTEM2, (ItemGroup<?>) item, Job.class)) {
-                        if (scanned[0] >= MAX_SCANNED) {
-                            break;
-                        }
-                        consider(job, found, scanned);
-                    }
-                }
-            }
-        }
-        if (scanned[0] >= MAX_SCANNED) {
-            LOGGER.warning(() -> "SYSTEM-build check stopped after " + MAX_SCANNED + " jobs; some jobs in"
-                    + " Configure grant scopes were not checked");
-        }
-        List<String> out = new ArrayList<>(found);
-        return out.size() > MAX_RESULTS ? new ArrayList<>(out.subList(0, MAX_RESULTS)) : out;
-    }
-
-    private static void consider(Job<?, ?> job, Set<String> found, int[] scanned) {
-        scanned[0]++;
-        if (runsAsSystem(job)) {
-            found.add(job.getFullName());
-        }
-    }
-
-    /** The scopes of pending CONFIGURE requests and active CONFIGURE grants. */
-    private static Set<GrantScope> configureScopes() {
-        Set<GrantScope> scopes = new LinkedHashSet<>();
-        for (Grant grant : GrantService.get().listActive()) {
-            if (grant.getActions() != null && grant.getActions().contains(GrantAction.CONFIGURE)
-                    && grant.getScope() != null) {
-                scopes.add(grant.getScope());
-            }
-        }
-        // The open-request index: no scan of closed requests (#13).
-        for (GrantRequest request : Store.get().listOpenGrantRequests()) {
-            if (request.getStatus() == RequestStatus.PENDING && request.getActions() != null
-                    && request.getActions().contains(GrantAction.CONFIGURE) && request.getScope() != null) {
-                scopes.add(request.getScope());
-            }
-        }
-        return scopes;
     }
 }
