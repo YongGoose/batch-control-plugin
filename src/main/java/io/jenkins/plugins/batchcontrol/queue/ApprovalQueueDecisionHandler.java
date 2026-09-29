@@ -158,9 +158,22 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("replay", job,
                             () -> "Blocked replay of approval-required job '" + job.getFullName() + "'");
-                    recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
-                            "Blocked a Pipeline Replay of job '" + job.getFullName()
-                                    + "' - the job requires an approved batch-control run request");
+                    // D-51a (S-21-09): a person's Replay (on the Replay page or through the CLI) is
+                    // recorded per attempt, naming the replayed build; anything else is unattended.
+                    boolean person = !ACL.SYSTEM2.equals(Jenkins.getAuthentication2())
+                            && (CLICommand.getCurrent() != null
+                                    || (Stapler.getCurrentRequest2() != null && isHumanSubmission(causes)));
+                    if (person) {
+                        String user = Jenkins.getAuthentication2().getName();
+                        String source = sourceBuild(causes);
+                        recordPersonRefusal(job, KIND_REPLAY, source, user, "Blocked a Pipeline Replay of job '"
+                                + job.getFullName() + "'" + (source.isEmpty() ? "" : " build #" + source) + " by '"
+                                + user + "' - the job requires an approved batch-control run request");
+                    } else {
+                        recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
+                                "Blocked a Pipeline Replay of job '" + job.getFullName()
+                                        + "' - the job requires an approved batch-control run request");
+                    }
                     // e2e-03 DEF-16: a person pressing Run on the Replay page gets the refusal
                     // page instead of the replay action's generic "not buildable" crash page;
                     // the CLI gets a one-line error (DEF-14). Anything else stays quiet.
@@ -485,14 +498,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * acts rarely, and in the container a second user's Retry, of a later build, within the hour
      * vanished into the first one's record. Only a repeat of the same attempt by the same user
      * within {@link BlockedAttemptAudit}'s short cooldown is merged, so a double click stays one
-     * record. A store failure is logged, like {@link #recordTriggerBlocked}.
+     * record. Per user the records are budgeted (D-51a, {@link BlockedAttemptAudit#recordPersonRefusal}).
+     * A store failure is logged, like {@link #recordTriggerBlocked}.
      */
     private static void recordPersonRefusal(Job<?, ?> job, String kind, String sourceBuild, String user,
                                             String text) {
         String fullName = job.getFullName();
         try {
-            BlockedAttemptAudit.get().record(ChangeType.TRIGGER_BLOCKED,
-                    fullName + '|' + kind + '#' + sourceBuild, fullName, user,
+            BlockedAttemptAudit.get().recordPersonRefusal(ChangeType.TRIGGER_BLOCKED,
+                    fullName + '|' + kind + '#' + sourceBuild, fullName, user, sourceBuild,
                     "cause=" + kind + " switch=approvalRequired: " + text);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
@@ -501,19 +515,28 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     }
 
     /**
-     * The number of the build a naginator Retry re-runs ({@code NaginatorCause#getSourceBuildNumber},
-     * read reflectively: naginator is not a dependency), or {@code ""} when unknown.
+     * The number of the build a person's re-run repeats (D-51a, S-21-09), or {@code ""} when
+     * unknown: naginator's {@code NaginatorCause#getSourceBuildNumber}, Pipeline's
+     * {@code ReplayCause#getOriginalNumber} (both read reflectively: neither plugin is a
+     * dependency), or for a Rebuild its {@code RebuildCause}, an {@link Cause.UpstreamCause} naming
+     * the rebuilt build.
      */
     private static String sourceBuild(List<Cause> causes) {
         for (Cause cause : causes) {
-            if (NAGINATOR_CAUSE_CLASS.equals(cause.getClass().getName())) {
+            String name = cause.getClass().getName();
+            String getter = NAGINATOR_CAUSE_CLASS.equals(name) ? "getSourceBuildNumber"
+                    : REPLAY_CAUSE_CLASS.equals(name) ? "getOriginalNumber" : null;
+            if (getter != null) {
                 try {
-                    Object number = cause.getClass().getMethod("getSourceBuildNumber").invoke(cause);
+                    Object number = cause.getClass().getMethod(getter).invoke(cause);
                     return number == null ? "" : number.toString();
                 } catch (ReflectiveOperationException | RuntimeException e) {
-                    LOGGER.log(Level.FINE, "Cannot read the retried build number", e);
+                    LOGGER.log(Level.FINE, "Cannot read the re-run build number", e);
                     return "";
                 }
+            }
+            if (REBUILD_CAUSE_CLASS.equals(name) && cause instanceof Cause.UpstreamCause) {
+                return Integer.toString(((Cause.UpstreamCause) cause).getUpstreamBuild());
             }
         }
         return "";

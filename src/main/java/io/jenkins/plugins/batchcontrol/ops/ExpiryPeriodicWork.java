@@ -53,6 +53,12 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         Instant queueSnapshotAt = BatchClock.now();
         Set<String> queuedIds = RunRequestService.queuedMarkerRequestIds(jenkins);
         RunRequestService.get().expireOverdue(queuedIds, queueSnapshotAt);
+        // D-51a: close the refused re-run summaries whose window ended (their count record).
+        try {
+            io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit.get().flushPersonSummaries();
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not close the refused re-run summaries", e);
+        }
         // Pending grant requests expire on the same cadence (SPEC item 8, T-08-12).
         GrantRequestService.get().expireOverduePending();
         // Pending activation and hold requests follow the run-request timeout (SPEC item 6a).
