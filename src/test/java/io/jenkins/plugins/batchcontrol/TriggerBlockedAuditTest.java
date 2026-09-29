@@ -34,7 +34,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
-import org.jvnet.hudson.test.recipes.WithTimeout;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
@@ -261,42 +260,56 @@ public class TriggerBlockedAuditTest {
                 "the exported row must carry the detail (cause kind and switch): " + rows);
     }
 
+    /** The coalescing bound, made configurable by core-dev for this row (matrix note 99). */
+    private static final String MAX_KEYS_PROPERTY =
+            "io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit.maxCoalescedKeys";
+
     /**
-     * T-06-52 (security-12 S-12-01, P1): the coalescing memory is bounded (10,000 keys by the
-     * review) but its bound must never suppress a record. 10,001 distinct locked jobs are each
-     * refused once within one hour: every job has exactly one TRIGGER_BLOCKED record and no
+     * T-06-52 (security-12 S-12-01, P1): the coalescing memory is bounded but its bound must never
+     * suppress a record. The bound is lowered to 50 through its system property, set before the
+     * first refusal and cleared afterwards; 51 distinct locked jobs (one more than the bound) are
+     * each refused once within one hour: every job has exactly one TRIGGER_BLOCKED record and no
      * submission throws. Guard: the most recently refused job refused again in the same hour
-     * still coalesces (one record). The jobs are created under run control, so they start locked
-     * (D-34) and not activated (SPEC 6a); either reason refuses the timer.
+     * still coalesces (one record). The jobs are FreeStyle, created under run control (so locked,
+     * D-34, and not activated, SPEC 6a) and never built.
      */
     @Test
-    @WithTimeout(900)
     public void t_06_52_coalescingBoundNeverSuppressesARecord() throws Exception {
-        clockAt(T0);
-        int count = 10_001;
-        List<FreeStyleProject> jobs = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            jobs.add(j.jenkins.createProject(FreeStyleProject.class, "tb-many-" + i));
-        }
-        for (FreeStyleProject job : jobs) {
-            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
-                    "fixture: " + job.getName() + " must be refused");
-        }
-        j.waitUntilNoActivity();
+        String previous = System.getProperty(MAX_KEYS_PROPERTY);
+        System.setProperty(MAX_KEYS_PROPERTY, "50");
+        try {
+            clockAt(T0);
+            int count = 51;
+            List<FreeStyleProject> jobs = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                jobs.add(j.jenkins.createProject(FreeStyleProject.class, "tb-many-" + i));
+            }
+            for (FreeStyleProject job : jobs) {
+                assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()),
+                        "fixture: " + job.getName() + " must be refused");
+            }
+            j.waitUntilNoActivity();
 
-        java.util.Map<String, Long> perJob = FileStore.get().listChangeRecords(MONTH).stream()
-                .filter(r -> r.getType() == ChangeType.TRIGGER_BLOCKED)
-                .filter(r -> r.getTarget() != null && r.getTarget().startsWith("tb-many-"))
-                .collect(Collectors.groupingBy(ChangeRecord::getTarget, Collectors.counting()));
-        assertEquals(count, perJob.size(), "every refused job must have a TRIGGER_BLOCKED record");
-        List<String> notOne = perJob.entrySet().stream().filter(e -> e.getValue() != 1L)
-                .map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.toList());
-        assertTrue(notOne.isEmpty(), "each job must have exactly one record: " + notOne);
+            java.util.Map<String, Long> perJob = FileStore.get().listChangeRecords(MONTH).stream()
+                    .filter(r -> r.getType() == ChangeType.TRIGGER_BLOCKED)
+                    .filter(r -> r.getTarget() != null && r.getTarget().startsWith("tb-many-"))
+                    .collect(Collectors.groupingBy(ChangeRecord::getTarget, Collectors.counting()));
+            assertEquals(count, perJob.size(), "every refused job must have a TRIGGER_BLOCKED record");
+            List<String> notOne = perJob.entrySet().stream().filter(e -> e.getValue() != 1L)
+                    .map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.toList());
+            assertTrue(notOne.isEmpty(), "each job must have exactly one record: " + notOne);
 
-        FreeStyleProject last = jobs.get(count - 1);
-        assertNull(last.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
-        assertEquals(1, triggerBlocked(last.getName()).size(), "a recent key must still coalesce within the hour");
-        assertEquals(0, j.jenkins.getQueue().getItems().length, "no refused run may be queued");
+            FreeStyleProject last = jobs.get(count - 1);
+            assertNull(last.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: refused again");
+            assertEquals(1, triggerBlocked(last.getName()).size(), "a recent key must still coalesce within the hour");
+            assertEquals(0, j.jenkins.getQueue().getItems().length, "no refused run may be queued");
+        } finally {
+            if (previous == null) {
+                System.clearProperty(MAX_KEYS_PROPERTY);
+            } else {
+                System.setProperty(MAX_KEYS_PROPERTY, previous);
+            }
+        }
     }
 
     /**
