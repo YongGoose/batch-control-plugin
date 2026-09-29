@@ -1,5 +1,8 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import hudson.model.Item;
+import hudson.model.Items;
+import hudson.security.ACL;
 import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -293,8 +296,9 @@ public final class FileStore implements Store {
         Objects.requireNonNull(configXml, "configXml");
         writeTextAtomically(snapshotDir(), PathCodec.encode(jobFullName) + ".xml", configXml,
                 "config snapshot of " + jobFullName);
-        // The current file now exists, so a file under the pre-#25 shortened form is obsolete.
-        deleteLegacySnapshot(jobFullName);
+        // A file under the pre-#25 shortened form is NOT deleted here: that name is also the plain
+        // encoding of another possible item, whose own baseline it may be. Only the startup
+        // migration, which sees every live item, decides what such a file is.
     }
 
     @Override
@@ -303,9 +307,11 @@ public final class FileStore implements Store {
         Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
         String text = readTextOrNull(file);
         if (text == null) {
-            // Written by a version before #25 and not yet migrated at startup.
+            // Written by a version before #25 and not migrated at startup (the item was not live
+            // then). Read-only: reached only while this item has no current-form baseline, and
+            // the first save gives it one.
             String legacy = PathCodec.legacyShortened(jobFullName);
-            if (legacy != null) {
+            if (legacy != null && !isLiveItemName(PathCodec.decode(legacy))) {
                 text = readTextOrNull(PathCodec.resolveUnder(snapshotDir(), legacy + ".xml"));
             }
         }
@@ -317,15 +323,26 @@ public final class FileStore implements Store {
         Objects.requireNonNull(jobFullName, "jobFullName");
         deleteFile(PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml"),
                 "config snapshot of " + jobFullName);
-        deleteLegacySnapshot(jobFullName);
     }
 
-    private void deleteLegacySnapshot(String jobFullName) {
-        String legacy = PathCodec.legacyShortened(jobFullName);
-        if (legacy != null) {
-            deleteFile(PathCodec.resolveUnder(snapshotDir(), legacy + ".xml"),
-                    "legacy config snapshot of " + jobFullName);
+    /**
+     * Whether an item named {@code fullName} exists. A pre-#25 shortened name is also the plain
+     * encoding of the item named by its decoding; when that item exists the file is its own
+     * baseline, never a legacy one (#25). Evaluated for every item regardless of the caller's
+     * Item/Read (a hidden item's file is still not another item's baseline): the lookup passes
+     * the system authentication as a parameter and does not switch the thread's context.
+     */
+    private static boolean isLiveItemName(String fullName) {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null) {
+            return true; // cannot tell: treat as taken, so nothing is misread
         }
+        for (Item item : Items.allItems2(ACL.SYSTEM2, jenkins, Item.class)) {
+            if (fullName.equals(item.getFullName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -403,7 +420,7 @@ public final class FileStore implements Store {
                                                 int offset, int limit, int maxScanned) {
         Comparator<RunRecord> newestFirst = Comparator.comparing(RunRecord::getStartedAt)
                 .thenComparing(RunRecord::getRunId).reversed();
-        return page(runsDir(), months, FileStore::runRecordFromJson, filter, newestFirst,
+        return page(runsDir(), months, FileStore::runRecordFromScanner, filter, newestFirst,
                 offset, limit, maxScanned);
     }
 
@@ -518,7 +535,7 @@ public final class FileStore implements Store {
                                                       int offset, int limit, int maxScanned) {
         Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
                 .thenComparing(ChangeRecord::getId).reversed();
-        RecordPage<ChangeRecord> page = page(changesDir(), months, FileStore::changeRecordFromJson,
+        RecordPage<ChangeRecord> page = page(changesDir(), months, FileStore::changeRecordFromScanner,
                 filter, newestFirst, offset, limit, maxScanned);
         // Patches only for the rendered rows (the filter never looks at the diff text).
         page.getItems().forEach(this::attachDiff);
@@ -571,8 +588,8 @@ public final class FileStore implements Store {
         Comparator<Incident> newestFirst = Comparator
                 .comparing((Incident i) -> i.getCreatedAt() == null ? Instant.EPOCH : i.getCreatedAt())
                 .thenComparing(Incident::getId).reversed();
-        Function<JSONObject, Incident> parser = json -> {
-            String id = optString(json, "id");
+        Function<JsonLineScanner, Incident> parser = line -> {
+            String id = line.optString(K_ID, false);
             return id == null ? null : loadIncident(id);
         };
         return page(incidentIndexDir(), months, parser, filter, newestFirst, offset, limit, maxScanned);
@@ -1065,7 +1082,7 @@ public final class FileStore implements Store {
      * {@code maxScanned} records. Only the {@code offset + limit} newest matches are held (a
      * bounded heap), sorted exactly by {@code newestFirst}.
      */
-    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Function<JSONObject, T> parser,
+    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Function<JsonLineScanner, T> parser,
                                    Predicate<? super T> filter, Comparator<T> newestFirst,
                                    int offset, int limit, int maxScanned) {
         int from = Math.max(0, offset);
@@ -1075,7 +1092,9 @@ public final class FileStore implements Store {
         PriorityQueue<T> newest = new PriorityQueue<>(Math.max(1, Math.min(keep, 1024)), newestFirst.reversed());
         int scanned = 0;
         int matched = 0;
+        int skipped = 0;
         boolean truncated = false;
+        JsonLineScanner scanner = new JsonLineScanner();
         List<YearMonth> ordered = new ArrayList<>(new TreeSet<>(months).descendingSet());
         scan:
         for (YearMonth month : ordered) {
@@ -1084,9 +1103,8 @@ public final class FileStore implements Store {
                 continue;
             }
             try (ReverseLineReader reader = new ReverseLineReader(file)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (line.isBlank()) {
+                while (reader.next()) {
+                    if (reader.isBlank()) {
                         continue;
                     }
                     if (scanned >= cap) {
@@ -1096,10 +1114,15 @@ public final class FileStore implements Store {
                     scanned++;
                     T value;
                     try {
-                        value = parser.apply(JSONObject.fromObject(line));
+                        if (!scanner.scan(reader.buffer(), reader.offset(), reader.length())) {
+                            throw new IllegalArgumentException("not a JSON object");
+                        }
+                        value = parser.apply(scanner);
                     } catch (RuntimeException e) {
-                        LOGGER.log(Level.WARNING, "Skipping unparseable line of {0}: {1}",
-                                new Object[] {file, e.getClass().getName()});
+                        if (skipped++ < 10) {
+                            LOGGER.log(Level.WARNING, "Skipping unparseable line of {0}: {1}",
+                                    new Object[] {file, e.getClass().getName()});
+                        }
                         continue;
                     }
                     if (value == null || !filter.test(value)) {
@@ -1107,9 +1130,11 @@ public final class FileStore implements Store {
                     }
                     matched++;
                     if (keep > 0) {
-                        newest.add(value);
-                        if (newest.size() > keep) {
+                        if (newest.size() < keep) {
+                            newest.add(value);
+                        } else if (newestFirst.compare(value, newest.peek()) < 0) {
                             newest.poll();
+                            newest.add(value);
                         }
                     }
                 }
@@ -1156,6 +1181,62 @@ public final class FileStore implements Store {
         putIfNotNull(json, "abortedBy", record.getAbortedBy());
         putIfNotNull(json, "runRequestId", record.getRunRequestId());
         return json;
+    }
+
+    private static byte[] key(String name) {
+        return name.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    private static final byte[] K_ID = key("id");
+    private static final byte[] K_RUN_ID = key("runId");
+    private static final byte[] K_JOB = key("jobFullName");
+    private static final byte[] K_NUMBER = key("number");
+    private static final byte[] K_CAUSE = key("causeType");
+    private static final byte[] K_RESULT = key("result");
+    private static final byte[] K_STARTED = key("startedAt");
+    private static final byte[] K_DURATION = key("durationMs");
+    private static final byte[] K_USER = key("user");
+    private static final byte[] K_PARAMETERS = key("parameters");
+    private static final byte[] K_ABORTED_BY = key("abortedBy");
+    private static final byte[] K_REQUEST_ID = key("runRequestId");
+    private static final byte[] K_TYPE = key("type");
+    private static final byte[] K_TARGET = key("target");
+    private static final byte[] K_AT = key("at");
+    private static final byte[] K_GRANT_ID = key("grantId");
+    private static final byte[] K_DIFF = key("diff");
+    private static final byte[] K_DETAIL = key("detail");
+
+    /** The page-query twin of {@link #runRecordFromJson} (same fields, same required ones). */
+    private static RunRecord runRecordFromScanner(JsonLineScanner line) {
+        RunRecord record = new RunRecord(
+                line.requireString(K_RUN_ID, false),
+                line.requireString(K_JOB, true),
+                Math.toIntExact(line.requireLong(K_NUMBER)),
+                CauseType.valueOf(line.requireString(K_CAUSE, true)),
+                line.optString(K_RESULT, true),
+                Instant.ofEpochMilli(line.requireLong(K_STARTED)),
+                line.requireLong(K_DURATION));
+        record.setUser(line.optString(K_USER, true));
+        Map<String, String> parameters = line.optStringMap(K_PARAMETERS);
+        if (parameters != null) {
+            record.setParameters(parameters);
+        }
+        record.setAbortedBy(line.optString(K_ABORTED_BY, true));
+        record.setRunRequestId(line.optString(K_REQUEST_ID, false));
+        return record;
+    }
+
+    /** The page-query twin of {@link #changeRecordFromJson}. */
+    private static ChangeRecord changeRecordFromScanner(JsonLineScanner line) {
+        return ChangeRecord.restore(
+                line.requireString(K_ID, false),
+                ChangeType.valueOf(line.requireString(K_TYPE, true)),
+                line.optString(K_TARGET, true),
+                line.optString(K_USER, true),
+                Instant.ofEpochMilli(line.requireLong(K_AT)),
+                line.optString(K_GRANT_ID, false),
+                line.optString(K_DIFF, false),
+                line.optString(K_DETAIL, false));
     }
 
     private static RunRecord runRecordFromJson(JSONObject json) {
