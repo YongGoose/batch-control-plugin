@@ -225,6 +225,66 @@ public class RefusedRerunAuditTest {
     }
 
     /**
+     * T-06-77 (e2e-03 DEF-32, real path): the same situation as T-06-74, but u1 presses Retry the
+     * way a browser does: logged in, on the failed build's page, clicking naginator's "Retry" task
+     * link (a POST link that core's JavaScript sends with the crumb header). u1's refusal must be
+     * recorded as TRIGGER_BLOCKED naming the retry, by u1, and no build follows (SPEC 6; D-49 keeps
+     * the link visible and requires the click to be refused and recorded). Note 158.
+     */
+    @Test
+    public void t_06_77_retryClickedInTheBrowserIsRecordedAsTheUser() throws Exception {
+        FreeStyleProject job = approvalRequired("rr-nag-click");
+        job.getBuildersList().add(new FailureBuilder());
+        job.getPublishersList().add(new NaginatorPublisher("", false, false, false, 1, new FixedDelay(0)));
+
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        assertBlocked(j, job, 2, 1);
+        FreeStyleBuild failed = job.getBuildByNumber(1);
+        j.assertBuildStatus(Result.FAILURE, failed);
+        assertTrue(rerunRecords(job).stream().noneMatch(r -> "u1".equals(r.getUser())),
+                "fixture: before u1 acts no refusal record may name u1: " + describe(rerunRecords(job)));
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
+        wc.getOptions().setJavaScriptEnabled(true);
+        wc.getOptions().setThrowExceptionOnScriptError(false);
+        List<String> retryPosts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        new org.htmlunit.util.WebConnectionWrapper(wc) {
+            @Override
+            public org.htmlunit.WebResponse getResponse(org.htmlunit.WebRequest request) throws java.io.IOException {
+                org.htmlunit.WebResponse response = super.getResponse(request);
+                if (request.getHttpMethod() == org.htmlunit.HttpMethod.POST
+                        && request.getUrl().getPath().endsWith("/retry/")) {
+                    retryPosts.add(response.getStatusCode() + " crumb=" + request.getAdditionalHeaders().keySet());
+                }
+                return response;
+            }
+        };
+        org.htmlunit.html.HtmlPage buildPage = wc.getPage(failed);
+        assertEquals(200, buildPage.getWebResponse().getStatusCode(), "fixture: u1 must open the failed build's page");
+        org.htmlunit.html.HtmlAnchor retry = null;
+        for (org.htmlunit.html.HtmlAnchor a : buildPage.getAnchors()) {
+            String href = a.getHrefAttribute();
+            if (href != null && href.endsWith(failed.getUrl() + "retry/")) {
+                retry = a;
+                break;
+            }
+        }
+        assertNotNull(retry, "fixture: the failed build's page must offer naginator's Retry link (D-49)");
+        retry.click();
+        wc.waitForBackgroundJavaScript(10000);
+        assertEquals(1, retryPosts.size(), "fixture: the click must have sent exactly one POST to retry/, as a browser"
+                + " does: " + retryPosts);
+
+        assertBlocked(j, job, 2, 1);
+        List<ChangeRecord> records = rerunRecords(job);
+        assertTrue(records.stream().anyMatch(r -> r.getType() == ChangeType.TRIGGER_BLOCKED && "u1".equals(r.getUser())
+                        && String.valueOf(r.getDetail()).toLowerCase(Locale.ROOT).contains("retry")),
+                "u1's Retry clicked in the browser must be recorded as TRIGGER_BLOCKED cause=RETRY by u1: "
+                        + describe(records));
+    }
+
+    /**
      * Test-only root action: on a request thread, as the calling user, schedules build #1's job
      * with a {@code NaginatorCause} (of build #1) and a {@code RemoteCause}, and no UserIdCause.
      */

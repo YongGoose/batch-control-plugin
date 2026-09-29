@@ -260,6 +260,58 @@ public class CreateNamePatternTest {
         assertNotNull(j.jenkins.getItemByFullName("team/nightly.report"));
     }
 
+    /**
+     * T-08-57 (e2e-03 DEF-36): under a FOLDER CREATE grant with the exact-name restriction
+     * {@code nightly.report}, u1 creates that item and then asks core's rename check
+     * ({@code checkNewName}) about a different name. The answer names the restriction (SPEC 8:
+     * a rename authorised by the grant must match; SPEC 6 usability line: refusals explained) and
+     * is not core's "same as the current name" or a permission refusal. Note 159.
+     */
+    @Test
+    public void t_08_57_renameCheckUnderExactRestrictionNamesTheRestriction() throws Exception {
+        grant("nightly.report", "CREATE");
+        assertTrue(createByConfigXml("u1", "nightly.report") < 400, "fixture: the named item must be created");
+        assertNotNull(j.jenkins.getItemByFullName("team/nightly.report"));
+
+        WebResponse check = get(j, "u1", team.getUrl() + "job/nightly.report/checkNewName?newName=other-report");
+        String text = check.getContentAsString();
+        assertEquals(200, check.getStatusCode(), "the rename check must answer a message, not HTTP " + check.getStatusCode()
+                + ": " + UsabilityFixtures.excerpt(text));
+        assertFalse(text.contains("same as the current name"), "the rename check must not answer core's misleading"
+                + " message: " + UsabilityFixtures.excerpt(text));
+        assertFalse(text.contains("Job/Create") || text.contains("Job/Configure"), "the rename check must name the"
+                + " restriction, not a missing permission: " + UsabilityFixtures.excerpt(text));
+        assertTrue(text.contains("nightly.report") && RESTRICTION_WORD.matcher(text).find(), "the rename check must name"
+                + " the name restriction: " + UsabilityFixtures.excerpt(text));
+    }
+
+    /**
+     * T-08-58 (e2e-03 DEF-36): CLI {@code create-job} with a non-matching name — a different name
+     * and the permitted name with a trailing space — fails, creates nothing, and its message names
+     * the restriction, not "missing the Job/Create permission". Note 159.
+     */
+    @Test
+    public void t_08_58_cliCreateJobRefusalNamesTheRestriction() throws Exception {
+        grant("nightly.report", "CREATE");
+
+        for (String name : new String[] {"team/cli-job", "team/nightly.report "}) {
+            CLICommandInvoker.Result refused = new CLICommandInvoker(j, "create-job").asUser("u1")
+                    .withStdin(new ByteArrayInputStream(MINIMAL_JOB_XML.getBytes(StandardCharsets.UTF_8)))
+                    .invokeWithArgs(name);
+            String out = refused.stderr() + "\n" + refused.stdout();
+            assertNotEquals(0, refused.returnCode(), "create-job '" + name + "' must fail");
+            assertNull(j.jenkins.getItemByFullName(name.trim()), "no item may be created for '" + name + "'");
+            assertFalse(out.contains("Job/Create"), "create-job '" + name + "': the refusal must name the restriction, not"
+                    + " a missing Job/Create permission: " + out);
+            assertTrue(out.contains("nightly.report") && RESTRICTION_WORD.matcher(out).find(), "create-job '" + name
+                    + "': the refusal must name the name restriction: " + out);
+        }
+        assertNull(team.getItem("cli-job"));
+    }
+
+    private static final java.util.regex.Pattern RESTRICTION_WORD =
+            java.util.regex.Pattern.compile("(?i)restrict|only|allowed|permitted|match");
+
     /** T-08-46: without a restriction the grant behaves as before: any name in the scope, no violation. */
     @Test
     public void t_08_46_noRestrictionKeepsTodaysBehaviour() throws Exception {
