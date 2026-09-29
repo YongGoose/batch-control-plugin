@@ -134,10 +134,13 @@ from scripts.
     record merges every refusal of one job and cause kind into at most one
     record per hour, whoever the attempt ran as — a per-minute cron on a locked
     job would otherwise write 1,440 identical rows a day. A refusal of something
-    a person did, such as a clicked Retry, Rebuild or Replay, is not merged
-    that way: each attempt writes its own record naming the user and the build
-    it re-runs, and only a repeat of the same attempt by the same user within
-    one minute is merged, so a double click stays one record. A generated nightly job whose Job DSL or JCasC
+    a person did, a clicked Retry, Rebuild or Replay, is not merged that way:
+    each attempt writes its own record naming the user and the build it
+    re-runs, and a repeat of the same attempt by the same user within one
+    minute is merged, so a double click stays one record. These per-attempt
+    records are limited to 20 per user in any 10 minutes; further refusals by
+    that user in the same 10 minutes are not listed one by one but counted in a
+    single summary record. A generated nightly job whose Job DSL or JCasC
     definition pins `blockTimer: false` (or an allow list) still does not run its
     first night, since that value does not survive a fresh creation (above); the
     difference now is that the first refusal already produced the notice, the
@@ -327,21 +330,24 @@ code does on purpose.
     has the identical path today, with or without Batch Control, since Jenkins
     itself does not distinguish a script's save from a human one.
 
-    The remedy is **Authorize Project**, but installing it is not enough: it
-    must actually give the job's builds a user identity, so that the build's
-    save comes under the same guard as a manual one. Either set a global
-    default build authorization, or give the job its own authorization
-    strategy. With Authorize Project's per-project setting and no default, a
-    job that has no strategy of its own still builds as SYSTEM. While change
-    control is on, Batch Control checks every job that a pending or active
-    `CONFIGURE` window covers: the administrative monitor on Manage Jenkins
-    names the jobs whose builds still run as SYSTEM and says how to fix them,
-    and the detail page of a `CONFIGURE` request on such a job warns the
-    approver before the decision. The check is bounded: it examines at most
-    500 jobs across the scopes of `CONFIGURE` windows and names at most 50 of
-    them, and when it stops early a WARNING is written to the controller log,
-    so on a larger instance the list may be incomplete. The same monitor also
-    warns when no build authenticator (a `QueueItemAuthenticator`) is
+    The remedy is **Authorize Project** with a **global default build
+    authorization**, so that every build runs as a user whatever the job's own
+    configuration and whatever started it, and the build's save comes under
+    the same guard as a manual one. Installing the plugin is not enough, and a
+    strategy set on a single job does not protect that job: anyone who can
+    configure the job, a `CONFIGURE` window holder included, can remove the
+    strategy, and a strategy that runs builds as the user who triggered them
+    leaves timer and SCM builds, which no user triggered, running as SYSTEM.
+    With Authorize Project's per-project setting and no global default, a job
+    without a strategy of its own also builds as SYSTEM.
+
+    While change control is on, Batch Control checks this once for the whole
+    instance, not job by job. If builds can run as SYSTEM, the administrative
+    monitor on Manage Jenkins says so and that a global default build
+    authorization fixes it, and the detail page of a pending request that
+    includes `CONFIGURE` shows the same warning to the users who may decide it
+    and to `BatchControl/Manage` holders, before the decision. The same monitor
+    also warns when no build authenticator (a `QueueItemAuthenticator`) is
     configured at all.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores

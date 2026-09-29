@@ -143,13 +143,15 @@ A person refused at "Build Now", at a REST `build` call or at the CLI gets an
 refusals have no screen to read them at the time: Pipeline Replay, whose UI
 offers no channel for the message; a build-token submission, whose caller is a
 script reading an HTTP status; and a timer or upstream trigger turned away by
-one of the per-job options or by activation. None of these are untraceable afterwards: each is
-logged, and each writes a change record to the audit history — a blocked-token
-attempt its own record; a blocked Replay its own `TRIGGER_BLOCKED` record per
-attempt (a repeat of the same attempt within a minute is merged); and a timer or
-upstream submission, or any other unattended submission refused because the job
-is not activated, a coalesced `TRIGGER_BLOCKED` record (at most one per job and
-cause per hour).
+one of the per-job options or by activation. None of these are untraceable
+afterwards: each is logged and writes a change record to the audit history. A
+blocked build-token attempt gets its own record. A person's refused Replay,
+Retry or Rebuild gets its own `TRIGGER_BLOCKED` record per attempt, naming the
+build it re-runs; a repeat of the same attempt within a minute is merged, and
+at most 20 are listed per user in any 10 minutes, further ones being counted
+in one summary record. A refused timer or upstream submission, or any other
+unattended submission refused because the job is not activated, is coalesced
+into at most one `TRIGGER_BLOCKED` record per job and cause per hour.
 While a job's `Block cron (timer) triggers` or `Block upstream triggers` switch
 is on, that job's own page also shows a notice naming it to anyone who can read
 the job.
@@ -429,11 +431,14 @@ restriction, renames of what that window created are limited to matching names.
 **Builds that run as SYSTEM are outside the self-grant guard.** A build that
 runs as SYSTEM can write a permanent authorization entry on its job, so a
 `CONFIGURE` window holder could use one to keep access after the window ends.
-Authorize Project closes this only if it actually gives the job's builds a user
-identity: set a global default build authorization, or a strategy on the job.
-With its per-project setting and no default, a job without its own strategy
-still builds as SYSTEM. Batch Control names such jobs in its administrative
-monitor and warns the approver on the detail page of a `CONFIGURE` request.
+Authorize Project closes this only with a global default build authorization,
+which gives every build a user identity. A strategy on a single job is not
+enough: anyone who can configure the job, a window holder included, can remove
+it, and a strategy that follows the triggering user leaves timer and SCM builds
+running as SYSTEM. While change control is on and builds can run as SYSTEM, the
+administrative monitor says so for the whole instance, and the detail page of a
+pending `CONFIGURE` request shows the same warning to its approvers and to
+`BatchControl/Manage` holders.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
