@@ -1,7 +1,8 @@
 <?jelly escape-by-default='true'?>
 <!-- e2e-03 DEF-22 / T-12-12 (SPEC item 12): the monthly aggregate as a screen, with the counts
      labelled in words (HistorySection#summaryLabel). The JSON at summary?month= keeps the field
-     keys for scripts. Read-only; ViewHistory is enforced by HistorySection#getTarget. -->
+     keys for scripts. Read-only; ViewHistory is enforced by HistorySection#getTarget.
+     e2e re-audit DEF-28: no "Back to History" link; the breadcrumb bar leads back. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Monthly Summary" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
@@ -18,7 +19,6 @@
         </tbody>
       </table>
       <p>
-        <a href="${rootURL}/batch-control/history/">Back to History</a> ·
         <a href="${rootURL}/batch-control/history/summary?month=${month}">This month as JSON</a>
       </p>
     </l:main-panel>

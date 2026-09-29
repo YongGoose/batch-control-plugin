@@ -18,24 +18,41 @@
         are only recorded in the audit history.
       </j:when>
       <j:otherwise>
-        <strong>Batch Control:</strong> change control is enabled, but the users and groups
-        below hold Item Create/Configure/Delete directly from the authorization strategy,
-        outside the just-in-time grant flow. Their changes bypass grant control and are only
+        <!-- e2e re-audit DEF-29: users and groups in one table, each row naming its kind
+             ("User" or "Group"), its sid as written in the strategy and every permission found,
+             so a group entry reads exactly like a user entry. -->
+        <strong>Batch Control:</strong> change control is enabled, but the entries below hold
+        Item Create/Configure/Delete directly from the authorization strategy, outside the
+        just-in-time grant flow. Changes made through them bypass grant control and are only
         recorded in the audit history.
-        <ul style="margin: 0.5rem 0;">
-          <j:forEach var="h" items="${it.standingUsers}">
-            <li>
-              User <code>${h.sid}</code><j:if test="${h.displayName != h.sid}"> (${h.displayName})</j:if>:
-              <j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach>
-            </li>
-          </j:forEach>
-          <j:forEach var="h" items="${it.standingGroups}">
-            <li>
-              Group <code>${h.sid}</code>:
-              <j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach>
-            </li>
-          </j:forEach>
-        </ul>
+        <table class="jenkins-table jenkins-table--small" style="margin: 0.5rem 0; width: auto;">
+          <thead>
+            <tr>
+              <th scope="col">Kind</th>
+              <th scope="col">User or group</th>
+              <th scope="col">Standing permissions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <j:forEach var="h" items="${it.standingUsers}">
+              <tr>
+                <td>User</td>
+                <td><code>${h.sid}</code><j:if test="${h.displayName != h.sid}"> (${h.displayName})</j:if></td>
+                <td><j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach></td>
+              </tr>
+            </j:forEach>
+            <j:forEach var="h" items="${it.standingGroups}">
+              <tr>
+                <td>Group</td>
+                <td>
+                  <code>${h.sid}</code>
+                  <j:if test="${h.sid == 'authenticated'}"> (every logged-in user)</j:if>
+                </td>
+                <td><j:forEach var="p" items="${h.permissions}" varStatus="st">${p}<j:if test="${!st.last}">, </j:if></j:forEach></td>
+              </tr>
+            </j:forEach>
+          </tbody>
+        </table>
         Only the global authorization is scanned; per-folder and per-job entries are not listed.
       </j:otherwise>
     </j:choose>

@@ -30,6 +30,7 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -98,7 +99,30 @@ public class JobRequestAction implements Action {
      */
     @Override
     public String getDisplayName() {
-        return RequestRunUiDecorator.REQUEST_RUN_LABEL;
+        return isActivationPage() ? ACTIVATION_CRUMB_LABEL : RequestRunUiDecorator.REQUEST_RUN_LABEL;
+    }
+
+    /**
+     * e2e re-audit DEF-28 (DEF-06): the label of this action's breadcrumb on the activation form
+     * ({@code <job>/batch-control/activation}), whose URL lies beneath this action. There the
+     * crumb must not read "Request Run": the page is not a run request, and the crumb bar reads
+     * {@code <job> > Batch Control > Activation}. Core takes a crumb's label from the action's
+     * display name, so on that page the job sidebar entry reads the same; on every other page
+     * (the job page included) the label stays "Request Run" (U-02).
+     */
+    static final String ACTIVATION_CRUMB_LABEL = "Batch Control";
+
+    /** Whether the current request renders the activation form beneath this action. */
+    private static boolean isActivationPage() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null) {
+            return false;
+        }
+        if (req.findAncestor(JobActivationForm.class) != null) {
+            return true;
+        }
+        String uri = req.getRequestURI();
+        return uri != null && uri.endsWith("/batch-control/activation");
     }
 
     /**
