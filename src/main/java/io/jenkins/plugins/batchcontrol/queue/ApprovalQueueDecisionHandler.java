@@ -115,21 +115,23 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         List<Cause> causes = collectCauses(actions);
         List<Cause> effective = retryAwareCauses(causes);
 
-        if (approvalRequired) {
-            // 1. Approved submission: the marker authorizes exactly one queue entry (D-23).
-            for (Action action : actions) {
-                if (action instanceof ApprovedRunAction) {
-                    ApprovedRunAction marker = (ApprovedRunAction) action;
-                    boolean consumed = RunRequestService.get()
-                            .consumeMarker(marker.getRequestId(), job.getFullName());
-                    if (!consumed) {
-                        LOGGER.warning(() -> "Blocked submission of job '" + job.getFullName()
-                                + "' with an invalid or already consumed approval marker (request "
-                                + marker.getRequestId() + ")");
-                    }
-                    return consumed;
+        // 1. Approved submission: the marker authorizes exactly one queue entry (D-23), whether or
+        // not the job requires approval (D-47): a re-use is refused and recorded on every job.
+        for (Action action : actions) {
+            if (action instanceof ApprovedRunAction) {
+                ApprovedRunAction marker = (ApprovedRunAction) action;
+                boolean consumed = RunRequestService.get()
+                        .consumeMarker(marker.getRequestId(), job.getFullName());
+                if (!consumed) {
+                    LOGGER.warning(() -> "Blocked submission of job '" + job.getFullName()
+                            + "' with an invalid or already consumed approval marker (request "
+                            + marker.getRequestId() + ")");
                 }
+                return consumed;
             }
+        }
+
+        if (approvalRequired) {
 
             // 2. Pipeline Replay: refused quietly (ReplayAction.run has no Failure channel).
             for (Cause cause : causes) {
@@ -191,9 +193,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     return false;
                 }
             }
-        } else if (hasMarker(actions) || isHumanSubmission(effective)) {
+        } else if (isHumanSubmission(causes)) {
             // approvalRequired governs human-originated runs only (D-46a): on a job without it a
             // person may start the job, while unattended causes still need the activation below.
+            // Judged on the submission's own causes (D-47): an automatic retry carries the retried
+            // build's causes, but nobody is acting now, so it continues to the activation check.
             return true;
         }
 
@@ -247,24 +251,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return activatedOrRefuse(job, KIND_OTHER, "an unattended run (" + describe(causes) + ")");
     }
 
-    /** Whether the submission carries an approval marker (a person's approved request). */
-    private static boolean hasMarker(List<Action> actions) {
-        for (Action action : actions) {
-            if (action instanceof ApprovedRunAction) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * Whether a person started this submission (D-46b): the UI, REST or CLI build ({@code
      * UserIdCause} and its CLI subtype, the deprecated {@code UserCause}), a Pipeline Replay, or an
-     * approved request's cause. A build token ({@code RemoteCause}) is not a person: it is the
-     * credential of a script, so it counts as unattended.
+     * approved request's cause. A Rebuild click carries the clicking user's {@code UserIdCause}
+     * and so counts as a person. A build token ({@code RemoteCause}) is not a person: it is the
+     * credential of a script, so it counts as unattended. Nor is an automatic retry (D-47),
+     * whatever causes it copied from the build it retries.
      */
     @SuppressWarnings("deprecation")
     private static boolean isHumanSubmission(List<Cause> causes) {
+        if (isAutomaticRetry(causes)) {
+            // D-47: the person in a retry's cause list acted on the retried build, not on this one.
+            return false;
+        }
         for (Cause cause : causes) {
             if (cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause
                     || cause instanceof ApprovedCause
@@ -273,6 +273,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
         return false;
+    }
+
+    /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
+    private static boolean isAutomaticRetry(List<Cause> causes) {
+        return retryAwareCauses(causes).size() != causes.size();
     }
 
     private static String describe(List<Cause> causes) {

@@ -31,9 +31,7 @@ public class ActivationItemListener extends ItemListener {
 
     @Override
     public void onCreated(Item item) {
-        if (!(item instanceof Job) && !(item instanceof ComputedFolder)) {
-            return;
-        }
+        // Every item: a subject gets its initial state, anything else loses a stale one (S-14-03).
         try {
             ActivationService.get().onItemCreated(item);
         } catch (RuntimeException e) {

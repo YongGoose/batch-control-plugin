@@ -605,7 +605,8 @@ public final class ActivationService {
         lock.lock();
         try {
             if (!isSubject(item)) {
-                if (item instanceof Job) {
+                // S-14-03: whatever the item is, a state left under its name is not its own.
+                if (store.loadActivationState(fullName) != null) {
                     deleteState(fullName);
                 }
                 return;
