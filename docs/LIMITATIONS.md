@@ -14,20 +14,25 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 1. **Administrators bypass every control.** `Overall/Administer` implies every
    Batch Control permission and every Jenkins permission. The plugin does not try
    to stop administrators; it records what they do.
-2. **Only causes the plugin recognises are classified.** A build started by a
-   trigger plugin with its own `Cause` type, a generic webhook trigger for
-   instance, is not recognised as person-initiated and therefore **passes** the
-   approval gate. The pass is logged. This is the same default-open posture as
-   the timer and upstream policies: verify how your own trigger plugins behave
+2. **Only causes the plugin recognises are classified as human.** A build
+   started by a trigger plugin with its own `Cause` type, a generic webhook
+   trigger for instance, or by a script or plugin code with no cause or only
+   `LegacyCodeCause`, is not recognised as person-initiated, so it is treated as
+   unattended: it needs no run request, but it passes only on an **activated**
+   job (item 39). On an activated job it **passes** the approval gate even when
+   `Require approval to run` is set, and neither `blockTimer` nor `blockUpstream`
+   narrows it; the pass is logged. Verify how your own trigger plugins behave
    before relying on the gate. Core's own build token is *not* in this category:
    the `RemoteCause` that a `?token=` submission carries is classified, refused
    quietly and written to the audit history as a blocked attempt.
-3. **cron, upstream and SCM triggers pass by default** on a job that already
-   exists, and anything installed during a permission window keeps firing after
-   that window closes. Expiry removes the *permission*, not the automation that
-   was configured with it. A job **created** while run control is on is the
-   exception: it starts with cron and upstream blocked (item 13), so this applies
-   to it only once somebody has unlocked it.
+3. **cron, upstream and SCM triggers pass by default on an activated job**,
+   and anything installed during a permission window keeps firing after that
+   window closes. Expiry removes the *permission*, not the automation that was
+   configured with it. Jobs that existed at install, and jobs created while run
+   control is off, are activated. A job **created** while run control is on is
+   the exception: it starts not activated (item 39) and with cron and upstream
+   blocked (item 13), so this applies to it only once an approver has activated
+   it and, for cron and upstream, somebody has cleared the switches.
 4. **A blocked job called from a Pipeline `build` step fails its caller.** When
    a protected job is refused at queue entry, the upstream job ends as `FAILURE`.
    This happens even with `wait: false`; it is Jenkins' behaviour, not a choice
@@ -84,10 +89,13 @@ from scripts.
 13. **While run control is on, every newly created job starts locked**, whatever
     the creation path (UI, REST, CLI, Job DSL, a seed job, a copy) and whoever the
     creator is: `approvalRequired=true`, `blockTimer=true`, `blockUpstream=true`
-    and an empty `allowedUpstreamJobs`. No cause can start the job until somebody
-    turns a switch off in its configuration, which is itself a recorded change and,
-    with change control on, needs a permission window. Creating a job and putting
-    it into service are deliberately two separate acts.
+    and an empty `allowedUpstreamJobs`. It also starts **not activated** (item
+    39). Clearing these switches is a recorded change and, with change control
+    on, needs a permission window, but it does **not** put the job into service:
+    no unattended cause starts the job until an approver approves an `ACTIVATE`
+    request, whatever its configuration says. Clearing `approvalRequired` only
+    lets a person start it without a run request. Creating a job and putting it
+    into service are deliberately two separate acts.
 
     **Values in the creation payload do not survive the lock.** An
     `approvalRequired=false`, a `blockTimer=false`, a `blockUpstream=false` or an
@@ -105,8 +113,9 @@ from scripts.
 
     **A refused timer, upstream or Replay submission is recorded and shown, not
     silent (#21).** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
-    record naming the job, the cause kind (`TIMER`, `UPSTREAM`, `REPLAY`) and the
-    switch that blocked it (`blockTimer`, `blockUpstream`, `approvalRequired`),
+    record naming the job, the cause kind (`TIMER`, `UPSTREAM`, `REPLAY`, ...) and
+    what blocked it (`blockTimer`, `blockUpstream`, `approvalRequired`, or
+    `activation` for a job that is not activated),
     listed on the change-history screens and exported in `changes.csv`. While run
     control is on and the switch is checked, the job's own main page carries a
     notice to any viewer holding `Item/Read`, naming the switch and pointing at
@@ -135,12 +144,14 @@ from scripts.
     landed, including the ones whose whole purpose was to run unattended, and the
     fix was to make the seed script clear the property right after creating them.
     A generated job that must run unattended needs that second pass, and the pass
-    is recorded.
+    is recorded; it also needs an approved activation, which no script can
+    supply.
 
 14. **Branch jobs generated by a multibranch project are exempt** from that
     default. They have no configuration screen, so there would be no way to turn
     the control off, and re-indexing regenerates their configuration anyway.
-    Their runs are still recorded.
+    Their runs are still recorded. They are *not* exempt from activation: it is
+    carried by their computed folder (item 39).
 
 ## Secrets
 
@@ -304,13 +315,14 @@ code does on purpose.
     Configure holder start editing item ACLs. Upgrading from an older release
     therefore leaves the plain global matrix strategy installed. Moving to
     **Batch Control: Matrix-based security** afterwards is a separate action
-    an administrator takes explicitly, from the migration button or the
-    administrative monitor's prompt, and both say plainly that per-item
+    an administrator takes explicitly, with the **Install the Batch Control
+    variant** button of the administrative monitor on Manage Jenkins (shown
+    while change control is on), which says plainly that per-item
     properties become effective from that point.
 
 ## Notifications and computed folders
 
-36. **A CREATE name restriction does not cover children a computed folder
+37. **A CREATE name restriction does not cover children a computed folder
     creates during indexing.** Branch jobs a multibranch project generates and
     child projects an organization folder generates are created by the system
     while it re-indexes, not by the holder of the restricted `Item/Create`
@@ -318,12 +330,54 @@ code does on purpose.
     them (security-08 S-07, D-40a). This follows the same boundary as item 6:
     those children are generated rather than authored, and only their runs are
     recorded.
-37. **A notification e-mail includes a link back to the request only when the
+38. **A notification e-mail includes a link back to the request only when the
     Jenkins URL is configured.** Set it under Manage Jenkins → System
     (Jenkins Location). Without it, a `REQUEST_CREATED`, `APPROVERS_CHANGED`,
     `APPROVED`, `REJECTED` or `GRANT_EXPIRING` message still carries its
     subject and reason text but no link, rather than guessing one from the
     request that triggered it (security-08 S-04, D-36).
+
+## Activation and other plugins' buttons
+
+39. **While run control is on, a job created under it runs unattended only
+    after an approved activation** (SPEC 6a). Unattended means every cause that
+    is not a person acting now: timer, upstream, SCM, webhooks and other
+    unclassified trigger causes, submissions from scripts and plugin code (no
+    cause, or only `LegacyCodeCause`), and automatic retries such as naginator's,
+    even when the build being retried was started by a person. The gate applies
+    to every non-computed job whatever `approvalRequired` says, and to every
+    user including administrators; clearing `blockTimer`, `blockUpstream` or
+    `approvalRequired`, or removing the job property, never activates a job, and
+    no configuration write path can. An activation is requested per job
+    (`ACTIVATE`, with a reason and one or more approvers) with
+    `BatchControl/Request` plus `Item/Read`, decided on the **Activations**
+    screen like a run request, and recorded as `ACTIVATED`. A hold (`HOLD`) is
+    also a request that needs approval, recorded as `HELD`; for an immediate
+    stop use Jenkins' **Disable Project** or the global run-control switch. An
+    activation survives configuration edits, renames and moves.
+
+    What counts as activated without a request: every job and folder present
+    when this version is first installed (`activatedBy = (upgrade)`, recorded
+    once), and every job created while run control is off
+    (`activatedBy = (uncontrolled)`), so turning run control on never stops an
+    existing schedule. Computed folders (multibranch projects, organization
+    folders) carry activation for their children: one created while run control
+    is on starts not activated, the `ACTIVATE`/`HOLD` request is made on the
+    folder, and a child passes only if its nearest computed-folder ancestor is
+    activated. The state fails closed: a job re-created under a deleted job's
+    name starts not activated.
+40. **Other plugins' build buttons show their own generic failure message.**
+    When Batch Control refuses a run started from another plugin's button
+    (Rebuild, Rebuild Last, naginator's Retry, a button relabelled or replaced by
+    customize-build-now), the refusal happens at queue entry, but that plugin
+    submits by script and shows only its own message, such as "Failed to
+    schedule build. Reload the page and try again." or "Failed.", which says
+    nothing about approval or activation. The run was correctly refused and
+    nothing was queued. The job's own page is where the reason is: on a job
+    that requires approval a notice says that manual runs need an approved run
+    request, whichever button started them, and links to **Request Run** for a
+    `Request` holder; the activation notice says whether unattended runs are
+    allowed, with a **Request activation** link (e2e-03 DEF-01).
 
 ## Out of scope by design
 
