@@ -6,7 +6,7 @@
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Activation - ${it.item.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.item}"/>
-    <!-- e2e-03 DEF-06: see JobRequestAction/activation.jelly. -->
+    <!-- e2e-03 DEF-06: see JobActivationRoute/activation.jelly. -->
     <j:if test="${activationCrumb}">
       <l:breadcrumb title="Activation" href="${rootURL}/${it.item.url}batch-control/activation"/>
     </j:if>

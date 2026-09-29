@@ -31,6 +31,7 @@ import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -48,7 +49,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * holders, so {@code /job/<name>/batch-control/} and every URL beneath it answer 404.
  */
 @Restricted(NoExternalUse.class)
-public class JobRequestAction implements Action {
+public class JobRequestAction implements Action, StaplerProxy {
 
     /** {@link FormErrors} name of the request form. */
     static final String FORM = "request";
@@ -99,30 +100,29 @@ public class JobRequestAction implements Action {
      */
     @Override
     public String getDisplayName() {
-        return isActivationPage() ? ACTIVATION_CRUMB_LABEL : RequestRunUiDecorator.REQUEST_RUN_LABEL;
+        return RequestRunUiDecorator.REQUEST_RUN_LABEL;
     }
 
     /**
-     * e2e re-audit DEF-28 (DEF-06): the label of this action's breadcrumb on the activation form
-     * ({@code <job>/batch-control/activation}), whose URL lies beneath this action. There the
-     * crumb must not read "Request Run": the page is not a run request, and the crumb bar reads
-     * {@code <job> > Batch Control > Activation}. Core takes a crumb's label from the action's
-     * display name, so on that page the job sidebar entry reads the same; on every other page
-     * (the job page included) the label stays "Request Run" (U-02).
+     * e2e re-audit DEF-06/DEF-28: the activation form lies beneath this action's URL
+     * ({@code <job>/batch-control/activation}), but it is not a run request, so its breadcrumbs
+     * must read {@code <job> > Activation} and no crumb may open the run request form. Core's
+     * breadcrumb bar lists every request ancestor that is a {@link hudson.model.ModelObject};
+     * a {@link StaplerProxy} is replaced by its target before it becomes an ancestor. For the
+     * activation URLs this action therefore hands the rest of the request to a
+     * {@link JobActivationRoute}, which is no model object and gives no crumb; every other URL
+     * is served by this action itself. The permission to reach this action at all
+     * ({@link #getUrlName()}) was decided before this is called, and
+     * {@link JobActivationForm#doSubmit} checks its own permissions.
      */
-    static final String ACTIVATION_CRUMB_LABEL = "Batch Control";
-
-    /** Whether the current request renders the activation form beneath this action. */
-    private static boolean isActivationPage() {
+    @Override
+    public Object getTarget() {
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req == null) {
-            return false;
+        String rest = req == null ? null : req.getRestOfPath();
+        if (rest != null && (rest.equals("/activation") || rest.startsWith("/activation/"))) {
+            return new JobActivationRoute(job);
         }
-        if (req.findAncestor(JobActivationForm.class) != null) {
-            return true;
-        }
-        String uri = req.getRequestURI();
-        return uri != null && uri.endsWith("/batch-control/activation");
+        return this;
     }
 
     /**
@@ -196,15 +196,6 @@ public class JobRequestAction implements Action {
     /** Approver candidates: global approver list ∩ job-level restriction (if configured). */
     public List<String> getApproverOptions() {
         return ApproverOptions.forJob(job);
-    }
-
-    /**
-     * Stapler: serves {@code /job/<name>/batch-control/activation} (SPEC item 6a). Reachable only
-     * through this action, so it is absent (404) without {@code BatchControl/Request} like the
-     * rest of this URL space; {@link JobActivationForm#doSubmit} re-checks the permissions.
-     */
-    public JobActivationForm getActivation() {
-        return new JobActivationForm(job);
     }
 
     // ---------------------------------------------------------------- submission
