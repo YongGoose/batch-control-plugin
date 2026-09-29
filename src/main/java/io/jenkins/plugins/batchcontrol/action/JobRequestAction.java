@@ -123,6 +123,15 @@ public class JobRequestAction implements Action {
         return ApproverOptions.forJob(job);
     }
 
+    /**
+     * Stapler: serves {@code /job/<name>/batch-control/activation} (SPEC item 6a). Reachable only
+     * through this action, so it is absent (404) without {@code BatchControl/Request} like the
+     * rest of this URL space; {@link JobActivationForm#doSubmit} re-checks the permissions.
+     */
+    public JobActivationForm getActivation() {
+        return new JobActivationForm(job);
+    }
+
     // ---------------------------------------------------------------- submission
 
     /**

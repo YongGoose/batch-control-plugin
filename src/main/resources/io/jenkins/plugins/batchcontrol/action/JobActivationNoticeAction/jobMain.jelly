@@ -1,0 +1,55 @@
+<?jelly escape-by-default='true'?>
+<!-- SPEC item 6a: the job page says whether the job is in service for unattended triggers and
+     links to the activation request form. Rendered for every action by the job main page; shown
+     only while run control is on, the job requires approval and the viewer holds Item/Read
+     (JobActivationNoticeAction#isShown). The form link is rendered only for a Request holder.
+     Only constant text, request ids and statuses are rendered; no script.
+
+     Wording contract: an activated job's notice must not contain the phrases used for the other
+     two states, so "Request a hold" rather than any phrase with "on hold" in it. -->
+<j:jelly xmlns:j="jelly:core">
+  <j:if test="${it.shown}">
+    <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control/activation"/>
+    <j:choose>
+      <j:when test="${it.activated}">
+        <div class="jenkins-alert jenkins-alert-success" role="status" style="margin-top: 1rem;">
+          <strong>Batch Control: this job is activated.</strong>
+          Timer and upstream triggers may start it, as far as its own trigger settings allow.
+          <j:if test="${it.canRequest}">
+            To stop unattended runs, <a href="${formUrl}">request a hold</a>; the hold takes effect
+            once it is approved.
+          </j:if>
+        </div>
+      </j:when>
+      <j:otherwise>
+        <div class="jenkins-alert jenkins-alert-warning" role="status" style="margin-top: 1rem;">
+          <j:choose>
+            <j:when test="${it.held}">
+              <strong>Batch Control: this job is on hold.</strong>
+            </j:when>
+            <j:otherwise>
+              <strong>Batch Control: this job is not activated.</strong>
+            </j:otherwise>
+          </j:choose>
+          Timer and upstream triggers do not start it until an activation request is approved.
+          Changing the job configuration does not change this.
+          <j:if test="${it.canRequest}">
+            <a href="${formUrl}">Request activation</a>.
+          </j:if>
+        </div>
+      </j:otherwise>
+    </j:choose>
+    <j:set var="pending" value="${it.pendingRequests}"/>
+    <j:if test="${!empty(pending)}">
+      <ul style="margin: 0.5rem 0;">
+        <j:forEach var="r" items="${pending}">
+          <li>
+            Pending ${r.action} request
+            <a href="${rootURL}/batch-control/activations/${r.id}/">${r.id}</a>
+            by ${r.requester}
+          </li>
+        </j:forEach>
+      </ul>
+    </j:if>
+  </j:if>
+</j:jelly>
