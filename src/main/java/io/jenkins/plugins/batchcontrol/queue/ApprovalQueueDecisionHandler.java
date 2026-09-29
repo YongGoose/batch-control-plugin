@@ -154,7 +154,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         if (approvalRequired) {
 
             // 2. Pipeline Replay: refused and recorded; explained only to a person (see below).
-            for (Cause cause : causes) {
+            // S-22-05: a Replay only when the submission's own re-run cause is the Replay (a Rebuild
+            // of a replayed build carries a copied ReplayCause and is judged as a Rebuild).
+            for (Cause cause : KIND_REPLAY.equals(lastRerunKind(causes)) ? causes : List.<Cause>of()) {
                 if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("replay", job,
                             () -> "Blocked replay of approval-required job '" + job.getFullName() + "'");
@@ -245,8 +247,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             if (!retry || userClickedRetry) {
                 for (Cause cause : causes) {
                     if (cause instanceof Cause.UserIdCause) {
-                        String rerun = retry ? KIND_RETRY
-                                : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
+                        // S-22-05: the submission's own re-run cause is the last one; earlier ones
+                        // were copied from the build it repeats.
+                        String own = lastRerunKind(causes);
+                        String rerun = KIND_RETRY.equals(own) || KIND_REBUILD.equals(own) ? own : null;
                         if (rerun != null) {
                             String user = Jenkins.getAuthentication2().getName();
                             String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
@@ -275,8 +279,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
                             + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
                     // Recorded, not only logged (SPEC item 6, e2e-03 DEF-03).
-                    String kind = isAutomaticRetry(causes) ? KIND_RETRY
-                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : KIND_OTHER;
+                    String own = lastRerunKind(causes);
+                    String kind = KIND_RETRY.equals(own) || KIND_REBUILD.equals(own) ? own : KIND_OTHER;
                     String what = KIND_RETRY.equals(kind) ? "a retry" : KIND_REBUILD.equals(kind) ? "a Rebuild" : "a re-run";
                     recordTriggerBlocked(job, kind, "approvalRequired", "Blocked " + what + " of job '"
                             + job.getFullName() + "' that re-uses an earlier "
@@ -432,6 +436,27 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return "build".equals(lastToken) || "buildWithParameters".equals(lastToken);
     }
 
+    /**
+     * The kind of the submission's own re-run cause (S-22-05): the last naginator, Rebuild or
+     * Replay cause in the list, since both naginator and Rebuild copy the repeated build's causes
+     * before adding their own; {@code null} when there is none.
+     */
+    private static String lastRerunKind(List<Cause> causes) {
+        for (int i = causes.size() - 1; i >= 0; i--) {
+            String name = causes.get(i).getClass().getName();
+            if (NAGINATOR_CAUSE_CLASS.equals(name)) {
+                return KIND_RETRY;
+            }
+            if (REBUILD_CAUSE_CLASS.equals(name)) {
+                return KIND_REBUILD;
+            }
+            if (REPLAY_CAUSE_CLASS.equals(name)) {
+                return KIND_REPLAY;
+            }
+        }
+        return null;
+    }
+
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
     private static boolean isAutomaticRetry(List<Cause> causes) {
         return retryAwareCauses(causes).size() != causes.size();
@@ -522,7 +547,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * the rebuilt build.
      */
     private static String sourceBuild(List<Cause> causes) {
-        for (Cause cause : causes) {
+        // S-22-05: from the last re-run cause, the submission's own; earlier ones are inherited.
+        for (int i = causes.size() - 1; i >= 0; i--) {
+            Cause cause = causes.get(i);
             String name = cause.getClass().getName();
             String getter = NAGINATOR_CAUSE_CLASS.equals(name) ? "getSourceBuildNumber"
                     : REPLAY_CAUSE_CLASS.equals(name) ? "getOriginalNumber" : null;
