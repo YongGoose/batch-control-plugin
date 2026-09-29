@@ -8,6 +8,7 @@ import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -202,10 +203,18 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return transitions == null || transitions.isEmpty() ? null : transitions.get(0).getAt();
     }
 
+    /** The selected month as a store period in the plugin clock's zone (S-03). */
+    private Period monthPeriod() {
+        java.time.ZoneId zone = BatchClock.clock().getZone();
+        YearMonth month = getMonth();
+        return new Period(month.atDay(1).atStartOfDay(zone).toInstant(),
+                month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant());
+    }
+
     private RecordPage<Incident> page() {
         if (page == null) {
             // Bounded read (#13): the monthly index is walked newest first up to the record cap.
-            page = FileStore.get().pageIncidents(List.of(getMonth()), i -> true,
+            page = FileStore.get().pageIncidents(List.of(getMonth()), monthPeriod(), s -> true, i -> true,
                     (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;

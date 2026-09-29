@@ -6,6 +6,7 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -172,10 +173,18 @@ public class ChangesSection implements ModelObject, StaplerProxy {
         return DiffSummary.of(diff);
     }
 
+    /** The selected month as a store period in the plugin clock's zone (S-03). */
+    private Period monthPeriod() {
+        java.time.ZoneId zone = BatchClock.clock().getZone();
+        YearMonth month = getMonth();
+        return new Period(month.atDay(1).atStartOfDay(zone).toInstant(),
+                month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant());
+    }
+
     private RecordPage<ChangeRecord> page() {
         if (page == null) {
             // Bounded read (#13): only this page's window is held and only its diffs are read.
-            page = FileStore.get().pageChangeRecords(List.of(getMonth()), c -> true,
+            page = FileStore.get().pageChangeRecords(List.of(getMonth()), monthPeriod(), c -> true,
                     (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;

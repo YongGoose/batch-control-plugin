@@ -5,6 +5,7 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -184,7 +185,9 @@ public class DashboardSection implements ModelObject, StaplerProxy {
                 months.add(m);
             }
             // Bounded read (#13): newest first, stops at the record cap.
-            page = FileStore.get().pageRunRecords(months, r -> !r.getStartedAt().isBefore(cutoff),
+            // Only records inside the window count toward the cap (S-03).
+            page = FileStore.get().pageRunRecords(months, new Period(cutoff, null),
+                    r -> !r.getStartedAt().isBefore(cutoff),
                     (getPage() - 1) * PAGE_SIZE, PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }
         return page;

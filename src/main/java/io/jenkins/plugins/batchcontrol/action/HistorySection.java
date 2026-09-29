@@ -15,6 +15,8 @@ import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.IncidentSummary;
+import io.jenkins.plugins.batchcontrol.store.Period;
 import io.jenkins.plugins.batchcontrol.store.RecordPage;
 import io.jenkins.plugins.batchcontrol.store.RequestSummary;
 import io.jenkins.plugins.batchcontrol.store.RunMonthStats;
@@ -371,6 +373,23 @@ public class HistorySection implements ModelObject, StaplerProxy {
                 && f.matchesStatus(i.getStatus());
     }
 
+    /** The filter's date range as a store period: only records inside it count toward the cap (S-03). */
+    private Period period() {
+        FilterParser.Filter f = getFilter();
+        return new Period(f.fromInstant(), f.toInstantExclusive());
+    }
+
+    /**
+     * The part of {@link #incidentFilter()} decidable from the index line (S-06), so an incident
+     * XML is loaded only when it can match. A line without a creation time is let through and
+     * decided by the full filter after loading.
+     */
+    private Predicate<IncidentSummary> incidentIndexFilter() {
+        FilterParser.Filter f = getFilter();
+        return s -> (s.createdAt() == null || f.inRange(s.createdAt()))
+                && f.matchesJob(s.jobFullName()) && f.matchesResult(s.result());
+    }
+
     private Predicate<ChangeRecord> changeFilter() {
         FilterParser.Filter f = getFilter();
         return c -> f.inRange(c.getAt()) && f.matchesJob(c.getTarget())
@@ -410,7 +429,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     private RecordPage<ChangeRecord> markerReusePage() {
         if (markerReuse == null) {
             Predicate<ChangeRecord> match = changeFilter();
-            markerReuse = FileStore.get().pageChangeRecords(storedMonths(),
+            markerReuse = FileStore.get().pageChangeRecords(storedMonths(), period(),
                     c -> c.getType() == ChangeType.MARKER_REUSE_BLOCKED && match.test(c),
                     0, REUSE_ALERT_LIMIT, Store.MAX_SCANNED_RECORDS);
         }
@@ -451,9 +470,10 @@ public class HistorySection implements ModelObject, StaplerProxy {
             int cap = Store.MAX_SCANNED_RECORDS;
             switch (getKind()) {
                 case "incidents" -> listing = Listing.of(FileStore.get().pageIncidents(
-                        months, incidentFilter(), offset, PAGE_SIZE, cap));
+                        months, period(), incidentIndexFilter(), incidentFilter(),
+                        offset, PAGE_SIZE, cap));
                 case "changes" -> listing = Listing.of(FileStore.get().pageChangeRecords(
-                        months, changeFilter(), offset, PAGE_SIZE, cap));
+                        months, period(), changeFilter(), offset, PAGE_SIZE, cap));
                 case "requests" -> {
                     List<RequestSummary> all = matchingRequestSummaries();
                     List<RunRequest> rows = new ArrayList<>();
@@ -466,7 +486,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
                     listing = new Listing(rows, all.size(), offset + PAGE_SIZE < all.size(), false);
                 }
                 default -> listing = Listing.of(FileStore.get().pageRunRecords(
-                        months, runFilter(), offset, PAGE_SIZE, cap));
+                        months, period(), runFilter(), offset, PAGE_SIZE, cap));
             }
         }
         return listing;
