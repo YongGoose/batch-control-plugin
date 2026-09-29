@@ -43,14 +43,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * SPEC item 4, "a history, dashboard or change-list page load reads a bounded amount of data
  * regardless of how many records a month holds ... and a query span is capped by records, not by
- * files" (#13). Matrix rows T-10-08, T-12-06, T-12-07 and T-12-08 (notes 64, 65).
+ * files" (#13), and the SPEC section 6 measurement. Matrix rows T-10-08, T-10-09, T-12-06,
+ * T-12-07 and T-12-08 (notes 64, 65, 66).
  *
  * <p>"Bounded regardless of how many records a month holds" is measured as a comparison: the same
- * page over a month of 1,500 records and over a month of 150,000 records (5,000 runs/day, the
- * SPEC section 6 volume) must cost about the same heap allocation, and the large one must render
- * within the SPEC section 6 bound of 2 s. A page that materialises the whole month allocates in
- * proportion to it (several hundred MB for 150,000 lines) and fails the comparison even on a
- * machine fast enough to beat the time bound.
+ * page over a month of 1,500 records and over a month of 35,000 records (5,000 runs/day for the 7
+ * days before "now", the SPEC section 6 volume) must cost about the same heap allocation, and the
+ * large one must render within the SPEC section 6 bound of 2 s. A page that materialises the
+ * whole month allocates in proportion to it and fails the comparison even on a machine fast
+ * enough to beat the time bound. (The volume is capped at 35,000 generated lines to keep the
+ * suite's memory use modest, note 64.)
  *
  * <p>Each page is loaded once unmeasured after the data is written (Jelly compilation, and any
  * per-month index an implementation keeps and rebuilds because the files were written behind its
@@ -63,16 +65,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class BoundedReadTest {
 
     static final int SMALL = 1_500;
-    static final int LARGE = 150_000;
+    static final int LARGE = 35_000;
     static final int JOBS = 10;
     static final long TIME_BOUND_MS = 2_000;
-    /** Allowed extra allocation of the 150,000-record page over the 1,500-record page. */
-    static final long ALLOC_BOUND_BYTES = 64L * 1024 * 1024;
+    /** Allowed extra allocation of the 35,000-record page over the 1,500-record page. */
+    static final long ALLOC_BOUND_BYTES = 24L * 1024 * 1024;
 
     static final YearMonth SMALL_MONTH = YearMonth.of(2026, 8);
     static final YearMonth LARGE_MONTH = YearMonth.of(2026, 9);
     static final Instant SMALL_NOW = Instant.parse("2026-08-28T12:00:00Z");
     static final Instant LARGE_NOW = Instant.parse("2026-09-28T12:00:00Z");
+    /** 5,000 runs a day for the 7 days before LARGE_NOW (SPEC section 6). */
+    static final Instant LARGE_FROM = Instant.parse("2026-09-21T12:00:00Z");
     private static final Instant FIXTURE_TIME = Instant.parse("2001-01-15T12:00:00Z");
 
     private JenkinsRule j;
@@ -104,12 +108,12 @@ public class BoundedReadTest {
     }
 
     /**
-     * T-12-06 (#13): the history screen over a 7-day window of a 150,000-record month renders
+     * T-12-06 (#13): the history screen over a 7-day window of a 35,000-record month renders
      * within 2 s and allocates no more than {@value #ALLOC_BOUND_BYTES} bytes beyond the same
      * screen over a 1,500-record month.
      */
     @Test
-    public void t_12_06_historyPageOverA150kMonthIsBounded() throws Exception {
+    public void t_12_06_historyPageOverA35kMonthIsBounded() throws Exception {
         writeRunMonths();
         Measured small = measure(SMALL_NOW, "batch-control/history/?from=2026-08-22&to=2026-08-28");
         Measured large = measure(LARGE_NOW, "batch-control/history/?from=2026-09-22&to=2026-09-28");
@@ -118,11 +122,11 @@ public class BoundedReadTest {
     }
 
     /**
-     * T-10-08 (#13): the dashboard's default 7-day view (SPEC 10) over a 150,000-record month is
+     * T-10-08 (#13): the dashboard's default 7-day view (SPEC 10) over a 35,000-record month is
      * bounded the same way.
      */
     @Test
-    public void t_10_08_dashboardDefaultViewOverA150kMonthIsBounded() throws Exception {
+    public void t_10_08_dashboardDefaultViewOverA35kMonthIsBounded() throws Exception {
         writeRunMonths();
         Measured small = measure(SMALL_NOW, "batch-control/dashboard/");
         Measured large = measure(LARGE_NOW, "batch-control/dashboard/");
@@ -131,14 +135,47 @@ public class BoundedReadTest {
     }
 
     /**
-     * T-12-08 (#13): the change-list screen over a 150,000-record change month is bounded the same
+     * T-10-09 (SPEC 6, #13): the measurement SPEC section 6 asks for, once, with a generated
+     * dataset: 5,000 runs a day for 7 days, the dashboard's and the history screen's 7-day view
+     * each under 2 s locally. The median of three loads after one warm-up is asserted and printed
+     * ({@code [spec6-measurement]}) so the figure can be recorded in docs/HOSTING-READINESS.md.
+     */
+    @Test
+    public void t_10_09_spec6SevenDayViewsAt5000RunsADayUnderTwoSeconds() throws Exception {
+        writeRunMonths();
+        BatchClock.setForTest(Clock.fixed(LARGE_NOW, ZoneOffset.UTC));
+        JenkinsRule.WebClient wc = client();
+        for (String path : new String[] {"batch-control/dashboard/",
+                "batch-control/history/?from=2026-09-21&to=2026-09-28"}) {
+            assertEquals(200, get(wc, path).getStatusCode(), "warm-up GET " + path);
+            long[] times = new long[3];
+            for (int i = 0; i < times.length; i++) {
+                long start = System.nanoTime();
+                WebResponse response = get(wc, path);
+                times[i] = (System.nanoTime() - start) / 1_000_000;
+                assertEquals(200, response.getStatusCode(), "GET " + path);
+                assertTrue(response.getContentAsString().contains("perf-job-"), "fixture: " + path + " lists the generated runs");
+            }
+            java.util.Arrays.sort(times);
+            long median = times[1];
+            System.out.println("[spec6-measurement] " + path + " over " + LARGE + " runs in 7 days: median "
+                    + median + " ms (runs " + java.util.Arrays.toString(times) + ", "
+                    + Runtime.version() + ", " + Runtime.getRuntime().availableProcessors() + " cpus)");
+            assertTrue(median < TIME_BOUND_MS, path + " 7-day view at 5,000 runs/day must load within " + TIME_BOUND_MS
+                    + " ms (SPEC 6), median " + median + " ms");
+        }
+        assertStoreHoldsTheGeneratedRuns();
+    }
+
+    /**
+     * T-12-08 (#13): the change-list screen over a 35,000-record change month is bounded the same
      * way.
      */
     @Test
-    public void t_12_08_changeListOverA150kMonthIsBounded() throws Exception {
+    public void t_12_08_changeListOverA35kMonthIsBounded() throws Exception {
         ChangeTemplate template = changeTemplate();
         writeChangeMonth(template, SMALL_MONTH, SMALL, Instant.parse("2026-08-01T00:00:00Z"), SMALL_NOW);
-        writeChangeMonth(template, LARGE_MONTH, LARGE, Instant.parse("2026-09-01T00:00:00Z"), LARGE_NOW);
+        writeChangeMonth(template, LARGE_MONTH, LARGE, LARGE_FROM, LARGE_NOW);
         Measured small = measure(SMALL_NOW, "batch-control/changes/?from=2026-08-22&to=2026-08-28");
         Measured large = measure(LARGE_NOW, "batch-control/changes/?from=2026-09-22&to=2026-09-28");
         assertBounded("change list", small, large);
@@ -192,14 +229,13 @@ public class BoundedReadTest {
         StoreDataFixtures.RunLine line = StoreDataFixtures.runLineTemplate();
         StoreDataFixtures.writeRunMonth(line, SMALL_MONTH, SMALL,
                 Instant.parse("2026-08-01T00:00:00Z"), SMALL_NOW, "perf-job-", JOBS);
-        StoreDataFixtures.writeRunMonth(line, LARGE_MONTH, LARGE,
-                Instant.parse("2026-09-01T00:00:00Z"), LARGE_NOW, "perf-job-", JOBS);
-        assertEquals(LARGE, StoreDataFixtures.lineCount(StoreDataFixtures.runsFile(LARGE_MONTH)), "fixture: the large month holds 150,000 lines");
+        StoreDataFixtures.writeRunMonth(line, LARGE_MONTH, LARGE, LARGE_FROM, LARGE_NOW, "perf-job-", JOBS);
+        assertEquals(LARGE, StoreDataFixtures.lineCount(StoreDataFixtures.runsFile(LARGE_MONTH)), "fixture: the large month holds 35,000 lines");
     }
 
     private static void assertStoreHoldsTheGeneratedRuns() {
         // Premise, checked last because it materialises the month: the store parses every
-        // generated line, so the pages above were really rendered over 150,000 records.
+        // generated line, so the pages above were really rendered over 35,000 records.
         assertEquals(LARGE, FileStore.get().listRunRecords(LARGE_MONTH).size(), "fixture: the store must read every generated run line");
     }
 
@@ -226,11 +262,11 @@ public class BoundedReadTest {
     }
 
     private static void assertBounded(String screen, Measured small, Measured large) {
-        assertTrue(large.ms() < TIME_BOUND_MS, "the " + screen + " page over a 150,000-record month must render within "
+        assertTrue(large.ms() < TIME_BOUND_MS, "the " + screen + " page over a 35,000-record month must render within "
                 + TIME_BOUND_MS + " ms (SPEC 6), took " + large.ms() + " ms");
         long extra = large.allocated() - small.allocated();
         assertTrue(extra < ALLOC_BOUND_BYTES, "the " + screen + " page must read a bounded amount regardless of the month's size (#13):"
-                + " 150,000 records allocated " + (large.allocated() >> 20) + " MiB against "
+                + " 35,000 records allocated " + (large.allocated() >> 20) + " MiB against "
                 + (small.allocated() >> 20) + " MiB for 1,500");
     }
 
