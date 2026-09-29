@@ -59,9 +59,11 @@
         that already has Configure permission, so a holder of a Configure permission window can
         make a build change a job's permissions permanently. Set a global default build
         authorization in <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a>
-        under <a href="${rootURL}/manage/configureSecurity">Security</a> that runs builds as the
-        user who started them, or as an account without Configure permission; a strategy on a
-        single job is not enough.
+        under <a href="${rootURL}/manage/configureSecurity">Security</a> that runs every build as
+        an account without Configure permission (for example "Run as Specific User" with a
+        dedicated low-privilege account). "Run as the user who triggered the build" is only safe
+        together with such a fallback, because timer and SCM builds have no triggering user. A
+        strategy on a single job is not enough.
       </p>
     </j:if>
   </l:adminMonitor>

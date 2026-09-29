@@ -87,9 +87,11 @@
           Configure permission.</strong>
           A holder of a Configure permission window can therefore make a build change a job's
           permissions permanently. A Jenkins administrator can prevent this by setting a global
-          default build authorization in Authorize Project that runs builds as the user who
-          started them, or as an account without Configure permission; a strategy on a single job
-          is not enough.
+          default build authorization in Authorize Project that runs every build as an account
+          without Configure permission (for example "Run as Specific User" with a dedicated
+          low-privilege account). "Run as the user who triggered the build" is only safe together
+          with such a fallback, because timer and SCM builds have no triggering user. A strategy
+          on a single job is not enough.
         </div>
       </j:if>
 
