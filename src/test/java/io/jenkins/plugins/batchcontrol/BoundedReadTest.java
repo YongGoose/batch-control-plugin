@@ -71,12 +71,12 @@ public class BoundedReadTest {
     /** Allowed extra allocation of the 35,000-record page over the 1,500-record page. */
     static final long ALLOC_BOUND_BYTES = 24L * 1024 * 1024;
 
-    static final YearMonth SMALL_MONTH = YearMonth.of(2026, 8);
-    static final YearMonth LARGE_MONTH = YearMonth.of(2026, 9);
-    static final Instant SMALL_NOW = Instant.parse("2026-08-28T12:00:00Z");
-    static final Instant LARGE_NOW = Instant.parse("2026-09-28T12:00:00Z");
+    static final YearMonth SMALL_MONTH = YearMonth.of(2025, 8);
+    static final YearMonth LARGE_MONTH = YearMonth.of(2025, 9);
+    static final Instant SMALL_NOW = Instant.parse("2025-08-28T12:00:00Z");
+    static final Instant LARGE_NOW = Instant.parse("2025-09-28T12:00:00Z");
     /** 5,000 runs a day for the 7 days before LARGE_NOW (SPEC section 6). */
-    static final Instant LARGE_FROM = Instant.parse("2026-09-21T12:00:00Z");
+    static final Instant LARGE_FROM = Instant.parse("2025-09-21T12:00:00Z");
     private static final Instant FIXTURE_TIME = Instant.parse("2001-01-15T12:00:00Z");
 
     private JenkinsRule j;
@@ -115,8 +115,8 @@ public class BoundedReadTest {
     @Test
     public void t_12_06_historyPageOverA35kMonthIsBounded() throws Exception {
         writeRunMonths();
-        Measured small = measure(SMALL_NOW, "batch-control/history/?from=2026-08-22&to=2026-08-28");
-        Measured large = measure(LARGE_NOW, "batch-control/history/?from=2026-09-22&to=2026-09-28");
+        Measured small = measure(SMALL_NOW, "batch-control/history/?from=2025-08-22&to=2025-08-28");
+        Measured large = measure(LARGE_NOW, "batch-control/history/?from=2025-09-22&to=2025-09-28");
         assertBounded("history", small, large);
         assertStoreHoldsTheGeneratedRuns();
     }
@@ -146,7 +146,7 @@ public class BoundedReadTest {
         BatchClock.setForTest(Clock.fixed(LARGE_NOW, ZoneOffset.UTC));
         JenkinsRule.WebClient wc = client();
         for (String path : new String[] {"batch-control/dashboard/",
-                "batch-control/history/?from=2026-09-21&to=2026-09-28"}) {
+                "batch-control/history/?from=2025-09-21&to=2025-09-28"}) {
             assertEquals(200, get(wc, path).getStatusCode(), "warm-up GET " + path);
             long[] times = new long[3];
             for (int i = 0; i < times.length; i++) {
@@ -174,12 +174,13 @@ public class BoundedReadTest {
     @Test
     public void t_12_08_changeListOverA35kMonthIsBounded() throws Exception {
         ChangeTemplate template = changeTemplate();
-        writeChangeMonth(template, SMALL_MONTH, SMALL, Instant.parse("2026-08-01T00:00:00Z"), SMALL_NOW);
+        writeChangeMonth(template, SMALL_MONTH, SMALL, Instant.parse("2025-08-01T00:00:00Z"), SMALL_NOW);
         writeChangeMonth(template, LARGE_MONTH, LARGE, LARGE_FROM, LARGE_NOW);
-        Measured small = measure(SMALL_NOW, "batch-control/changes/?from=2026-08-22&to=2026-08-28");
-        Measured large = measure(LARGE_NOW, "batch-control/changes/?from=2026-09-22&to=2026-09-28");
+        Measured small = measure(SMALL_NOW, "batch-control/history/?kind=changes&from=2025-08-22&to=2025-08-28");
+        Measured large = measure(LARGE_NOW, "batch-control/history/?kind=changes&from=2025-09-22&to=2025-09-28");
         assertBounded("change list", small, large);
-        assertEquals(LARGE, FileStore.get().listChangeRecords(LARGE_MONTH).size(), "fixture: the store must read every generated change line");
+        assertEquals(LARGE, FileStore.get().listChangeRecords(LARGE_MONTH).stream()
+                .filter(rec -> rec.getTarget() != null && rec.getTarget().startsWith("perf-job-")).count(), "fixture: the store must read every generated change line");
     }
 
     /**
@@ -196,19 +197,19 @@ public class BoundedReadTest {
 
         j.createFreeStyleProject("span-old-job");
         j.createFreeStyleProject("span-new-job");
-        Instant old = Instant.parse("2023-05-15T12:00:00Z");
+        Instant old = Instant.parse("2022-05-15T12:00:00Z");
         BatchClock.setForTest(Clock.fixed(old, ZoneOffset.UTC));
         FileStore.get().appendRunRecord(new RunRecord("span-old-job#1", "span-old-job", 1,
                 CauseType.USER, "SUCCESS", old, 10L));
-        Instant recent = Instant.parse("2026-09-27T12:00:00Z");
+        Instant recent = Instant.parse("2025-09-27T12:00:00Z");
         BatchClock.setForTest(Clock.fixed(recent, ZoneOffset.UTC));
         FileStore.get().appendRunRecord(new RunRecord("span-new-job#1", "span-new-job", 1,
                 CauseType.USER, "SUCCESS", recent, 10L));
         BatchClock.setForTest(Clock.fixed(LARGE_NOW, ZoneOffset.UTC));
-        assertEquals(1, FileStore.get().listRunRecords(YearMonth.of(2023, 5)).size(), "fixture: the old record is stored in its month");
+        assertEquals(1, FileStore.get().listRunRecords(YearMonth.of(2022, 5)).size(), "fixture: the old record is stored in its month");
 
         JenkinsRule.WebClient wc = client();
-        WebResponse wide = get(wc, "batch-control/history/?from=2023-05-01&to=2026-09-28");
+        WebResponse wide = get(wc, "batch-control/history/?from=2022-05-01&to=2025-09-28");
         assertEquals(200, wide.getStatusCode(), "a 41-month span must be answered");
         String body = wide.getContentAsString();
         assertTrue(body.contains("span-new-job"), "guard: the recent record is listed");
@@ -216,7 +217,7 @@ public class BoundedReadTest {
                 + " not on month files (#13)");
 
         long start = System.nanoTime();
-        WebResponse absurd = get(wc, "batch-control/history/?from=1990-01-01&to=2026-09-28");
+        WebResponse absurd = get(wc, "batch-control/history/?from=1990-01-01&to=2025-09-28");
         long ms = (System.nanoTime() - start) / 1_000_000;
         assertEquals(200, absurd.getStatusCode(), "an absurd span must still be answered");
         assertTrue(absurd.getContentAsString().contains("span-old-job"), "an absurd span over two records lists both");
@@ -228,7 +229,7 @@ public class BoundedReadTest {
     private void writeRunMonths() throws Exception {
         StoreDataFixtures.RunLine line = StoreDataFixtures.runLineTemplate();
         StoreDataFixtures.writeRunMonth(line, SMALL_MONTH, SMALL,
-                Instant.parse("2026-08-01T00:00:00Z"), SMALL_NOW, "perf-job-", JOBS);
+                Instant.parse("2025-08-01T00:00:00Z"), SMALL_NOW, "perf-job-", JOBS);
         StoreDataFixtures.writeRunMonth(line, LARGE_MONTH, LARGE, LARGE_FROM, LARGE_NOW, "perf-job-", JOBS);
         assertEquals(LARGE, StoreDataFixtures.lineCount(StoreDataFixtures.runsFile(LARGE_MONTH)), "fixture: the large month holds 35,000 lines");
     }

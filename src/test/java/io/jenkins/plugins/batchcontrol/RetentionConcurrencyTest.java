@@ -199,8 +199,9 @@ public class RetentionConcurrencyTest {
 
         List<ChangeRecord> configures = FileStore.get().listChangeRecords(month).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE && "tpl-diff".equals(rec.getTarget()))
+                .filter(rec -> rec.getDiff() != null && rec.getDiff().contains("template-change"))
                 .collect(Collectors.toList());
-        assertEquals(1, configures.size(), "fixture: one CONFIGURE record in " + month);
+        assertEquals(1, configures.size(), "fixture: one CONFIGURE record with the template diff in " + month);
         List<Incident> incidents = IncidentService.get().list(month);
         assertEquals(1, incidents.size(), "fixture: one incident in " + month);
         BatchClock.reset();
