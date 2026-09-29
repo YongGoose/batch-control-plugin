@@ -7,6 +7,8 @@ import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.Queue;
 import hudson.scm.NullSCM;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -30,8 +32,8 @@ import static io.jenkins.plugins.batchcontrol.ActivationFixtures.assertBlocked;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.decideActivation;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.isActivated;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.submitActivationOk;
-import static io.jenkins.plugins.batchcontrol.ActivationFixtures.userCause;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.assertSuccess;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.token;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -171,9 +173,15 @@ public class ActivationComputedFolderTest {
         return branch;
     }
 
-    /** A finished build of an uncontrolled job started by a human cause (note 100). */
+    /**
+     * A finished build of an uncontrolled job started by a human cause (note 100). security-15
+     * S-15-01: the submission, not only the {@code Cause}, must run while impersonating the
+     * user, or the gate now (correctly) classifies it as unattended.
+     */
     private FreeStyleBuild upstreamBuild() throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject("mb-up-" + System.nanoTime()));
-        return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, userCause("admin")));
+        try (ACLContext ignored = ACL.as2(token("admin"))) {
+            return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
     }
 }

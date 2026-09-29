@@ -47,7 +47,6 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.CRON_FREESTYLE_XML;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.assertBlocked;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.isActivated;
-import static io.jenkins.plugins.batchcontrol.ActivationFixtures.userCause;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.activate;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.token;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
@@ -288,9 +287,15 @@ public class ActivationUnattendedPathTest {
         return job;
     }
 
-    /** A finished build of an uncontrolled job started by a human cause (note 100). */
+    /**
+     * A finished build of an uncontrolled job started by a human cause (note 100). security-15
+     * S-15-01: the submission, not only the {@code Cause}, must run while impersonating the
+     * user, or the gate now (correctly) classifies it as unattended.
+     */
     private FreeStyleBuild upstreamBuild() throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject("up-" + System.nanoTime()));
-        return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, userCause("admin")));
+        try (ACLContext ignored = ACL.as2(token("admin"))) {
+            return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
     }
 }

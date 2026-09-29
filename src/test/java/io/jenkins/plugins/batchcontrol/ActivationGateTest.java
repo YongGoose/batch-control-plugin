@@ -460,9 +460,16 @@ public class ActivationGateTest {
         return job;
     }
 
-    /** A finished build of an uncontrolled job, started by a human cause (note 100). */
+    /**
+     * A finished build of an uncontrolled job, started by a human cause (note 100). security-15
+     * S-15-01: the submission itself, not only the {@code Cause}, must happen while
+     * impersonating the user — a {@code UserIdCause} built while impersonating but submitted
+     * from the SYSTEM test thread is now correctly classified as unattended, not human.
+     */
     private FreeStyleBuild upstreamBuild(String name) throws Exception {
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject(name));
-        return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, ActivationFixtures.userCause("admin")));
+        try (ACLContext ignored = ACL.as2(token("admin"))) {
+            return j.assertBuildStatusSuccess(upstream.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
     }
 }

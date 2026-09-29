@@ -6,6 +6,8 @@ import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.Items;
 import hudson.model.Queue;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.triggers.TimerTrigger;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
@@ -32,6 +34,7 @@ import static io.jenkins.plugins.batchcontrol.ActivationFixtures.assertBlocked;
 import static io.jenkins.plugins.batchcontrol.ActivationFixtures.isActivated;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.activate;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.token;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -188,7 +191,13 @@ public class ActivationLifecycleTest {
 
         WorkflowJob caller = uncontrolled(j.createProject(WorkflowJob.class, "life-caller"));
         caller.setDefinition(new CpsFlowDefinition("build job: 'life-mb/main', wait: false, propagate: false", true));
-        j.assertBuildStatusSuccess(caller.scheduleBuild2(0, new hudson.model.CauseAction(ActivationFixtures.userCause("admin"))));
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // the user, or the gate now (correctly) classifies it as unattended - the caller itself
+        // is uncontrolled and not activated, so it needs a genuinely human cause to run at all.
+        try (ACLContext ignored = ACL.as2(token("admin"))) {
+            j.assertBuildStatusSuccess(caller.scheduleBuild2(0,
+                    new hudson.model.CauseAction(new Cause.UserIdCause())));
+        }
         j.waitUntilNoActivity();
         WorkflowRun upstreamRun = branch.getBuildByNumber(next + 1);
         assertNotNull(upstreamRun, "an upstream cause must start the computed child of an activated multibranch project");

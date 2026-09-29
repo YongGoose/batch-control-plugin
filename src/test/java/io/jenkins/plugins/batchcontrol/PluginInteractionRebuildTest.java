@@ -1,8 +1,11 @@
 package io.jenkins.plugins.batchcontrol;
 
 import com.sonyericsson.rebuild.RebuildAction;
+import hudson.model.Cause;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +13,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.token;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.assertApprovedRunQueuedExactlyOnce;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.assertBlocked;
@@ -79,7 +83,13 @@ public class PluginInteractionRebuildTest {
     @Test
     public void t_06_26_rebuildRunsOnUncontrolledJob() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rb-free"));
-        j.assertBuildStatusSuccess(job.scheduleBuild2(0, ActivationFixtures.userCause("u1"))); // a human run (note 100)
+        // a human run (note 100). security-15 S-15-01: the submission, not only the Cause, must
+        // run while impersonating u1, or the gate now (correctly) classifies it as unattended -
+        // which would refuse this very first build too, since the job is uncontrolled and not
+        // activated.
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatusSuccess(job.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
 
         // D-47 (security-14 S-14-01): a Rebuild click is a person acting now (a live UserIdCause
         // from this very POST), unlike an automatic naginator retry (T-06-54) whose causes are

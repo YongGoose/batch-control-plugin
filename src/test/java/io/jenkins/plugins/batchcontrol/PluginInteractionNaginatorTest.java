@@ -3,9 +3,12 @@ package io.jenkins.plugins.batchcontrol;
 import com.chikli.hudson.plugin.naginator.FixedDelay;
 import com.chikli.hudson.plugin.naginator.NaginatorPublisher;
 import com.chikli.hudson.plugin.naginator.NaginatorRetryAction;
+import hudson.model.Cause;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Result;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -18,6 +21,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.token;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.assertApprovedRunQueuedExactlyOnce;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.assertBlocked;
@@ -137,8 +141,13 @@ public class PluginInteractionNaginatorTest {
         job.getPublishersList().add(retryOnce());
         // deliberately NOT activated (D-47): the automatic retry below must still be refused.
 
-        // a human first run (note 100), same premise as T-06-35, on a job left not activated
-        j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, ActivationFixtures.userCause("u1")));
+        // a human first run (note 100), same premise as T-06-35, on a job left not activated.
+        // security-15 S-15-01: the submission, not only the Cause, must run while impersonating
+        // u1, or the gate now (correctly) classifies it as unattended - which would refuse this
+        // very first build too, since the job is uncontrolled and not activated.
+        try (ACLContext ignored = ACL.as2(token("u1"))) {
+            j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0, new Cause.UserIdCause()));
+        }
         j.waitUntilNoActivity();
 
         assertBlocked(j, job, 2, 1); // only the human build (#1) exists; no automatic retry followed it
