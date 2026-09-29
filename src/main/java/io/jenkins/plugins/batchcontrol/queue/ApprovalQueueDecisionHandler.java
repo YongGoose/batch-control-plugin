@@ -45,7 +45,8 @@ import org.kohsuke.stapler.Stapler;
  *   <li>Pipeline Replay → refuse and record it (#21); a person on the Replay page gets the
  *       refusal page and the CLI a one-line error (e2e-03 DEF-16, DEF-14), anything else is
  *       refused quietly;</li>
- *   <li>remote (build-token) cause → refuse quietly and record the attempt (S-14);</li>
+ *   <li>remote (build-token) cause → refuse and record the attempt (S-14); inside an HTTP
+ *       request the caller gets a plain-text 403 (DEF-33/34), elsewhere the refusal is quiet;</li>
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
@@ -177,20 +178,32 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // to step 7 and passed, which made the two endpoints SPEC item 6 names as blocked
             // bypassable by anyone holding the token string.
             //
-            // Refused quietly, like the timer and upstream refusals and unlike step 4: the caller is
-            // a script reading an HTTP status, so guidance text has no reader. Quiet is why the
-            // attempt is written to the audit history instead — the same reasoning D-30 applies to a
-            // blocked marker re-use. The record is bounded (S-21): see BlockedAttemptAudit.
+            // The attempt is written to the audit history — the same reasoning D-30 applies to a
+            // blocked marker re-use. The record is bounded (S-21): see BlockedAttemptAudit. Inside an
+            // HTTP request the script caller also gets a plain-text 403 saying what to do (e2e
+            // re-audit DEF-33/34): otherwise core answers its "scheduled" 302 and build-token-root
+            // an empty 403. Without a current request (queue maintenance, Groovy, other plugins'
+            // background threads) the refusal stays a quiet false, so nothing is thrown there.
             for (Cause cause : causes) {
                 if (cause instanceof Cause.RemoteCause) {
                     LOGGER.warning(() -> "Blocked a remote (build-token) run of approval-required job '"
                             + job.getFullName() + "': " + cause.getShortDescription());
-                    BlockedAttemptAudit.get().record(ChangeType.REMOTE_RUN_BLOCKED,
-                            job.getFullName(), job.getFullName(),
-                            Jenkins.getAuthentication2().getName(),
-                            "Blocked a remote run submission of job '" + job.getFullName()
-                                    + "' - the job requires an approved batch-control run request and "
-                                    + "a build token does not substitute for one - " + cause.getShortDescription());
+                    try {
+                        BlockedAttemptAudit.get().record(ChangeType.REMOTE_RUN_BLOCKED,
+                                job.getFullName(), job.getFullName(),
+                                Jenkins.getAuthentication2().getName(),
+                                "Blocked a remote run submission of job '" + job.getFullName()
+                                        + "' - the job requires an approved batch-control run request and "
+                                        + "a build token does not substitute for one - " + cause.getShortDescription());
+                    } catch (RuntimeException e) {
+                        // As in recordTriggerBlocked: a store failure never turns the refusal into
+                        // an exception on a non-request thread; the refusal is already logged above.
+                        LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked remote run of job '"
+                                + job.getFullName() + "'");
+                    }
+                    if (Stapler.getCurrentRequest2() != null) {
+                        throw new RemoteRunRefusal(remoteRefusedMessage(job));
+                    }
                     return false;
                 }
             }
@@ -464,6 +477,12 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         }
         return Stapler.getCurrentRequest2() != null
                 ? new ApprovalRequiredFailure(job, message) : new Failure(message);
+    }
+
+    /** The plain-text refusal of a build-token submission (e2e re-audit DEF-33/34). */
+    private static String remoteRefusedMessage(Job<?, ?> job) {
+        return "Not scheduled: job '" + job.getFullName() + "' requires an approved batch-control run "
+                + "request, and a build token does not substitute for one. " + requestHint(job);
     }
 
     /** The refusal of a Pipeline Replay a person submitted (e2e-03 DEF-16). */
