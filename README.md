@@ -148,8 +148,10 @@ afterwards: each is logged and writes a change record to the audit history. A
 blocked build-token attempt gets its own record. A person's refused Replay,
 Retry or Rebuild gets its own `TRIGGER_BLOCKED` record per attempt, naming the
 build it re-runs; a repeat of the same attempt within a minute is merged, and
-at most 20 are listed per user in any 10 minutes, further ones being counted
-in one summary record. A refused timer or upstream submission, or any other
+at most 20 are listed per user in any 10 minutes. The next one writes a summary
+record saying that further refusals are counted, not listed, and when the 10
+minutes end a closing record gives their number and the builds. No record is
+ever rewritten. A refused timer or upstream submission, or any other
 unattended submission refused because the job is not activated, is coalesced
 into at most one `TRIGGER_BLOCKED` record per job and cause per hour.
 While a job's `Block cron (timer) triggers` or `Block upstream triggers` switch
@@ -438,7 +440,9 @@ it, and a strategy that follows the triggering user leaves timer and SCM builds
 running as SYSTEM. While change control is on and builds can run as SYSTEM, the
 administrative monitor says so for the whole instance, and the detail page of a
 pending `CONFIGURE` request shows the same warning to its approvers and to
-`BatchControl/Manage` holders.
+`BatchControl/Manage` holders. The check is cached for five minutes, so after
+the build authenticators change the warning can take that long to appear or
+clear; replacing them through the security configuration updates it at once.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based

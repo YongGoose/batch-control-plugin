@@ -138,9 +138,11 @@ from scripts.
     each attempt writes its own record naming the user and the build it
     re-runs, and a repeat of the same attempt by the same user within one
     minute is merged, so a double click stays one record. These per-attempt
-    records are limited to 20 per user in any 10 minutes; further refusals by
-    that user in the same 10 minutes are not listed one by one but counted in a
-    single summary record. A generated nightly job whose Job DSL or JCasC
+    records are limited to 20 per user in any 10 minutes. The next refusal by
+    that user in the same 10 minutes writes one summary record saying that
+    further refusals are counted, not listed; later ones are only counted, and
+    when the 10 minutes end one closing record gives their number and the
+    builds they named. No record is ever rewritten to update a count. A generated nightly job whose Job DSL or JCasC
     definition pins `blockTimer: false` (or an allow list) still does not run its
     first night, since that value does not survive a fresh creation (above); the
     difference now is that the first refusal already produced the notice, the
@@ -348,7 +350,10 @@ code does on purpose.
     includes `CONFIGURE` shows the same warning to the users who may decide it
     and to `BatchControl/Manage` holders, before the decision. The same monitor
     also warns when no build authenticator (a `QueueItemAuthenticator`) is
-    configured at all.
+    configured at all. The answer is cached for five minutes, so after the
+    build authenticators change the warning can take up to five minutes to
+    appear or disappear; when they are replaced by saving the security
+    configuration, it is re-evaluated at once.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
