@@ -158,8 +158,10 @@ public class RunControlUsabilityTest {
 
     /**
      * T-06-70 (DEF-25): on an approval-required job nobody is offered a build entry that can never
-     * succeed: no entry at core's build URL ("Direct Build (needs approval)", "Build Now"), no
-     * "Rebuild Last", and on its builds no Rebuild — for the requester and for the administrator.
+     * succeed and that a plugin can remove: no "Build Now" caption, no "Rebuild Last", and on its
+     * builds no Rebuild — for the requester and for the administrator. Core's own build entry
+     * (renamed "Direct Build (needs approval)") stays by coordinator ruling and is pinned, with its
+     * explained refusal, by T-UI-16/18.
      * Request Run stays. Control: the same plugins offer Rebuild and Retry on an uncontrolled job,
      * so the row measures the entries, not their absence from the instance.
      *
@@ -195,11 +197,9 @@ public class RunControlUsabilityTest {
         for (String user : new String[] {"u1", "admin"}) {
             HtmlPage jobPage = UsabilityFixtures.htmlPage(j, user, job.getUrl());
             String text = jobPage.asNormalizedText();
-            assertFalse(UsabilityFixtures.hasLinkTo(j, jobPage, job.getUrl() + "build")
-                            || UsabilityFixtures.hasLinkTo(j, jobPage, job.getUrl() + "buildWithParameters"),
-                    user + ": no entry may point at core's build URL of an approval-required job; anchors were "
-                            + UsabilityFixtures.resolvedHrefs(jobPage));
-            assertFalse(text.contains("Direct Build") || text.contains("Build Now") || text.contains("Rebuild Last"),
+            // Core's build entry ("Direct Build (needs approval)") stays by coordinator ruling: core
+            // draws it for every Item/Build holder; T-UI-16/18 pin it and its explained refusal.
+            assertFalse(text.contains("Build Now") || text.contains("Rebuild Last"),
                     user + ": no never-succeeding build entry may be shown: " + excerpt(text));
             for (String href : UsabilityFixtures.resolvedHrefs(jobPage)) {
                 assertFalse(href.endsWith("/rebuild"), user + ": no Rebuild entry may be offered on the job page: " + href);
