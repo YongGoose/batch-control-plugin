@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-09-30 — e2e-03 re-audit defects DEF-28..35 fixed (part 3); part-2 fixes merged (#46)
+- #46 merged (DEF-08..27, DD-07..12; GitHub `build` 530 tests green).
+- The rubric re-audit of 215 rows (run on the #45 build) found DEF-28..35; 30 of its new FAILs were part-2 defects already fixed in #46. Part 3 fixes: DEF-28 no "Back to" links on refusal pages; DEF-29 the standing-holder monitor lists each user only for their own entries and each group once (also under role-strategy groups, S-18-01); DEF-30 plugin-version and numeric `configVersion` re-serialisation is not a change; DEF-31 build pages carry the approval notice (only while approval is required, S-18-06); DEF-32 a user-clicked Retry is recorded as that user; DEF-33/34 a refused token run answers 403 with a plain message; DEF-35 the self-grant guard answers 403 and tells the user (D-48, SPEC item 2); DEF-06 activation crumbs read `<item> > Activation`.
+- Tests: rows T-UI-23/24, T-08-53/56, T-09-21/22, T-06-71..75, T-02-47..49, T-01-15, notes 140-153; T-02-35 and T-08-47 updated to D-48. Gate at d5863e5: 546 tests, 0 failures, SpotBugs 0.
+- Reviews: security-18 0/0/1/2/3 (all fixed in this branch), security-19 0/0/0/3/3 (S-19-01..03 LOW and the INFO items go into a follow-up PR; red rows ready).
+- Next: follow-up PR for security-19, then redeploy the hpi from main, re-verify every FAIL row and every DEF, then e2e part 3 (C, D) and the independent pass.
+
 ## 2026-09-30 — final e2e (e2e-03) in progress; part-1 fixes merged (#45), part-2 fixes ready
 - e2e-03 part 1 (pre-flight, reviewer items, plugin precedence) and part 2 (Section B, 21 groups) done; the gate held on every path; defects were about what users are told and what is recorded. Part-1 defects DEF-01..07 merged in #45 (security-16 0/0/0/1).
 - Part-2 defects DEF-08..27 and DD-07..12 fixed on `fix/e2e-run3-part2` (usability acceptance line added to SPEC section 6). Rulings: core Build Now, Pipeline Replay and naginator Retry links cannot be hidden by a plugin, so they stay visible and a click is refused with an explanation (LIMITATIONS); Rebuild is hidden via RebuildValidator; a Discover-only user is not offered the rerun form.
