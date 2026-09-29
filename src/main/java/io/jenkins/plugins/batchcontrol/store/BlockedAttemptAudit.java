@@ -5,7 +5,9 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -130,6 +132,8 @@ public final class BlockedAttemptAudit {
         String summaryUser;
         ChangeType summaryType;
         int summaryCount;
+        /** How many of the counted attempts the build list represents (S-22-06). */
+        int summaryListed;
         final java.util.Set<String> summaryBuilds = new java.util.LinkedHashSet<>();
 
         void forgetOld(Instant now) {
@@ -213,8 +217,9 @@ public final class BlockedAttemptAudit {
      * Per user at most {@link #PERSON_BUDGET} such records are written per rolling
      * {@link #PERSON_WINDOW}; the next refusal in that window writes one summary record, and the
      * ones after it are counted. The store is append-only (JSONL), so the count is written as a
-     * closing record when the summary's window ends ({@link #flushPersonSummaries()}, called by the
-     * per-minute work and by the next refusal); until then each counted refusal is logged at INFO.
+     * closing record when the summary's window ends ({@link #flushPersonSummaries()} on the
+     * per-minute work, the user's own next refusal, or {@link #flushAtShutdown()}); until then each
+     * counted refusal is logged at INFO.
      *
      * <p>Both maps are bounded at {@link #MAX_PERSON_KEYS}. Evicting an attempt key only lets that
      * attempt write again, which still spends the user's budget. A user's budget is evicted only
@@ -222,9 +227,11 @@ public final class BlockedAttemptAudit {
      * still inside their window, a new user is counted under one shared overflow budget, so no
      * budget is ever reopened by eviction.
      *
-     * <p>The bookkeeping is constant-time per call and the only I/O is the one append, so the
-     * queue lock this runs under (see the class comment) is held no longer than the hand-off to
-     * the store (D-51a, S-21-05).
+     * <p>The bookkeeping is constant-time per call (S-22-04): the only other work is closing the
+     * caller's own expired summary, at most one more append. Other users' summaries are closed and
+     * idle budgets removed by {@link #flushPersonSummaries()} on the per-minute work, so the queue
+     * lock this runs under (see the class comment) is held no longer than the hand-off to the store
+     * (D-51a, S-21-05).
      *
      * @param build the re-run build's number as text ({@code ""} when unknown), named in a summary
      * @return {@code true} if a record (per-attempt or summary) was appended
@@ -235,7 +242,6 @@ public final class BlockedAttemptAudit {
         Objects.requireNonNull(attemptKey, "attemptKey");
         forgetOtherInstance();
         Instant now = BatchClock.now();
-        flushExpired(now);
         String key = type.name() + KEY_SEPARATOR + attemptKey + KEY_SEPARATOR + user;
         Instant previous = lastPersonAttempt.get(key);
         if (previous != null && !previous.plus(COOLDOWN).isBefore(now)) {
@@ -249,9 +255,7 @@ public final class BlockedAttemptAudit {
         String budgetKey = user;
         PersonBudget budget = personBudgets.get(budgetKey);
         if (budget == null) {
-            if (personBudgets.size() >= MAX_PERSON_KEYS) {
-                personBudgets.values().removeIf(b -> b.idle(now));
-            }
+            // S-22-04: idle budgets are removed by the per-minute work, never here (constant time).
             if (personBudgets.size() >= MAX_PERSON_KEYS) {
                 budgetKey = OVERFLOW_USER;
                 budget = personBudgets.get(OVERFLOW_USER);
@@ -260,6 +264,13 @@ public final class BlockedAttemptAudit {
                 budget = new PersonBudget();
                 personBudgets.put(budgetKey, budget);
             }
+        }
+        // S-22-04: only the caller's own expired summary is closed here (at most one extra append);
+        // other users' summaries are closed by the per-minute work, off the queue lock.
+        ChangeRecord closing = budget.summaryUntil != null && !budget.summaryUntil.isAfter(now)
+                ? close(budgetKey, budget, null) : null;
+        if (closing != null) {
+            store.appendChangeRecord(closing);
         }
         budget.forgetOld(now);
         if (budget.summaryUntil == null && budget.writes.size() < PERSON_BUDGET && !OVERFLOW_USER.equals(budgetKey)) {
@@ -274,6 +285,7 @@ public final class BlockedAttemptAudit {
             budget.summaryUser = user;
             budget.summaryType = type;
             budget.summaryCount = 1;
+            budget.summaryListed = 0;
             budget.summaryBuilds.clear();
             addBuild(budget, target, build);
             String who = OVERFLOW_USER.equals(budgetKey) ? "further users" : "'" + user + "'";
@@ -293,39 +305,94 @@ public final class BlockedAttemptAudit {
     private static void addBuild(PersonBudget budget, String target, String build) {
         if (budget.summaryBuilds.size() < 50) {
             budget.summaryBuilds.add(build == null || build.isEmpty() ? target : target + " #" + build);
+            budget.summaryListed++; // S-22-06: repeats of a listed build count as listed
         }
     }
 
     /**
-     * Writes the closing count record of every summary whose window has ended (D-51a). Called by
-     * the per-minute work and before each person refusal.
+     * The per-minute work (S-22-03, S-22-04): collects, under this object's lock, the closing count
+     * records of every summary whose window has ended and removes idle budgets, then appends the
+     * records outside the lock, so a queue thread refusing something meanwhile never waits behind
+     * these appends. Never runs on the queue lock.
      */
-    public synchronized void flushPersonSummaries() {
-        forgetOtherInstance();
-        flushExpired(BatchClock.now());
+    public void flushPersonSummaries() {
+        List<ChangeRecord> closing = new ArrayList<>();
+        synchronized (this) {
+            forgetOtherInstance();
+            Instant now = BatchClock.now();
+            Iterator<Map.Entry<String, PersonBudget>> it = personBudgets.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<String, PersonBudget> e = it.next();
+                PersonBudget b = e.getValue();
+                if (b.summaryUntil != null && !b.summaryUntil.isAfter(now)) {
+                    closing.add(close(e.getKey(), b, null));
+                }
+                if (b.idle(now)) {
+                    it.remove();
+                }
+            }
+        }
+        for (ChangeRecord record : closing) {
+            store.appendChangeRecord(record);
+        }
     }
 
-    private void flushExpired(Instant now) {
-        for (Map.Entry<String, PersonBudget> e : personBudgets.entrySet()) {
-            PersonBudget b = e.getValue();
-            if (b.summaryUntil == null || b.summaryUntil.isAfter(now)) {
-                continue;
+    /**
+     * S-22-03: writes the closing count record of every open summary before Jenkins stops, so no
+     * summary is left promising a count that never follows. A crash still loses an open count
+     * (the records are append-only; documented).
+     */
+    @hudson.init.Terminator
+    public static void flushAtShutdown() {
+        INSTANCE.closeAllOpen();
+    }
+
+    private void closeAllOpen() {
+        List<ChangeRecord> closing = new ArrayList<>();
+        synchronized (this) {
+            Instant now = BatchClock.now();
+            for (Map.Entry<String, PersonBudget> e : personBudgets.entrySet()) {
+                PersonBudget b = e.getValue();
+                if (b.summaryUntil != null) {
+                    closing.add(close(e.getKey(), b, b.summaryUntil.isAfter(now) ? now : null));
+                }
             }
-            String user = e.getKey();
-            String who = OVERFLOW_USER.equals(user) ? "further users" : "'" + user + "'";
-            store.appendChangeRecord(ChangeRecord.create(b.summaryType, b.summaryTarget, b.summaryUser,
-                    b.summaryCount + " refused re-runs by " + who + " between " + b.summaryFrom + " and "
-                            + b.summaryUntil + " were counted, not listed: " + String.join(", ", b.summaryBuilds)
-                            + (b.summaryBuilds.size() < b.summaryCount ? ", ..." : "")));
-            b.summaryUntil = null;
-            b.summaryFrom = null;
-            b.summaryTarget = null;
-            b.summaryUser = null;
-            b.summaryType = null;
-            b.summaryCount = 0;
-            b.summaryBuilds.clear();
-            b.writes.clear(); // the window that was counted is closed; the budget starts again
         }
+        for (ChangeRecord record : closing) {
+            try {
+                store.appendChangeRecord(record);
+            } catch (RuntimeException ex) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not write a refused re-run count at shutdown", ex);
+            }
+        }
+    }
+
+    /**
+     * The closing count record of {@code b}'s summary, and resets it. {@code endedEarly} is the
+     * shutdown time when the window was cut short, else {@code null}.
+     *
+     * <p>S-22-06: an overflow summary (the shared budget of {@link #OVERFLOW_USER}) carries the id
+     * of the first user who overflowed in its {@code user} field, and says "further users" in its
+     * text; the other users' attempts are in the build list and the controller log only.
+     */
+    private static ChangeRecord close(String budgetKey, PersonBudget b, Instant endedEarly) {
+        String who = OVERFLOW_USER.equals(budgetKey) ? "further users" : "'" + budgetKey + "'";
+        String until = endedEarly == null ? String.valueOf(b.summaryUntil)
+                : endedEarly + " (the window ended early because Jenkins was shutting down)";
+        ChangeRecord record = ChangeRecord.create(b.summaryType, b.summaryTarget, b.summaryUser,
+                b.summaryCount + " refused re-runs by " + who + " between " + b.summaryFrom + " and "
+                        + until + " were counted, not listed: " + String.join(", ", b.summaryBuilds)
+                        + (b.summaryListed < b.summaryCount ? ", ..." : ""));
+        b.summaryUntil = null;
+        b.summaryFrom = null;
+        b.summaryTarget = null;
+        b.summaryUser = null;
+        b.summaryType = null;
+        b.summaryCount = 0;
+        b.summaryListed = 0;
+        b.summaryBuilds.clear();
+        b.writes.clear(); // the window that was counted is closed; the budget starts again
+        return record;
     }
 
     private boolean append(Map<String, Instant> tracked, int bound, String key, Duration cooldown,
