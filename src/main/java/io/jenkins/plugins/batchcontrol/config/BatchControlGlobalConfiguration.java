@@ -3,14 +3,19 @@ package io.jenkins.plugins.batchcontrol.config;
 import hudson.Extension;
 import hudson.ExtensionList;
 import hudson.model.listeners.SaveableListener;
+import hudson.security.Permission;
+import hudson.util.FormValidation;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.function.UnaryOperator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -21,15 +26,25 @@ import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundSetter;
+import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * Global plugin configuration (SPEC section 5 keys and defaults). Nothing is active until an
  * administrator turns a switch on; toggling either switch writes a
  * {@code ChangeRecord(CONFIG_TOGGLE)} to the store (SPEC item 1).
  *
- * <p>Numeric setters silently ignore non-positive values so an invalid form value can never be
- * persisted (the previous value is kept).
+ * <p>e2e-03 DEF-08: the web form is validated before anything is bound. Each field has a
+ * {@code doCheck*} method, so the message appears next to the field while typing, and
+ * {@link #configure} refuses a submission holding an invalid value with a
+ * {@link hudson.model.Descriptor.FormException} naming that field; nothing is saved then. The
+ * setters (JCasC, scripts) still ignore non-positive values, so an invalid value can never be
+ * persisted on any path.
+ *
+ * <p>e2e-03 DEF-10: {@code BatchControl/Manage} is enough to open and save this configuration
+ * ({@link #getRequiredGlobalConfigPagePermission()}, and {@link BatchControlConfigurationLink} for
+ * a holder who cannot open core's system configuration page).
  */
 @Extension
 @Symbol("batchControl")
@@ -88,10 +103,22 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * records and the side effects (cache invalidation, revoking active grants when change control
      * goes off). If the write fails nothing in memory has changed and the error is surfaced.
      */
+    /**
+     * e2e-03 DEF-10: this section is shown and saved for {@code BatchControl/Manage} holders
+     * (implied by {@code Overall/Administer}) rather than for administrators only.
+     */
+    @Override
+    public Permission getRequiredGlobalConfigPagePermission() {
+        return BatchControlPermissions.MANAGE;
+    }
+
     @Override
     public synchronized boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
+        // e2e-03 DEF-08: an invalid value refuses the whole submission, before anything is bound.
+        JSONObject form = normalizeListFields(json);
+        validate(form);
         BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
-        req.bindJSON(bound, json);
+        req.bindJSON(bound, form);
         try {
             bound.writeConfigFile();
         } catch (IOException e) {
@@ -337,7 +364,11 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     public void setIncidentResults(List<String> incidentResults) {
-        List<String> sanitized = sanitizeStrings(incidentResults);
+        List<String> sanitized = new ArrayList<>();
+        for (String result : sanitizeStrings(incidentResults)) {
+            // Build results are upper case (hudson.model.Result); "failure" means FAILURE.
+            sanitized.add(result.toUpperCase(Locale.ROOT));
+        }
         if (!sanitized.isEmpty()) {
             this.incidentResults = sanitized;
         }
@@ -394,6 +425,192 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         hudson.PluginWrapper mailer = jenkins.getPluginManager().getPlugin("mailer");
         return mailer != null && mailer.isActive();
+    }
+
+    // ---------------------------------------------------------------- validation (e2e-03 DEF-08)
+
+    /** Field labels as the form shows them, used in every validation message. */
+    static final String LABEL_PENDING = "Pending request timeout (hours)";
+    static final String LABEL_APPROVED_RUN = "Approved-but-not-run timeout (minutes)";
+    static final String LABEL_DURATIONS = "Grant duration options";
+    static final String LABEL_MAX_GRANT = "Maximum grant duration (minutes)";
+    static final String LABEL_INCIDENT_RESULTS = "Results that open an incident";
+    static final String LABEL_RETENTION = "Retention period (months)";
+    static final String LABEL_NOTIFY = "Notify before expiry (minutes)";
+
+    /** The build results an incident can be opened for ({@code hudson.model.Result} names). */
+    static final List<String> RESULT_NAMES =
+            List.of("FAILURE", "UNSTABLE", "ABORTED", "NOT_BUILT", "SUCCESS");
+
+    /**
+     * The form may name the two list settings by their SPEC keys ({@code grantDurationOptions},
+     * {@code incidentResults}) with the comma-separated text as the value; they are bound through
+     * the text setters. A copy is returned; {@code json} is not changed.
+     */
+    static JSONObject normalizeListFields(JSONObject json) {
+        JSONObject form = JSONObject.fromObject(json);
+        for (String key : new String[] {"grantDurationOptions", "incidentResults"}) {
+            Object value = form.opt(key);
+            if (value instanceof String) {
+                form.remove(key);
+                form.put(key + "Text", value);
+            }
+        }
+        return form;
+    }
+
+    /**
+     * Refuses a form submission holding an invalid value, naming the field (its JSON key) and
+     * saying what is expected. A field the submission does not carry is left alone.
+     */
+    static void validate(JSONObject json) throws FormException {
+        requireValid(json, "pendingTimeoutHours", v -> positiveError(v, LABEL_PENDING));
+        requireValid(json, "approvedRunTimeoutMinutes", v -> positiveError(v, LABEL_APPROVED_RUN));
+        requireValid(json, "maxGrantMinutes", v -> positiveError(v, LABEL_MAX_GRANT));
+        requireValid(json, "retentionMonths", v -> positiveError(v, LABEL_RETENTION));
+        requireValid(json, "notifyBeforeExpiryMinutes", v -> positiveError(v, LABEL_NOTIFY));
+        String max = json.has("maxGrantMinutes") ? String.valueOf(json.get("maxGrantMinutes")) : null;
+        requireValid(json, "grantDurationOptionsText", v -> durationOptionsError(v, max));
+        requireValid(json, "incidentResultsText", BatchControlGlobalConfiguration::incidentResultsError);
+    }
+
+    private static void requireValid(JSONObject json, String field, UnaryOperator<String> errorOf)
+            throws FormException {
+        if (!json.has(field)) {
+            return;
+        }
+        Object raw = json.get(field);
+        String error = errorOf.apply(raw == null ? null : String.valueOf(raw));
+        if (error != null) {
+            throw new FormException(error, field);
+        }
+    }
+
+    private static FormValidation toValidation(String error) {
+        return error == null ? FormValidation.ok() : FormValidation.error(error);
+    }
+
+    /** A whole number of at least 1; the plain-text error, or {@code null} when valid. */
+    static String positiveError(String value, String label) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty()) {
+            return label + ": a value is required (a whole number of 1 or more).";
+        }
+        try {
+            if (Integer.parseInt(text) >= 1) {
+                return null;
+            }
+        } catch (NumberFormatException e) {
+            // reported below
+        }
+        return label + ": '" + text + "' is not allowed; enter a whole number of 1 or more.";
+    }
+
+    /** Comma- or newline-separated whole minutes, each at least 1 and at most {@code maxText}. */
+    static String durationOptionsError(String value, String maxText) {
+        List<String> tokens = parseStrings(value);
+        if (tokens.isEmpty()) {
+            return LABEL_DURATIONS + ": at least one duration is required, for example 15, 30, 60.";
+        }
+        Integer max = null;
+        try {
+            max = maxText == null ? null : Integer.valueOf(maxText.trim());
+        } catch (NumberFormatException e) {
+            // the maximum field reports its own error
+        }
+        for (String token : tokens) {
+            int minutes;
+            try {
+                minutes = Integer.parseInt(token);
+            } catch (NumberFormatException e) {
+                return LABEL_DURATIONS + ": '" + token + "' is not a whole number of minutes. "
+                        + "Enter minutes separated by commas, for example 15, 30, 60.";
+            }
+            if (minutes < 1) {
+                return LABEL_DURATIONS + ": '" + token + "' is not allowed; each duration must be 1 minute or more.";
+            }
+            if (max != null && max >= 1 && minutes > max) {
+                return LABEL_DURATIONS + ": " + minutes + " minutes exceeds the maximum grant duration of "
+                        + max + " minutes. Lower the option or raise the maximum.";
+            }
+        }
+        return null;
+    }
+
+    /** Comma- or newline-separated build result names. */
+    static String incidentResultsError(String value) {
+        List<String> tokens = parseStrings(value);
+        if (tokens.isEmpty()) {
+            return LABEL_INCIDENT_RESULTS + ": at least one result is required, for example FAILURE, UNSTABLE.";
+        }
+        for (String token : tokens) {
+            if (!RESULT_NAMES.contains(token.toUpperCase(Locale.ROOT))) {
+                return LABEL_INCIDENT_RESULTS + ": '" + token + "' is not a build result. Use "
+                        + String.join(", ", RESULT_NAMES) + ".";
+            }
+        }
+        return null;
+    }
+
+    /** The form's inline checks answer only a user who may save the form. */
+    private static boolean mayCheck() {
+        return Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckPendingTimeoutHours(@QueryParameter String value) {
+        return mayCheck() ? toValidation(positiveError(value, LABEL_PENDING)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckApprovedRunTimeoutMinutes(@QueryParameter String value) {
+        return mayCheck() ? toValidation(positiveError(value, LABEL_APPROVED_RUN)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckMaxGrantMinutes(@QueryParameter String value) {
+        return mayCheck() ? toValidation(positiveError(value, LABEL_MAX_GRANT)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckRetentionMonths(@QueryParameter String value) {
+        return mayCheck() ? toValidation(positiveError(value, LABEL_RETENTION)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckNotifyBeforeExpiryMinutes(@QueryParameter String value) {
+        return mayCheck() ? toValidation(positiveError(value, LABEL_NOTIFY)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only); re-run when the maximum changes. */
+    @POST
+    public FormValidation doCheckGrantDurationOptionsText(@QueryParameter String value,
+                                                          @QueryParameter String maxGrantMinutes) {
+        return mayCheck() ? toValidation(durationOptionsError(value, maxGrantMinutes)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation (read-only). */
+    @POST
+    public FormValidation doCheckIncidentResultsText(@QueryParameter String value) {
+        return mayCheck() ? toValidation(incidentResultsError(value)) : FormValidation.ok();
+    }
+
+    /** Stapler form validation of the field named by its SPEC key (read-only). */
+    @POST
+    public FormValidation doCheckGrantDurationOptions(@QueryParameter String value,
+                                                      @QueryParameter String maxGrantMinutes) {
+        return doCheckGrantDurationOptionsText(value, maxGrantMinutes);
+    }
+
+    /** Stapler form validation of the field named by its SPEC key (read-only). */
+    @POST
+    public FormValidation doCheckIncidentResults(@QueryParameter String value) {
+        return doCheckIncidentResultsText(value);
     }
 
     // ---------------------------------------------------------------- helpers

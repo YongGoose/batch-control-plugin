@@ -1,6 +1,9 @@
 package io.jenkins.plugins.batchcontrol.security;
 
+import com.michelin.cio.hudson.plugins.rolestrategy.AuthorizationType;
+import com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry;
 import com.michelin.cio.hudson.plugins.rolestrategy.PermissionTemplate;
+import com.michelin.cio.hudson.plugins.rolestrategy.Role;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleBasedAuthorizationStrategy;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleMap;
 import com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType;
@@ -9,6 +12,7 @@ import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.PluginManager;
 import hudson.model.AbstractItem;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
@@ -16,17 +20,28 @@ import hudson.model.Job;
 import hudson.model.Node;
 import hudson.security.ACL;
 import hudson.security.AuthorizationStrategy;
+import hudson.security.Permission;
+import hudson.security.PermissionGroup;
+import hudson.security.PermissionScope;
+import hudson.util.FormValidation;
 import io.jenkins.plugins.batchcontrol.Messages;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * role-strategy's role-based strategy with Batch Control grants layered on top (D-35a,
@@ -113,6 +128,13 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
      * Selecting it builds the strategy the way role-strategy does (keeping the installed roles, or
      * an admin role for the current user when coming from another strategy) and copies the
      * result into this class.
+     *
+     * <p>e2e-03 DEF-20: role-strategy's Manage Roles, Assign Roles and permission template pages
+     * address the installed strategy's descriptor ({@code it.strategy.descriptor} in Jelly and
+     * {@code /descriptor/<class>/check*} from JavaScript). Every such method of the parent's
+     * descriptor is therefore exposed here and delegates to it, so the pages behave exactly as
+     * under the plain strategy. The web methods keep the parent's {@code @RequirePOST}; they
+     * only validate or render and the parent performs its own permission checks.
      */
     @Extension(optional = true)
     @Symbol("batchControlRoleBased")
@@ -142,6 +164,97 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
                 throw new FormException("role-strategy is not available", "authorizationStrategy");
             }
             return copyOf(parent.newInstance(req, formData));
+        }
+
+        /** The plain strategy's descriptor every role-page method delegates to. */
+        @NonNull
+        private static RoleBasedAuthorizationStrategy.DescriptorImpl parent() {
+            RoleBasedAuthorizationStrategy.DescriptorImpl parent =
+                    Jenkins.get().getDescriptorByType(RoleBasedAuthorizationStrategy.DescriptorImpl.class);
+            return parent != null ? parent : RoleBasedAuthorizationStrategy.DESCRIPTOR;
+        }
+
+        /** Assign Roles: renders each user or group row's name (role-strategy tableAssign.js). */
+        @RequirePOST
+        public FormValidation doCheckName(@QueryParameter String value) {
+            return parent().doCheckName(value);
+        }
+
+        /**
+         * Manage Roles: validates an item or agent role pattern. Re-implemented rather than
+         * delegated because the parent's method is restricted to role-strategy itself.
+         */
+        @RequirePOST
+        public FormValidation doCheckPattern(@QueryParameter String value) {
+            try {
+                Pattern.compile(value == null ? "" : value);
+            } catch (PatternSyntaxException e) {
+                return FormValidation.error(e.getMessage());
+            }
+            return FormValidation.ok();
+        }
+
+        /** Role and template names: warns about leading or trailing whitespace. */
+        @RequirePOST
+        public FormValidation doCheckForWhitespace(@QueryParameter String value) {
+            return parent().doCheckForWhitespace(value);
+        }
+
+        /** Jelly: the permission groups shown for a role type. */
+        public List<PermissionGroup> getGroups(@NonNull String type) {
+            return parent().getGroups(type);
+        }
+
+        /**
+         * Jelly: whether a permission is shown for a role type (the parent's rule: no dangerous
+         * permission among the global ones, the scope must fit item and agent roles).
+         */
+        @SuppressWarnings("deprecation") // Jenkins.RUN_SCRIPTS is one of the suppressed permissions
+        public boolean showPermission(String type, Permission p) {
+            if (p == null || type == null) {
+                return false;
+            }
+            switch (type) {
+                case GLOBAL:
+                    return !(p == Jenkins.RUN_SCRIPTS || p == PluginManager.CONFIGURE_UPDATECENTER
+                            || p == PluginManager.UPLOAD_PLUGINS) && p.getEnabled();
+                case PROJECT:
+                    return p.isContainedBy(PermissionScope.ITEM_GROUP) && p.getEnabled();
+                case SLAVE:
+                    return p.isContainedBy(PermissionScope.COMPUTER) && p.getEnabled();
+                default:
+                    return false;
+            }
+        }
+
+        /** Jelly: the space-separated ids of the permissions implying {@code p}. */
+        public String impliedByList(Permission p) {
+            List<String> ids = new ArrayList<>();
+            for (Permission q = p == null ? null : p.impliedBy; q != null; q = q.impliedBy) {
+                ids.add(q.getId());
+            }
+            return String.join(" ", ids);
+        }
+
+        /** Jelly: the entry of an assignment row; {@code null} for the template row. */
+        @CheckForNull
+        public PermissionEntry entryFor(String type, String sid) {
+            return type == null ? null : new PermissionEntry(AuthorizationType.valueOf(type), sid);
+        }
+
+        /** Jelly: whether an assignment table holds ambiguous (user-or-group) entries. */
+        public boolean hasAmbiguousEntries(SortedMap<Role, Set<PermissionEntry>> grantedRoles) {
+            if (grantedRoles == null) {
+                return false;
+            }
+            for (Set<PermissionEntry> entries : grantedRoles.values()) {
+                for (PermissionEntry entry : entries) {
+                    if (entry.getType() == AuthorizationType.EITHER) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
     }
 

@@ -184,6 +184,23 @@ public final class IncidentService {
         return rerun(incidentId, io.jenkins.plugins.batchcontrol.model.Approvers.of(approver));
     }
 
+    /**
+     * Whether the current user could request a rerun of {@code incident} (e2e-03 DEF-12): the
+     * incident's job still exists and {@link RunRequestService#canRequest} holds for it, which is
+     * what {@link #rerun} and the request creation check. Screens show the rerun form only then.
+     */
+    public boolean canRerun(Incident incident) {
+        if (incident == null) {
+            return false;
+        }
+        try {
+            Job<?, ?> job = Jenkins.get().getItemByFullName(incident.getJobFullName(), Job.class);
+            return job != null && RunRequestService.get().canRequest(job);
+        } catch (org.springframework.security.access.AccessDeniedException e) {
+            return false; // discoverable but not readable
+        }
+    }
+
     /** Approver-set form (D-37) of {@link #rerun(String, String)}. */
     public RunRequest rerun(String incidentId, java.util.List<String> approvers) {
         Incident incident = require(incidentId);

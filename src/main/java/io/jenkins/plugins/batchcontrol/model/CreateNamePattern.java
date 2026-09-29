@@ -50,6 +50,15 @@ public final class CreateNamePattern {
         return text.trim();
     }
 
+    /**
+     * Plain-text description of a stored restriction for an explanation to the holder
+     * (e2e-03 DEF-19), for example {@code names matching the pattern /app-[0-9]+/} or
+     * {@code the name 'app-2'}.
+     */
+    public static String describe(String text) {
+        return isRegexForm(text) ? "names matching the pattern " + text : "the name '" + text + "'";
+    }
+
     /** Whether the text is written in the {@code /regex/} form. */
     static boolean isRegexForm(String text) {
         return text.length() >= 2 && text.startsWith("/") && text.endsWith("/");

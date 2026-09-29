@@ -428,6 +428,10 @@ public final class ActivationService {
                         + request.getStatus() + "; only PENDING requests can be cancelled.");
             }
             request.setStatus(RequestStatus.CANCELLED);
+            // e2e-03 DEF-13: the history names who cancelled and when (the requester or a
+            // Manage holder), in the same fields a decision uses.
+            request.setDecidedAt(BatchClock.now());
+            request.setDecidedBy(caller);
             store.saveActivationRequest(request);
             return request;
         } finally {

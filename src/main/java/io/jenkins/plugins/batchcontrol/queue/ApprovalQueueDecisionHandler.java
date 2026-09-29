@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.queue;
 
 import hudson.Extension;
+import hudson.cli.CLICommand;
 import hudson.model.Action;
 import hudson.model.Cause;
 import hudson.model.CauseAction;
@@ -41,8 +42,9 @@ import org.kohsuke.stapler.Stapler;
  *   <li>job not approval-required: a human submission (user, CLI, Replay, approved request)
  *       passes; anything else continues at the timer step (D-46a);</li>
  *   <li>approval marker present → validate and consume it (D-23), pass or refuse quietly;</li>
- *   <li>Pipeline Replay → refuse quietly (the replay UI has no error channel for a Failure) and
- *       record it (#21);</li>
+ *   <li>Pipeline Replay → refuse and record it (#21); a person on the Replay page gets the
+ *       refusal page and the CLI a one-line error (e2e-03 DEF-16, DEF-14), anything else is
+ *       refused quietly;</li>
  *   <li>remote (build-token) cause → refuse quietly and record the attempt (S-14);</li>
  *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
@@ -97,6 +99,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     static final String KIND_RETRY = "RETRY";
     static final String KIND_REBUILD = "REBUILD";
 
+    /** The CLI {@code build} command's cause (a {@code UserIdCause} subtype), matched by name. */
+    private static final String CLI_CAUSE_CLASS = "hudson.cli.BuildCommand$CLICause";
+
     /** The rebuild plugin is not a dependency; its cause is matched by name (e2e-03 DEF-03). */
     private static final String REBUILD_CAUSE_CLASS = "com.sonyericsson.rebuild.RebuildCause";
 
@@ -141,7 +146,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
 
         if (approvalRequired) {
 
-            // 2. Pipeline Replay: refused quietly (ReplayAction.run has no Failure channel).
+            // 2. Pipeline Replay: refused and recorded; explained only to a person (see below).
             for (Cause cause : causes) {
                 if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("replay", job,
@@ -149,6 +154,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
                             "Blocked a Pipeline Replay of job '" + job.getFullName()
                                     + "' - the job requires an approved batch-control run request");
+                    // e2e-03 DEF-16: a person pressing Run on the Replay page gets the refusal
+                    // page instead of the replay action's generic "not buildable" crash page;
+                    // the CLI gets a one-line error (DEF-14). Anything else stays quiet.
+                    if (CLICommand.getCurrent() != null) {
+                        throw new IllegalStateException(replayRefusedMessage(job));
+                    }
+                    if (Stapler.getCurrentRequest2() != null && isHumanSubmission(causes)) {
+                        throw new ApprovalRequiredFailure(job, replayRefusedMessage(job));
+                    }
                     return false;
                 }
             }
@@ -196,7 +210,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                                         + Jenkins.getAuthentication2().getName()
                                         + "' - a re-run does not reuse an earlier approval; submit a new run request");
                     }
-                    throw refusal(job);
+                    throw refusal(job, causes);
                 }
             }
 
@@ -436,12 +450,27 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     /**
      * The refusal of a user-originated run (e2e-03 DEF-02). Inside an HTTP request it is the
      * {@link ApprovalRequiredFailure} page, which links the request form only for users who may
-     * open it; elsewhere (CLI, scripts) the plain {@link Failure} with the same message as before.
+     * open it; for the CLI an {@link IllegalStateException} (e2e-03 DEF-14); elsewhere (scripts)
+     * the plain {@link Failure} with the same message as before.
      */
-    private static Failure refusal(Job<?, ?> job) {
+    private static RuntimeException refusal(Job<?, ?> job, List<Cause> causes) {
         String message = approvalRequiredMessage(job);
+        // e2e-03 DEF-14: the CLI prints an IllegalStateException as one "ERROR: <message>" line
+        // with exit code 4; any other exception type is reported as an unexpected failure with a
+        // server stack trace. A CLI build carries CLICause; remote transports also set the
+        // current command.
+        if (CLICommand.getCurrent() != null || hasCause(causes, CLI_CAUSE_CLASS)) {
+            return new IllegalStateException(message);
+        }
         return Stapler.getCurrentRequest2() != null
                 ? new ApprovalRequiredFailure(job, message) : new Failure(message);
+    }
+
+    /** The refusal of a Pipeline Replay a person submitted (e2e-03 DEF-16). */
+    private static String replayRefusedMessage(Job<?, ?> job) {
+        return "Replay is not available for job '" + job.getFullName() + "': it only runs through an "
+                + "approved batch-control run request, and a replay would run changed code without one. "
+                + requestHint(job);
     }
 
     /**
@@ -450,11 +479,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * the global landing page only lists requests).
      */
     private static String approvalRequiredMessage(Job<?, ?> job) {
+        return "Approval required: job '" + job.getFullName()
+                + "' only runs through an approved batch-control run request. " + requestHint(job);
+    }
+
+    /** Where a run request for {@code job} is submitted. */
+    private static String requestHint(Job<?, ?> job) {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         String rootUrl = jenkins != null && jenkins.getRootUrl() != null ? jenkins.getRootUrl() : "/";
-        return "Approval required: job '" + job.getFullName()
-                + "' only runs through an approved batch-control run request. "
-                + "Submit a run request at " + rootUrl + job.getUrl()
+        return "Submit a run request at " + rootUrl + job.getUrl()
                 + "batch-control/ and wait for approval.";
     }
 }

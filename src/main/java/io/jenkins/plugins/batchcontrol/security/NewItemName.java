@@ -150,6 +150,24 @@ final class NewItemName {
         return named(value, !readOnly(req) && "confirmRename".equals(endpoint(req)), endpoint(req));
     }
 
+    /**
+     * Whether {@code operation} is one of the name checks the New Item and Rename pages run while
+     * a name is typed ({@code checkJobName}, {@code checkNewName}); a refusal there is answered with
+     * a form validation message (e2e-03 DEF-19).
+     */
+    static boolean isValidationOperation(@CheckForNull String operation) {
+        return "checkJobName".equals(operation) || "checkNewName".equals(operation);
+    }
+
+    /**
+     * Whether {@code operation} is a web endpoint that creates or renames an item
+     * ({@code createItem}, {@code confirmRename}); a refusal there is answered with the
+     * explanation of the restriction (e2e-03 DEF-19).
+     */
+    static boolean isWebChangeOperation(@CheckForNull String operation) {
+        return "createItem".equals(operation) || "confirmRename".equals(operation);
+    }
+
     private static boolean isRenameEndpoint(@CheckForNull String endpoint) {
         return "confirmRename".equals(endpoint) || "checkNewName".equals(endpoint);
     }

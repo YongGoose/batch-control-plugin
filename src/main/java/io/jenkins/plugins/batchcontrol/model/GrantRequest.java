@@ -177,7 +177,10 @@ public final class GrantRequest {
         return Approvers.contains(approvers, userId);
     }
 
-    /** The approver who decided (approved or rejected), or {@code null} while undecided. */
+    /**
+     * The user who closed the request: the approver who approved or rejected it, or the user who
+     * cancelled it (e2e-03 DEF-13); {@code null} while undecided.
+     */
     public String getDecidedBy() {
         return decidedBy;
     }

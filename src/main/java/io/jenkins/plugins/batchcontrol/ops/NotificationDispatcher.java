@@ -7,7 +7,9 @@ import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Grant;
+import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -106,7 +108,9 @@ public final class NotificationDispatcher {
             List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
                     request.getScope().getFullName(), request.getRequester(), request.getReason(),
-                    recipients, url("batch-control/grants/" + request.getId() + "/")));
+                    recipients, url("batch-control/grants/" + request.getId() + "/"), null,
+                    grantDetails(request.getScope(), request.getActions(), request.getDurationMinutes(),
+                            request.getCreateNamePattern())));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
                     + request.getId(), e);
@@ -136,11 +140,38 @@ public final class NotificationDispatcher {
             dispatch(NotificationEvent.GRANT_EXPIRING, new Notification(Notification.KIND_GRANT, requestId,
                     grant.getScope().getFullName(), grant.getUser(), reason,
                     grant.getUser() == null ? Collections.emptyList() : List.of(grant.getUser()),
-                    url("batch-control/grants/" + requestId + "/")));
+                    url("batch-control/grants/" + requestId + "/"), null,
+                    grantDetails(grant.getScope(), grant.getActions(), 0, grant.getCreateNamePattern())));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the GRANT_EXPIRING notification of grant "
                     + grant.getId(), e);
         }
+    }
+
+    /**
+     * e2e-03 DEF-24: what the approver decides on, so the mail can be judged without opening the
+     * request: scope type, actions, duration (when known) and the Create name restriction.
+     */
+    static List<String> grantDetails(GrantScope scope, List<GrantAction> actions, int durationMinutes,
+                                     String createNamePattern) {
+        List<String> details = new ArrayList<>();
+        if (scope != null && scope.getType() != null) {
+            details.add("Scope type: " + scope.getType());
+        }
+        if (actions != null && !actions.isEmpty()) {
+            List<String> names = new ArrayList<>();
+            for (GrantAction action : actions) {
+                names.add(action.name());
+            }
+            details.add("Actions: " + String.join(", ", names));
+        }
+        if (durationMinutes > 0) {
+            details.add("Duration: " + durationMinutes + (durationMinutes == 1 ? " minute" : " minutes"));
+        }
+        if (createNamePattern != null) {
+            details.add("Name restriction (Create): " + createNamePattern);
+        }
+        return details;
     }
 
     private static List<String> recipientsFor(NotificationEvent event, List<String> approvers, String requester) {

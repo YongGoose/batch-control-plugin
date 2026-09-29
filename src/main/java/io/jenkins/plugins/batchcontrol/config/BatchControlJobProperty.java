@@ -83,12 +83,14 @@ public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
     /**
      * The trigger switches that are refusing unattended runs of this job right now, in the order
      * {@code blockTimer}, {@code blockUpstream} (#21, job-page notice). Empty while run control is
-     * off or the job is not approval-required, because the queue gate then lets every cause pass
-     * and a switch that is set blocks nothing. The notice tells the reader to clear the switch in
-     * the job configuration, which is itself change-controlled.
+     * off, because the queue gate then lets every cause pass and a switch that is set blocks
+     * nothing. Since D-46 the switches refuse timer and upstream runs whatever
+     * {@code approvalRequired} says, so the notice follows the switches alone (e2e-03 DEF-15). The
+     * notice tells the reader to clear the switch in the job configuration, which is itself
+     * change-controlled.
      */
     public List<String> getBlockingSwitches() {
-        if (!approvalRequired || !BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
+        if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
             return List.of();
         }
         List<String> switches = new ArrayList<>(2);

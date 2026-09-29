@@ -337,6 +337,10 @@ public final class GrantRequestService {
                         + request.getStatus() + "; only PENDING requests can be cancelled.");
             }
             request.setStatus(RequestStatus.CANCELLED);
+            // e2e-03 DEF-13: the history names who cancelled and when (the requester or a
+            // Manage holder), in the same fields a decision uses.
+            request.setDecidedAt(BatchClock.now());
+            request.setDecidedBy(caller);
             store.saveGrantRequest(request);
             return request;
         } finally {
@@ -444,6 +448,19 @@ public final class GrantRequestService {
      * @param scopeFullName the scope the window was for; becomes the record's target
      * @throws IllegalStateException if change control is off
      */
+    /**
+     * e2e-03 DEF-27: the refusal of a grant request that the HTTP layer turns away before it
+     * reaches {@link #create} (the Grants screen closes with the change-control switch). Records
+     * the refused request exactly as {@link #create} would and throws the same
+     * {@link IllegalStateException}; returns normally while change control is on.
+     *
+     * @param scopeFullName the scope the request named, or {@code null} when none was given
+     * @throws IllegalStateException if change control is off
+     */
+    public void refuseRequestWhileChangeControlOff(String scopeFullName) {
+        checkChangeControlEnabled("requested", scopeFullName);
+    }
+
     private static void checkChangeControlEnabled(String attemptedTransition, String scopeFullName) {
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         if (cfg.isChangeControlEnabled()) {

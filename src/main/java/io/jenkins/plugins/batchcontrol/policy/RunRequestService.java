@@ -15,6 +15,7 @@ import hudson.model.StringParameterValue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
@@ -114,6 +115,30 @@ public final class RunRequestService {
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
                              String approver, String incidentId) {
         return create(job, parameters, reason, Approvers.of(approver), incidentId);
+    }
+
+    /**
+     * Whether the current user could submit a run request for {@code job} (e2e-03 DEF-12, SPEC
+     * section 6 usability): {@code BatchControl/Request}, {@code Item/Read} and {@code Item/Build}
+     * on the job, the permission checks of {@link #create} (D-38). Screens use it to show the
+     * Request Run entry and form only to such a user; {@link #create} still checks for real.
+     */
+    public boolean canRequest(Job<?, ?> job) {
+        return job != null && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST)
+                && job.hasPermission(Item.READ) && job.hasPermission(Item.BUILD);
+    }
+
+    /**
+     * Whether a person's Build Now, Rebuild, Retry or Replay of {@code job} is refused by the queue
+     * gate and needs an approved run request instead (SPEC item 6): run control is on and the job
+     * requires approval. Screens use it to replace or hide those entries (e2e-03 DEF-25).
+     */
+    public static boolean requiresApprovalToRun(Job<?, ?> job) {
+        if (job == null || !BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
+            return false;
+        }
+        BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
+        return property != null && property.isApprovalRequired();
     }
 
     /**
@@ -249,6 +274,10 @@ public final class RunRequestService {
                         + request.getStatus() + "; only PENDING requests can be cancelled.");
             }
             request.setStatus(RequestStatus.CANCELLED);
+            // e2e-03 DEF-13: the history names who cancelled and when (the requester or a
+            // Manage holder), in the same fields a decision uses.
+            request.setDecidedAt(BatchClock.now());
+            request.setDecidedBy(caller);
             store.saveRunRequest(request);
             return request;
         } finally {
@@ -544,6 +573,12 @@ public final class RunRequestService {
                         || request.getStatus() == RequestStatus.APPROVED) {
                     request.setStatus(RequestStatus.INVALIDATED);
                     request.setInvalidationReason(reason);
+                    // e2e-03 DEF-17: the request explains why it was invalidated. The reason is
+                    // also the decision comment unless an approver already left one, which stays.
+                    String comment = request.getDecisionComment();
+                    if (comment == null || comment.trim().isEmpty()) {
+                        request.setDecisionComment(reason);
+                    }
                     store.saveRunRequest(request);
                     invalidated.add(request.getId());
                     LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);

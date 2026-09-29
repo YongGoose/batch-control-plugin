@@ -27,6 +27,7 @@ public final class Notification {
     private final List<String> recipients;
     private final String url;
     private final String action;
+    private final List<String> details;
 
     public Notification(String kind, String requestId, String subject, String requester,
                         String reason, List<String> recipients, String url) {
@@ -39,6 +40,19 @@ public final class Notification {
      */
     public Notification(String kind, String requestId, String subject, String requester,
                         String reason, List<String> recipients, String url, String action) {
+        this(kind, requestId, subject, requester, reason, recipients, url, action, null);
+    }
+
+    /**
+     * @param details plain-text lines describing what is decided on, each {@code Label: value}
+     *                (for a change request its actions, duration and name restriction, e2e-03
+     *                DEF-24); {@code null} for none
+     */
+    public Notification(String kind, String requestId, String subject, String requester,
+                        String reason, List<String> recipients, String url, String action,
+                        List<String> details) {
+        this.details = details == null
+                ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(details));
         this.kind = Objects.requireNonNull(kind, "kind");
         this.requestId = Objects.requireNonNull(requestId, "requestId");
         this.subject = subject;
@@ -53,6 +67,14 @@ public final class Notification {
     /** {@code ACTIVATE} or {@code HOLD} for an activation request; {@code null} for other kinds. */
     public String getAction() {
         return action;
+    }
+
+    /**
+     * Plain-text {@code Label: value} lines describing what the request asks for (for a change
+     * request: actions, duration and name restriction); never {@code null}, possibly empty.
+     */
+    public List<String> getDetails() {
+        return details;
     }
 
     /**
