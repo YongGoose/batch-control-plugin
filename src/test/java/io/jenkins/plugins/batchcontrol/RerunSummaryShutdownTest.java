@@ -46,9 +46,11 @@ public class RerunSummaryShutdownTest {
 
     /**
      * T-06-84: u1 retries 24 different failed builds within seconds: 20 per-attempt records, one
-     * summary, and 3 counted refusals (#22..#24) leave the summary open. After a clean restart the
-     * history holds exactly one further record by u1: the closing record, giving the count 3 and
-     * saying that the window ended early because Jenkins was shutting down.
+     * summary opened by #21, and #22..#24 only counted, so the summary is still open. After a clean
+     * restart the history holds exactly one further record by u1: the closing record, giving the
+     * count 4 (every refusal beyond the 20, including #21 that opened the summary, D-51a), naming
+     * #21..#24 and none of #1..#20, and saying that the window ended early because Jenkins was
+     * shutting down.
      */
     @Test
     public void t_06_84_cleanShutdownWritesTheClosingRecordOfAnOpenSummary() throws Throwable {
@@ -83,8 +85,16 @@ public class RerunSummaryShutdownTest {
                     + " summary: " + describe(added));
             String text = String.valueOf(added.get(0).getDetail());
             String lower = text.toLowerCase(Locale.ROOT);
-            assertTrue(text.matches("(?s).*\\b3\\b.*"), "the closing record must give the count of the 3 counted"
-                    + " refusals: " + text);
+            // D-51a (1a80eff): the count covers every refusal beyond the 20 per-attempt records,
+            // including the one that opened the summary: #21..#24
+            assertTrue(text.matches("(?s).*\\b4\\b.*"), "the closing record must give the count 4 (#21..#24): " + text);
+            for (int n = 21; n <= 24; n++) {
+                assertTrue(text.matches("(?s).*#" + n + "\\b.*"), "the closing record must name build #" + n + ": " + text);
+            }
+            for (int n = 1; n <= 20; n++) {
+                assertTrue(!text.matches("(?s).*#" + n + "\\b.*"), "the closing record must not name build #" + n
+                        + ", which has its own record: " + text);
+            }
             assertTrue(lower.contains("shut"), "the closing record must say the window ended early because Jenkins was"
                     + " shutting down: " + text);
         });
