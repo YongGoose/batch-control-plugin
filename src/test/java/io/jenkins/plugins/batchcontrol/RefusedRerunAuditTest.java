@@ -285,6 +285,92 @@ public class RefusedRerunAuditTest {
     }
 
     /**
+     * T-06-78 (D-51, e2e-03 DEF-32 root cause): a person's refused re-run is recorded per attempt.
+     * u1 clicks Retry (browser path, as T-06-77) on failed build #1, again on #1 a few seconds
+     * later, then on failed build #2: exactly two TRIGGER_BLOCKED records by u1, one naming #1 and
+     * one naming #2 (the double click on #1 is merged). Unattended refusals keep the hourly
+     * coalescing: on a second job, two refused automatic retries within the hour leave one record.
+     * Note 161.
+     */
+    @Test
+    public void t_06_78_personRetryIsRecordedPerAttemptAndUnattendedStaysCoalesced() throws Exception {
+        FreeStyleProject job = approvalRequired("rr-d51");
+        job.getBuildersList().add(new FailureBuilder());
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        requestAndApprove(job);
+        j.waitUntilNoActivity();
+        FreeStyleBuild first = job.getBuildByNumber(1);
+        FreeStyleBuild second = job.getBuildByNumber(2);
+        assertNotNull(second, "fixture: two approved runs must have produced #1 and #2");
+        j.assertBuildStatus(Result.FAILURE, first);
+        j.assertBuildStatus(Result.FAILURE, second);
+
+        assertEquals(1, clickRetryInBrowser("u1", first), "fixture: the click on #1 must send one POST");
+        assertEquals(1, clickRetryInBrowser("u1", first), "fixture: the repeated click on #1 must send one POST");
+        assertEquals(1, clickRetryInBrowser("u1", second), "fixture: the click on #2 must send one POST");
+        assertBlocked(j, job, 3, 2);
+
+        List<ChangeRecord> byU1 = rerunRecords(job).stream()
+                .filter(r -> r.getType() == ChangeType.TRIGGER_BLOCKED && "u1".equals(r.getUser()))
+                .collect(Collectors.toList());
+        assertEquals(2, byU1.size(), "u1's attempts on #1 (twice within seconds) and #2 must leave exactly two"
+                + " TRIGGER_BLOCKED records, one per attempt (D-51): " + describe(rerunRecords(job)));
+        java.util.regex.Pattern names1 = java.util.regex.Pattern.compile("(#|/)1\\b");
+        java.util.regex.Pattern names2 = java.util.regex.Pattern.compile("(#|/)2\\b");
+        assertEquals(1, byU1.stream().filter(r -> names1.matcher(r.getTarget() + " " + r.getDetail()).find()
+                        && !names2.matcher(r.getTarget() + " " + r.getDetail()).find()).count(),
+                "one record must name build #1: " + describe(byU1));
+        assertEquals(1, byU1.stream().filter(r -> names2.matcher(r.getTarget() + " " + r.getDetail()).find()
+                        && !names1.matcher(r.getTarget() + " " + r.getDetail()).find()).count(),
+                "one record must name build #2: " + describe(byU1));
+
+        FreeStyleProject auto = approvalRequired("rr-d51-auto");
+        auto.getBuildersList().add(new FailureBuilder());
+        auto.getPublishersList().add(new NaginatorPublisher("", false, false, false, 1, new FixedDelay(0)));
+        requestAndApprove(auto);
+        j.waitUntilNoActivity();
+        requestAndApprove(auto);
+        j.waitUntilNoActivity();
+        assertBlocked(j, auto, 3, 2);
+        List<ChangeRecord> unattended = ActivationFixtures.recordsFor(ChangeType.TRIGGER_BLOCKED, auto.getFullName());
+        assertEquals(1, unattended.size(), "two refused automatic retries of one job within the hour must stay one"
+                + " coalesced record: " + describe(unattended));
+    }
+
+    /** Opens {@code build}'s page as {@code userId} with JavaScript and clicks naginator's Retry; returns the POSTs sent to retry/. */
+    private int clickRetryInBrowser(String userId, FreeStyleBuild build) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
+        wc.getOptions().setJavaScriptEnabled(true);
+        wc.getOptions().setThrowExceptionOnScriptError(false);
+        List<String> posts = new java.util.concurrent.CopyOnWriteArrayList<>();
+        new org.htmlunit.util.WebConnectionWrapper(wc) {
+            @Override
+            public org.htmlunit.WebResponse getResponse(org.htmlunit.WebRequest request) throws java.io.IOException {
+                org.htmlunit.WebResponse response = super.getResponse(request);
+                if (request.getHttpMethod() == org.htmlunit.HttpMethod.POST
+                        && request.getUrl().getPath().endsWith("/retry/")) {
+                    posts.add(String.valueOf(response.getStatusCode()));
+                }
+                return response;
+            }
+        };
+        org.htmlunit.html.HtmlPage page = wc.getPage(build);
+        org.htmlunit.html.HtmlAnchor retry = null;
+        for (org.htmlunit.html.HtmlAnchor a : page.getAnchors()) {
+            String href = a.getHrefAttribute();
+            if (href != null && href.endsWith(build.getUrl() + "retry/")) {
+                retry = a;
+                break;
+            }
+        }
+        assertNotNull(retry, "fixture: " + build + " must offer naginator's Retry link (D-49)");
+        retry.click();
+        wc.waitForBackgroundJavaScript(10000);
+        return posts.size();
+    }
+
+    /**
      * Test-only root action: on a request thread, as the calling user, schedules build #1's job
      * with a {@code NaginatorCause} (of build #1) and a {@code RemoteCause}, and no UserIdCause.
      */
