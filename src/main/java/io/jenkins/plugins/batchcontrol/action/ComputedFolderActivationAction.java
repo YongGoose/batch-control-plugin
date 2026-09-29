@@ -15,6 +15,7 @@ import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.StaplerProxy;
 
 /**
  * Activation on a computed folder (multibranch project, organization folder), which carries the
@@ -32,7 +33,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>No sidebar entry; the action never changes state itself.
  */
 @Restricted(NoExternalUse.class)
-public class ComputedFolderActivationAction implements Action {
+public class ComputedFolderActivationAction implements Action, StaplerProxy {
 
     private final ComputedFolder<?> folder;
 
@@ -62,9 +63,16 @@ public class ComputedFolderActivationAction implements Action {
         return isCanRequest() ? "batch-control" : null;
     }
 
-    /** Stapler: serves {@code <folder>/batch-control/activation}; the submission re-checks. */
-    public JobActivationForm getActivation() {
-        return new JobActivationForm(folder);
+    /**
+     * Stapler: {@code <folder>/batch-control/activation} is served by a {@link JobActivationRoute},
+     * which is no model object, so the form's breadcrumbs read {@code <folder> > Activation} as on
+     * a job (e2e re-audit DEF-06). This action itself would otherwise add a second "Activation"
+     * crumb. Reaching this action at all needs {@code BatchControl/Request} ({@link #getUrlName()});
+     * the submission re-checks its permissions.
+     */
+    @Override
+    public Object getTarget() {
+        return JobActivationRoute.isActivationRequest() ? new JobActivationRoute(folder) : this;
     }
 
     // ---------------------------------------------------------------- summary (Jelly)

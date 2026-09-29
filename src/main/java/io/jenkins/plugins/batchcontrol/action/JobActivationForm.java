@@ -33,7 +33,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 /**
  * The activation request form at {@code <item>/batch-control/activation} (SPEC item 6a, D-39)
  * for a job ({@link JobActivationRoute#getActivation()}) or a computed folder, which carries the
- * activation of its children (D-46c, {@link ComputedFolderActivationAction#getActivation()}). It
+ * activation of its children (D-46c, {@link ComputedFolderActivationAction#getTarget()}). It
  * inherits the owning action's absence rule: without {@code BatchControl/Request} the whole
  * {@code <item>/batch-control/} space answers 404, so this form is never shown to a user who
  * could not submit it.

@@ -30,7 +30,6 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
@@ -117,12 +116,7 @@ public class JobRequestAction implements Action, StaplerProxy {
      */
     @Override
     public Object getTarget() {
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        String rest = req == null ? null : req.getRestOfPath();
-        if (rest != null && (rest.equals("/activation") || rest.startsWith("/activation/"))) {
-            return new JobActivationRoute(job);
-        }
-        return this;
+        return JobActivationRoute.isActivationRequest() ? new JobActivationRoute(job) : this;
     }
 
     /**
