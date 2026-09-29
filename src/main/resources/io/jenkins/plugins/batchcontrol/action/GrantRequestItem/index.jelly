@@ -83,11 +83,13 @@
            (GrantRequestItem#isShowSystemBuildWarning). It names no job and no count. -->
       <j:if test="${it.showSystemBuildWarning}">
         <div class="jenkins-alert jenkins-alert-warning" role="alert">
-          <strong>Builds can run as SYSTEM on this instance.</strong>
+          <strong>Builds on this instance can run as SYSTEM or as an account that already has
+          Configure permission.</strong>
           A holder of a Configure permission window can therefore make a build change a job's
           permissions permanently. A Jenkins administrator can prevent this by setting a global
-          default build authorization in Authorize Project (a strategy on a single job is not
-          enough).
+          default build authorization in Authorize Project that runs builds as the user who
+          started them, or as an account without Configure permission; a strategy on a single job
+          is not enough.
         </div>
       </j:if>
 

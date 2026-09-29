@@ -51,15 +51,17 @@
       </p>
     </j:if>
     <!-- D-50a (SPEC item 2): one fixed warning with no job names, while change control is on and
-         builds can run as SYSTEM (BatchControlStrategyMonitor#isBuildsMayRunAsSystem). -->
+         builds can run as SYSTEM or as an account with Configure (D-50b,
+         BatchControlStrategyMonitor#isBuildsMayRunAsSystem). -->
     <j:if test="${it.buildsMayRunAsSystem}">
       <p>
-        <strong>Batch Control:</strong> builds can run as SYSTEM on this instance, so a holder of a
-        Configure permission window can make a build change a job's permissions permanently. Set
-        a global default build authorization in
-        <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a> under
-        <a href="${rootURL}/manage/configureSecurity">Security</a> (a strategy on a single job is
-        not enough).
+        <strong>Batch Control:</strong> builds on this instance can run as SYSTEM or as an account
+        that already has Configure permission, so a holder of a Configure permission window can
+        make a build change a job's permissions permanently. Set a global default build
+        authorization in <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a>
+        under <a href="${rootURL}/manage/configureSecurity">Security</a> that runs builds as the
+        user who started them, or as an account without Configure permission; a strategy on a
+        single job is not enough.
       </p>
     </j:if>
   </l:adminMonitor>
