@@ -28,7 +28,6 @@ import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.springframework.security.core.Authentication;
 
 /**
  * The queue gate (SPEC item 6, D-03): every run path goes through
@@ -254,15 +253,14 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     }
 
     /**
-     * Whether a person started this submission (D-46b, D-47, security-15 S-15-01): the UI, REST or
-     * CLI build ({@code UserIdCause} and its CLI subtype, the deprecated {@code UserCause}) or a
-     * Pipeline Replay, submitted by an authenticated user who is not SYSTEM, and for a user cause
-     * naming a real user id (not {@code null}, SYSTEM or anonymous). A Rebuild click carries the
-     * clicking user's {@code UserIdCause} and so counts as a person. Code running as SYSTEM (a
-     * script, a CLI or Replay call made as SYSTEM, a {@code UserIdCause} built under SYSTEM, which
-     * carries no user id) is unattended. An approved request's cause counts only through its
-     * marker, which is consumed before this is asked. A build token ({@code RemoteCause}) and an
-     * automatic retry (D-47), whatever causes it copied from the build it retries, are unattended.
+     * Whether a person started this submission (D-46b, D-47, security-15 S-15-01): a user-type
+     * cause ({@code UserIdCause} and its CLI subtype, the deprecated {@code UserCause}, a Rebuild
+     * click, which carries the clicking user's {@code UserIdCause}, or a Pipeline Replay) submitted
+     * by anyone but SYSTEM. An anonymous user with Item/Build pressing Build Now is a person acting.
+     * Code running as SYSTEM (a script, a CLI or Replay call made as SYSTEM, a {@code UserIdCause}
+     * built under SYSTEM) is unattended. An approved request's cause counts only through its marker,
+     * which is consumed before this is asked. A build token ({@code RemoteCause}) and an automatic
+     * retry (D-47), whatever causes it copied from the build it retries, are unattended.
      */
     @SuppressWarnings("deprecation")
     private static boolean isHumanSubmission(List<Cause> causes) {
@@ -270,30 +268,16 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // D-47: the person in a retry's cause list acted on the retried build, not on this one.
             return false;
         }
-        Authentication submitter = Jenkins.getAuthentication2();
-        if (ACL.SYSTEM2.equals(submitter) || ACL.isAnonymous2(submitter)) {
+        if (ACL.SYSTEM2.equals(Jenkins.getAuthentication2())) {
             return false;
         }
         for (Cause cause : causes) {
-            if (cause instanceof Cause.UserIdCause) {
-                if (isRealUser(((Cause.UserIdCause) cause).getUserId())) {
-                    return true;
-                }
-            } else if (cause instanceof Cause.UserCause) {
-                if (isRealUser(((Cause.UserCause) cause).getUserName())) {
-                    return true;
-                }
-            } else if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
+            if (cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause
+                    || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                 return true;
             }
         }
         return false;
-    }
-
-    /** A user id that names a person: not {@code null}/blank, SYSTEM or anonymous (S-15-01). */
-    private static boolean isRealUser(String id) {
-        return id != null && !id.isBlank() && !ACL.SYSTEM_USERNAME.equals(id)
-                && !ACL.ANONYMOUS_USERNAME.equals(id) && !"anonymous".equals(id);
     }
 
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
