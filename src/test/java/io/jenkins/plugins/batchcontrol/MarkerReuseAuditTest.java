@@ -280,6 +280,55 @@ public class MarkerReuseAuditTest {
         assertTrue(allowed.getContentAsString().contains(request.getId()), "control: a ViewHistory holder must see the re-use row");
     }
 
+    /**
+     * T-06-55 (D-47, security-14 S-14-01 BLOCKER): the approval marker is bound to the request
+     * id, not to the job's current {@code approvalRequired} switch. After the marker is
+     * consumed, turning {@code approvalRequired} off does not make presenting the very same
+     * marker again pass, and it is still recorded — SPEC item 6/D-30 read together with D-47
+     * ("The approval marker is consumed and a re-use attempt recorded whether or not the job
+     * requires approval"). P-12 ratifies the record's shape, so this row asserts the type name
+     * directly: {@code ChangeType.MARKER_REUSE_BLOCKED}, {@code target} = the job the marker was
+     * replayed on, {@code user} = the account that replayed it.
+     */
+    @Test
+    public void t_06_55_reusePresentedOnApprovalNotRequiredJobIsStillBlockedAndRecorded()
+            throws Exception {
+        FreeStyleProject job = j.createFreeStyleProject("reuse-optout");
+        job.addProperty(new BatchControlJobProperty(true));
+
+        RunRequest request = createAs(REQUESTER, job);
+        approveAs(APPROVER, request.getId());
+        j.waitUntilNoActivity();
+        assertEquals(1, job.getBuilds().size(), "fixture: the approved submission must run exactly once");
+
+        FreeStyleBuild approvedBuild = job.getBuildByNumber(1);
+        ApprovedRunAction marker = approvedBuild.getAction(ApprovedRunAction.class);
+        assertNotNull(marker, "fixture: the executed run must carry the marker action");
+        assertTrue(reuseRecords(request.getId()).isEmpty(), "fixture: no re-use record may exist before a re-use is attempted");
+
+        // D-47: the job stops requiring approval AFTER the marker was already consumed.
+        BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(false));
+        assertFalse(job.getProperty(BatchControlJobProperty.class).isApprovalRequired(), "fixture: the job must no longer require approval");
+
+        as(REUSER, () -> assertScheduleRefused(
+                "D-47: presenting the consumed marker on an approval-not-required job must still be refused",
+                () -> job.scheduleBuild2(0, new Cause.UserIdCause(), marker)));
+        j.waitUntilNoActivity();
+        assertEquals(1, job.getBuilds().size(), "no build may result from re-presenting the consumed marker on the"
+                + " approval-not-required job");
+
+        List<ChangeRecord> records = reuseRecords(request.getId());
+        assertEquals(1, records.size(), "the blocked re-use must still be recorded even though approvalRequired is"
+                + " now false (D-47): " + describe(records));
+        ChangeRecord record = records.get(0);
+        assertEquals(ChangeType.MARKER_REUSE_BLOCKED, record.getType(), "P-12: the ratified type name for a blocked marker re-use");
+        assertEquals("reuse-optout", record.getTarget(), "P-12: target is the job the marker was presented on");
+        assertEquals(REUSER, record.getUser(), "the actor of the attempt, not the owner of the approval");
+        String text = textOf(record);
+        assertTrue(text.contains(request.getId()), "the record must name the consumed request id: " + text);
+        assertTrue(text.contains("reuse-optout"), "the record must name the job the marker was replayed on: " + text);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** Audit records that refer to the consumed request; see the class derivation note. */

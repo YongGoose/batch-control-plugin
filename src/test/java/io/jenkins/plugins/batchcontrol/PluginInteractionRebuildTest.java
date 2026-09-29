@@ -81,6 +81,9 @@ public class PluginInteractionRebuildTest {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rb-free"));
         j.assertBuildStatusSuccess(job.scheduleBuild2(0, ActivationFixtures.userCause("u1"))); // a human run (note 100)
 
+        // D-47 (security-14 S-14-01): a Rebuild click is a person acting now (a live UserIdCause
+        // from this very POST), unlike an automatic naginator retry (T-06-54) whose causes are
+        // only inherited from the build it retries — so this job needs no activation here.
         post(j, "u1", job.getBuildByNumber(1).getUrl() + "rebuild/");
         j.waitUntilNoActivity();
 
