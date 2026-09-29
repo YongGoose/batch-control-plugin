@@ -1,9 +1,0 @@
-<?jelly escape-by-default='true'?>
-<!-- e2e-03 DEF-25: included by core's build page for every action. On a build of an
-     approval-required job (run control on) it loads the stylesheet that hides the Rebuild and
-     Retry entries, which the queue gate refuses for every user; nothing else is rendered. -->
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
-  <j:if test="${it.hidden}">
-    <st:adjunct includes="io.jenkins.plugins.batchcontrol.action.JobActivationNoticeAction.hide-direct-build"/>
-  </j:if>
-</j:jelly>

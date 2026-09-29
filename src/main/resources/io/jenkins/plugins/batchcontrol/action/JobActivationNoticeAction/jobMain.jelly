@@ -9,7 +9,7 @@
 
      Wording contract: an activated job's notice must not contain the phrases used for the other
      two states, so "Request a hold" rather than any phrase with "on hold" in it. -->
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+<j:jelly xmlns:j="jelly:core">
   <j:if test="${it.shown}">
     <!-- e2e-03 DEF-01 (SPEC item 6): on an approval-required job the page always says that manual
          runs need an approved request, since another plugin's build button (Rebuild, Retry, a
@@ -36,13 +36,6 @@
           </j:otherwise>
         </j:choose>
       </div>
-      <!-- e2e-03 DEF-25 (SPEC item 6: "Build Now" is replaced by "Request Run"): the build
-           entries that are refused for everyone here are hidden. Core's build link and the
-           Rebuild/Retry entries of other plugins cannot be removed from a plugin, so a
-           stylesheet scoped to this page hides them; the queue gate still refuses the URLs. -->
-      <j:if test="${it.hideDirectBuild}">
-        <st:adjunct includes="io.jenkins.plugins.batchcontrol.action.JobActivationNoticeAction.hide-direct-build"/>
-      </j:if>
     </j:if>
     <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control/activation"/>
     <j:set var="carrier" value="${it.carrier}"/>

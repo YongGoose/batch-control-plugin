@@ -131,16 +131,6 @@ public class JobActivationNoticeAction implements Action {
         return new JobRequestAction(job).isCanRequestRun();
     }
 
-    /**
-     * e2e-03 DEF-25: whether this page hides the build entries that can never succeed here
-     * (core's relabeled build link, Rebuild Last, Retry). True exactly when manual runs need an
-     * approved request ({@link #isApprovalRequired()}): every such click is refused for every
-     * user, administrators included. The endpoints stay refused by the queue gate regardless.
-     */
-    public boolean isHideDirectBuild() {
-        return isApprovalRequired();
-    }
-
     /** The PENDING requests of this job the viewer may see (P-09). */
     public List<ActivationRequest> getPendingRequests() {
         List<ActivationRequest> visible = new ArrayList<>();
