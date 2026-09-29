@@ -220,9 +220,8 @@ public class HistoryWebTest {
     public void t_12_04_monthlySummaryCountsAreExact() throws Exception {
         // 2 SUCCESS (one via an approved request), 1 FAILURE, 1 UNSTABLE
         FreeStyleProject sumA = j.createFreeStyleProject("sum-a");
-        // setBatchControl, not addProperty: this fixture needs an approval-required job whose
-        // timer is still open, and after D-34 a job created under run control starts with
-        // blockTimer=true (matrix notes 42, 46)
+        // setBatchControl, not addProperty: the fixture's property must be the one the plugin reads
+        // (matrix note 42)
         setBatchControl(sumA, new BatchControlJobProperty(true));
         RunRequest approved;
         try (ACLContext ignored = as("u1")) {
@@ -233,7 +232,11 @@ public class HistoryWebTest {
             RunRequestService.get().approve(approved.getId(), "ok");
         }
         j.waitUntilNoActivity();
-        j.assertBuildStatusSuccess(sumA.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+        // the second SUCCESS is a timer run of an uncontrolled job: since SPEC item 6a a timer run of
+        // sum-a would need an activation, and whether an activation request counts among the
+        // summary's approved requests is not specified (note 97), so the fixture avoids one
+        FreeStyleProject sumT = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("sum-t"));
+        j.assertBuildStatusSuccess(sumT.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
 
         FreeStyleProject sumF = j.createFreeStyleProject("sum-f");
         sumF.getBuildersList().add(new FailureBuilder());

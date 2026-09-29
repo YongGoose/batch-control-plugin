@@ -202,12 +202,14 @@ public class TriggerBlockedAuditTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList());
         setBatchControl(both, property);
+        activateAsAdmin(both);
         FreeStyleProject other = timerLocked("tb-other");
         FreeStyleProject open = j.createFreeStyleProject("tb-open");
         BatchControlJobProperty openProperty = new BatchControlJobProperty(true);
         openProperty.setBlockTimer(false);
         openProperty.setBlockUpstream(false);
         setBatchControl(open, openProperty);
+        activateAsAdmin(open);
         clockAt(T0);
 
         assertNull(both.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "fixture: timer refused");
@@ -265,6 +267,7 @@ public class TriggerBlockedAuditTest {
         property.setBlockTimer(true);
         property.setBlockUpstream(false);
         setBatchControl(job, property);
+        activateAsAdmin(job);
         assertTrue(property.isBlockTimer(), "fixture: blockTimer on");
         assertFalse(property.isBlockUpstream(), "fixture: blockUpstream off");
         return job;
@@ -277,9 +280,20 @@ public class TriggerBlockedAuditTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Collections.emptyList());
         setBatchControl(job, property);
+        activateAsAdmin(job);
         assertTrue(property.isBlockUpstream(), "fixture: blockUpstream on");
         assertFalse(property.isBlockTimer(), "fixture: blockTimer off");
         return job;
+    }
+
+    /**
+     * SPEC item 6a: the rows here pin that the <em>job switch</em> is named as the reason, so
+     * the job is activated first and the switch is the only thing that refuses (note 91). The
+     * administrator is the only approver of this class and may approve their own request
+     * (allowAdminSelfApproval, default true).
+     */
+    private static void activateAsAdmin(FreeStyleProject job) throws Exception {
+        BatchControlFixtures.activate(job, "admin", "admin");
     }
 
     private FreeStyleBuild upstreamBuild(String name) throws Exception {

@@ -124,6 +124,7 @@ public class IncidentTest {
         // while its timer stays open, and after D-34 the created job carries blockTimer=true
         // (matrix notes 42, 46)
         setBatchControl(job, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(job); // SPEC item 6a: the timer firing needs an activation (note 91)
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),
@@ -239,6 +240,7 @@ public class IncidentTest {
                 new StringParameterDefinition("DATE", "2000-01-01")));
         // see t_11_02: a stated property, so the fixture's timer firing survives D-34
         setBatchControl(job, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(job); // SPEC item 6a (note 91)
         job.getBuildersList().add(new FailureBuilder());
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0,
                 new TimerTrigger.TimerTriggerCause(),

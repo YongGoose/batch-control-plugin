@@ -94,6 +94,7 @@ public class PluginInteractionParameterizedTriggerTest {
     @Test
     public void t_06_29_triggerPassesByDefault() throws Exception {
         setBatchControl(target, new BatchControlJobProperty(true));
+        BatchControlFixtures.activate(target); // SPEC item 6a: the upstream door needs an activation (note 91)
         FreeStyleProject upstream = upstreamWithBuildStep("pt-y");
 
         post(j, "u1", upstream.getUrl() + "build");
@@ -123,6 +124,7 @@ public class PluginInteractionParameterizedTriggerTest {
         property.setBlockUpstream(true);
         assertSame(property, setBatchControl(job, property));
         assertTrue(job.getProperty(BatchControlJobProperty.class).isBlockUpstream(), "fixture: blockUpstream must be on");
+        BatchControlFixtures.activate(job); // SPEC item 6a: blockUpstream must be the only reason (note 91)
     }
 
     private FreeStyleProject upstreamWithBuildStep(String name) throws Exception {

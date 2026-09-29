@@ -79,6 +79,7 @@ public class RequestIntegrityTest {
         // run control is already on, so D-31 gave the job a property at creation; install this
         // one as the only one or blockUpstream would be shadowed (see BatchControlFixtures)
         setBatchControl(protectedJob, property);
+        BatchControlFixtures.activate(protectedJob); // SPEC item 6a: the empty allow list must be the reason (note 91)
 
         WorkflowJob caller = j.createProject(WorkflowJob.class, "caller-a");
         caller.setDefinition(new CpsFlowDefinition("build job: 'protected-b', wait: false", true));

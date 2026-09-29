@@ -265,7 +265,8 @@ public class NewJobAutomationSafetyTest {
 
     /**
      * The same job after somebody brought it into service: the two automation switches turned off
-     * in the job's configuration while {@code approvalRequired} stays on. This is the way out
+     * in the job's configuration while {@code approvalRequired} stays on, and (SPEC item 6a) an
+     * approved activation. This is the way out
      * D-34 names ("turn the switch off in the job configuration"), expressed the way T-OS-05/06
      * express an administrator flipping a job switch.
      */
@@ -279,6 +280,9 @@ public class NewJobAutomationSafetyTest {
         assertTrue(isApprovalRequired(created), "fixture: " + name + " must still be approval-required after the unlock");
         assertFalse(unlocked.isBlockTimer(), "fixture: blockTimer must be off for the activation rows");
         assertFalse(unlocked.isBlockUpstream(), "fixture: blockUpstream must be off for the activation rows");
+        // SPEC item 6a (#15): clearing the switches alone no longer brings the job into service;
+        // an approved activation is the other half of the AND (T-06a-01/02, note 91)
+        BatchControlFixtures.activate(created);
         return created;
     }
 

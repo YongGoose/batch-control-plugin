@@ -101,6 +101,11 @@ public class DiscoverOnlyRequestScreenTest {
         BatchControlFixtures.setBatchControl(jobJ, new BatchControlJobProperty(true));
         jobK = j.createFreeStyleProject("open-k");
         BatchControlFixtures.setBatchControl(jobK, new BatchControlJobProperty(true));
+        // SPEC item 6a: the fixture runs below are timer runs, which need activated jobs (note 91).
+        // The instance is still unsecured here, so neutral ids keep the activation requests out of
+        // u1's own request screens this class measures.
+        BatchControlFixtures.activate(jobJ, "bc-requester", "a1");
+        BatchControlFixtures.activate(jobK, "bc-requester", "a1");
         folder = j.jenkins.createProject(Folder.class, "secret-folder");
 
         // One run of open-k, so the detail screen's recent-run table has something to render.

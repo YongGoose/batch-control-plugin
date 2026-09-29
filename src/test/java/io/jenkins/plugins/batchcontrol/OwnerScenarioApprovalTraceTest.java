@@ -85,6 +85,8 @@ public class OwnerScenarioApprovalTraceTest {
         // After D-34 a job created under run control starts with blockTimer=true, which would
         // shadow-block the timer half of the row (matrix notes 42, 46).
         setBatchControl(job, new BatchControlJobProperty(true));
+        // SPEC item 6a: the unapproved timer half of T-OS-04 needs an activated job (note 91)
+        BatchControlFixtures.activate(job, REQUESTER, APPROVER);
     }
 
     /**

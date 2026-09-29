@@ -47,6 +47,7 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
+import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.activate;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.uncontrolled;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.requestAndApprove;
@@ -74,6 +75,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @WithJenkins
 public class QueueBlockTest {
+
+    /** Item 6a fixture ids on the unsecured instance (any authenticated id holds every permission). */
+    private static final String UNSECURED_REQUESTER = "bc-requester";
+    private static final String UNSECURED_APPROVER = "bc-approver";
 
     private JenkinsRule j;
 
@@ -147,6 +152,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: only blockUpstream may be the reason (note 91)
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -161,6 +167,7 @@ public class QueueBlockTest {
     @Test
     public void t_06_06_timerCausePassesByDefault() throws Exception {
         protect(job);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: the timer door is open only once activated (note 91)
         // matrix note 4: reproduce cron firing by scheduling with a TimerTriggerCause
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
         assertNotNull(future, "a timer cause must pass by default");
@@ -173,6 +180,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: only blockTimer may be the reason (note 91)
 
         // an unattended cause is refused quietly: scheduleBuild2 returns null, nothing is thrown
         Future<FreeStyleBuild> future = job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause());
@@ -188,6 +196,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
         setBatchControl(cronJob, property);
+        activate(cronJob, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: the refusal is blockTimer's (note 91)
 
         List<LogRecord> infoRecords = Collections.synchronizedList(new ArrayList<>());
         Handler handler = new Handler() {
@@ -276,6 +285,7 @@ public class QueueBlockTest {
     @Test
     public void t_06_10_upstreamPassesByDefault() throws Exception {
         protect(job);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
         j.buildAndAssertSuccess(upstream);
@@ -293,6 +303,7 @@ public class QueueBlockTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
 
         WorkflowJob upstream = j.createProject(WorkflowJob.class, "y");
         upstream.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -311,6 +322,7 @@ public class QueueBlockTest {
         property.setBlockUpstream(true);
         property.setAllowedUpstreamJobs(Arrays.asList("y"));
         setBatchControl(job, property);
+        activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
 
         WorkflowJob other = j.createProject(WorkflowJob.class, "z");
         other.setDefinition(new CpsFlowDefinition("build job: 'batch-x', wait: false", true));
@@ -385,6 +397,7 @@ public class QueueBlockTest {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(blockUpstream);
         setBatchControl(self, property);
+        activate(self); // item 6a: the self-trigger is an upstream cause (note 91)
         return self;
     }
 
