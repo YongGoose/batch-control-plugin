@@ -91,7 +91,7 @@ public class HistoryWebTest {
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.VIEW_HISTORY)
                         .everywhere().to("viewer")
                 .grant(Jenkins.READ, Item.READ).everywhere().to("nohist")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST)
+                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST) // D-38 (#24): requesters need Item/Build
                         .everywhere().to("u1")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
                         .everywhere().to("a1"));

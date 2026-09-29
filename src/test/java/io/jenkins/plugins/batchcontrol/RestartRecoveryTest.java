@@ -167,6 +167,7 @@ public class RestartRecoveryTest {
             strategy.add(Jenkins.READ, PermissionEntry.user(userId));
             strategy.add(Item.READ, PermissionEntry.user(userId));
         }
+        strategy.add(Item.BUILD, PermissionEntry.user("u1")); // D-38 (#24)
         strategy.add(BatchControlPermissions.REQUEST, PermissionEntry.user("u1"));
         strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
         r.jenkins.setAuthorizationStrategy(strategy);

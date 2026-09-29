@@ -31,6 +31,7 @@
 - 수용 기준: 설치 직후 기존 잡의 빌드·설정·삭제가 이전과 동일하게 동작한다.
 - 수용 기준: 실행 통제만 켜면 변경 통제 관련 UI·차단은 나타나지 않는다(반대도 동일).
 - 수용 기준: 스위치 on/off 시 ChangeRecord(type=CONFIG_TOGGLE, 사용자, 시각, 이전/이후 값)가 남는다.
+- Acceptance: a switch change takes effect only once the new configuration is saved. If the save fails, the in-memory switch, the toggle record and any side effect (such as revoking active grants when change control is turned off) are not applied; side effects run only after the new state is durable. A direct setter call (JCasC, script console) never throws: it applies the value and logs a failed write (D-42). (#19)
 
 **2. 권한 체계**
 `BatchControl/Request`, `BatchControl/Approve`, `BatchControl/RequestGrant`, `BatchControl/ViewHistory`, `BatchControl/Manage` 권한을 정의합니다.
@@ -78,6 +79,8 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 사유가 4,000자를 초과하거나 문자열 파라미터 값이 개당 10,000자를 초과하면 요청 생성이 거부된다. (R-7 부분 채택, D-22)
 - 수용 기준: 실행된 빌드에는 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다.
 - 잡 단위 설정(JobProperty): `approvalRequired`(bool), 잡별 결재자 목록 제한(선택).
+- Acceptance: submitting a run request (job request form, incident rerun, and the service API) requires `Item/Build` on the job as the requester, in addition to `BatchControl/Request` and `Item/Read`; without it the submission is refused with 403 and no request is stored. (D-38, #24)
+- Acceptance: whether an approver may approve is decided by the approval policy alone. An approved request is submitted even when the approver holds only `Item/Discover` or no permission on the job: the job lookup for the submission runs as SYSTEM after the policy check. (#26)
 
 **6. 실행 경로 차단**
 UI, REST API, CLI 등 승인 없는 수동 실행은 모두 큐 진입 단계에서 차단합니다.

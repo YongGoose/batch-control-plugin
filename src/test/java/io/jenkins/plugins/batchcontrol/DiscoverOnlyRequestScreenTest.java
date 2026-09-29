@@ -117,7 +117,9 @@ public class DiscoverOnlyRequestScreenTest {
                 .grant(Item.DISCOVER).onItems(jobJ).to("b")
                 .grant(Item.DISCOVER).onItems(folder).to("b")
                 .grant(Item.READ).onItems(jobK).to("b")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST)
+                // D-38 (#24): filing a run request needs Item/Build as the requester
+                .grant(Item.BUILD).onItems(jobJ, jobK).to("b")
+                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST) // D-38 (#24): requesters need Item/Build
                         .everywhere().to("u1")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
                         .everywhere().to("a1"));
