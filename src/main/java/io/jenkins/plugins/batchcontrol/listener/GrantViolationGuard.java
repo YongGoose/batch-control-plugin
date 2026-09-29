@@ -172,6 +172,8 @@ public class GrantViolationGuard extends SaveableListener {
             appendViolation(fullName, user, grant,
                     "The authorization property was changed by a user whose Item/Configure comes only "
                             + "from " + grantText(grant) + "; the entries the change added were removed.");
+            // D-48: the saving user is told as well, if the save came through an HTTP request.
+            SelfGrantRevertFilter.flag(item);
             LOGGER.warning(() -> "Reverted additions to the authorization property of '" + fullName
                     + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant));
         }
@@ -507,6 +509,7 @@ public class GrantViolationGuard extends SaveableListener {
                             + grant.getId() + " and carried an authorization property; the property was removed.");
             record.setGrantId(grant.getId());
             Store.get().appendChangeRecord(record);
+            SelfGrantRevertFilter.flag(item); // D-48
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
                     + user + "' through grant " + grant.getId());
         }
