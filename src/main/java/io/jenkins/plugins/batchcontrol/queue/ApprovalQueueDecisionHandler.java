@@ -237,13 +237,14 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                         if (rerun != null) {
                             String user = Jenkins.getAuthentication2().getName();
                             String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
-                            // e2e re-audit DEF-32: keyed per user, so a person's refused re-run is
-                            // recorded under their name and never merged into the SYSTEM record of
-                            // automatic retries (or another person's).
-                            recordTriggerBlocked(job, rerun, "approvalRequired",
-                                    "Blocked " + what + " of job '" + job.getFullName() + "' by '" + user
-                                            + "' - a re-run does not reuse an earlier approval; submit a new run request",
-                                    user);
+                            String source = sourceBuild(causes);
+                            // e2e re-audit DEF-32: recorded under the person's name and never merged
+                            // into the SYSTEM record of automatic retries, another person's record,
+                            // or the same person's earlier refusal on another build.
+                            recordPersonRefusal(job, rerun, source, user,
+                                    "Blocked " + what + " of job '" + job.getFullName() + "'"
+                                            + (source.isEmpty() ? "" : " build #" + source) + " by '" + user
+                                            + "' - a re-run does not reuse an earlier approval; submit a new run request");
                         }
                         throw refusal(job, causes);
                     }
@@ -464,17 +465,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * fails, and the refusal is already in the controller log.
      */
     private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
-        recordTriggerBlocked(job, kind, blockingSwitch, text, null);
-    }
-
-    /**
-     * As {@link #recordTriggerBlocked(Job, String, String, String)}; a non-null {@code user} is
-     * part of the coalescing key, for refusals a person made (DEF-32).
-     */
-    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text,
-                                             String user) {
         String fullName = job.getFullName();
-        String key = user == null ? fullName + '|' + kind : fullName + '|' + kind + "|user:" + user;
+        String key = fullName + '|' + kind;
         try {
             BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
                     key, TRIGGER_AUDIT_INTERVAL, fullName,
@@ -485,6 +477,46 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
                     + " submission of job '" + fullName + "'");
         }
+    }
+
+    /**
+     * Writes the {@link ChangeType#TRIGGER_BLOCKED} record of a re-run a person submitted and was
+     * refused (e2e-03 DEF-32). Unlike the unattended refusals it is not merged per hour: a person
+     * acts rarely, and in the container a second user's Retry, of a later build, within the hour
+     * vanished into the first one's record. Only a repeat of the same attempt by the same user
+     * within {@link BlockedAttemptAudit}'s short cooldown is merged, so a double click stays one
+     * record. A store failure is logged, like {@link #recordTriggerBlocked}.
+     */
+    private static void recordPersonRefusal(Job<?, ?> job, String kind, String sourceBuild, String user,
+                                            String text) {
+        String fullName = job.getFullName();
+        try {
+            BlockedAttemptAudit.get().record(ChangeType.TRIGGER_BLOCKED,
+                    fullName + '|' + kind + '#' + sourceBuild, fullName, user,
+                    "cause=" + kind + " switch=approvalRequired: " + text);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
+                    + " submission of job '" + fullName + "' by '" + user + "'");
+        }
+    }
+
+    /**
+     * The number of the build a naginator Retry re-runs ({@code NaginatorCause#getSourceBuildNumber},
+     * read reflectively: naginator is not a dependency), or {@code ""} when unknown.
+     */
+    private static String sourceBuild(List<Cause> causes) {
+        for (Cause cause : causes) {
+            if (NAGINATOR_CAUSE_CLASS.equals(cause.getClass().getName())) {
+                try {
+                    Object number = cause.getClass().getMethod("getSourceBuildNumber").invoke(cause);
+                    return number == null ? "" : number.toString();
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    LOGGER.log(Level.FINE, "Cannot read the retried build number", e);
+                    return "";
+                }
+            }
+        }
+        return "";
     }
 
     /**
