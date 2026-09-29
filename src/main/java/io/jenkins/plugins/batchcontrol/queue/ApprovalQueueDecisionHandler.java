@@ -186,11 +186,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // build without a new approval, and the plugin's own toast hides the guidance.
             for (Cause cause : causes) {
                 if (cause instanceof Cause.UserIdCause) {
-                    if (hasCause(causes, REBUILD_CAUSE_CLASS)) {
-                        recordTriggerBlocked(job, KIND_REBUILD, "approvalRequired",
-                                "Blocked a Rebuild of job '" + job.getFullName() + "' by '"
+                    // A user-clicked naginator Retry carries NaginatorCause plus a fresh UserIdCause.
+                    String rerun = isAutomaticRetry(causes) ? KIND_RETRY
+                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
+                    if (rerun != null) {
+                        String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
+                        recordTriggerBlocked(job, rerun, "approvalRequired",
+                                "Blocked " + what + " of job '" + job.getFullName() + "' by '"
                                         + Jenkins.getAuthentication2().getName()
-                                        + "' - a rebuild does not reuse an earlier approval; submit a new run request");
+                                        + "' - a re-run does not reuse an earlier approval; submit a new run request");
                     }
                     throw refusal(job);
                 }
