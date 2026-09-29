@@ -5,6 +5,7 @@ import hudson.init.Initializer;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.util.PluginServletFilter;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.ui.SelfGrantRevertedFailure;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
@@ -19,6 +20,7 @@ import jakarta.servlet.http.HttpServletResponseWrapper;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -60,6 +62,9 @@ public final class SelfGrantRevertFilter implements Filter {
     /** Request attribute holding the {@link SelfGrantRevertedFailure} of the first reverted item. */
     static final String ATTRIBUTE = SelfGrantRevertFilter.class.getName() + ".failure";
 
+    /** Request attribute set when this filter wraps the response (S-20-01). */
+    static final String GUARDED = SelfGrantRevertFilter.class.getName() + ".guarded";
+
     /** Registers the filter once the plugin has started. */
     @Initializer(after = InitMilestone.PLUGINS_STARTED)
     public static void register() throws ServletException {
@@ -68,12 +73,21 @@ public final class SelfGrantRevertFilter implements Filter {
 
     /**
      * Marks the current HTTP request, if any, so its answer tells the user that the guard reverted
-     * the authorization part of the save of {@code item}. Without a current request (CLI, scripts,
-     * background work) it does nothing; the GRANT_VIOLATION record is written either way.
+     * the authorization part of the save of {@code item}. Without a current request (scripts,
+     * background work, the CLI over WebSocket or remoting) it does nothing. The CLI in {@code -http}
+     * mode runs inside its {@code /cli} POST, so that request is marked, but its response is
+     * already committed before the command runs, so the answer is left as it is (S-19-04). The
+     * GRANT_VIOLATION record is written either way.
      */
     static void flag(Item item) {
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         if (req != null && req.getAttribute(ATTRIBUTE) == null) {
+            if (req.getAttribute(GUARDED) == null) {
+                // S-20-01: change control was off when the request began; the revert is recorded,
+                // but this request's answer cannot carry the notice.
+                LOGGER.warning(() -> "Revert of the authorization entries of '" + item.getFullName()
+                        + "' not shown to the user: the request was not guarded");
+            }
             req.setAttribute(ATTRIBUTE, new SelfGrantRevertedFailure(item));
         }
     }
@@ -81,15 +95,27 @@ public final class SelfGrantRevertFilter implements Filter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
+        // S-19-03: while change control is off the guard never acts, so nothing is wrapped at all.
         if (!(request instanceof HttpServletRequest) || !(response instanceof HttpServletResponse)
-                || !"POST".equals(((HttpServletRequest) request).getMethod())) {
+                || !"POST".equals(((HttpServletRequest) request).getMethod())
+                || !changeControlOn()) {
             chain.doFilter(request, response);
             return;
         }
         HttpServletRequest req = (HttpServletRequest) request;
+        req.setAttribute(GUARDED, Boolean.TRUE);
         GuardedResponse guarded = new GuardedResponse(req, (HttpServletResponse) response);
         chain.doFilter(request, guarded);
         guarded.finish();
+    }
+
+    /** Whether change control is on; {@code false} while the configuration is not available yet. */
+    private static boolean changeControlOn() {
+        try {
+            return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
+        } catch (RuntimeException e) { // S-20-01: a broken lookup leaves POSTs unwrapped, never a 500
+            return false;
+        }
     }
 
     /** Forwards everything until the request is marked; then answers the failure once. */
@@ -137,12 +163,18 @@ public final class SelfGrantRevertFilter implements Filter {
                     writePlain(failure);
                 }
                 super.flushBuffer();
-            } catch (ServletException | RuntimeException e) {
+            } catch (ServletException | IOException | RuntimeException e) {
                 LOGGER.log(Level.WARNING, "Could not render the self-grant notice; answering in plain text", e);
-                if (!super.isCommitted()) {
-                    super.reset();
-                    writePlain(failure);
-                    super.flushBuffer();
+                // S-19-05 (b): the save and the revert are done; a failing fallback must not turn
+                // the answer into a 500, so it is only logged.
+                try {
+                    if (!super.isCommitted()) {
+                        super.reset();
+                        writePlain(failure);
+                        super.flushBuffer();
+                    }
+                } catch (IOException | RuntimeException fallback) {
+                    LOGGER.log(Level.WARNING, "Could not write the plain-text self-grant notice", fallback);
                 }
             } finally {
                 state = State.REPLACED;
@@ -160,6 +192,9 @@ public final class SelfGrantRevertFilter implements Filter {
 
         /** After the chain: a marked request that produced no answer gets the plain-text failure. */
         void finish() throws IOException {
+            if (req.isAsyncStarted()) {
+                return; // S-19-05 (c): the answer is produced later, on another thread
+            }
             if (state == State.WATCHING) {
                 Object failure = req.getAttribute(ATTRIBUTE);
                 if (failure instanceof Failure && !super.isCommitted()) {
@@ -222,7 +257,11 @@ public final class SelfGrantRevertFilter implements Filter {
             if (divert()) {
                 return new PrintWriter(OutputStream.nullOutputStream(), false, StandardCharsets.UTF_8);
             }
-            return super.getWriter();
+            PrintWriter raw = super.getWriter();
+            // While rendering the notice the raw writer is used; otherwise the endpoint gets a gated
+            // one, so output it writes through a reference taken before the save never lands after
+            // the notice (S-19-05 (a)).
+            return state == State.RENDERING ? raw : new GatedPrintWriter(raw);
         }
 
         @Override
@@ -230,7 +269,134 @@ public final class SelfGrantRevertFilter implements Filter {
             if (divert()) {
                 return new DiscardingStream();
             }
-            return super.getOutputStream();
+            ServletOutputStream raw = super.getOutputStream();
+            return state == State.RENDERING ? raw : new GatedStream(raw);
+        }
+
+        /**
+         * The endpoint's writer while watching (S-20-02): behaves like the container's writer for
+         * an unmarked request, including {@link #checkError()} after a client disconnect, which the
+         * container's writer records instead of throwing.
+         */
+        private final class GatedPrintWriter extends PrintWriter {
+            private final PrintWriter raw;
+
+            GatedPrintWriter(PrintWriter raw) {
+                super(new GatedWriter(raw), false);
+                this.raw = raw;
+            }
+
+            @Override
+            public boolean checkError() {
+                return super.checkError() || raw.checkError();
+            }
+        }
+
+        /** A writer that diverts to the notice on first use once the request is marked. */
+        private final class GatedWriter extends Writer {
+            private final Writer raw;
+
+            GatedWriter(Writer raw) {
+                this.raw = raw;
+            }
+
+            @Override
+            public void write(char[] cbuf, int off, int len) throws IOException {
+                if (!divert()) {
+                    raw.write(cbuf, off, len);
+                }
+            }
+
+            @Override
+            public void write(String str, int off, int len) throws IOException {
+                if (!divert()) {
+                    raw.write(str, off, len); // no char[] copy (S-20-02)
+                }
+            }
+
+            @Override
+            public void write(int c) throws IOException {
+                if (!divert()) {
+                    raw.write(c);
+                }
+            }
+
+            @Override
+            public Writer append(CharSequence csq) throws IOException {
+                if (!divert()) {
+                    raw.append(csq);
+                }
+                return this;
+            }
+
+            @Override
+            public Writer append(CharSequence csq, int start, int end) throws IOException {
+                if (!divert()) {
+                    raw.append(csq, start, end);
+                }
+                return this;
+            }
+
+            @Override
+            public void flush() throws IOException {
+                if (!divert()) {
+                    raw.flush();
+                }
+            }
+
+            @Override
+            public void close() throws IOException {
+                if (!divert()) {
+                    raw.close();
+                }
+            }
+        }
+
+        /** A stream that diverts to the notice on first use once the request is marked. */
+        private final class GatedStream extends ServletOutputStream {
+            private final ServletOutputStream raw;
+
+            GatedStream(ServletOutputStream raw) {
+                this.raw = raw;
+            }
+
+            @Override
+            public boolean isReady() {
+                return raw.isReady();
+            }
+
+            @Override
+            public void setWriteListener(WriteListener writeListener) {
+                raw.setWriteListener(writeListener);
+            }
+
+            @Override
+            public void write(int b) throws IOException {
+                if (!divert()) {
+                    raw.write(b);
+                }
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                if (!divert()) {
+                    raw.write(b, off, len);
+                }
+            }
+
+            @Override
+            public void flush() throws IOException {
+                if (!divert()) {
+                    raw.flush();
+                }
+            }
+
+            @Override
+            public void close() throws IOException {
+                if (!divert()) {
+                    raw.close();
+                }
+            }
         }
 
         @Override

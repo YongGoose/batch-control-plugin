@@ -135,6 +135,21 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     private static volatile CachedScan cachedScan;
 
+    private static final int REALM_CAP = 0;
+    private static final int STRATEGY_CAP = 1;
+
+    /** Last logged truncation count per cap, so a lasting truncation is logged once (S-20-03). */
+    private static final java.util.concurrent.atomic.AtomicIntegerArray LAST_CAP_COUNT =
+            new java.util.concurrent.atomic.AtomicIntegerArray(2);
+
+    /** Logs {@code message} at WARNING when a cap's truncation count changed since the last log. */
+    private static void logCapOnChange(int cap, int count, java.util.function.Supplier<String> message) {
+        int previous = LAST_CAP_COUNT.getAndSet(cap, count);
+        if (count > 0 && count != previous) {
+            LOGGER.warning(message);
+        }
+    }
+
     /** Drops the cached scan (called on a change-control toggle; next render recomputes). */
     public static void invalidateCache() {
         cachedScan = null;
@@ -224,12 +239,16 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
      * granted to the account itself (DEF-29). A group's permissions are those its probe holds
      * beyond what every logged-in user holds, so a grant to {@code authenticated} is reported
      * once, on {@code authenticated}. When no group at all can be enumerated, a user is probed
-     * with all of their authorities minus that baseline instead, so nothing goes unreported.
+     * with all of their authorities minus that baseline instead, so nothing goes unreported; so
+     * is a user in a group left out by the {@value #MAX_CANDIDATES}-group cap, which is logged at
+     * WARNING (S-19-06).
      */
     private static List<StandingHolder> scanForStandingPermissions(AuthorizationStrategy strategy) {
         ACL rootAcl = strategy.getRootACL();
         Map<String, Authentication> users = new LinkedHashMap<>();
         Set<String> groups = new LinkedHashSet<>(strategyGroupSids(strategy));
+        int unchecked = 0;
+        Set<String> truncatedUsers = new LinkedHashSet<>();
         for (String sid : candidateSids(strategy)) {
             Authentication auth = authenticate(sid);
             if (auth == null) {
@@ -241,12 +260,23 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             users.put(sid, auth);
             for (GrantedAuthority authority : auth.getAuthorities()) {
                 String name = authority.getAuthority();
-                if (groups.size() < MAX_CANDIDATES && name != null && !name.isEmpty()) {
+                if (name == null || name.isEmpty() || AUTHENTICATED.equals(name) || groups.contains(name)) {
+                    continue;
+                }
+                if (groups.size() < MAX_CANDIDATES) {
                     groups.add(name);
+                } else {
+                    // S-19-06: this group is not probed, so its members are probed in full below.
+                    unchecked++;
+                    truncatedUsers.add(sid);
                 }
             }
         }
         groups.remove(AUTHENTICATED);
+        int notChecked = unchecked;
+        logCapOnChange(REALM_CAP, notChecked, () -> "Standing-permission scan: " + notChecked
+                + " more group memberships were not checked (limit " + MAX_CANDIDATES + " groups); their "
+                + truncatedUsers.size() + " members are checked with all their groups instead");
 
         List<StandingHolder> groupHolders = new ArrayList<>();
         Authentication everyLoggedIn = groupProbe(null);
@@ -276,7 +306,7 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             // DEF-29: with the groups enumerated, a user is listed for what the strategy grants the
             // account itself; the probe carries the account name without its authorities (not even
             // authenticated), so a permission held through a group is reported once, on that group.
-            List<String> held = groupsKnown
+            List<String> held = groupsKnown && !truncatedUsers.contains(user.getKey())
                     ? heldPermissions(rootAcl, principalOnly(user.getValue()), Collections.emptyList())
                     : heldPermissions(rootAcl, user.getValue(), baseline);
             if (!held.isEmpty()) {
@@ -388,16 +418,24 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
             Method method = strategy.getClass().getMethod("getAllPermissionEntries");
             Object result = method.invoke(strategy);
             if (result instanceof Collection) {
+                int skipped = 0;
                 for (Object entry : (Collection<?>) result) {
-                    if (groups.size() >= MAX_CANDIDATES) {
-                        break;
-                    }
                     String type = typeOf(entry);
                     String sid = sidOf(entry);
-                    if (sid != null && !sid.isEmpty() && ("GROUP".equals(type) || "EITHER".equals(type))) {
-                        groups.add(sid);
+                    if (sid != null && !sid.isEmpty() && ("GROUP".equals(type) || "EITHER".equals(type))
+                            && !groups.contains(sid)) {
+                        if (groups.size() < MAX_CANDIDATES) {
+                            groups.add(sid);
+                        } else {
+                            skipped++;
+                        }
                     }
                 }
+                int notChecked = skipped;
+                // S-20-03: a group entry past the cap is not listed; said once per change.
+                logCapOnChange(STRATEGY_CAP, notChecked, () -> "Standing-permission scan: " + notChecked
+                        + " more group entries of the authorization strategy were not checked (limit "
+                        + MAX_CANDIDATES + ")");
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             LOGGER.log(Level.FINE,

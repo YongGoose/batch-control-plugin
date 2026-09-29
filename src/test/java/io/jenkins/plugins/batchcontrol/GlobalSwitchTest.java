@@ -97,6 +97,68 @@ public class GlobalSwitchTest {
         }
     }
 
+    /**
+     * T-01-16 (security-19 S-19-03; SPEC 1 and CLAUDE.md: with the switch off, existing Jenkins
+     * behaviour does not change): while change control is off, the response a POST endpoint
+     * receives is not wrapped by any Batch Control class. Observed through a test root action
+     * that walks the public servlet wrapper chain of its response ({@code ServletResponseWrapper
+     * #getResponse}); its answer is the one it wrote. Premise: with change control on, the walk
+     * does see the plugin's wrapper (the D-35b/D-48 guard needs it then), so a walk that sees
+     * nothing cannot pass. Note 156.
+     */
+    @Test
+    public void t_01_16_changeControlOffLeavesPostResponsesUnwrapped() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        String on = PluginInteractionFixtures.post(j, null, "s19-wrap/probe").getWebResponse().getContentAsString();
+        assertTrue(on.startsWith("probe-ok"), "fixture: the probe must answer its own text: " + on);
+        assertTrue(on.contains("io.jenkins.plugins.batchcontrol."), "premise: with change control on the walk must see"
+                + " the plugin's response wrapper, or this row cannot observe it: " + on);
+
+        cfg.setChangeControlEnabled(false);
+        cfg.save();
+        org.htmlunit.Page off = PluginInteractionFixtures.post(j, null, "s19-wrap/probe");
+        String body = off.getWebResponse().getContentAsString();
+        assertEquals(200, off.getWebResponse().getStatusCode(), "the POST answer must be unchanged");
+        assertTrue(body.startsWith("probe-ok"), "the POST answer must be the endpoint's own text: " + body);
+        assertFalse(body.contains("io.jenkins.plugins.batchcontrol."), "with change control off no Batch Control class may"
+                + " wrap a POST response: " + body);
+    }
+
+    /** Test-only root action: answers "probe-ok" plus the class chain of the response it receives. */
+    @org.jvnet.hudson.test.TestExtension("t_01_16_changeControlOffLeavesPostResponsesUnwrapped")
+    public static class WrapProbe implements hudson.model.RootAction {
+        @Override
+        public String getIconFileName() {
+            return null;
+        }
+
+        @Override
+        public String getDisplayName() {
+            return null;
+        }
+
+        @Override
+        public String getUrlName() {
+            return "s19-wrap";
+        }
+
+        @org.kohsuke.stapler.verb.POST
+        public void doProbe(org.kohsuke.stapler.StaplerRequest2 req, org.kohsuke.stapler.StaplerResponse2 rsp)
+                throws java.io.IOException {
+            StringBuilder chain = new StringBuilder();
+            jakarta.servlet.ServletResponse r = rsp;
+            while (r != null) {
+                chain.append(' ').append(r.getClass().getName());
+                r = r instanceof jakarta.servlet.ServletResponseWrapper
+                        ? ((jakarta.servlet.ServletResponseWrapper) r).getResponse() : null;
+            }
+            rsp.setContentType("text/plain;charset=UTF-8");
+            rsp.getWriter().print("probe-ok" + chain);
+        }
+    }
+
     /** T-01-02: admin turns runControlEnabled false -> true; ChangeRecord(CONFIG_TOGGLE, admin, false->true). */
     @Test
     public void t_01_02_enableRunControlLeavesConfigToggleRecord() throws Exception {

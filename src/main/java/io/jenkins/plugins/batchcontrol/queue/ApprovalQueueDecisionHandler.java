@@ -193,7 +193,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // S-18-03: a Retry a person clicks copies the retried build's causes, a RemoteCause
             // included, next to that person's fresh UserIdCause. It is that person's submission
             // (D-47, DEF-32), so it skips this step and is refused and recorded at step 4.
-            boolean userClickedRetry = isAutomaticRetry(causes) && isUserClickedRetry();
+            // S-19-01: naginator strips copied UserIdCauses from a Retry, so a UserIdCause present is
+            // the clicking person's own; without one the submission stays on the step-3 path.
+            boolean userClickedRetry = isAutomaticRetry(causes) && isUserClickedRetry()
+                    && hasUserIdCause(causes);
             for (Cause cause : userClickedRetry ? List.<Cause>of() : causes) {
                 if (cause instanceof Cause.RemoteCause) {
                     LOGGER.warning(() -> "Blocked a remote (build-token) run of approval-required job '"
@@ -348,6 +351,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         for (Cause cause : causes) {
             if (cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause
                     || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUserIdCause(List<Cause> causes) {
+        for (Cause cause : causes) {
+            if (cause instanceof Cause.UserIdCause) {
                 return true;
             }
         }
