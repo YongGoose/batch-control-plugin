@@ -84,10 +84,17 @@ public class StoreFileNameUniquenessTest {
         assertFalse(victimDiff.contains(attackerLeaf) || victimDiff.contains("attacker-"), "the victim's diff must not be computed against the attacker's configuration:\n" + victimDiff);
 
         // attacker saves: its diff must not reveal the victim's configuration
+        // (two saves, so at least one CONFIGURE record exists whatever the first save after
+        // creation records; every one of them is checked)
+        attacker.setDescription("attacker-1");
         attacker.setDescription("attacker-2");
-        String attackerDiff = lastDiff(attackerFullName);
-        assertFalse(attackerDiff.contains("victim-secret"), "the attacker's CONFIGURE diff must not reveal the victim's configuration (#25):\n"
-                + attackerDiff);
+        List<ChangeRecord> attackerRecords = configures(attackerFullName);
+        assertFalse(attackerRecords.isEmpty(), "a CONFIGURE record must exist for the attacker's job");
+        for (ChangeRecord rec : attackerRecords) {
+            String attackerDiff = String.valueOf(rec.getDiff());
+            assertFalse(attackerDiff.contains("victim-secret"), "the attacker's CONFIGURE diff must not reveal the victim's configuration (#25):\n"
+                    + attackerDiff);
+        }
 
         // deleting the attacker's job must not delete the victim's baseline
         attacker.delete();
@@ -135,11 +142,15 @@ public class StoreFileNameUniquenessTest {
     }
 
     /** The diff of the newest CONFIGURE record of {@code target} in the current month. */
-    private static String lastDiff(String target) {
-        List<ChangeRecord> records = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+    private static List<ChangeRecord> configures(String target) {
+        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> target.equals(rec.getTarget()))
                 .collect(Collectors.toList());
+    }
+
+    private static String lastDiff(String target) {
+        List<ChangeRecord> records = configures(target);
         assertFalse(records.isEmpty(), "a CONFIGURE record must exist for " + target);
         String diff = records.get(records.size() - 1).getDiff();
         assertNotNull(diff, "a CONFIGURE record must carry a diff");
