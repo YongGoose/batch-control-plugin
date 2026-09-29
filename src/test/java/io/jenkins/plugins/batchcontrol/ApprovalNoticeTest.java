@@ -248,7 +248,7 @@ public class ApprovalNoticeTest {
             return null;
         }
         DomElement best = null;
-        for (DomElement element : main.getElementsByTagName("*")) {
+        for (DomElement element : main.getHtmlElementDescendants()) {
             String tag = element.getTagName();
             if ("script".equals(tag) || "style".equals(tag)) {
                 continue;
