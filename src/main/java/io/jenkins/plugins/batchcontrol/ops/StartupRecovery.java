@@ -3,7 +3,7 @@ package io.jenkins.plugins.batchcontrol.ops;
 import hudson.init.InitMilestone;
 import hudson.init.Initializer;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.lang.ref.WeakReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,7 +56,7 @@ public final class StartupRecovery {
      */
     private static void prepareStore() {
         try {
-            FileStore.get().warmUp();
+            Store.get().warmUp();
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the batch-control entity index", e);
         }

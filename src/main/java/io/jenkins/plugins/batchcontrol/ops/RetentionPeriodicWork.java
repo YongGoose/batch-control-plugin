@@ -5,10 +5,10 @@ import hudson.model.PeriodicWork;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
-import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.RetentionResult;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.concurrent.TimeUnit;
@@ -57,7 +57,7 @@ public class RetentionPeriodicWork extends PeriodicWork {
         YearMonth currentMonth = YearMonth.from(
                 BatchClock.now().atZone(BatchClock.clock().getZone()));
         YearMonth oldestKept = currentMonth.minusMonths(retentionMonths);
-        FileStore store = FileStore.get();
+        Store store = Store.get();
         for (YearMonth month : store.listStoredMonths()) {
             if (!month.isBefore(oldestKept)) {
                 continue;
@@ -87,7 +87,7 @@ public class RetentionPeriodicWork extends PeriodicWork {
      * {@code grants/} no longer grow for the life of the installation. One RETENTION record per
      * pass that deleted anything.
      */
-    private static void deleteClosedEntities(FileStore store, YearMonth oldestKept, int retentionMonths) {
+    private static void deleteClosedEntities(Store store, YearMonth oldestKept, int retentionMonths) {
         Instant cutoff = oldestKept.atDay(1).atStartOfDay(BatchClock.clock().getZone()).toInstant();
         try {
             RetentionResult result = store.deleteClosedEntitiesBefore(cutoff);

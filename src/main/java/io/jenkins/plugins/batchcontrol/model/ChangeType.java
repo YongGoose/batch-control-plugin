@@ -71,5 +71,22 @@ public enum ChangeType {
      * {@code grantId} the grant the Configure came from, and {@code detail} says that the
      * authorization property was restored. {@code diff} stays {@code null}.
      */
-    GRANT_VIOLATION
+    GRANT_VIOLATION,
+    /**
+     * An unattended run submission (timer, upstream) or a Pipeline Replay refused quietly by the
+     * queue gate (#21, SPEC item 6). The refusal has no error channel, so this record is where it
+     * becomes visible; without it a locked job (D-34) looks exactly like a job whose cron never
+     * fires.
+     *
+     * <p>{@code target} is the job full name. {@code detail} starts with {@code cause=<KIND>
+     * switch=<name>}, where the kind is {@code TIMER}, {@code UPSTREAM} or {@code REPLAY} and the
+     * switch is the job setting that refused it ({@code blockTimer}, {@code blockUpstream}, or
+     * {@code approvalRequired} for a replay). {@code user} is the account the submission ran as
+     * (for a timer normally {@code SYSTEM}). {@code grantId}/{@code diff} stay {@code null}.
+     *
+     * <p>Coalesced per job and cause kind to at most one record per hour, whoever submitted it
+     * (see {@code store.BlockedAttemptAudit#recordCoalesced}): a per-minute cron on a locked job
+     * would otherwise write 1,440 identical rows a day.
+     */
+    TRIGGER_BLOCKED
 }

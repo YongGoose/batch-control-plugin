@@ -12,7 +12,6 @@ import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Ids;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
@@ -54,7 +53,7 @@ public final class IncidentService {
     private static final IncidentService INSTANCE = new IncidentService();
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Store store = FileStore.get();
+    private final Store store = Store.get();
 
     private IncidentService() {
     }

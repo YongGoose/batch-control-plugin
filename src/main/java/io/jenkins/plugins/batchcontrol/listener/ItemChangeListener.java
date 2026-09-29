@@ -12,7 +12,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,7 +56,7 @@ public class ItemChangeListener extends ItemListener {
         seedSnapshot(item);
         ChangeRecord record = ChangeRecord.create(ChangeType.CREATE, fullName, user, null);
         record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.CREATE));
-        FileStore.get().appendChangeRecord(record);
+        Store.get().appendChangeRecord(record);
     }
 
     @Override
@@ -68,8 +68,8 @@ public class ItemChangeListener extends ItemListener {
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.DELETE, fullName, user, null);
         record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.DELETE));
-        FileStore.get().appendChangeRecord(record);
-        FileStore.get().deleteConfigSnapshot(fullName);
+        Store.get().appendChangeRecord(record);
+        Store.get().deleteConfigSnapshot(fullName);
     }
 
     @Override
@@ -82,7 +82,7 @@ public class ItemChangeListener extends ItemListener {
         ChangeRecord record = ChangeRecord.create(ChangeType.RENAME, fullName, user,
                 "Renamed from '" + oldName + "' to '" + newName + "'");
         record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, null));
-        FileStore.get().appendChangeRecord(record);
+        Store.get().appendChangeRecord(record);
     }
 
     @Override
@@ -91,7 +91,7 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         // The diff baseline follows the item to its new full name.
-        FileStore.get().deleteConfigSnapshot(oldFullName);
+        Store.get().deleteConfigSnapshot(oldFullName);
         seedSnapshot(item);
         // onLocationChanged fires for renames too (which onRenamed already recorded); a MOVE
         // is a location change whose parent path changed.
@@ -102,7 +102,7 @@ public class ItemChangeListener extends ItemListener {
         ChangeRecord record = ChangeRecord.create(ChangeType.MOVE, newFullName, user,
                 "Moved from '" + oldFullName + "' to '" + newFullName + "'");
         record.setGrantId(ChangeRecording.activeGrantIdFor(user, newFullName, null));
-        FileStore.get().appendChangeRecord(record);
+        Store.get().appendChangeRecord(record);
     }
 
     // ---------------------------------------------------------------- D-31/D-34 (widen D-17)
@@ -278,7 +278,7 @@ public class ItemChangeListener extends ItemListener {
         try {
             XmlFile config = ((AbstractItem) item).getConfigFile();
             if (config.exists()) {
-                FileStore.get().saveConfigSnapshot(item.getFullName(), config.asString());
+                Store.get().saveConfigSnapshot(item.getFullName(), config.asString());
             }
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Failed to snapshot config of '" + item.getFullName() + "'", e);

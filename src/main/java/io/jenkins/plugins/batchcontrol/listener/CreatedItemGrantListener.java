@@ -15,7 +15,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -76,7 +76,7 @@ public class CreatedItemGrantListener extends ItemListener {
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
                     "The item was created under a Create grant whose name restriction does not allow the name '"
                             + item.getName() + "'; an administrator must check it (D-40).");
-            FileStore.get().appendChangeRecord(record);
+            Store.get().appendChangeRecord(record);
             return;
         }
         Grant grant = GrantService.get().recordCreatedItem(user, fullName,

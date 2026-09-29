@@ -6,8 +6,8 @@ import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
-import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -18,7 +18,6 @@ import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,7 +59,7 @@ public final class GrantRequestService {
     private static final GrantRequestService INSTANCE = new GrantRequestService();
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Store store = FileStore.get();
+    private final Store store = Store.get();
 
     private GrantRequestService() {
     }
@@ -460,7 +459,7 @@ public final class GrantRequestService {
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REQUEST_BLOCKED, target, user,
                     "A permission window for '" + target + "' could not be " + attemptedTransition
                             + ": change control is off");
-            FileStore.get().appendChangeRecord(record);
+            Store.get().appendChangeRecord(record);
         }
         LOGGER.info(() -> "Refused to let '" + user + "' have a permission window for '" + target
                 + "' " + attemptedTransition + ": change control is off (S-15)");

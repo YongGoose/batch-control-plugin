@@ -12,7 +12,6 @@ import hudson.model.listeners.SaveableListener;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.store.FileStore;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.store.UnifiedDiff;
@@ -107,7 +106,7 @@ public class ConfigSnapshotListener extends SaveableListener {
                 LOGGER.log(Level.WARNING, "Cannot read saved config of '" + fullName + "'", e);
                 return;
             }
-            Store store = FileStore.get();
+            Store store = Store.get();
             String oldXml = store.loadConfigSnapshot(fullName);
             if (oldXml == null) {
                 // First sighting: the creation-time initial save (the CREATE record comes from
