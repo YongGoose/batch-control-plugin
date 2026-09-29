@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.security;
 
 import hudson.model.Action;
 import hudson.model.FreeStyleProject;
+import hudson.model.Item;
 import hudson.model.Queue;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
@@ -23,6 +24,12 @@ import org.springframework.security.core.Authentication;
 /**
  * D-50, D-50a (SPEC item 2, e2e-03 DEF-37, security-21): whether builds on this instance may run
  * as SYSTEM although change control is on.
+ *
+ * <p>"May run as SYSTEM" also covers an identity that holds Overall/Administer, or Item/Configure
+ * at the root, in the installed strategy without any Batch Control grant (D-50b): the D-35b guard
+ * does not revert a save by such an identity. Authenticators that decide by something the probe
+ * cannot represent (the job's name, folder or type, or the calling identity) are not judged
+ * (D-50b, a documented limitation).
  *
  * <p>A job's own build authorization does not protect it (a Configure holder can remove it, and a
  * strategy that follows the triggering user leaves timer and SCM builds as SYSTEM). So one
@@ -54,24 +61,28 @@ public final class SystemBuildCheck {
 
     static final long CACHE_TTL_MINUTES = 5;
 
-    /** The probe job's name: it is never registered, so it names nothing. */
-    private static final String PROBE_NAME = "batch-control-system-build-probe";
+    /**
+     * The probe job's name. It contains {@code :}, which {@code Jenkins.checkGoodName} rejects, so
+     * no real item can ever carry it and a name-keyed authenticator cannot be steered by creating
+     * a job of that name (S-22-02). The probe is never registered.
+     */
+    private static final String PROBE_NAME = "batch-control:system-build-probe";
 
     private static final class Cached {
-        final Jenkins owner;
+        final java.lang.ref.WeakReference<Jenkins> owner; // S-22-07: never keeps an old instance alive
         final List<QueueItemAuthenticator> authenticators;
         final boolean value;
         final long atNanos;
 
         Cached(Jenkins owner, List<QueueItemAuthenticator> authenticators, boolean value, long atNanos) {
-            this.owner = owner;
+            this.owner = new java.lang.ref.WeakReference<>(owner);
             this.authenticators = authenticators;
             this.value = value;
             this.atNanos = atNanos;
         }
 
         boolean fresh(Jenkins jenkins, List<QueueItemAuthenticator> current, long now) {
-            if (owner != jenkins || now - atNanos >= TimeUnit.MINUTES.toNanos(CACHE_TTL_MINUTES)
+            if (owner.get() != jenkins || now - atNanos >= TimeUnit.MINUTES.toNanos(CACHE_TTL_MINUTES)
                     || authenticators.size() != current.size()) {
                 return false;
             }
@@ -115,11 +126,6 @@ public final class SystemBuildCheck {
         }
     }
 
-    /** Drops the cached answer (the next call probes again). */
-    public static void invalidate() {
-        cached = null;
-    }
-
     private static List<QueueItemAuthenticator> authenticators() {
         List<QueueItemAuthenticator> list = new ArrayList<>();
         for (QueueItemAuthenticator authenticator : QueueItemAuthenticatorProvider.authenticators()) {
@@ -135,8 +141,16 @@ public final class SystemBuildCheck {
             List<Action> noCause = Collections.emptyList();
             Queue.WaitingItem item = new Queue.WaitingItem(Calendar.getInstance(), job, noCause);
             Authentication identity = item.authenticate2();
-            return identity == null || ACL.SYSTEM2.equals(identity)
-                    || ACL.SYSTEM_USERNAME.equals(identity.getName());
+            if (identity == null || ACL.SYSTEM2.equals(identity) || ACL.SYSTEM_USERNAME.equals(identity.getName())) {
+                return true;
+            }
+            // D-50b (S-22-01): an identity the D-35b guard exempts is not safe either. The guard keeps
+            // an authorization change made by an identity with native Configure, so a build running
+            // as one (for example a service account used as the global default) can write a
+            // permanent entry. Asked of the installed strategy with every grant layer off, the same
+            // parent-ACL question the guard asks (D-35d (1)).
+            return GrantLayer.hasPermissionWithoutGrants(jenkins, identity, Jenkins.ADMINISTER)
+                    || GrantLayer.hasPermissionWithoutGrants(jenkins, identity, Item.CONFIGURE);
         } catch (RuntimeException | LinkageError e) {
             LOGGER.log(Level.WARNING, "A build authenticator failed on the SYSTEM-build probe; assuming builds may"
                     + " run as SYSTEM", e);
