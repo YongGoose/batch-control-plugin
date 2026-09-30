@@ -199,12 +199,12 @@ public class JobRequestAction implements Action, StaplerProxy {
 
     /**
      * D-58b (3): whether this page offers "Mark as reviewed": the job is in the "changed under a
-     * grant" state and the viewer holds Item/Configure on it. Hidden for now: core has no per-item
-     * "changed under a grant" query yet ({@code GrantService#itemsChangedUnderGrant} is capped and
-     * lists only the marked item, not its descendants). {@link #doMarkReviewed} works regardless.
+     * grant" state (itself or through an ancestor, {@link GrantService#isChangedUnderGrant}) and
+     * the viewer holds Item/Configure on it. {@link #doMarkReviewed} re-checks, and
+     * {@link GrantService#markReviewed} refuses a user whose Configure comes from a grant.
      */
     public boolean isShowMarkReviewed() {
-        return false;
+        return job.hasPermission(Item.CONFIGURE) && GrantService.get().isChangedUnderGrant(job);
     }
 
     /**
