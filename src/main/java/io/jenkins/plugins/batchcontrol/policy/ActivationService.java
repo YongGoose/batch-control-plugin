@@ -327,8 +327,11 @@ public final class ActivationService {
                     request.getApprovers(), request.getJobFullName());
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
+                String reason = EndReasons.pendingExpired();
                 request.setStatus(RequestStatus.EXPIRED);
+                request.setDecisionComment(reason);
                 store.saveActivationRequest(request);
+                NotificationDispatcher.activationEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Activation request " + id
                         + " passed its pending timeout and is now EXPIRED.");
             }
@@ -339,6 +342,8 @@ public final class ActivationService {
                 request.setStatus(RequestStatus.INVALIDATED);
                 request.setDecisionComment("Target job no longer exists");
                 store.saveActivationRequest(request);
+                NotificationDispatcher.activationEnded(NotificationEvent.INVALIDATED, request, true,
+                        "Target job no longer exists");
                 throw new IllegalStateException("Job '" + request.getJobFullName()
                         + "' no longer exists; activation request " + id + " is now INVALIDATED.");
             }
@@ -433,6 +438,7 @@ public final class ActivationService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
             store.saveActivationRequest(request);
+            NotificationDispatcher.activationEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
         } finally {
             lock.unlock();
@@ -494,8 +500,11 @@ public final class ActivationService {
                 ActivationRequest request = store.loadActivationRequest(snapshot.getId());
                 if (request != null && request.getStatus() == RequestStatus.PENDING
                         && pendingExpired(request, now)) {
+                    String reason = EndReasons.pendingExpired();
                     request.setStatus(RequestStatus.EXPIRED);
+                    request.setDecisionComment(reason);
                     store.saveActivationRequest(request);
+                    NotificationDispatcher.activationEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Activation request " + request.getId() + " expired (pending timeout)");
                 }
             } finally {
@@ -751,6 +760,7 @@ public final class ActivationService {
                 request.setDecisionComment(reason);
                 request.setDecidedAt(BatchClock.now());
                 store.saveActivationRequest(request);
+                NotificationDispatcher.activationEnded(NotificationEvent.INVALIDATED, request, true, reason);
                 LOGGER.info(() -> "Activation request " + request.getId() + " invalidated: " + reason);
             }
         }

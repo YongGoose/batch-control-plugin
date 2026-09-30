@@ -235,8 +235,11 @@ public final class GrantRequestService {
             checkScopeExists(request.getScope());
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
+                String reason = EndReasons.pendingExpired();
                 request.setStatus(RequestStatus.EXPIRED);
+                request.setDecisionComment(reason);
                 store.saveGrantRequest(request);
+                NotificationDispatcher.grantEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Grant request " + id
                         + " passed its pending timeout and is now EXPIRED.");
             }
@@ -342,6 +345,7 @@ public final class GrantRequestService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
             store.saveGrantRequest(request);
+            NotificationDispatcher.grantEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
         } finally {
             lock.unlock();
@@ -366,8 +370,11 @@ public final class GrantRequestService {
                 GrantRequest request = store.loadGrantRequest(snapshot.getId());
                 if (request != null && request.getStatus() == RequestStatus.PENDING
                         && pendingExpired(request, now)) {
+                    String reason = EndReasons.pendingExpired();
                     request.setStatus(RequestStatus.EXPIRED);
+                    request.setDecisionComment(reason);
                     store.saveGrantRequest(request);
+                    NotificationDispatcher.grantEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Grant request " + request.getId()
                             + " expired (pending timeout)");
                 }

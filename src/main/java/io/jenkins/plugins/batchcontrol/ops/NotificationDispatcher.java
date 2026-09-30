@@ -133,6 +133,87 @@ public final class NotificationDispatcher {
         }
     }
 
+    /**
+     * D-54: {@link NotificationEvent#CANCELLED}, {@link NotificationEvent#EXPIRED} or
+     * {@link NotificationEvent#INVALIDATED} for a run request that ended without a decision.
+     *
+     * @param wasPending whether the request was PENDING when it ended (its approvers are told)
+     * @param reason     why it ended, shown in the message; may be {@code null}
+     */
+    public static void runEnded(NotificationEvent event, RunRequest request, boolean wasPending,
+                                @CheckForNull String reason) {
+        try {
+            dispatch(event, new Notification(Notification.KIND_RUN, request.getId(), request.getJobFullName(),
+                    request.getRequester(), request.getReason(),
+                    endRecipients(event, request.getApprovers(), request.getRequester(), wasPending),
+                    url("batch-control/requests/" + request.getId() + "/"), null, endDetails(reason)));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of run request "
+                    + request.getId(), e);
+        }
+    }
+
+    /** As {@link #runEnded} for a change (grant) request. */
+    public static void grantEnded(NotificationEvent event, GrantRequest request, boolean wasPending,
+                                  @CheckForNull String reason) {
+        try {
+            List<String> details = grantDetails(request.getScope(), request.getActions(),
+                    request.getDurationMinutes(), request.getCreateNamePattern());
+            details.addAll(0, endDetails(reason));
+            dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
+                    request.getScope().getFullName(), request.getRequester(), request.getReason(),
+                    endRecipients(event, request.getApprovers(), request.getRequester(), wasPending),
+                    url("batch-control/grants/" + request.getId() + "/"), null, details));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
+                    + request.getId(), e);
+        }
+    }
+
+    /** As {@link #runEnded} for an activation or hold request. */
+    public static void activationEnded(NotificationEvent event, ActivationRequest request, boolean wasPending,
+                                       @CheckForNull String reason) {
+        try {
+            dispatch(event, new Notification(Notification.KIND_ACTIVATION, request.getId(),
+                    request.getJobFullName(), request.getRequester(), request.getReason(),
+                    endRecipients(event, request.getApprovers(), request.getRequester(), wasPending),
+                    url("batch-control/activations/" + request.getId() + "/"), request.getAction().name(),
+                    endDetails(reason)));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of activation request "
+                    + request.getId(), e);
+        }
+    }
+
+    /**
+     * D-54 recipients: the designated approvers when the request was pending; the requester for
+     * EXPIRED and INVALIDATED, and for CANCELLED only when someone else cancelled it. The user
+     * acting now (the canceller) is never mailed about their own action.
+     */
+    static List<String> endRecipients(NotificationEvent event, List<String> approvers, String requester,
+                                      boolean wasPending) {
+        java.util.LinkedHashSet<String> recipients = new java.util.LinkedHashSet<>();
+        if (requester != null) {
+            recipients.add(requester);
+        }
+        if (wasPending && approvers != null) {
+            recipients.addAll(approvers);
+        }
+        if (event == NotificationEvent.CANCELLED) {
+            String actor = Jenkins.getInstanceOrNull() == null ? null : Jenkins.getAuthentication2().getName();
+            recipients.removeIf(id -> io.jenkins.plugins.batchcontrol.model.Approvers.sameUser(id, actor));
+        }
+        return new ArrayList<>(recipients);
+    }
+
+    private static List<String> endDetails(@CheckForNull String reason) {
+        List<String> details = new ArrayList<>();
+        if (reason != null && !reason.trim().isEmpty()) {
+            details.add("Reason: " + reason.trim());
+        }
+        return details;
+    }
+
     /** {@link NotificationEvent#GRANT_EXPIRING} for an active window, sent to its holder. */
     public static void grantExpiring(Grant grant, String reason) {
         try {
