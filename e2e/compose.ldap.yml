@@ -1,0 +1,20 @@
+# e2e-05 check 2: an OpenLDAP directory next to the e2e Jenkins.
+#
+#   scripts/ldap-up.sh     render out/ldap/bootstrap.ldif from ldap/bootstrap.ldif.template, start openldap
+#   then, as admin: Manage Jenkins -> Configuration as Code -> /var/jenkins_casc/profile-ldap.yaml -> Apply
+#   back:  the same page with /var/jenkins_casc/jenkins.yaml (or restart Jenkins: JCasC re-applies jenkins.yaml)
+#   scripts/ldap-down.sh   stop and remove the openldap container (its data is recreated from the LDIF)
+#
+# Only the openldap service is added; the Jenkins container is the one of docker-compose.yml.
+services:
+  openldap:
+    image: bitnamilegacy/openldap:2.6.10
+    container_name: batch-control-e2e-ldap
+    restart: "no"
+    environment:
+      LDAP_ROOT: dc=e2e,dc=local
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: "${BC_OTHER_PASSWORD:?set BC_OTHER_PASSWORD in e2e/.env}"
+      LDAP_CUSTOM_LDIF_DIR: /ldifs
+    volumes:
+      - ./out/ldap:/ldifs:ro

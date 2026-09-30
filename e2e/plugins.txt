@@ -34,3 +34,7 @@ lockable-resources
 throttle-concurrents
 authorize-project
 jobConfigHistory
+# e2e-05 extra checks: LDAP realm (ldap, compose.ldap.yml, casc/profile-ldap.yaml)
+# and the dark theme (dark-theme brings theme-manager).
+ldap
+dark-theme

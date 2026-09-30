@@ -1,0 +1,93 @@
+# JCasC profile "ldap" (e2e-05 check 2). Applied by hand from Manage Jenkins -> Configuration as Code ->
+# Apply with /var/jenkins_casc/profile-ldap.yaml, after scripts/ldap-up.sh; not loaded at boot
+# (CASC_JENKINS_CONFIG points at jenkins.yaml only). Back: apply /var/jenkins_casc/jenkins.yaml, or restart.
+#
+# The realm is the ldap plugin's; the directory is ldap/bootstrap.ldif.template. Permissions come from
+# LDAP groups (group entries), mirroring the e2e roles of jenkins.yaml. The single user entry for `admin`
+# is a safety net so the profile can always be reverted from the UI; it is not what is under test.
+# No LDAP cache is configured, so stopping the directory is seen by the next lookup.
+jenkins:
+  securityRealm:
+    ldap:
+      configurations:
+        - server: "ldap://openldap:1389"
+          rootDN: "dc=e2e,dc=local"
+          managerDN: "cn=admin,dc=e2e,dc=local"
+          managerPasswordSecret: "${BC_OTHER_PASSWORD}"
+          userSearchBase: "ou=people"
+          userSearch: "uid={0}"
+          groupSearchBase: "ou=groups"
+          groupSearchFilter: "(&(cn={0})(objectclass=groupOfNames))"
+          groupMembershipStrategy:
+            fromGroupSearch:
+              filter: "(member={0})"
+          displayNameAttributeName: "cn"
+          mailAddressAttributeName: "mail"
+      disableMailAddressResolver: false
+      disableRolePrefixing: true
+  authorizationStrategy:
+    batchControlProjectMatrix:
+      entries:
+        - user:
+            name: admin
+            permissions:
+              - Overall/Administer
+        - group:
+            name: bc-admins
+            permissions:
+              - Overall/Administer
+        - group:
+            name: bc-requesters
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - Job/Build
+              - BatchControl/Request
+              - BatchControl/RequestGrant
+        - group:
+            name: bc-approvers
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+        - group:
+            name: bc-configurers
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - Job/Configure
+              - Job/Delete
+              - BatchControl/Request
+        - group:
+            name: bc-auditors
+            permissions:
+              - Overall/Read
+              - View/Read
+              - BatchControl/ViewHistory
+unclassified:
+  batchControl:
+    runControlEnabled: true
+    changeControlEnabled: true
+    approvers:
+      - lapprover-1
+      - lapprover-2
+      - admin
+    allowAdminSelfApproval: true
+    pendingTimeoutHours: 1
+    approvedRunTimeoutMinutes: 1
+    grantDurationOptions:
+      - 1
+      - 15
+      - 30
+      - 60
+    maxGrantMinutes: 240
+    incidentResults:
+      - FAILURE
+      - UNSTABLE
+    retentionMonths: 24
+    notifyBeforeExpiryMinutes: 1
+    emailNotifications: true
