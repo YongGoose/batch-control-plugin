@@ -745,7 +745,10 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     /** Stapler form validation of the approver list (read-only, D-53). */
     @POST
     public FormValidation doCheckApproversText(@QueryParameter String value) {
-        return mayCheck() ? approversValidation(value, runControlEnabled || changeControlEnabled) : FormValidation.ok();
+        // S-25-09: the lookup reveals whether an account exists, so a caller without
+        // BatchControl/Manage is refused (403), not answered; @POST refuses a GET.
+        Jenkins.get().checkPermission(BatchControlPermissions.MANAGE);
+        return approversValidation(value, runControlEnabled || changeControlEnabled);
     }
 
     /** The form's inline checks answer only a user who may save the form. */
