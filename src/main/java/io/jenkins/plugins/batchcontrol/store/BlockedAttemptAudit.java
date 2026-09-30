@@ -98,8 +98,14 @@ public final class BlockedAttemptAudit {
      */
     @Restricted(NoExternalUse.class)
     public static Store swapStoreForTesting(Store replacement) {
+        // S-25-04: refused outside unit tests, and every swap is logged.
+        if (!hudson.Main.isUnitTest) {
+            throw new IllegalStateException("swapStoreForTesting is only available in unit tests");
+        }
         Store previous = INSTANCE.store;
         INSTANCE.store = Objects.requireNonNull(replacement, "replacement");
+        LOGGER.warning(() -> "The refused-attempt audit store was replaced by " + replacement.getClass().getName()
+                + " (unit test)");
         return previous;
     }
 
