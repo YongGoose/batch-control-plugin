@@ -205,6 +205,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 이메일을 기본으로 하고 Slack 등은 확장 포인트로 붙입니다.
 - Acceptance: an extension point `io.jenkins.plugins.batchcontrol.ops.BatchControlNotifier` (events in `ops.NotificationEvent`) receives events `REQUEST_CREATED`, `APPROVERS_CHANGED`, `APPROVED`, `REJECTED`, `EXPIRING` for run and change requests, and `GRANT_EXPIRING` for an active change window. Recipients: the designated approvers for `REQUEST_CREATED`/`APPROVERS_CHANGED`, the requester for the others. `EXPIRING`/`GRANT_EXPIRING` fire once, `notifyBeforeExpiryMinutes` (global, default 10) before the expiry. A notifier failure never fails or delays the request action. (D-36)
 - Acceptance: the shipped e-mail notifier uses the Mailer plugin, an optional dependency, and the recipient's Mailer e-mail address. It sends nothing unless the global option `emailNotifications` (default false) is on, so an upgrade changes nothing. Without Mailer the option is absent and nothing breaks. Messages contain the request id, job or scope, requester, a link and the reason, all plain text; each reason line is quoted so it cannot pose as another field. The link uses the configured Jenkins URL only and is left out when none is configured. The dispatch queue is bounded; on overflow a notice is dropped and logged. (D-36)
+- Acceptance: events `CANCELLED`, `EXPIRED` and `INVALIDATED` are added. The requester receives `EXPIRED` (pending, or approved but not executed) and `INVALIDATED`, with the reason; the designated approvers of a pending request receive `CANCELLED`, `EXPIRED` and `INVALIDATED`. The requester is not mailed about their own cancel. (D-54)
 - Acceptance: CSV exports keep their existing columns; the `approver` column holds the designated set joined by `;`, and a `decidedBy` column is appended at the end. (D-37)
 
 **14. REST API와 외부 연동**
@@ -214,6 +215,10 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 **15. 다단계 결재선**
 단일 결재자 구조를 순차 결재선으로 확장합니다.
 합의, 전결, 대결(부재 시 대리 결재)은 이후 검토 항목으로 둡니다.
+
+- Acceptance: a save of the Batch Control configuration that changes anything besides the two switches writes one `CONFIG_CHANGE` record naming the user and each changed field with old and new values; installing or reverting a Batch Control strategy writes one `STRATEGY_CHANGE` record; a save that changes nothing writes nothing. (D-52)
+- Acceptance: an approver id that names no existing user and that the security realm does not resolve is refused with a message next to the field naming it; the input is kept and nothing is saved. If the realm cannot be asked the id is accepted with a warning. An empty approver list is refused while either switch is on. (D-53)
+- Acceptance: while the target job is disabled, the run request decision form says so and Approve is refused with a message; Reject stays possible. A request approved before the job was disabled shows that it waits because the job is disabled. (D-55)
 
 ## 3. 데이터 모델 (MVP)
 
