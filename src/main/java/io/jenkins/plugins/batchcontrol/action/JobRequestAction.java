@@ -11,14 +11,17 @@ import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.security.Permission;
 import hudson.util.Secret;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -204,7 +207,21 @@ public class JobRequestAction implements Action, StaplerProxy {
      * {@link GrantService#markReviewed} refuses a user whose Configure comes from a grant.
      */
     public boolean isShowMarkReviewed() {
-        return job.hasPermission(Item.CONFIGURE) && GrantService.get().isChangedUnderGrant(job);
+        // S-29-08: nothing is undone while change control is off, so the block would be untrue.
+        // S-29-03: offered only to a user who may review it, Configure (or Administer) held
+        // natively, as GrantService#markReviewed demands; a grant-only holder sees no button.
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            return false;
+        }
+        org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+        boolean mayReview = GrantLayer.hasPermissionWithoutGrants(job, auth, Item.CONFIGURE)
+                || GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER);
+        return mayReview && GrantService.get().isChangedUnderGrant(job);
+    }
+
+    /** D-58c: the runs of this job replayed under a permission window, for the review section. */
+    public List<ReplayedRuns.Row> getMarkedRuns() {
+        return ReplayedRuns.of(job);
     }
 
     /**
@@ -222,8 +239,10 @@ public class JobRequestAction implements Action, StaplerProxy {
 
     /** Whether the page shows the "marked as reviewed" confirmation (constant text only). */
     public boolean isReviewedNotice() {
+        // S-29-08: the parameter alone is not trusted; the notice only states what is true now.
         StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
-        return req != null && "1".equals(req.getParameter("reviewed"));
+        return req != null && "1".equals(req.getParameter("reviewed"))
+                && !GrantService.get().isChangedUnderGrant(job);
     }
 
     /**

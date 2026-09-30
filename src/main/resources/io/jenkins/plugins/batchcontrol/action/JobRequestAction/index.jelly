@@ -14,7 +14,7 @@
            Configure and GrantService refuses a grant-only Configure holder. -->
       <j:if test="${it.reviewedNotice}">
         <div class="jenkins-alert jenkins-alert-success" role="status">
-          Marked as reviewed. Changes that widen this job's authorization are no longer undone.
+          Marked as reviewed: this job is no longer listed as changed under a permission window.
         </div>
       </j:if>
       <j:if test="${it.showMarkReviewed}">
@@ -24,6 +24,21 @@
             so changes that widen its authorization are undone. Check what was changed under the
             permission window (see Change Records) and the Pipeline script first.
           </p>
+          <!-- D-58c: the runs replayed under a window stay untrusted after the review. -->
+          <j:set var="markedRuns" value="${it.markedRuns}"/>
+          <j:if test="${!empty(markedRuns)}">
+            <p>These runs were replayed under a temporary permission window; only an administrator can re-run them.</p>
+            <ul>
+              <j:forEach var="r" items="${markedRuns}">
+                <li>
+                  <j:choose>
+                    <j:when test="${r.url != null}"><a href="${rootURL}/${r.url}">${r.id}</a></j:when>
+                    <j:otherwise>${r.id}</j:otherwise>
+                  </j:choose>
+                </li>
+              </j:forEach>
+            </ul>
+          </j:if>
           <f:form method="post" action="markReviewed" name="markReviewed">
             <button type="submit" class="jenkins-button">Mark as reviewed</button>
           </f:form>

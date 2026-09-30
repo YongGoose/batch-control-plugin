@@ -71,6 +71,8 @@
          BatchControlStrategyMonitor#getItemsChangedUnderGrant. Administrator-only page; names are
          escaped by default. An item that no longer resolves is listed as plain text. -->
     <j:set var="changedItems" value="${it.itemsChangedUnderGrant}"/>
+    <!-- D-58c: the marked runs come from the Batch Control root action (ui.ReplayedRuns). -->
+    <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
     <j:if test="${!empty(changedItems)}">
       <p>
         <strong>Batch Control:</strong> these items were changed under a temporary permission
@@ -92,6 +94,20 @@
             <j:choose>
               <j:when test="${changedItem != null}">
                 <a href="${rootURL}/${changedItem.url}configure"><code>${name}</code></a>
+                <j:set var="itemRuns" value="${bcRoot.markedRuns(name)}"/>
+                <j:if test="${!empty(itemRuns)}">
+                  <div>These runs were replayed under a temporary permission window; only an administrator can re-run them.</div>
+                  <ul>
+                    <j:forEach var="r" items="${itemRuns}">
+                      <li>
+                        <j:choose>
+                          <j:when test="${r.url != null}"><a href="${rootURL}/${r.url}">${r.id}</a></j:when>
+                          <j:otherwise>${r.id}</j:otherwise>
+                        </j:choose>
+                      </li>
+                    </j:forEach>
+                  </ul>
+                </j:if>
                 <form method="post" action="${rootURL}/${it.url}/markReviewed" style="display: inline; margin-left: 0.5rem;">
                   <input type="hidden" name="item" value="${name}"/>
                   <button type="submit" class="jenkins-button jenkins-button--tertiary">Mark as reviewed</button>

@@ -8,7 +8,9 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -135,5 +137,15 @@ public class BatchControlRootAction implements RootAction {
     /** Stapler: serves {@code /batch-control/history/...}. */
     public HistorySection getHistory() {
         return new HistorySection();
+    }
+
+    /**
+     * D-58c, for the batch-control-strategy monitor's view (reached there through
+     * {@code app.getExtensionList}): the runs of the item named {@code itemFullName} replayed
+     * under a permission window. Not a Stapler route (no {@code get}/{@code do} prefix); the
+     * monitor is Administer-only, and the item is resolved as the viewer.
+     */
+    public List<ReplayedRuns.Row> markedRuns(String itemFullName) {
+        return ReplayedRuns.of(itemFullName == null ? null : Jenkins.get().getItemByFullName(itemFullName));
     }
 }
