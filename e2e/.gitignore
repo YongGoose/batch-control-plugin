@@ -4,6 +4,7 @@
 out/
 browser/node_modules
 fresh/node_modules
+extra/node_modules
 
 # Screenshots are kept on disk and never committed (owner decision 2026-09-30);
 # the reports name them.

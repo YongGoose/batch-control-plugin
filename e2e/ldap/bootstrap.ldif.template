@@ -1,0 +1,103 @@
+# e2e-05 check 2: directory for the LDAP realm (compose.ldap.yml, casc/profile-ldap.yaml).
+# Rendered by scripts/ldap-up.sh into out/ldap/bootstrap.ldif with the passwords of e2e/.env;
+# this template carries placeholders only.
+#
+# Users mirror the e2e roles under new ids (so that "known to the realm, never logged in to
+# Jenkins" can be tested); mail addresses use @ldap.e2e.local so a notification proves that
+# the address came from LDAP and not from the local user database. Groups carry the
+# permissions (casc/profile-ldap.yaml), not the users.
+dn: dc=e2e,dc=local
+objectClass: dcObject
+objectClass: organization
+dc: e2e
+o: Batch Control e2e
+
+dn: ou=people,dc=e2e,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=e2e,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=admin,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: admin
+cn: LDAP Administrator
+sn: Administrator
+mail: admin@ldap.e2e.local
+userPassword: @BC_ADMIN_PASSWORD@
+
+dn: uid=lrequester,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lrequester
+cn: LDAP Requester
+sn: Requester
+mail: lrequester@ldap.e2e.local
+userPassword: @BC_REQUESTER_PASSWORD@
+
+dn: uid=lapprover-1,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lapprover-1
+cn: LDAP Approver One
+sn: Approver
+mail: lapprover-1@ldap.e2e.local
+userPassword: @BC_APPROVER_PASSWORD@
+
+dn: uid=lapprover-2,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lapprover-2
+cn: LDAP Approver Two
+sn: Approver
+mail: lapprover-2@ldap.e2e.local
+userPassword: @BC_APPROVER_PASSWORD@
+
+dn: uid=lconfigurer,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lconfigurer
+cn: LDAP Standing Configurer
+sn: Configurer
+mail: lconfigurer@ldap.e2e.local
+userPassword: @BC_OTHER_PASSWORD@
+
+dn: uid=lauditor,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lauditor
+cn: LDAP Auditor
+sn: Auditor
+mail: lauditor@ldap.e2e.local
+userPassword: @BC_OTHER_PASSWORD@
+
+dn: uid=lnobody,ou=people,dc=e2e,dc=local
+objectClass: inetOrgPerson
+uid: lnobody
+cn: LDAP No Group
+sn: Nobody
+mail: lnobody@ldap.e2e.local
+userPassword: @BC_OTHER_PASSWORD@
+
+dn: cn=bc-admins,ou=groups,dc=e2e,dc=local
+objectClass: groupOfNames
+cn: bc-admins
+member: uid=admin,ou=people,dc=e2e,dc=local
+
+dn: cn=bc-requesters,ou=groups,dc=e2e,dc=local
+objectClass: groupOfNames
+cn: bc-requesters
+member: uid=lrequester,ou=people,dc=e2e,dc=local
+
+dn: cn=bc-approvers,ou=groups,dc=e2e,dc=local
+objectClass: groupOfNames
+cn: bc-approvers
+member: uid=lapprover-1,ou=people,dc=e2e,dc=local
+member: uid=lapprover-2,ou=people,dc=e2e,dc=local
+
+dn: cn=bc-configurers,ou=groups,dc=e2e,dc=local
+objectClass: groupOfNames
+cn: bc-configurers
+member: uid=lconfigurer,ou=people,dc=e2e,dc=local
+
+dn: cn=bc-auditors,ou=groups,dc=e2e,dc=local
+objectClass: groupOfNames
+cn: bc-auditors
+member: uid=lauditor,ou=people,dc=e2e,dc=local
