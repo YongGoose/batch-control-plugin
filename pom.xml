@@ -180,6 +180,12 @@
       <artifactId>jobConfigHistory</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- Declarative Pipeline, for the Restart from Stage test (T-02-79, D-58b). -->
+      <groupId>org.jenkinsci.plugins</groupId>
+      <artifactId>pipeline-model-definition</artifactId>
+      <scope>test</scope>
+    </dependency>
     <!-- Not BOM-managed; pinned to latest release supporting jenkins.baseline 2.568 (requiredCore 2.516.3). -->
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
