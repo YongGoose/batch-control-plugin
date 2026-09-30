@@ -768,7 +768,11 @@ public class GrantViolationGuard extends SaveableListener {
                         }
                     }
                     }
-                    GrantService.get().markChanged(grantId, fullName);
+                    // S-29-05: no redundant mark when a folder above is already marked (it covers this item).
+                    Object parent = item.getParent();
+                    if (!(parent instanceof Item && GrantService.get().isChangedUnderGrant((Item) parent))) {
+                        GrantService.get().markChanged(grantId, fullName);
+                    }
                 }
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, "Could not check the creation of '" + created.getFullName() + "'", e);

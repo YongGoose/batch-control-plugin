@@ -222,10 +222,17 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     public HttpResponse doMarkReviewed(@org.kohsuke.stapler.QueryParameter String item) {
         Jenkins.get().checkPermission(Jenkins.ADMINISTER);
         hudson.model.Item target = item == null ? null : Jenkins.get().getItemByFullName(item);
+        io.jenkins.plugins.batchcontrol.security.GrantService grants =
+                io.jenkins.plugins.batchcontrol.security.GrantService.get();
         if (target == null) {
-            return HttpResponses.error(404, "No item named '" + item + "'.");
+            // S-29-04: a listed name that no longer resolves can be cleared; anything else is a 404.
+            if (item != null && grants.itemsChangedUnderGrant(Integer.MAX_VALUE).contains(item)) {
+                grants.clearStaleEntry(item);
+                return backToReferrer();
+            }
+            return HttpResponses.notFound(); // S-29-09: no stack trace, no reflected name
         }
-        io.jenkins.plugins.batchcontrol.security.GrantService.get().markReviewed(target);
+        grants.markReviewed(target);
         return backToReferrer();
     }
 

@@ -74,6 +74,7 @@ public final class GrantService {
 
     private synchronized void clearCache() {
         cache = null;
+        markedRuns.clear();
     }
 
     /**
@@ -255,6 +256,74 @@ public final class GrantService {
         return false;
     }
 
+    /** D-58c: at most this many marked runs are listed per item. */
+    static final int MAX_MARKED_RUNS = 50;
+
+    /** At most this many builds of a job are scanned for markers on a cache miss. */
+    static final int MARKED_RUN_SCAN = 100;
+
+    /** D-58c: job full name to the ids of its marked runs (newest first), for the current session. */
+    private final java.util.Map<String, List<String>> markedRuns = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** D-58c: a marked run started (called by the run listener). */
+    public void noteMarkedRun(String jobFullName, String runId) {
+        markedRuns.compute(jobFullName, (job, runs) -> {
+            List<String> updated = new ArrayList<>();
+            updated.add(runId);
+            if (runs != null) {
+                for (String existing : runs) {
+                    if (updated.size() >= MAX_MARKED_RUNS) {
+                        break;
+                    }
+                    if (!existing.equals(runId)) {
+                        updated.add(existing);
+                    }
+                }
+            }
+            return updated;
+        });
+    }
+
+    /**
+     * D-58c: the ids ({@code job#number}) of the runs of the item (a job, or the jobs below a
+     * folder) that were replayed under a grant, at most {@value #MAX_MARKED_RUNS}. Served from a
+     * per-session cache; a job not seen yet is scanned once over its newest
+     * {@value #MARKED_RUN_SCAN} builds.
+     */
+    public List<String> markedRuns(hudson.model.Item item) {
+        List<String> out = new ArrayList<>();
+        if (item instanceof hudson.model.Job) {
+            out.addAll(markedRunsOf((hudson.model.Job<?, ?>) item));
+        } else if (item instanceof hudson.model.ItemGroup) {
+            int jobs = 0;
+            for (hudson.model.Job<?, ?> job : ((hudson.model.ItemGroup<?>) item).getAllItems(hudson.model.Job.class)) {
+                if (out.size() >= MAX_MARKED_RUNS || ++jobs > MAX_MARKED_RUNS) {
+                    break;
+                }
+                out.addAll(markedRunsOf(job));
+            }
+        }
+        return out.size() > MAX_MARKED_RUNS ? new ArrayList<>(out.subList(0, MAX_MARKED_RUNS)) : out;
+    }
+
+    private List<String> markedRunsOf(hudson.model.Job<?, ?> job) {
+        return markedRuns.computeIfAbsent(job.getFullName(), name -> {
+            List<String> found = new ArrayList<>();
+            int scanned = 0;
+            for (hudson.model.Run<?, ?> run = job.getLastBuild(); run != null && scanned < MARKED_RUN_SCAN;
+                    run = run.getPreviousBuild()) {
+                scanned++;
+                if (run.getAction(io.jenkins.plugins.batchcontrol.queue.ReplayUnderGrantAction.class) != null) {
+                    found.add(name + "#" + run.getNumber());
+                    if (found.size() >= MAX_MARKED_RUNS) {
+                        break;
+                    }
+                }
+            }
+            return found;
+        });
+    }
+
     /**
      * D-58b: whether the item, or an item above it, is in the "changed under a grant" state (any
      * grant, active or ended). Served from the in-memory grant cache, for page rendering.
@@ -390,18 +459,107 @@ public final class GrantService {
      */
     public void markReviewed(hudson.model.Item item) {
         org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
-        if (!GrantLayer.hasPermissionWithoutGrants(item, auth, hudson.model.Item.CONFIGURE)
-                && !GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER)) {
+        if (!mayReview(item, auth)) {
             throw new hudson.security.AccessDeniedException3(auth, hudson.model.Item.CONFIGURE);
         }
         String fullName = item.getFullName();
-        synchronized (this) {
-            rewriteChanged(fullName, null, true);
+        // S-29-02: an entry below the item is cleared only if the reviewer may review that item too.
+        java.util.Set<String> clear = new java.util.LinkedHashSet<>();
+        java.util.Set<String> kept = new java.util.LinkedHashSet<>();
+        for (String name : changedAtOrBelow(fullName)) {
+            hudson.model.Item below = name.equals(fullName) ? item : Jenkins.get().getItemByFullName(name);
+            if (below == null || below == item || mayReview(below, auth)) {
+                clear.add(name);
+            } else {
+                kept.add(name);
+            }
         }
-        store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
-                "Marked as reviewed by '" + auth.getName() + "': the item and everything below it are no longer"
-                        + " guarded as changed under a permission window."));
-        LOGGER.info(() -> "'" + fullName + "' marked as reviewed by '" + auth.getName() + "'");
+        int cleared = removeChanged(clear);
+        // S-29-03: recorded only when something was cleared, and says what is still guarded.
+        if (cleared > 0) {
+            String still = isGuardedItem(fullName)
+                    ? " The item is still guarded through an active permission window or a changed folder above it."
+                    : "";
+            String skipped = kept.isEmpty() ? "" : " Not cleared, because the reviewer may not review them: "
+                    + String.join(", ", kept) + ".";
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
+                    "Marked as reviewed by '" + auth.getName() + "': " + cleared + " changed-under-a-permission-window"
+                            + " entr" + (cleared == 1 ? "y" : "ies") + " at or below this item cleared." + skipped + still));
+            LOGGER.info(() -> "'" + fullName + "' marked as reviewed by '" + auth.getName() + "'");
+        }
+    }
+
+    /**
+     * S-29-04: an administrator clears a listed entry whose item no longer resolves (a stale entry).
+     * Checked here too: Overall/Administer.
+     */
+    public void clearStaleEntry(String fullName) {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        int cleared = removeChanged(java.util.Set.of(fullName));
+        if (cleared > 0) {
+            String user = Jenkins.getAuthentication2().getName();
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, user,
+                    "Marked as reviewed by '" + user + "': the entry named an item that no longer exists."));
+        }
+    }
+
+    private static boolean mayReview(hudson.model.Item item, org.springframework.security.core.Authentication auth) {
+        return GrantLayer.hasPermissionWithoutGrants(item, auth, hudson.model.Item.CONFIGURE)
+                || GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER);
+    }
+
+    /** The changed entries (any grant) equal to or below {@code fullName}. */
+    private synchronized java.util.Set<String> changedAtOrBelow(String fullName) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        for (Grant grant : grants()) {
+            for (String name : grant.getChangedItems()) {
+                if (name.equals(fullName) || name.startsWith(fullName + "/")) {
+                    found.add(name);
+                }
+            }
+        }
+        return found;
+    }
+
+    /** Removes the exact entries {@code names} from every grant; the number of entries removed. */
+    private synchronized int removeChanged(java.util.Set<String> names) {
+        int removed = 0;
+        if (names.isEmpty()) {
+            return 0;
+        }
+        for (Grant cached : new ArrayList<>(grants())) {
+            boolean affected = false;
+            for (String name : cached.getChangedItems()) {
+                if (names.contains(name)) {
+                    affected = true;
+                    break;
+                }
+            }
+            if (!affected) {
+                continue;
+            }
+            try {
+                Grant grant = store.loadGrant(cached.getId());
+                if (grant == null) {
+                    continue;
+                }
+                List<String> kept = new ArrayList<>();
+                for (String name : grant.getChangedItems()) {
+                    if (names.contains(name)) {
+                        removed++;
+                    } else {
+                        kept.add(name);
+                    }
+                }
+                grant.setChangedItems(kept);
+                store.saveGrant(grant);
+                replaceInCache(grant);
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.SEVERE, "Could not clear the changed-under-grant entries of grant "
+                        + cached.getId(), e);
+            }
+        }
+        return removed;
     }
 
     /**

@@ -123,6 +123,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
 
     @Override
     public boolean shouldSchedule(Queue.Task p, List<Action> actions) {
+        if (refuseMarkedSource(p, actions)) {
+            return false;
+        }
         boolean decision = decide(p, actions);
         if (decision) {
             markReplayUnderGrant(p, actions);
@@ -146,15 +149,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             if (!(p instanceof Job) || !BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
                 return;
             }
-            boolean rerun = false;
-            for (Cause cause : collectCauses(actions)) {
-                String name = cause.getClass().getName();
-                if (REPLAY_CAUSE_CLASS.equals(name) || RESTART_CAUSE_CLASS.equals(name)) {
-                    rerun = true;
-                    break;
-                }
-            }
-            if (!rerun) {
+            if (!isScriptRerun(actions)) {
                 return;
             }
             org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
@@ -168,9 +163,116 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     .hasPermissionWithoutGrants(job, auth, hudson.model.Item.CONFIGURE)) {
                 io.jenkins.plugins.batchcontrol.security.GrantService.get().markChanged(grant.getId(),
                         job.getFullName());
+                // D-58c: the new run carries a hidden marker (saved with the build), so it can never
+                // be re-run by anyone but an administrator, before or after the review.
+                actions.add(new ReplayUnderGrantAction(auth.getName(), grant.getId()));
             }
         } catch (RuntimeException e) {
             LOGGER.log(Level.SEVERE, "Could not mark a replayed job as changed under a grant", e);
+        }
+    }
+
+    /** Pipeline's replay action (workflow-cps, optional), present on a Replay and a Pipeline Rebuild. */
+    private static final String REPLAY_FLOW_ACTION_CLASS =
+            "org.jenkinsci.plugins.workflow.cps.replay.ReplayFlowFactoryAction";
+
+    /**
+     * Whether the submission re-runs a Pipeline script from an earlier run: a Replay or Pipeline
+     * Rebuild (their cause, or Pipeline's replay action, S-29-06) or a Restart from Stage.
+     */
+    private static boolean isScriptRerun(List<Action> actions) {
+        for (Action action : actions) {
+            if (action != null && REPLAY_FLOW_ACTION_CLASS.equals(action.getClass().getName())) {
+                return true;
+            }
+        }
+        for (Cause cause : collectCauses(actions)) {
+            String name = cause.getClass().getName();
+            if (REPLAY_CAUSE_CLASS.equals(name) || RESTART_CAUSE_CLASS.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * D-58c: a Replay, Pipeline Rebuild, Restart from Stage or rebuild-plugin Rebuild whose source run
+     * carries {@link ReplayUnderGrantAction} is refused for everyone but an Overall/Administer holder,
+     * while change control is on, and recorded like other refused re-runs. A person gets the plain
+     * message (on the web or the CLI); anything else is refused quietly. Never throws otherwise.
+     */
+    private static boolean refuseMarkedSource(Queue.Task p, List<Action> actions) {
+        Job<?, ?> job;
+        hudson.model.Run<?, ?> source;
+        try {
+            if (!(p instanceof Job) || !BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+                return false;
+            }
+            job = (Job<?, ?>) p;
+            source = sourceRun(job, collectCauses(actions));
+            if (source == null || source.getAction(ReplayUnderGrantAction.class) == null) {
+                return false;
+            }
+            if (Jenkins.get().hasPermission2(Jenkins.getAuthentication2(), Jenkins.ADMINISTER)) {
+                return false;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not check the source run of a re-run", e);
+            return false;
+        }
+        String message = "Build #" + source.getNumber() + " of '" + job.getFullName() + "' cannot be re-run: this run's"
+                + " script was replayed under a temporary permission window. Ask an administrator.";
+        org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+        boolean person = !ACL.SYSTEM2.equals(auth) && !ACL.isAnonymous2(auth);
+        String source1 = Integer.toString(source.getNumber());
+        if (person) {
+            recordPersonRefusal(job, KIND_REPLAY, source1, auth.getName(), "Blocked a re-run of job '"
+                    + job.getFullName() + "' build #" + source1 + " by '" + auth.getName()
+                    + "' - the run's script was replayed under a permission window");
+        } else {
+            recordTriggerBlocked(job, KIND_REPLAY, "replayedUnderGrant", "Blocked a re-run of job '"
+                    + job.getFullName() + "' build #" + source1 + " - the run's script was replayed under a"
+                    + " permission window");
+        }
+        if (CLICommand.getCurrent() != null) {
+            throw new IllegalStateException(message);
+        }
+        if (person && Stapler.getCurrentRequest2() != null) {
+            throw new Failure(message);
+        }
+        return true;
+    }
+
+    /**
+     * The run a re-run repeats, from the submission's own (last) re-run cause: Pipeline's Replay or
+     * Rebuild ({@code ReplayCause#getOriginalNumber}), Restart from Stage ({@code getOriginal} or
+     * {@code getOriginalNumber}), or the rebuild plugin's {@code RebuildCause} (an upstream cause
+     * naming the rebuilt build). Plugin classes are read reflectively; {@code null} when unknown.
+     */
+    private static hudson.model.Run<?, ?> sourceRun(Job<?, ?> job, List<Cause> causes) {
+        for (int i = causes.size() - 1; i >= 0; i--) {
+            Cause cause = causes.get(i);
+            String name = cause.getClass().getName();
+            if (REPLAY_CAUSE_CLASS.equals(name) || RESTART_CAUSE_CLASS.equals(name)) {
+                Object number = invokeQuietly(cause, "getOriginalNumber");
+                if (number instanceof Integer) {
+                    return job.getBuildByNumber((Integer) number);
+                }
+                Object original = invokeQuietly(cause, "getOriginal");
+                return original instanceof hudson.model.Run ? (hudson.model.Run<?, ?>) original : null;
+            }
+            if (REBUILD_CAUSE_CLASS.equals(name) && cause instanceof Cause.UpstreamCause) {
+                return job.getBuildByNumber(((Cause.UpstreamCause) cause).getUpstreamBuild());
+            }
+        }
+        return null;
+    }
+
+    private static Object invokeQuietly(Object target, String method) {
+        try {
+            return target.getClass().getMethod(method).invoke(target);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
         }
     }
 
