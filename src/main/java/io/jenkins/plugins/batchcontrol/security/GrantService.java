@@ -231,43 +231,183 @@ public final class GrantService {
         return grant != null ? grant : findCreatingGrant(user, itemFullName, itemRootDir);
     }
 
-    /**
-     * D-58: the users who hold, or held within {@code window}, a grant whose scope covers
-     * {@code itemFullName} or through which they created it (D-35c). Read from the in-memory grant
-     * cache (bounded by retention), so no store read happens on a warm cache.
-     */
-    public synchronized java.util.Set<String> recentHolders(String itemFullName, java.time.Duration window) {
-        Instant since = BatchClock.now().minus(window);
-        java.util.Set<String> users = new java.util.LinkedHashSet<>();
-        for (Grant grant : grants()) {
-            if (grant.getUser() == null) {
-                continue;
-            }
-            Instant ended = grant.getRevokedAt() != null ? grant.getRevokedAt() : grant.getExpiresAt();
-            if (ended != null && ended.isBefore(since)) {
-                continue;
-            }
-            // A folder's property is inherited by what is below it, so a grant anywhere below the
-            // folder makes its holder a guarded principal of the folder as well.
-            String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
-            boolean covers = (grant.getScope() != null && grant.getScope().includes(itemFullName))
-                    || (scope != null && !itemFullName.isEmpty() && scope.startsWith(itemFullName + "/"))
-                    || grant.hasCreated(itemFullName)
-                    || createdBelow(grant, itemFullName);
-            if (covers) {
-                users.add(grant.getUser());
-            }
-        }
-        return users;
-    }
+    // ---------------------------------------------------------------- D-58a guarded items
 
-    private static boolean createdBelow(Grant grant, String folderFullName) {
-        for (String created : grant.getCreatedItems()) {
-            if (created.startsWith(folderFullName + "/")) {
+    /**
+     * D-58a: whether the item is guarded: covered by an active grant (its scope includes the item,
+     * the scope lies below the item when the item is a folder, or the item was created through
+     * it), or changed under a grant (active or ended) and not reviewed since. Answered from the
+     * in-memory grant cache.
+     */
+    public synchronized boolean isGuardedItem(String itemFullName) {
+        if (itemFullName == null || itemFullName.isEmpty()) {
+            return false;
+        }
+        Instant now = BatchClock.now();
+        for (Grant grant : grants()) {
+            if (grant.hasChanged(itemFullName)) {
+                return true;
+            }
+            if (grant.isActiveAt(now) && covers(grant, itemFullName)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item. */
+    private static boolean covers(Grant grant, String itemFullName) {
+        String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
+        return (grant.getScope() != null && grant.getScope().includes(itemFullName))
+                // a folder's property is inherited below it, so a scope below the folder guards it
+                || (scope != null && scope.startsWith(itemFullName + "/"))
+                || grant.hasCreated(itemFullName);
+    }
+
+    /**
+     * D-58a: the id of a grant that makes the item guarded (one that lists it as changed, else an
+     * active one covering it), or {@code null} when it is not guarded.
+     */
+    @CheckForNull
+    public synchronized String guardingGrantId(String itemFullName) {
+        if (itemFullName == null || itemFullName.isEmpty()) {
+            return null;
+        }
+        Instant now = BatchClock.now();
+        String covering = null;
+        for (Grant grant : grants()) {
+            if (grant.hasChanged(itemFullName)) {
+                return grant.getId();
+            }
+            if (covering == null && grant.isActiveAt(now) && covers(grant, itemFullName)) {
+                covering = grant.getId();
+            }
+        }
+        return covering;
+    }
+
+    /** D-58a: the items in the "changed under a grant" state, sorted, at most {@code limit}. */
+    public synchronized List<String> itemsChangedUnderGrant(int limit) {
+        java.util.TreeSet<String> items = new java.util.TreeSet<>();
+        for (Grant grant : grants()) {
+            items.addAll(grant.getChangedItems());
+        }
+        List<String> out = new ArrayList<>();
+        for (String item : items) {
+            if (out.size() >= limit) {
+                break;
+            }
+            out.add(item);
+        }
+        return out;
+    }
+
+    /**
+     * D-58a: notes that {@code itemFullName} was changed under {@code grantId} (a save or creation
+     * by the holder while their permission came only from the grant), persisting the grant. A
+     * store failure is logged; it never fails the save.
+     */
+    public synchronized void markChanged(String grantId, String itemFullName) {
+        if (grantId == null || itemFullName == null || itemFullName.isEmpty()) {
+            return;
+        }
+        for (Grant cached : grants()) {
+            if (cached.getId().equals(grantId) && cached.hasChanged(itemFullName)) {
+                return; // already marked
+            }
+        }
+        try {
+            Grant grant = store.loadGrant(grantId);
+            if (grant == null) {
+                return;
+            }
+            List<String> items = grant.getChangedItems();
+            if (!items.contains(itemFullName)) {
+                items.add(itemFullName);
+            }
+            grant.setChangedItems(items);
+            store.saveGrant(grant);
+            replaceInCache(grant);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not mark '" + itemFullName
+                    + "' as changed under grant " + grantId, e);
+        }
+    }
+
+    /**
+     * D-58a: the review. {@code itemFullName} was saved through the web by an administrator or a
+     * native Configure holder, so it leaves the "changed under a grant" state (the item itself
+     * only, not what is below it).
+     */
+    public synchronized void clearChanged(String itemFullName) {
+        rewriteChanged(itemFullName, null, false);
+    }
+
+    /**
+     * D-58a (S-27-03): an item was renamed or moved. The "changed under a grant" state follows it
+     * and what is below it; and an item that was covered by an active grant under its old name,
+     * but is not under its new name, is marked as changed under that grant, so it stays guarded.
+     */
+    public synchronized void relocateChanged(String oldFullName, String newFullName) {
+        Instant now = BatchClock.now();
+        List<String> carriers = new ArrayList<>();
+        for (Grant grant : grants()) {
+            if (grant.isActiveAt(now) && covers(grant, oldFullName) && !covers(grant, newFullName)) {
+                carriers.add(grant.getId());
+            }
+        }
+        rewriteChanged(oldFullName, newFullName, true);
+        for (String grantId : carriers) {
+            markChanged(grantId, newFullName);
+        }
+    }
+
+    /** D-58a: a deleted item (and what was below it) leaves the "changed under a grant" state. */
+    public synchronized void forgetChanged(String fullName) {
+        rewriteChanged(fullName, null, true);
+    }
+
+    /**
+     * Replaces (or removes, with a {@code null} replacement) {@code fullName}, and with
+     * {@code descendants} what is below it, in the changed-items list of every grant.
+     */
+    private void rewriteChanged(String fullName, @CheckForNull String replacement, boolean descendants) {
+        if (fullName == null || fullName.isEmpty()) {
+            return;
+        }
+        for (Grant cached : new ArrayList<>(grants())) {
+            boolean affected = false;
+            for (String item : cached.getChangedItems()) {
+                if (item.equals(fullName) || (descendants && item.startsWith(fullName + "/"))) {
+                    affected = true;
+                    break;
+                }
+            }
+            if (!affected) {
+                continue;
+            }
+            try {
+                Grant grant = store.loadGrant(cached.getId());
+                if (grant == null) {
+                    continue;
+                }
+                java.util.LinkedHashSet<String> updated = new java.util.LinkedHashSet<>();
+                for (String item : grant.getChangedItems()) {
+                    boolean match = item.equals(fullName) || (descendants && item.startsWith(fullName + "/"));
+                    if (!match) {
+                        updated.add(item);
+                    } else if (replacement != null) {
+                        updated.add(replacement + item.substring(fullName.length()));
+                    }
+                }
+                grant.setChangedItems(new ArrayList<>(updated));
+                store.saveGrant(grant);
+                replaceInCache(grant);
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not update the changed-under-grant state of '"
+                        + fullName + "' in grant " + cached.getId(), e);
+            }
+        }
     }
 
     /** Every grant that is active right now (not expired, not revoked). */
@@ -335,6 +475,12 @@ public final class GrantService {
         }
         grant.setCreatedItems(items);
         grant.setCreatedItemIdentities(identities);
+        // D-58a: an item created through the grant alone is changed under it.
+        List<String> changed = grant.getChangedItems();
+        if (!changed.contains(itemFullName)) {
+            changed.add(itemFullName);
+        }
+        grant.setChangedItems(changed);
         store.saveGrant(grant);
         replaceInCache(grant);
         return grant;
