@@ -682,6 +682,78 @@ public class AuthorizationEntryGuardTest {
         assertEquals(4, job.getNextBuildNumber(), "a re-run of a run inheriting the marker must be refused: no new build");
     }
 
+    /**
+     * T-02-81 (e2e-03 DEF-39, D-58b): c1 (native Item/Configure, not an administrator) widens the
+     * guarded job through HTTP; the 403 page points to the "Mark as reviewed" action.
+     */
+    @Test
+    public void t_02_81_nativeConfigureRefusalPointsToMarkAsReviewed() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        String xml = current().getConfigFile().asString();
+        String widened = xml.replace("<properties/>", "<properties>" + propertyXml("carol") + "</properties>");
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("c1");
+        WebRequest req = new WebRequest(wc.createCrumbedUrl(current().getUrl() + "config.xml"), HttpMethod.POST);
+        req.setAdditionalHeader("Content-Type", "application/xml");
+        req.setRequestBody(widened);
+        org.htmlunit.Page answer = wc.getPage(req);
+        assertEquals(403, answer.getWebResponse().getStatusCode(), "fixture: the widening must be refused");
+        String text = UsabilityFixtures.text(answer);
+        assertTrue(text.contains("Mark as reviewed"), "the 403 for a native Configure holder must point to Mark as"
+                + " reviewed: " + UsabilityFixtures.excerpt(text));
+    }
+
+    /**
+     * T-02-82 (e2e-03 DEF-40, D-58c): on a job without approvalRequired, the refusal record of c1's
+     * re-run of the marked #2 does not name the approvalRequired switch; the record of the
+     * administrator's allowed re-run does not say his permission came only from a window.
+     */
+    @Test
+    public void t_02_82_markedRunRecordsDescribeWhatHappened() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=replay-me") < 400,
+                "fixture: the administrator's review must succeed");
+        int c1Before = byUserOn("c1", "replay-me").size();
+        postPage("c1", job.getUrl() + "2/replay/rebuild", null);
+        j.waitUntilNoActivityUpTo(120_000);
+        List<ChangeRecord> c1 = byUserOn("c1", "replay-me");
+        assertTrue(c1.size() > c1Before, "fixture: c1's refusal must be recorded");
+        String refusal = String.valueOf(c1.get(c1.size() - 1).getDetail());
+        assertFalse(refusal.contains("approvalRequired"), "the refusal on a job without approvalRequired must not name"
+                + " that switch: " + refusal);
+
+        int adminBefore = byUserOn("admin", "replay-me").size();
+        postPage("admin", job.getUrl() + "2/replay/rebuild", null);
+        j.waitUntilNoActivityUpTo(120_000);
+        List<ChangeRecord> admin = byUserOn("admin", "replay-me");
+        for (ChangeRecord r : admin.subList(adminBefore, admin.size())) {
+            assertFalse(String.valueOf(r.getDetail()).toLowerCase(java.util.Locale.ROOT).contains("only from"),
+                    "the administrator's record must not say his permission came only from a window: " + r.getDetail());
+        }
+    }
+
+    /**
+     * T-02-83 (e2e-03 DEF-41, D-58c/D-49): c1 (Job/Build) sees no rebuild-plugin Rebuild link on the
+     * marked run #2; the unmarked #1 offers it (premise).
+     */
+    @Test
+    public void t_02_83_markedRunOffersNoRebuildLinkToANonAdministrator() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        assertTrue(offersRebuild("c1", job, 1), "premise: the rebuild plugin offers Rebuild on the unmarked #1");
+        assertFalse(offersRebuild("c1", job, 2), "the marked run #2 must offer a non-administrator no Rebuild link");
+    }
+
+    private boolean offersRebuild(String user, WorkflowJob job, int number) throws Exception {
+        org.htmlunit.html.HtmlPage page = UsabilityFixtures.htmlPage(j, user, job.getUrl() + number + "/");
+        for (org.htmlunit.html.HtmlAnchor a : page.getAnchors()) {
+            String href = a.getHrefAttribute();
+            if (href != null && href.matches(".*/" + number + "/rebuild/?(\\?.*)?$")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void requestPermissionFor(String user) {
