@@ -201,6 +201,15 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         return backToReferrer();
     }
 
+    /**
+     * D-58a: the items in the "changed under a grant" state (saved or created under a grant and not
+     * reviewed since by an administrator or a native Configure holder through the web), sorted, at
+     * most 50. They stay guarded until reviewed. Administrator-only page.
+     */
+    public java.util.List<String> getItemsChangedUnderGrant() {
+        return io.jenkins.plugins.batchcontrol.security.GrantService.get().itemsChangedUnderGrant(50);
+    }
+
     /** The {@code target} of a {@link ChangeType#STRATEGY_CHANGE} record (D-52). */
     public static final String STRATEGY_CHANGE_TARGET = "authorization-strategy";
 

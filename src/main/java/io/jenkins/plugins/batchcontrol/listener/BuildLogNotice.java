@@ -4,8 +4,6 @@ import hudson.model.Job;
 import hudson.model.Run;
 import hudson.model.TaskListener;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -16,18 +14,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * D-58: tells a build that its save of the job's authorization property was partly reverted, with
  * one line in the build log. Pipeline is optional, so its classes are reached reflectively.
  *
- * <p>When the save runs on a Pipeline CPS thread ({@code CpsThread.current()}), the line goes to
- * that build's log only. Otherwise it goes to the running Pipeline builds of the job (at most
- * {@link #MAX_RUNNING}), since the saving build cannot be told apart. A build type without a
- * reachable listener (for example Freestyle) gets no line; the GRANT_VIOLATION record is written
- * either way. Never throws.
+ * <p>The line goes only to the build that saved: the Pipeline build whose CPS thread runs the
+ * save ({@code CpsThread.current()}) when it is a build of the saved job. When the saving build
+ * cannot be identified (a save from another job, a script, a Freestyle build), no line is written
+ * (S-27-10); the GRANT_VIOLATION record is written either way. Never throws.
  */
 @Restricted(NoExternalUse.class)
 final class BuildLogNotice {
 
     private static final Logger LOGGER = Logger.getLogger(BuildLogNotice.class.getName());
-
-    static final int MAX_RUNNING = 3;
 
     private BuildLogNotice() {
     }
@@ -39,9 +34,7 @@ final class BuildLogNotice {
                 own.getLogger().println(line);
                 return;
             }
-            for (TaskListener listener : runningListeners(job)) {
-                listener.getLogger().println(line);
-            }
+            // S-27-10: only the build that saved; when it cannot be identified, no line.
         } catch (RuntimeException | LinkageError e) {
             LOGGER.log(Level.FINE, "Could not write the authorization notice to a build log of '"
                     + job.getFullName() + "'", e);
@@ -108,28 +101,4 @@ final class BuildLogNotice {
         return null;
     }
 
-    private static List<TaskListener> runningListeners(Job<?, ?> job) {
-        List<TaskListener> listeners = new ArrayList<>();
-        int seen = 0;
-        for (Run<?, ?> run = job.getLastBuild(); run != null && seen < MAX_RUNNING; run = run.getPreviousBuild()) {
-            seen++;
-            if (!run.isBuilding()) {
-                continue;
-            }
-            try {
-                Object execution = call(run, "getExecution");
-                if (execution == null) {
-                    continue;
-                }
-                Object owner = call(execution, "getOwner");
-                Object listener = call(owner, "getListener");
-                if (listener instanceof TaskListener) {
-                    listeners.add((TaskListener) listener);
-                }
-            } catch (ReflectiveOperationException | RuntimeException e) {
-                // not a Pipeline build, or no listener reachable
-            }
-        }
-        return listeners;
-    }
 }
