@@ -1,6 +1,18 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:l="/lib/layout">
   <f:section title="Batch Control">
+    <!-- e2e-04 FD-15: a refused save of /batch-control-configuration/ re-renders this form inside
+         the same POST (BatchControlConfigurationLink#doConfigSubmit). The draft it binds drops an
+         out-of-range number, so the numeric fields take what the user typed from the submitted
+         form instead; each field's own check then shows its message next to it. This form is
+         rendered for a POST carrying the "json" form only in that case; on every GET, and on
+         Manage Jenkins > System, the stored values are shown as before. -->
+    <j:set var="bcTyped" value="${null}"/>
+    <j:if test="${request2.method == 'POST' and request2.getParameter('json') != null}">
+      <j:set var="bcSubmittedForm" value="${request2.submittedForm}"/>
+      <j:set var="bcSectionKey" value="${descriptor.jsonSafeClassName}"/>
+      <j:set var="bcTyped" value="${bcSubmittedForm.has(bcSectionKey) ? bcSubmittedForm.getJSONObject(bcSectionKey) : bcSubmittedForm}"/>
+    </j:if>
     <!-- No <f:description> here: inside a title-less <f:entry> it is laid out on the checkbox
          caption's line and renders as one run-together string (E2E-D4). The wording lives in
          help-runControlEnabled.html, like every other field on this screen. -->
@@ -17,10 +29,12 @@
       <f:checkbox title="Allow administrators to approve their own requests"/>
     </f:entry>
     <f:entry title="Pending request timeout (hours)" field="pendingTimeoutHours">
-      <f:number min="1"/>
+      <f:number min="1"
+                value="${bcTyped != null and bcTyped.has('pendingTimeoutHours') ? bcTyped.getString('pendingTimeoutHours') : null}"/>
     </f:entry>
     <f:entry title="Approved-but-not-run timeout (minutes)" field="approvedRunTimeoutMinutes">
-      <f:number min="1"/>
+      <f:number min="1"
+                value="${bcTyped != null and bcTyped.has('approvedRunTimeoutMinutes') ? bcTyped.getString('approvedRunTimeoutMinutes') : null}"/>
     </f:entry>
     <f:entry title="Grant duration options (minutes, comma-separated)" field="grantDurationOptions">
       <!-- The SPEC key names the field (T-CFG-04); the value is the comma-separated text, which
@@ -28,18 +42,21 @@
       <f:textbox value="${instance.grantDurationOptionsText}"/>
     </f:entry>
     <f:entry title="Maximum grant duration (minutes)" field="maxGrantMinutes">
-      <f:number min="1"/>
+      <f:number min="1"
+                value="${bcTyped != null and bcTyped.has('maxGrantMinutes') ? bcTyped.getString('maxGrantMinutes') : null}"/>
     </f:entry>
     <f:entry title="Results that open an incident (comma-separated)" field="incidentResults">
       <f:textbox value="${instance.incidentResultsText}"/>
     </f:entry>
     <f:entry title="Retention period (months)" field="retentionMonths">
-      <f:number min="1"/>
+      <f:number min="1"
+                value="${bcTyped != null and bcTyped.has('retentionMonths') ? bcTyped.getString('retentionMonths') : null}"/>
     </f:entry>
     <!-- D-36: notifications. The e-mail option exists only while the Mailer plugin is active, so
          an instance without Mailer never sees a switch that could do nothing. -->
     <f:entry title="Notify before expiry (minutes)" field="notifyBeforeExpiryMinutes">
-      <f:number min="1"/>
+      <f:number min="1"
+                value="${bcTyped != null and bcTyped.has('notifyBeforeExpiryMinutes') ? bcTyped.getString('notifyBeforeExpiryMinutes') : null}"/>
     </f:entry>
     <j:if test="${instance.mailerAvailable}">
       <f:entry field="emailNotifications">
