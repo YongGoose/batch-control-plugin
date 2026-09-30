@@ -210,10 +210,19 @@ public final class RunRequestService {
             // D-20 check-at-submit: a request whose pending timeout has already passed is
             // expired here instead of being approved, so it can never be submitted.
             if (pendingExpired(request, now)) {
+                String reason = EndReasons.pendingExpired();
                 request.setStatus(RequestStatus.EXPIRED);
+                request.setDecisionComment(reason);
                 store.saveRunRequest(request);
+                NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Request " + id
                         + " passed its pending timeout and is now EXPIRED.");
+            }
+            // D-55 (e2e-04 FD-06): an approval of a disabled job could never start, so it is
+            // refused and the request stays PENDING; Reject is still possible.
+            if (jobDisabled(request.getJobFullName())) {
+                throw new IllegalStateException("The job '" + request.getJobFullName() + "' is disabled; enable it"
+                        + " first, then approve. You can still reject the request.");
             }
             request.setStatus(RequestStatus.APPROVED);
             request.setDecidedAt(now);
@@ -230,6 +239,16 @@ public final class RunRequestService {
         submitApproved(request);
         RunRequest reloaded = load(id);
         return reloaded != null ? reloaded : request;
+    }
+
+    /**
+     * D-55: whether the target job exists and is disabled. Looked up through
+     * {@link ApprovalPolicy#jobForPolicy} (the decision checks are complete by then), and only read.
+     */
+    private static boolean jobDisabled(String jobFullName) {
+        Job<?, ?> job = ApprovalPolicy.jobForPolicy(jobFullName);
+        return job instanceof jenkins.model.ParameterizedJobMixIn.ParameterizedJob
+                && ((jenkins.model.ParameterizedJobMixIn.ParameterizedJob<?, ?>) job).isDisabled();
     }
 
     /** Rejects a PENDING request; the comment is mandatory (SPEC 5). */
@@ -279,6 +298,8 @@ public final class RunRequestService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
             store.saveRunRequest(request);
+            // D-54: the approvers (and the requester, when a Manage holder cancelled) are told.
+            NotificationDispatcher.runEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
         } finally {
             lock.unlock();
@@ -378,8 +399,11 @@ public final class RunRequestService {
             Instant now = BatchClock.now();
             if (approvedExpired(request, now)) {
                 // D-20 check-at-submit: an expired approval is never submitted.
+                String reason = EndReasons.approvedNotStarted();
                 request.setStatus(RequestStatus.EXPIRED);
+                request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
                 store.saveRunRequest(request);
+                NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                 LOGGER.warning(() -> "Refusing approval marker of request " + requestId
                         + ": the approved-run timeout passed before submission (now EXPIRED)");
                 return false;
@@ -478,8 +502,11 @@ public final class RunRequestService {
                     continue;
                 }
                 if (request.getStatus() == RequestStatus.PENDING && pendingExpired(request, now)) {
+                    String reason = EndReasons.pendingExpired();
                     request.setStatus(RequestStatus.EXPIRED);
+                    request.setDecisionComment(reason);
                     store.saveRunRequest(request);
+                    NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (pending timeout)");
                 } else if (request.getStatus() == RequestStatus.APPROVED
@@ -487,8 +514,11 @@ public final class RunRequestService {
                         && !queuedRequestIds.contains(request.getId())
                         && ticketNotFresherThan(request, queueSnapshotAt)
                         && approvedExpired(request, now)) {
+                    String reason = EndReasons.approvedNotStarted();
                     request.setStatus(RequestStatus.EXPIRED);
+                    request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
                     store.saveRunRequest(request);
+                    NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (approved-run timeout)");
                 }
@@ -571,6 +601,7 @@ public final class RunRequestService {
                 }
                 if (request.getStatus() == RequestStatus.PENDING
                         || request.getStatus() == RequestStatus.APPROVED) {
+                    boolean wasPending = request.getStatus() == RequestStatus.PENDING;
                     request.setStatus(RequestStatus.INVALIDATED);
                     request.setInvalidationReason(reason);
                     // e2e-03 DEF-17: the request explains why it was invalidated. The reason is
@@ -580,6 +611,7 @@ public final class RunRequestService {
                         request.setDecisionComment(reason);
                     }
                     store.saveRunRequest(request);
+                    NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
                     invalidated.add(request.getId());
                     LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
                 }

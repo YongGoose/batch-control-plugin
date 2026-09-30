@@ -12,13 +12,26 @@
       <!-- Filter form: a plain GET form; filtering never changes state. -->
       <form method="get" action="." style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end;">
         <input type="hidden" name="kind" value="${it.kind}"/>
+        <!-- e2e-04 FD-11: a refused date keeps what the user entered (as text: a date input
+             would blank a value it cannot parse) with the message right below the field. -->
+        <j:set var="filter" value="${it.filter}"/>
         <div>
           <label for="filter-from">From</label><br/>
-          <input type="date" id="filter-from" name="from" value="${it.filter.fromValue}" class="jenkins-input" style="width: auto;"/>
+          <input type="${filter.fromError != null ? 'text' : 'date'}" id="filter-from" name="from" value="${filter.fromInput}"
+                 class="jenkins-input" style="width: auto;" placeholder="YYYY-MM-DD"
+                 aria-invalid="${filter.fromError != null ? 'true' : null}"/>
+          <j:if test="${filter.fromError != null}">
+            <div class="error" role="alert" data-batch-control-field-error="from">${filter.fromError}</div>
+          </j:if>
         </div>
         <div>
           <label for="filter-to">To</label><br/>
-          <input type="date" id="filter-to" name="to" value="${it.filter.toValue}" class="jenkins-input" style="width: auto;"/>
+          <input type="${filter.toError != null ? 'text' : 'date'}" id="filter-to" name="to" value="${filter.toInput}"
+                 class="jenkins-input" style="width: auto;" placeholder="YYYY-MM-DD"
+                 aria-invalid="${filter.toError != null ? 'true' : null}"/>
+          <j:if test="${filter.toError != null}">
+            <div class="error" role="alert" data-batch-control-field-error="to">${filter.toError}</div>
+          </j:if>
         </div>
         <div>
           <label for="filter-job">Job</label><br/>
@@ -47,6 +60,13 @@
         <a class="jenkins-button ${it.kind == 'requests' ? 'jenkins-button--primary' : ''}" href="?${it.query('requests')}">Requests</a>
       </div>
 
+      <j:choose>
+        <j:when test="${!filter.valid}">
+          <div class="jenkins-alert jenkins-alert-warning" role="status">
+            Nothing is listed or exported until the dates above are corrected.
+          </div>
+        </j:when>
+        <j:otherwise>
       <!-- Blocked approval-marker re-use (D-30), shown on every tab and only when there is
            something to show. A blocked attempt creates no run record, so on the default Runs tab
            it would otherwise be invisible - the very problem D-30 was decided to fix. It sits
@@ -259,6 +279,9 @@
         <a class="jenkins-button" href="changes.csv?${it.baseQuery}">changes.csv</a>
         <a class="jenkins-button" href="requests.csv?${it.baseQuery}">requests.csv</a>
       </div>
+
+        </j:otherwise>
+      </j:choose>
 
       <h2>Monthly Summary (${it.summaryMonth})</h2>
       <table class="jenkins-table" style="max-width: 30rem;">

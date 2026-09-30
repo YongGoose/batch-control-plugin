@@ -138,8 +138,12 @@ activated. The child's page names that folder to viewers who may read it.
 build that is already running, not a global switch, not a job property, not a
 configuration change, and not a permission window expiring mid-build.
 
-A person refused at "Build Now", at a REST `build` call or at the CLI gets an
-"approval required" page or CLI message linking to the request form. Some
+A person refused at a REST `build` call, at the CLI, or at the build link of a
+job with parameters gets an "approval required" page or CLI message linking to
+the request form. The build link of a job without parameters is the exception:
+Jenkins shows only its own toast, "Failed to schedule build. Reload the page and
+try again.", and the approval notice on the job page is where the reason is
+([Limitations](#limitations)). Some
 refusals have no screen to read them at the time: Pipeline Replay, whose UI
 offers no channel for the message; a build-token submission, whose caller is a
 script reading an HTTP status; and a timer or upstream trigger turned away by
@@ -186,10 +190,15 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 
 ### 1. Turn on what you need
 
+**Holding `BatchControl/Manage` without `Overall/Administer`? Open
+`/batch-control-configuration/`**, or **Batch Control → Configuration**. Manage
+Jenkins is not open to you.
+
 The settings are in two places, with the same fields and the same checks:
 
 - **Batch Control → Configuration** (`/batch-control-configuration/`), the
-  entry in the Batch Control sidebar. It needs only `BatchControl/Manage`, so a
+  entry in the sidebar of the Batch Control page ([The screens](#the-screens)
+  says how to reach that page). It needs only `BatchControl/Manage`, so a
   user who holds that permission but not `Overall/Administer` opens and saves the
   configuration here. The same page is listed as **Batch Control** on
   **Manage Jenkins** for users who can open Manage Jenkins.
@@ -197,8 +206,15 @@ The settings are in two places, with the same fields and the same checks:
   own page and needs `Overall/Manage`, so a holder of `BatchControl/Manage`
   alone gets 403 there.
 
-`BatchControl/Manage` is implied by `Overall/Administer`. Flipping either switch
-is itself recorded, whichever page it was saved from.
+`BatchControl/Manage` is implied by `Overall/Administer`. Every save that changes
+something is recorded, whichever page it was saved from: flipping either switch
+writes a `CONFIG_TOGGLE` change record, and a change to any other field (the
+approver list included) writes one `CONFIG_CHANGE` record naming the user and
+each changed field with its old and new value. Installing or reverting a Batch
+Control authorization strategy (step 2) through Batch Control's own buttons
+writes a `STRATEGY_CHANGE` record; changing the strategy directly on
+**Manage Jenkins → Security** writes no Batch Control record. A
+save that changes nothing writes nothing.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -323,8 +339,12 @@ show each of these four steps.
 
 ## The screens
 
-Everything is under **Batch Control** in the left sidebar, permission-gated
-section by section, so a user sees only what they can act on.
+Everything is on the **Batch Control** page, at `/batch-control/`. On Jenkins
+2.568 its entry is not in the dashboard's left sidebar: open the **☰** (More
+actions) menu in the page header and choose **Batch Control**. On that page the
+sections are listed in its own sidebar, permission-gated section by section, so a
+user sees only what they can act on. A user with no Batch Control permission gets
+no entry and a 404 at that URL.
 
 **Run Requests** carries each request's stored parameters, reason, requester,
 approver, status and decision history, and is where the approver decides. On a
@@ -345,7 +365,13 @@ cause (`USER`, `TIMER`, `UPSTREAM`, `APPROVED_REQUEST`, `SCM`, `OTHER`), user,
 parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
 each with the last 100 console lines, and offers acknowledge, resolve, comment and
-a rerun request with the original parameters prefilled; the lifecycle runs `OPEN`
+a rerun request. The rerun request carries the failed build's original parameters
+as they were; they are fixed, not offered for editing, and only the reason and the
+approvers are filled in. Submitting it needs `BatchControl/Request` plus
+`Item/Read` and `Item/Build` on the job, like any run request, and the Incidents
+screen itself needs `BatchControl/ViewHistory`, so the user needs all four; the
+typical roles in step 3 give that combination only to administrators unless you
+add it. The lifecycle runs `OPEN`
 → `ACKNOWLEDGED` → `RESOLVED`, one way only, each transition carrying a user, a
 timestamp and a comment. **History** filters runs, incidents, change records and
 requests by period, job, user, result and status, exports each as CSV, prefixing
@@ -365,7 +391,12 @@ retention expiry.
 **Notifications.** Batch Control sends e-mail through an optional dependency on
 the Mailer plugin, so an instance without Mailer installed is unaffected, when a
 request is created, its approver set changes, it is approved or rejected, or an
-active grant window is about to expire. The message carries the reason and,
+active grant window is about to expire. A request that ends without a decision is
+notified too: the requester is told when their request expires (pending, or
+approved but never run) or is invalidated, with the reason, and the designated
+approvers of a pending request are told when it is cancelled, expires or is
+invalidated, so that their inbox does not point at a request that is gone. A
+requester is not mailed about their own cancel. The message carries the reason and,
 only when the Jenkins URL is configured under **Manage Jenkins → System**, a
 link back to the request; without that URL set, the message is sent with no
 link rather than one guessed from the request itself
@@ -394,9 +425,16 @@ that child is created by the system rather than through the window
 What follows is the part that changes decisions. The complete list is in
 [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
-**Administrators bypass everything.** `Overall/Administer` implies every Batch
-Control permission, so the plugin records what administrators do rather than
-trying to stop them.
+**Administrators are recorded, not stopped.** Stopping an administrator is out
+of scope. `Overall/Administer` implies every Batch Control permission, so an
+administrator can approve their own requests (unless *Allow administrators to
+approve their own requests* is off), switch either control off, clear a job's
+switches or change the authorization strategy, and each of these is recorded.
+The gates themselves do apply to administrators: on a job that requires approval
+an administrator's Direct Build, REST build or Replay is refused like anyone
+else's, so an administrator also runs such a job through a request; and the
+activation gate holds unattended runs of a job that is not activated, whoever
+started them.
 
 **Turning change control off cuts off work in progress.** The switch revokes every
 open permission window the moment it goes off, so a user part-way through a change
@@ -501,7 +539,10 @@ own build link (relabelled **Direct Build (needs approval)**), Pipeline's
 **Replay** and naginator's **Retry** are drawn for everyone with the underlying
 permission, and Batch Control has no way to remove them. A click is refused,
 nothing is queued, and the job and build pages explain why and point to
-**Request Run**. The rebuild plugin's **Rebuild** can be hidden, and is.
+**Request Run**. On a job without parameters, **Direct Build (needs approval)**
+answers only with Jenkins' own toast, "Failed to schedule build. Reload the page
+and try again.", which wrongly suggests trying again, and that first click writes
+no record; use the approval notice on the job page and **Request Run** instead. The rebuild plugin's **Rebuild** can be hidden, and is.
 
 **Other plugins' build buttons fail with their own generic message.** When
 Batch Control refuses a run started from naginator's Retry, Rebuild or Rebuild

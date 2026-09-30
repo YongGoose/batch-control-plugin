@@ -103,5 +103,18 @@ public enum ChangeType {
      * A job was put on hold (SPEC item 6a): a HOLD request was approved, so timer and upstream
      * causes no longer run it. Fields as for {@link #ACTIVATED}.
      */
-    HELD
+    HELD,
+    /**
+     * A save of the Batch Control configuration changed something besides the two switches
+     * (D-52). {@code target} is {@code batch-control-configuration}, {@code user} the saving user,
+     * {@code detail} lists each changed field as {@code name: old -> new} (the approver list in
+     * full).
+     */
+    CONFIG_CHANGE,
+    /**
+     * A Batch Control authorization strategy was installed (migrated to) or reverted (D-52).
+     * {@code target} is {@code authorization-strategy}, {@code detail} names the strategy classes
+     * before and after.
+     */
+    STRATEGY_CHANGE
 }

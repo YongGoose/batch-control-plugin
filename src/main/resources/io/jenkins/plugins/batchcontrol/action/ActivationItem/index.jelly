@@ -47,7 +47,16 @@
             <tr><th style="text-align: left;">Decided by</th><td>${it.request.decidedBy}</td></tr>
           </j:if>
           <j:if test="${it.request.decisionComment != null}">
-            <tr><th style="text-align: left;">Decision comment</th><td style="white-space: pre-wrap;">${it.request.decisionComment}</td></tr>
+            <!-- e2e-04 FD-05: an expired request shows why it expired, like the run request page. -->
+            <tr>
+              <th style="text-align: left;">
+                <j:choose>
+                  <j:when test="${it.request.status.name() == 'EXPIRED'}">Why it expired</j:when>
+                  <j:otherwise>Decision comment</j:otherwise>
+                </j:choose>
+              </th>
+              <td style="white-space: pre-wrap;">${it.request.decisionComment}</td>
+            </tr>
           </j:if>
           <j:if test="${it.request.selfApproved}">
             <tr><th style="text-align: left;">Self-approved</th><td>Yes</td></tr>

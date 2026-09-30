@@ -6,9 +6,12 @@ import hudson.model.AdministrativeMonitor;
 import hudson.security.AuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.StrategyMigration;
 import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -172,6 +175,7 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         jenkins.save();
         LOGGER.info(() -> "Authorization strategy " + current.getClass().getName() + " migrated to "
                 + migrated.getClass().getName() + " by " + Jenkins.getAuthentication2().getName());
+        recordStrategyChange("installed", current, migrated);
         return backToReferrer();
     }
 
@@ -193,7 +197,28 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         jenkins.save();
         LOGGER.info(() -> "Authorization strategy " + current.getClass().getName() + " reverted to "
                 + plain.getClass().getName() + " by " + Jenkins.getAuthentication2().getName());
+        recordStrategyChange("reverted", current, plain);
         return backToReferrer();
+    }
+
+    /** The {@code target} of a {@link ChangeType#STRATEGY_CHANGE} record (D-52). */
+    public static final String STRATEGY_CHANGE_TARGET = "authorization-strategy";
+
+    /**
+     * D-52: one {@link ChangeType#STRATEGY_CHANGE} record for an install or revert, written after
+     * the strategy is saved. A store failure is logged and does not undo the change.
+     */
+    private static void recordStrategyChange(String what, AuthorizationStrategy before, AuthorizationStrategy after) {
+        String user = Jenkins.getAuthentication2().getName();
+        try {
+            Store.get().appendChangeRecord(ChangeRecord.create(ChangeType.STRATEGY_CHANGE, STRATEGY_CHANGE_TARGET,
+                    user, "Batch Control authorization strategy " + what + ": "
+                            // S-25-07: display names only; the record is shown to every ViewHistory holder.
+                            + (before == null ? "none" : before.getDescriptor().getDisplayName())
+                            + " -> " + after.getDescriptor().getDisplayName()));
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not record the authorization strategy change", e);
+        }
     }
 
     /** Fallback target when there is no usable referrer. */

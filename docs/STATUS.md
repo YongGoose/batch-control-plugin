@@ -13,6 +13,28 @@
 
 ---
 
+## 2026-09-30 — fresh-eyes e2e (e2e-04) defects fixed (part 5); #49 merged
+- #49 merged (part 4, GitHub `build` 566 tests green).
+- An independent fresh-eyes e2e pass (docs/reports/e2e-04.md, on main 99be699) found 13 defects FD-01..13 and 4 doc defects DD-01..04. The core flows held: an approved run executes once, activation, grant windows, and the self-grant refusal. Rulings D-52..D-57. Part 5 fixes:
+  - FD-01: strategy actions are shown only to administrators.
+  - FD-02 / D-52: CONFIG_CHANGE and STRATEGY_CHANGE records.
+  - FD-03 / D-53: approver ids are validated, the input is kept, capped and de-duplicated.
+  - FD-04 / D-54: mails for cancelled, expired and invalidated requests.
+  - FD-05: expiry reasons.
+  - FD-06 / D-55: a disabled job cannot be approved.
+  - FD-07: a refusal after a hold gets its own record.
+  - FD-08: the grant form comes first.
+  - FD-09: approved runs carry the requester, but only for the request's own run.
+  - FD-10 / D-57: the incident rerun needs ViewHistory, with guidance.
+  - FD-11: History date messages.
+  - FD-12/13 / D-56: no change, documented.
+  - DD-01..04: documentation.
+- Also fixed: security-24 items (the re-run budget after shutdown, retry warnings, a store test seam that works only in unit tests) and S-26-01 (an approved run is never folded into a waiting queue item).
+- Reviews:
+  - security-25: 0/0/1/2/6. S-25-01 was forged Rebuild attribution; fixed.
+  - security-26: 0/0/0/1/4; all fixed.
+- Gate at bb3d182: 588 tests, 0 failures, SpotBugs 0.
+
 ## 2026-09-30 — e2e re-verification defects fixed (part 4); #48 merged
 - #48 merged (security-19/20 hardening, GitHub `build` 550 tests green).
 - The e2e re-verification on the #46/#47 build (e2e-03 "Re-verification after #46/#47") found 50 re-audit FAIL rows -> 46 PASS / 4 FAIL, Section C 29/2/1, D 11 PASS and 2 blocked (D-05 month boundary, D-09 no released version). Part 4 fixes the open defects:

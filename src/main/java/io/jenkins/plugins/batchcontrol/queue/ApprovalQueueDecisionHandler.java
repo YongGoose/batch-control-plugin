@@ -487,13 +487,18 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         if (ActivationService.get().mayRunUnattended(job)) {
             return true;
         }
-        String carrier = ActivationService.activationSubject(job).getFullName();
+        hudson.model.Item subject = ActivationService.activationSubject(job);
+        String carrier = subject.getFullName();
         String notActivated = carrier.equals(job.getFullName())
                 ? "the job is not activated" : "its folder '" + carrier + "' is not activated";
         logRateLimited("activation-" + kind, job, () -> "Blocked " + what + " of job '" + job.getFullName()
                 + "' (" + notActivated + ")");
+        // e2e-04 FD-07: a refusal after a HOLD is not merged into a record written before the job
+        // was activated: the time the activation last ended is part of the coalescing key.
+        // S-25-03: from the activation cache (no disk read under the queue lock); never throws.
+        String epoch = ActivationService.get().holdEpoch(subject);
         recordTriggerBlocked(job, kind, "activation", "Blocked " + what + " of job '" + job.getFullName()
-                + "' - " + notActivated + "; an approved activation request puts it into service");
+                + "' - " + notActivated + "; an approved activation request puts it into service", epoch);
         return false;
     }
 
@@ -505,8 +510,18 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * fails, and the refusal is already in the controller log.
      */
     private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
+        recordTriggerBlocked(job, kind, blockingSwitch, text, "");
+    }
+
+    /**
+     * As {@link #recordTriggerBlocked(Job, String, String, String)}. The coalescing key is the job,
+     * the cause kind, the blocking switch and {@code epoch} (e2e-04 FD-07): a refusal for another
+     * reason, or after the state behind the switch changed, gets its own record.
+     */
+    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text,
+                                             String epoch) {
         String fullName = job.getFullName();
-        String key = fullName + '|' + kind;
+        String key = fullName + '|' + kind + '|' + blockingSwitch + (epoch.isEmpty() ? "" : '|' + epoch);
         try {
             BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
                     key, TRIGGER_AUDIT_INTERVAL, fullName,

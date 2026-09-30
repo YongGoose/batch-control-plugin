@@ -72,18 +72,23 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
     private static RunRecord buildRecord(Run<?, ?> run) {
         String jobFullName = run.getParent().getFullName();
         String runId = jobFullName + "#" + run.getNumber();
-        ApprovedCause approved = run.getCause(ApprovedCause.class);
+        RunRequest own = ownRequest(run);
         Result result = run.getResult();
         RunRecord record = new RunRecord(runId, jobFullName, run.getNumber(),
-                classify(run, approved),
+                classify(run, own),
                 result == null ? null : result.toString(),
                 Instant.ofEpochMilli(run.getStartTimeInMillis()),
                 run.getDuration());
-        if (approved != null) {
-            record.setRunRequestId(approved.getRequestId());
+        if (own != null) {
+            record.setRunRequestId(own.getId());
         }
         Cause.UserIdCause userCause = run.getCause(Cause.UserIdCause.class);
-        if (userCause != null) {
+        if (own != null && own.getRequester() != null) {
+            // e2e-04 FD-09: a run started by an approved request is the requester's run (History,
+            // runs.csv, the dashboard and the user= filter); the request id stays on the record.
+            // S-26-04: the requester as stored on the request, not as the cause says.
+            record.setUser(own.getRequester());
+        } else if (userCause != null) {
             record.setUser(userCause.getUserId());
         }
         record.setParameters(IncidentService.maskedParameters(run));
@@ -92,13 +97,41 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
     }
 
     /**
+     * The stored run request this run is the own execution of (its {@code executedRunId} names
+     * this run), else {@code null} (security-25 S-25-01). Every {@link ApprovedCause} on the run is
+     * considered, not only the first (S-26-04). A Rebuild or a retry copies the cause of the build it
+     * repeats; such a run is its clicker's, not the earlier requester's, so its user, cause type and
+     * request link come from its own causes.
+     */
+    @edu.umd.cs.findbugs.annotations.CheckForNull
+    static RunRequest ownRequest(Run<?, ?> run) {
+        String runId = run.getParent().getFullName() + "#" + run.getNumber();
+        for (Cause cause : run.getCauses()) {
+            if (!(cause instanceof ApprovedCause)) {
+                continue;
+            }
+            String requestId = ((ApprovedCause) cause).getRequestId();
+            try {
+                RunRequest request = RunRequestService.get().load(requestId);
+                if (request != null && runId.equals(request.getExecutedRunId())) {
+                    return request;
+                }
+            } catch (RuntimeException e) {
+                java.util.logging.Logger.getLogger(RunRecordListener.class.getName()).log(
+                        java.util.logging.Level.WARNING, "Could not read run request " + requestId + " for " + runId, e);
+            }
+        }
+        return null;
+    }
+
+    /**
      * SPEC item 10 cause classification: USER / TIMER / UPSTREAM / APPROVED_REQUEST / SCM /
      * OTHER. The approved-request marker cause wins over everything; the remaining families
      * are checked in user → timer → upstream → scm order ({@code BuildUpstreamCause} of the
      * {@code build} step is an {@code UpstreamCause} subclass and classifies as UPSTREAM).
      */
-    private static CauseType classify(Run<?, ?> run, ApprovedCause approved) {
-        if (approved != null) {
+    private static CauseType classify(Run<?, ?> run, RunRequest own) {
+        if (own != null) {
             return CauseType.APPROVED_REQUEST;
         }
         if (run.getCause(Cause.UserIdCause.class) != null) {
@@ -145,11 +178,7 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
         if (run.getResult() != Result.SUCCESS) {
             return;
         }
-        ApprovedCause approved = run.getCause(ApprovedCause.class);
-        if (approved == null) {
-            return;
-        }
-        RunRequest request = RunRequestService.get().load(approved.getRequestId());
+        RunRequest request = ownRequest(run);
         if (request == null || request.getIncidentId() == null) {
             return;
         }

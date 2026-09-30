@@ -90,7 +90,24 @@ public final class BlockedAttemptAudit {
 
     private static final BlockedAttemptAudit INSTANCE = new BlockedAttemptAudit();
 
-    private final Store store = Store.get();
+    private volatile Store store = Store.get();
+
+    /**
+     * Test seam (S-24-04): replaces the store this class appends to and returns the previous one,
+     * so a test can make appends fail and restore the real store afterwards. Not for production use.
+     */
+    @Restricted(NoExternalUse.class)
+    public static Store swapStoreForTesting(Store replacement) {
+        // S-25-04: refused outside unit tests, and every swap is logged.
+        if (!hudson.Main.isUnitTest) {
+            throw new IllegalStateException("swapStoreForTesting is only available in unit tests");
+        }
+        Store previous = INSTANCE.store;
+        INSTANCE.store = Objects.requireNonNull(replacement, "replacement");
+        LOGGER.warning(() -> "The refused-attempt audit store was replaced by " + replacement.getClass().getName()
+                + " (unit test)");
+        return previous;
+    }
 
     /**
      * Key to the instant of the last record written under it. Insertion-ordered and re-inserted on
@@ -288,8 +305,15 @@ public final class BlockedAttemptAudit {
         budget.forgetOld(now);
         if (shutDown && budget.summaryUntil == null) {
             // S-23-06: after the shutdown flush no summary is opened, since nothing would close it.
-            store.appendChangeRecord(ChangeRecord.create(type, target, user, detail));
-            return true;
+            // S-24-01: the budget still applies; beyond it the refusal is only logged.
+            if (budget.writes.size() < PERSON_BUDGET && !OVERFLOW_USER.equals(budgetKey)) {
+                budget.writes.addLast(now);
+                store.appendChangeRecord(ChangeRecord.create(type, target, user, detail));
+                return true;
+            }
+            LOGGER.info(() -> "Refused re-run by '" + user + "' during shutdown, over the record budget (not"
+                    + " recorded): " + detail);
+            return false;
         }
         if (budget.summaryUntil == null && budget.writes.size() < PERSON_BUDGET && !OVERFLOW_USER.equals(budgetKey)) {
             budget.writes.addLast(now);
@@ -352,8 +376,16 @@ public final class BlockedAttemptAudit {
                 }
             }
         }
+        int failed = 0;
         for (ChangeRecord record : closing) {
-            appendOrKeep(record); // S-23-03: one failure never drops the records after it
+            // S-23-03: one failure never drops the records after it. S-24-02: one stack trace per flush.
+            if (!appendOrKeep(record, failed == 0)) {
+                failed++;
+            }
+        }
+        if (failed > 1) {
+            int count = failed;
+            LOGGER.warning(() -> count + " refused re-run count records could not be written in this flush");
         }
     }
 
@@ -362,16 +394,37 @@ public final class BlockedAttemptAudit {
      * the next flush (S-23-03), so the count is never silently lost.
      */
     private void appendOrKeep(ChangeRecord record) {
+        appendOrKeep(record, true);
+    }
+
+    /**
+     * As {@link #appendOrKeep(ChangeRecord)}; {@code withTrace} logs the stack trace, otherwise
+     * only the message (S-24-02). The message says what actually happens to the record: kept for
+     * the next flush, or dropped because the pending list is full.
+     *
+     * @return {@code true} if the record was written
+     */
+    private boolean appendOrKeep(ChangeRecord record, boolean withTrace) {
         try {
             store.appendChangeRecord(record);
+            return true;
         } catch (RuntimeException e) {
-            LOGGER.log(java.util.logging.Level.WARNING, e, () -> "Could not write a refused re-run count; it is"
-                    + " retried on the next flush: " + record.getDetail());
+            boolean kept;
             synchronized (this) {
-                if (pendingClosing.size() < MAX_PENDING_CLOSING) {
+                kept = pendingClosing.size() < MAX_PENDING_CLOSING;
+                if (kept) {
                     pendingClosing.add(record);
                 }
             }
+            String message = "Could not write a refused re-run count; " + (kept
+                    ? "it is kept for the next flush" : "it is dropped (the pending list is full)")
+                    + ": " + record.getDetail();
+            if (withTrace) {
+                LOGGER.log(java.util.logging.Level.WARNING, message, e);
+            } else {
+                LOGGER.warning(message + " (" + e + ")");
+            }
+            return false;
         }
     }
 
@@ -388,6 +441,7 @@ public final class BlockedAttemptAudit {
     private void closeAllOpen() {
         List<ChangeRecord> closing = new ArrayList<>();
         synchronized (this) {
+            forgetOtherInstance(); // S-24-05: before the flag, so a later instance check cannot reset it
             shutDown = true; // S-23-06
             closing.addAll(pendingClosing);
             pendingClosing.clear();

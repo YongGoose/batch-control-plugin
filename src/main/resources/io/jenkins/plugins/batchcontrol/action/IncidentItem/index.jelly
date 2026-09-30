@@ -214,10 +214,19 @@
            form the server refuses. -->
       <j:if test="${!it.canRerun and it.jobAvailable}">
         <h2>Request Rerun</h2>
+        <!-- e2e-04 FD-10: the rerun is submitted from this page, which needs Batch Control/
+             ViewHistory as well, so a user with only Request and Job/Build cannot do it. Name the
+             whole permission set, and the fallback that such a user can reach. -->
         <p class="jenkins-description">
-          A rerun is a run request for this job, pre-filled with the original parameters. It is
-          made by a user with the <b>Batch Control/Request</b> permission and <b>Job/Build</b> on
-          the job; ask one of them, or a Jenkins administrator, to request it from this page.
+          A rerun is a run request for this job with the original parameters, linked to this
+          incident. You may not submit one. It can be requested from this page by a user who can
+          open this page (<b>Batch Control/ViewHistory</b>) and also holds
+          <b>Batch Control/Request</b> and <b>Job/Build</b> on the job, or by a Jenkins
+          administrator; ask one of them.
+        </p>
+        <p class="jenkins-description">
+          A user with Batch Control/Request and Job/Build can instead submit an ordinary run
+          request on the job's Request Run page; that request is not linked to this incident.
         </p>
       </j:if>
     </l:main-panel>

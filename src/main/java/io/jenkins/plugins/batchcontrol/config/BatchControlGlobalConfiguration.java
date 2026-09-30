@@ -87,6 +87,33 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         copyFrom(source);
     }
 
+    /**
+     * A detached copy of this configuration with {@code json} bound onto it, for re-showing a
+     * refused form with what the user typed (D-53). Never registered, saved or used for any
+     * decision; {@code null} when the submission cannot even be bound (then the plain refusal
+     * stands).
+     */
+    @edu.umd.cs.findbugs.annotations.CheckForNull
+    static BatchControlGlobalConfiguration draftOf(StaplerRequest2 req, JSONObject json) {
+        try {
+            BatchControlGlobalConfiguration draft = new BatchControlGlobalConfiguration(get());
+            req.bindJSON(draft, normalizeListFields(json));
+            return draft;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not bind the refused configuration form for re-display", e);
+            return null;
+        }
+    }
+
+    /** S-25-06: a detached draft or candidate is never written to {@code config.xml}. */
+    @Override
+    public synchronized void save() {
+        if (candidate) {
+            return;
+        }
+        super.save();
+    }
+
     public static BatchControlGlobalConfiguration get() {
         return ExtensionList.lookupSingleton(BatchControlGlobalConfiguration.class);
     }
@@ -113,12 +140,28 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     @Override
-    public synchronized boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
+    public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // e2e-03 DEF-08: an invalid value refuses the whole submission, before anything is bound.
+        // S-25-02: validation (which may ask a slow security realm) runs before the monitor is
+        // taken, so it never holds up the switch setters; binding, write and apply stay one
+        // transaction under the monitor (#19).
         JSONObject form = normalizeListFields(json);
         validate(form);
+        validateApprovers(form);
+        synchronized (this) {
+            return bindWriteApply(req, form);
+        }
+    }
+
+    private boolean bindWriteApply(StaplerRequest2 req, JSONObject form) throws FormException {
         BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
         req.bindJSON(bound, form);
+        // S-26-02: the empty-list rule again on the bound state, under the monitor (no realm call),
+        // so a switch turned on meanwhile cannot leave the instance without approvers.
+        if (bound.approvers.isEmpty() && (bound.runControlEnabled || bound.changeControlEnabled)) {
+            throw new FormException(LABEL_APPROVERS + ": at least one approver is required while run control"
+                    + " or change control is on.", "approversText");
+        }
         try {
             bound.writeConfigFile();
         } catch (IOException e) {
@@ -128,9 +171,13 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         boolean previousRun = runControlEnabled;
         boolean previousChange = changeControlEnabled;
+        String changes = describeChanges(this, bound);
         copyFrom(bound);
         SaveableListener.fireOnChange(this, getConfigFile());
         afterSwitchesChanged(previousRun, previousChange);
+        if (!changes.isEmpty()) {
+            recordConfigChange(changes);
+        }
         return true;
     }
 
@@ -259,6 +306,48 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         this.notifyBeforeExpiryMinutes = source.notifyBeforeExpiryMinutes;
     }
 
+    /** The {@code target} of a {@link ChangeType#CONFIG_CHANGE} record (D-52). */
+    public static final String CONFIG_CHANGE_TARGET = "batch-control-configuration";
+
+    /**
+     * D-52: every field besides the two switches that differs between {@code before} and
+     * {@code after}, as {@code "label: old -> new"} joined by {@code "; "} (the approver list in
+     * full); {@code ""} when nothing changed.
+     */
+    static String describeChanges(BatchControlGlobalConfiguration before, BatchControlGlobalConfiguration after) {
+        List<String> changes = new ArrayList<>();
+        diff(changes, "approvers", before.approvers, after.approvers);
+        diff(changes, "allowAdminSelfApproval", before.allowAdminSelfApproval, after.allowAdminSelfApproval);
+        diff(changes, "pendingTimeoutHours", before.pendingTimeoutHours, after.pendingTimeoutHours);
+        diff(changes, "approvedRunTimeoutMinutes", before.approvedRunTimeoutMinutes, after.approvedRunTimeoutMinutes);
+        diff(changes, "grantDurationOptions", before.grantDurationOptions, after.grantDurationOptions);
+        diff(changes, "maxGrantMinutes", before.maxGrantMinutes, after.maxGrantMinutes);
+        diff(changes, "incidentResults", before.incidentResults, after.incidentResults);
+        diff(changes, "retentionMonths", before.retentionMonths, after.retentionMonths);
+        diff(changes, "emailNotifications", before.emailNotifications, after.emailNotifications);
+        diff(changes, "notifyBeforeExpiryMinutes", before.notifyBeforeExpiryMinutes, after.notifyBeforeExpiryMinutes);
+        return String.join("; ", changes);
+    }
+
+    private static void diff(List<String> changes, String field, Object before, Object after) {
+        if (!java.util.Objects.equals(before, after)) {
+            changes.add(field + ": " + before + " -> " + after);
+        }
+    }
+
+    /**
+     * D-52: one {@link ChangeType#CONFIG_CHANGE} record for the save. Written after the new state is
+     * durable; a store failure is logged and does not undo the save (as for the toggle records).
+     */
+    private static void recordConfigChange(String changes) {
+        try {
+            Store.get().appendChangeRecord(ChangeRecord.create(ChangeType.CONFIG_CHANGE, CONFIG_CHANGE_TARGET,
+                    Jenkins.getAuthentication2().getName(), "Batch Control configuration changed: " + changes));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not record the Batch Control configuration change: " + changes, e);
+        }
+    }
+
     private static void recordToggle(String key, boolean previous, boolean current) {
         String user = Jenkins.getAuthentication2().getName();
         Store.get().appendChangeRecord(
@@ -272,7 +361,8 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     public void setApprovers(List<String> approvers) {
-        this.approvers = sanitizeStrings(approvers);
+        // S-26-03: stored de-duplicated (first occurrence wins), as validated.
+        this.approvers = new ArrayList<>(new java.util.LinkedHashSet<>(sanitizeStrings(approvers)));
     }
 
     public String getApproversText() {
@@ -280,7 +370,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     public void setApproversText(String text) {
-        this.approvers = parseStrings(text);
+        this.approvers = new ArrayList<>(new java.util.LinkedHashSet<>(parseStrings(text))); // S-26-03
     }
 
     public boolean isAllowAdminSelfApproval() {
@@ -550,6 +640,135 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             }
         }
         return null;
+    }
+
+    static final String LABEL_APPROVERS = "Approvers";
+
+    /**
+     * D-53: refuses the submission when its approver list names an unknown id, or is empty while
+     * either switch is (or will be) on. A field the submission does not carry is left alone.
+     */
+    private void validateApprovers(JSONObject json) throws FormException {
+        if (!json.has("approversText")) {
+            return;
+        }
+        boolean switchOn = json.optBoolean("runControlEnabled", runControlEnabled)
+                || json.optBoolean("changeControlEnabled", changeControlEnabled);
+        FormValidation check = approversValidation(String.valueOf(json.get("approversText")), switchOn);
+        if (check.kind == FormValidation.Kind.ERROR) {
+            throw new FormException(check.getMessage(), "approversText");
+        }
+    }
+
+    /**
+     * D-53: each id must name an existing Jenkins user or one the security realm resolves. An
+     * unknown id is an error naming it; an id the realm could not be asked about (an error other
+     * than "not found") is accepted with a warning. An empty list is an error while
+     * {@code switchOn}. The message is plain text (FormValidation escapes it).
+     */
+    static FormValidation approversValidation(String text, boolean switchOn) {
+        // S-25-02: de-duplicated and capped before any lookup.
+        List<String> ids = new ArrayList<>(new java.util.LinkedHashSet<>(parseStrings(text)));
+        if (ids.size() > MAX_APPROVERS) {
+            return FormValidation.error(LABEL_APPROVERS + ": at most " + MAX_APPROVERS + " approvers can be listed.");
+        }
+        for (String id : ids) {
+            if (id.length() > MAX_ID_LENGTH) {
+                // S-26-03: never sent to the realm.
+                return FormValidation.error(LABEL_APPROVERS + ": an id longer than " + MAX_ID_LENGTH
+                        + " characters is not a user id.");
+            }
+        }
+        if (ids.isEmpty()) {
+            return switchOn
+                    ? FormValidation.error(LABEL_APPROVERS + ": at least one approver is required while run control"
+                            + " or change control is on.")
+                    : FormValidation.ok();
+        }
+        List<String> unknown = new ArrayList<>();
+        List<String> unchecked = new ArrayList<>();
+        boolean stoppedEarly = false;
+        for (String id : ids) {
+            if (unknown.size() >= MAX_UNKNOWN_REPORTED || !unchecked.isEmpty()) {
+                // S-25-02, S-26-03: after a few unknown ids, or once the realm failed to answer (an
+                // unreachable realm will not answer the next id either), the rest is not asked.
+                stoppedEarly = true;
+                break;
+            }
+            switch (resolve(id)) {
+                case UNKNOWN:
+                    unknown.add(id);
+                    break;
+                case UNCHECKED:
+                    unchecked.add(id);
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (!unknown.isEmpty()) {
+            return FormValidation.error(LABEL_APPROVERS + ": " + quoted(unknown)
+                    + (unknown.size() == 1 ? " is not a known Jenkins user" : " are not known Jenkins users")
+                    + (stoppedEarly ? " (the remaining ids were not checked)" : "")
+                    + ". Enter existing user ids, one per line. Nothing was saved.");
+        }
+        if (!unchecked.isEmpty()) {
+            return FormValidation.warning(LABEL_APPROVERS + ": " + quoted(unchecked) + " could not be checked"
+                    + " against the security realm right now" + (stoppedEarly ? " (nor the ids after it)" : "")
+                    + "; make sure the ids are correct.");
+        }
+        return FormValidation.ok();
+    }
+
+    /** S-25-02: the most approver ids a list may hold. */
+    static final int MAX_APPROVERS = 100;
+
+    /** S-25-02: after this many unknown ids the realm is not asked any more. */
+    static final int MAX_UNKNOWN_REPORTED = 5;
+
+    /** S-26-03: the longest approver id that is looked up. */
+    static final int MAX_ID_LENGTH = 256;
+
+    private enum Resolution { KNOWN, UNKNOWN, UNCHECKED }
+
+    private static Resolution resolve(String id) {
+        if (hudson.model.User.getById(id, false) != null) {
+            return Resolution.KNOWN;
+        }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null || jenkins.getSecurityRealm() == hudson.security.SecurityRealm.NO_AUTHENTICATION) {
+            return Resolution.UNCHECKED; // no realm to ask
+        }
+        try {
+            jenkins.getSecurityRealm().loadUserByUsername2(id);
+            return Resolution.KNOWN;
+        } catch (hudson.security.UserMayOrMayNotExistException2 e) {
+            // S-25-05: the realm cannot tell (for example AD without a bind account): D-53 accepts
+            // the id with a warning. This subclass of UsernameNotFoundException is caught first.
+            return Resolution.UNCHECKED;
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
+            return Resolution.UNKNOWN;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "The security realm could not be asked about approver '" + id + "'", e);
+            return Resolution.UNCHECKED;
+        }
+    }
+
+    private static String quoted(List<String> ids) {
+        List<String> out = new ArrayList<>();
+        for (String id : ids) {
+            out.add("'" + id + "'");
+        }
+        return String.join(", ", out);
+    }
+
+    /** Stapler form validation of the approver list (read-only, D-53). */
+    @POST
+    public FormValidation doCheckApproversText(@QueryParameter String value) {
+        // S-25-09: the lookup reveals whether an account exists, so a caller without
+        // BatchControl/Manage is refused (403), not answered; @POST refuses a GET.
+        Jenkins.get().checkPermission(BatchControlPermissions.MANAGE);
+        return approversValidation(value, runControlEnabled || changeControlEnabled);
     }
 
     /** The form's inline checks answer only a user who may save the form. */
