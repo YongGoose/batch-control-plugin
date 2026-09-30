@@ -333,38 +333,55 @@ code does on purpose.
 
 ## SYSTEM builds and the global-matrix upgrade
 
-35. **A build that runs as SYSTEM, or as an account with Configure
-    permission, can still write a permanent authorization entry.** A Pipeline
-    `properties([authorizationMatrix(...)])` step, or a Job DSL seed job,
-    executes as SYSTEM unless the instance runs builds under a real user; the
-    guard that reverts a grant holder's self-escalating edit to a job's
-    authorization property looks at who saved the item, and SYSTEM is not a
-    grant holder, so nothing is reverted or recorded. The same holds for a
-    build that runs as an account which already holds `Overall/Administer` or
-    `Item/Configure`, such as a privileged service account: that account's
-    save is a legitimate Configure save, so the guard keeps the entry. This is
-    not new exposure: any user who already holds standing `Item/Configure` on
-    that job has the identical path today, with or without Batch Control,
-    since Jenkins itself does not distinguish a script's save from a human
-    one.
+35. **A build can write its own job's authorization entries, whatever
+    identity it runs as.** A Pipeline `properties([authorizationMatrix(...)])`
+    step saves the job's authorization property without asking whether the
+    build's account holds Configure, so running builds as a low-privilege
+    account does not by itself stop a `CONFIGURE` window holder from giving
+    themself a permanent entry through the Pipeline script. Batch Control
+    therefore guards the entries of grant holders, whoever saves them: while
+    change control is on, a save of a job's or folder's authorization entries
+    that adds or widens an entry for a user who holds a grant covering that
+    item, or held one in the last 30 days, or for one of that user's groups
+    (`authenticated` included), is reverted and recorded as
+    `GRANT_VIOLATION`. This applies to a build running as any account or as
+    SYSTEM, to a script, and to another user's save. The only exception is a
+    save made through an HTTP request (the web UI, a `config.xml` POST or the
+    REST/CLI over HTTP) by a user who holds `Overall/Administer`, who is
+    deliberately giving the entry. A build whose save was reverted names the
+    reverted entries in its build log; a save made through an HTTP request is
+    answered with HTTP 403 and a plain message saying which
+    authorization entries were not kept and that the other changes were
+    saved.
 
-    The remedy is **Authorize Project** with a **global default build
-    authorization** that runs every build, whatever the job's own
-    configuration and whatever started it, as an account without Configure
-    permission: for example **Run as Specific User** with a dedicated
-    low-privilege build account. Do not give that account `Overall/Administer`
-    or `Item/Configure`, neither globally nor through a folder's or a job's own
-    authorization entries. **Run as the user who triggered the build** is safe
-    only together with such a fallback: timer and SCM builds have no
-    triggering user, so without one they run as SYSTEM. (A build that does run
-    as the person who triggered it comes under the same guard as that
-    person's manual save.) Installing the plugin is not enough, and a strategy
-    set on a single job does not protect that job: anyone who can configure
-    the job, a `CONFIGURE` window holder included, can remove the strategy.
-    With Authorize Project's per-project setting and no global default, a job
-    without a strategy of its own builds as SYSTEM. A job whose own build
-    authorization runs as an administrator is exposed to anyone who can
-    configure that job, and the instance-wide check below does not see it.
+    The rule covers the grant holder's own entries only. An entry written for
+    some other account, such as an accomplice's account or a user who never
+    held a grant on the item, is not reverted: that is collusion between
+    users, and Batch Control does not detect it. Neither is this new
+    exposure: any user who already holds standing `Item/Configure` on a job
+    has the same path today, with or without Batch Control, since Jenkins
+    itself does not distinguish a script's save from a human one.
+
+    **Run builds under a low-privilege account as well.** The guard above does
+    not make the build account irrelevant: a build that runs as SYSTEM or as
+    an account with Configure permission can still change what such an
+    account may change, including entries for accounts that are not guarded.
+    Use **Authorize Project** with a **global default build authorization**
+    that runs every build, whatever the job's own configuration and whatever
+    started it, as an account without Configure permission: for example
+    **Run as Specific User** with a dedicated low-privilege build account. Do
+    not give that account `Overall/Administer` or `Item/Configure`, neither
+    globally nor through a folder's or a job's own authorization entries.
+    **Run as the user who triggered the build** is safe only together with
+    such a fallback: timer and SCM builds have no triggering user, so without
+    one they run as SYSTEM. Installing the plugin is not enough, and a
+    strategy set on a single job does not protect that job: anyone who can
+    configure the job, a `CONFIGURE` window holder included, can remove the
+    strategy. With Authorize Project's per-project setting and no global
+    default, a job without a strategy of its own builds as SYSTEM. A job
+    whose own build authorization runs as an administrator is exposed to
+    anyone who can configure that job, and the instance-wide check below does
+    not see it.
 
     While change control is on, Batch Control checks this once for the whole
     instance, not job by job. If builds can run as SYSTEM or as an account

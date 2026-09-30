@@ -468,28 +468,37 @@ in its folder, since Jenkins allows a rename to anyone who may configure the job
 the rename is recorded with the window. Under a `CREATE` window with a name
 restriction, renames of what that window created are limited to matching names.
 
-**Builds that run as SYSTEM, or as an account with Configure, are outside the
-self-grant guard.** Such a build can write a permanent authorization entry on
-its job, so a `CONFIGURE` window holder could use one to keep access after the
-window ends. Authorize Project closes this only with a global default build
-authorization that runs every build as an account without Configure
-permission, for example **Run as Specific User** with a dedicated low-privilege
-build account. Give that account neither `Overall/Administer` nor
-`Item/Configure`, and no Configure on folders or jobs either. **Run as the user
-who triggered the build** is safe only with such a fallback, since timer and
-SCM builds have no triggering user and would otherwise run as SYSTEM. A
-strategy on a single job is not enough: anyone who can configure the job, a
-window holder included, can remove it. While change control is on and builds
-can run as SYSTEM or as an account with Configure, the administrative monitor
-says so for the whole instance, and the detail page of a pending `CONFIGURE`
-request shows the same warning to its approvers and to `BatchControl/Manage`
-holders. The check looks at the build account's permissions at the Jenkins root
-only, so Configure given to it on a folder or job is not detected. It cannot
-judge authenticators that decide by job type, folder or the caller's identity.
-Its answer is cached for five minutes, so after the build authenticators or the
-build account's permissions change the warning can take that long to appear or
-clear; replacing the authenticators through the security configuration updates
-it at once.
+**A build can write its own job's authorization entries.** A Pipeline
+`properties` step saves the job's authorization entries whatever account the
+build runs as, so a `CONFIGURE` window holder could use one to keep access after
+the window ends. While change control is on, Batch Control therefore reverts and
+records any entry added or widened for a user who holds a grant on the item, or
+held one in the last 30 days, and for that user's groups, whoever saves it: a
+build, a script or another user. The only exception is a save made through an
+HTTP request (the web UI, a `config.xml` POST or the REST/CLI over HTTP) by a
+user who holds `Overall/Administer`. The build log names the reverted entries. Entries written for
+other accounts, for example an accomplice's, are outside this rule.
+
+Run builds under a low-privilege account as well, since a build that runs as
+SYSTEM or as an account with Configure can still change whatever that account
+may change. Use Authorize Project with a global default build authorization
+that runs every build as an account without Configure permission, for example
+**Run as Specific User** with a dedicated low-privilege build account. Give that
+account neither `Overall/Administer` nor `Item/Configure`, and no Configure on
+folders or jobs either. **Run as the user who triggered the build** is safe only
+with such a fallback, since timer and SCM builds have no triggering user and
+would otherwise run as SYSTEM. A strategy on a single job is not enough: anyone
+who can configure the job, a window holder included, can remove it. While change
+control is on and builds can run as SYSTEM or as an account with Configure, the
+administrative monitor says so for the whole instance, and the detail page of a
+pending `CONFIGURE` request shows the same warning to its approvers and to
+`BatchControl/Manage` holders. The check looks at the build account's
+permissions at the Jenkins root only, so Configure given to it on a folder or
+job is not detected. It cannot judge authenticators that decide by job type,
+folder or the caller's identity. Its answer is cached for five minutes, so after
+the build authenticators or the build account's permissions change the warning
+can take that long to appear or clear; replacing the authenticators through the
+security configuration updates it at once.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
