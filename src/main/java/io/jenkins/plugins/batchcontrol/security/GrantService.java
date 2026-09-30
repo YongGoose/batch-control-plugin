@@ -256,6 +256,23 @@ public final class GrantService {
     }
 
     /**
+     * D-58b: whether the item, or an item above it, is in the "changed under a grant" state (any
+     * grant, active or ended). Served from the in-memory grant cache, for page rendering.
+     */
+    public synchronized boolean isChangedUnderGrant(hudson.model.Item item) {
+        if (item == null) {
+            return false;
+        }
+        String fullName = item.getFullName();
+        for (Grant grant : grants()) {
+            if (changedAtOrAbove(grant, fullName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * D-58b (1): whether the grant lists the item, or an item above it, as changed under it (a
      * changed folder shapes what its children run: branch jobs of a multibranch project, jobs in a
      * folder).
