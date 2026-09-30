@@ -637,14 +637,17 @@ public class AuthorizationEntryGuardTest {
      */
     @Test
     public void t_02_79_restartFromStageOfAMarkedRunIsRefused() throws Exception {
-        ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).add(Item.BUILD, PermissionEntry.user("c1"));
+        BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
+        strategy.add(Item.BUILD, PermissionEntry.user("c1"));
+        // builds run as `batch` (global default); `agent any` needs Agent/Build on the built-in node
+        strategy.add(hudson.model.Computer.BUILD, PermissionEntry.user("batch"));
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "restart-me");
         String declarative = "pipeline { agent any; stages { stage('only') { steps { echo 'hello' } } } }";
         job.setDefinition(new CpsFlowDefinition(declarative, true));
-        j.buildAndAssertSuccess(job);
+        j.assertBuildStatusSuccess(job.scheduleBuild2(0).get(2, java.util.concurrent.TimeUnit.MINUTES));
         StrategyFixtures.grant("bob", GrantScope.Type.JOB, "restart-me", Arrays.asList(GrantAction.CONFIGURE));
         replay("bob", job, 1, declarative.replace("hello", "planted"));
-        j.waitUntilNoActivity();
+        j.waitUntilNoActivityUpTo(120_000);
         assertTrue(job.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
         assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=restart-me") < 400,
                 "fixture: the administrator's review must succeed");
@@ -656,7 +659,7 @@ public class AuthorizationEntryGuardTest {
         WebRequest req = new WebRequest(wc.createCrumbedUrl(job.getUrl() + "2/restart/restart"), HttpMethod.POST);
         req.setRequestParameters(params);
         wc.getPage(req);
-        j.waitUntilNoActivity();
+        j.waitUntilNoActivityUpTo(120_000);
         assertEquals(3, job.getNextBuildNumber(), "a Restart from Stage of the marked run must be refused: no new build");
     }
 
