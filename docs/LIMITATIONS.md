@@ -11,9 +11,16 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 
 ## Scope of control
 
-1. **Administrators bypass every control.** `Overall/Administer` implies every
-   Batch Control permission and every Jenkins permission. The plugin does not try
-   to stop administrators; it records what they do.
+1. **Administrators are recorded, not stopped.** `Overall/Administer` implies
+   every Batch Control permission and every Jenkins permission, so an
+   administrator can approve their own requests (unless
+   `allowAdminSelfApproval` is off), switch either control off, clear a job's
+   switches or change the authorization strategy. The plugin does not try to
+   prevent that; it records it. The gates themselves still apply to
+   administrators: on a job that requires approval an administrator's direct
+   build, REST build or Replay is refused like anyone else's, and the
+   activation gate holds unattended runs of a job that is not activated for
+   every user (item 39).
 2. **Only causes the plugin recognises are classified as human.** A build
    started by a trigger plugin with its own `Cause` type, a generic webhook
    trigger for instance, or by a script or plugin code with no cause or only
@@ -414,7 +421,8 @@ code does on purpose.
 38. **A notification e-mail includes a link back to the request only when the
     Jenkins URL is configured.** Set it under Manage Jenkins → System
     (Jenkins Location). Without it, a `REQUEST_CREATED`, `APPROVERS_CHANGED`,
-    `APPROVED`, `REJECTED` or `GRANT_EXPIRING` message still carries its
+    `APPROVED`, `REJECTED`, `CANCELLED`, `EXPIRED`, `INVALIDATED` or
+    `GRANT_EXPIRING` message still carries its
     subject and reason text but no link, rather than guessing one from the
     request that triggered it (security-08 S-04, D-36).
 
@@ -473,6 +481,19 @@ code does on purpose.
     so it does not appear on such a job. A user who may see the job but not
     build it is not offered the rerun form, and a rerun submitted anyway is
     refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
+
+    Jenkins' own build link has one more rough edge. On a job without
+    parameters, clicking **Direct Build (needs approval)** submits in the
+    background, and the only response is Jenkins' toast "Failed to schedule
+    build. Reload the page and try again.", which suggests that trying again
+    might help; it will not. On a job with parameters the link opens the
+    parameters page first, and submitting it shows the "Approval required"
+    page. Either way nothing is queued, and this first click writes no change
+    record: it is an ordinary manual click that the gate refused, not a re-run,
+    and recording every such click would flood the history (D-56). The link is
+    shown to every `Item/Build` holder, administrators included. The way to run
+    the job is the approval notice on the job page and its **Request Run**
+    link.
 
 ## Out of scope by design
 
