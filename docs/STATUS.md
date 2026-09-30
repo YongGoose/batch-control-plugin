@@ -13,6 +13,20 @@
 
 ---
 
+## 2026-09-30 — e2e re-verification defects fixed (part 4); #48 merged
+- #48 merged (security-19/20 hardening, GitHub `build` 550 tests green).
+- The e2e re-verification on the #46/#47 build (e2e-03 "Re-verification after #46/#47") found 50 re-audit FAIL rows -> 46 PASS / 4 FAIL, Section C 29/2/1, D 11 PASS and 2 blocked (D-05 month boundary, D-09 no released version). Part 4 fixes the open defects:
+  - DEF-32: a person's refused re-run is recorded per attempt. The root cause was the hourly merge. See D-51/D-51a: a budget of 20 per user per 10 minutes, then a summary and a closing count, and records stay append-only.
+  - DEF-36: the Rename check and the CLI create-job name the restriction.
+  - DEF-37: while change control is on, one instance-wide warning appears when builds can run as SYSTEM or as an account with Configure. It is on the monitor and, for deciders and Manage holders, on the Configure request detail (D-50/D-50a/D-50b).
+  - DD-14/15 and the rulings in D-49 are documented.
+- Reviews:
+  - security-21: 0/2/3/2/2. The per-job scan missed risks and leaked hidden jobs; ruled D-50a and D-51a.
+  - security-22: 0/1/0/4/3. A service account with Configure; ruled D-50b.
+  - security-23: 0/0/0/3/5. Wrong remedy text, a flush regression, root-only scope.
+  - security-24: 0/0/0/1/4. Its items move to part 5.
+- Gate at 8e2db39: 566 tests, 0 failures, SpotBugs 0.
+
 ## 2026-09-30 — security-19/20 follow-up (hardening of the part-3 fixes)
 - #47 merged (GitHub `build` 546 tests green).
 - security-19 0/0/0/3/3 and security-20 0/0/0/1/3 fixed on `fix/security-19`: a Retry skips the token step only with the clicking user's cause (S-19-01); a numeric `configVersion` is dropped only without attributes (S-19-02); the self-grant filter leaves POSTs unwrapped while change control is off, its fallback never fails, it is async-safe and its writer keeps `checkError()` without copying (S-19-03..05, S-20-01/02); both group caps of the monitor log a WARNING and truncated users are probed in full (S-19-06, S-20-03). S-20-04 (async output edges not reachable from a save path) is left as INFO.

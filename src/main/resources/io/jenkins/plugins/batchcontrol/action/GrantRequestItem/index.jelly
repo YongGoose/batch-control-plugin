@@ -78,6 +78,23 @@
         </table>
       </j:if>
 
+      <!-- D-50a (SPEC item 2): one fixed, instance-wide warning above the decision form, only to a
+           viewer who may decide this request or holds Batch Control/Manage
+           (GrantRequestItem#isShowSystemBuildWarning). It names no job and no count. -->
+      <j:if test="${it.showSystemBuildWarning}">
+        <div class="jenkins-alert jenkins-alert-warning" role="alert">
+          <strong>Builds on this instance can run as SYSTEM or as an account that already has
+          Configure permission.</strong>
+          A holder of a Configure permission window can therefore make a build change a job's
+          permissions permanently. A Jenkins administrator can prevent this by setting a global
+          default build authorization in Authorize Project that runs every build as an account
+          without Configure permission (for example "Run as Specific User" with a dedicated
+          low-privilege account). "Run as the user who triggered the build" is only safe together
+          with such a fallback, because timer and SCM builds have no triggering user. A strategy
+          on a single job is not enough.
+        </div>
+      </j:if>
+
       <j:if test="${it.canDecide}">
         <h2>Decision</h2>
         <p class="jenkins-description">

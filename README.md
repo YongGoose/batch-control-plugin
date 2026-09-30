@@ -143,11 +143,17 @@ A person refused at "Build Now", at a REST `build` call or at the CLI gets an
 refusals have no screen to read them at the time: Pipeline Replay, whose UI
 offers no channel for the message; a build-token submission, whose caller is a
 script reading an HTTP status; and a timer or upstream trigger turned away by
-one of the per-job options or by activation. None of these are untraceable afterwards: each is
-logged, and each writes a change record to the audit history — a blocked-token
-attempt its own record, and a blocked Replay, timer or upstream submission, or
-any unattended submission refused because the job is not activated, a
-coalesced `TRIGGER_BLOCKED` record (at most one per job and cause per hour).
+one of the per-job options or by activation. None of these are untraceable
+afterwards: each is logged and writes a change record to the audit history. A
+blocked build-token attempt gets its own record. A person's refused Replay,
+Retry or Rebuild gets its own `TRIGGER_BLOCKED` record per attempt, naming the
+build it re-runs; a repeat of the same attempt within a minute is merged, and
+at most 20 are listed per user in any 10 minutes. The next one writes a summary
+record saying that further refusals are counted, not listed, and when the 10
+minutes end a closing record gives their number and the builds. No record is
+ever rewritten. A refused timer or upstream submission, or any other
+unattended submission refused because the job is not activated, is coalesced
+into at most one `TRIGGER_BLOCKED` record per job and cause per hour.
 While a job's `Block cron (timer) triggers` or `Block upstream triggers` switch
 is on, that job's own page also shows a notice naming it to anyone who can read
 the job.
@@ -180,8 +186,19 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 
 ### 1. Turn on what you need
 
-**Manage Jenkins → System → Batch Control**, which needs `BatchControl/Manage`
-(implied by `Overall/Administer`). Flipping either switch is itself recorded.
+The settings are in two places, with the same fields and the same checks:
+
+- **Batch Control → Configuration** (`/batch-control-configuration/`), the
+  entry in the Batch Control sidebar. It needs only `BatchControl/Manage`, so a
+  user who holds that permission but not `Overall/Administer` opens and saves the
+  configuration here. The same page is listed as **Batch Control** on
+  **Manage Jenkins** for users who can open Manage Jenkins.
+- The Batch Control section of **Manage Jenkins → System**. That is Jenkins'
+  own page and needs `Overall/Manage`, so a holder of `BatchControl/Manage`
+  alone gets 403 there.
+
+`BatchControl/Manage` is implied by `Overall/Administer`. Flipping either switch
+is itself recorded, whichever page it was saved from.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -197,7 +214,7 @@ mvn hpi:run         # a local Jenkins at http://localhost:8080/jenkins
 | Retention period (months) | 24 | Month files older than this are deleted, and the deletion is recorded |
 | Notify before expiry (minutes) | 10 | How long before an active grant window expires its holder is notified |
 | Send e-mail notifications | off | Shown only while the Mailer plugin is installed |
-| Batch Control strategy | shown only while installed | Not a saved field: **Revert to the plain strategy** appears here while a Batch Control authorization strategy variant is installed (step 2) |
+| Batch Control strategy | shown only while installed | Not a saved field: **Revert to the plain strategy** appears here while a Batch Control authorization strategy variant is installed (step 2); using it needs `Overall/Administer` |
 
 A request cannot be created unless its designated approver is on the Approvers
 list, and `BatchControl/Approve` is checked on them again at the moment they
@@ -263,7 +280,7 @@ variant is selected *and* change control is on.
 | `BatchControl/Approve` | Approve or reject run, activation, hold and window requests |
 | `BatchControl/RequestGrant` | Request temporary change permissions |
 | `BatchControl/ViewHistory` | View the history screens, dashboards and CSV exports |
-| `BatchControl/Manage` | Manage the global configuration and revoke windows |
+| `BatchControl/Manage` | Manage the global configuration on **Batch Control → Configuration**, and revoke windows |
 
 `Manage` is implied by `Overall/Administer` and implies the other four, so
 administrators pass every check. A requester typically holds `Overall/Read`,
@@ -408,7 +425,33 @@ that a non-administrator approved while being shown only the word `CONFIGURE`.
 `Run/Replay` is the one to know about: run control still refuses a replay of a job
 that requires approval, so it is not a way around the run gate there, but on a job
 without run control a window holder can replay a build with a modified Pipeline
-script.
+script. A `CONFIGURE` window also lets its holder rename the job to any free name
+in its folder, since Jenkins allows a rename to anyone who may configure the job;
+the rename is recorded with the window. Under a `CREATE` window with a name
+restriction, renames of what that window created are limited to matching names.
+
+**Builds that run as SYSTEM, or as an account with Configure, are outside the
+self-grant guard.** Such a build can write a permanent authorization entry on
+its job, so a `CONFIGURE` window holder could use one to keep access after the
+window ends. Authorize Project closes this only with a global default build
+authorization that runs every build as an account without Configure
+permission, for example **Run as Specific User** with a dedicated low-privilege
+build account. Give that account neither `Overall/Administer` nor
+`Item/Configure`, and no Configure on folders or jobs either. **Run as the user
+who triggered the build** is safe only with such a fallback, since timer and
+SCM builds have no triggering user and would otherwise run as SYSTEM. A
+strategy on a single job is not enough: anyone who can configure the job, a
+window holder included, can remove it. While change control is on and builds
+can run as SYSTEM or as an account with Configure, the administrative monitor
+says so for the whole instance, and the detail page of a pending `CONFIGURE`
+request shows the same warning to its approvers and to `BatchControl/Manage`
+holders. The check looks at the build account's permissions at the Jenkins root
+only, so Configure given to it on a folder or job is not detected. It cannot
+judge authenticators that decide by job type, folder or the caller's identity.
+Its answer is cached for five minutes, so after the build authenticators or the
+build account's permissions change the warning can take that long to appear or
+clear; replacing the authenticators through the security configuration updates
+it at once.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
@@ -445,17 +488,25 @@ an approved `ACTIVATE` request can. A generated nightly job therefore does not
 run its first night — but the refusal is recorded and shown, not silent: the
 job's own page carries a notice saying it is not activated (and naming
 `blockTimer`/`blockUpstream` while a switch is on), each refused attempt writes
-a `TRIGGER_BLOCKED` change record (coalesced to at most one per job and cause
-per hour), and the controller log carries a line at most once an hour per job.
+a `TRIGGER_BLOCKED` change record (unattended refusals are coalesced to at
+most one per job and cause per hour), and the controller log carries a line
+at most once an hour per job.
 A generated job that must run unattended needs a second pass to clear the
 switches and an approver to activate it. Jobs that already exist when the
 plugin is installed, and jobs created while run control is off, are activated
 and keep their schedules.
 
+**Some re-run links stay visible on a job that requires approval.** Jenkins'
+own build link (relabelled **Direct Build (needs approval)**), Pipeline's
+**Replay** and naginator's **Retry** are drawn for everyone with the underlying
+permission, and Batch Control has no way to remove them. A click is refused,
+nothing is queued, and the job and build pages explain why and point to
+**Request Run**. The rebuild plugin's **Rebuild** can be hidden, and is.
+
 **Other plugins' build buttons fail with their own generic message.** When
-Batch Control refuses a run started from Rebuild, Rebuild Last, naginator's
-Retry or a button customised by another plugin, that plugin shows its own
-message ("Failed to schedule build", "Failed.") and says nothing about
+Batch Control refuses a run started from naginator's Retry, Rebuild or Rebuild
+Last where they are shown, or a button customised by another plugin, that
+plugin shows its own message ("Failed to schedule build", "Failed.") and says nothing about
 approval. The run was refused correctly and nothing was queued; the job's own
 page is where the reason is shown: on a job that requires approval a notice
 says that manual runs need an approved run request and links to **Request

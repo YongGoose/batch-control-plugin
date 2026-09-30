@@ -168,6 +168,11 @@ final class NewItemName {
         return "createItem".equals(operation) || "confirmRename".equals(operation);
     }
 
+    /** Whether {@code operation} is a CLI {@code create-job}/{@code copy-job} (e2e-03 DEF-36). */
+    static boolean isCliOperation(@CheckForNull String operation) {
+        return operation != null && operation.startsWith("cli:");
+    }
+
     private static boolean isRenameEndpoint(@CheckForNull String endpoint) {
         return "confirmRename".equals(endpoint) || "checkNewName".equals(endpoint);
     }

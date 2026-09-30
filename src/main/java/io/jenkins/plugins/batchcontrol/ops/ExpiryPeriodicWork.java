@@ -46,6 +46,13 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         if (jenkins == null) {
             return;
         }
+        // D-51a: close the refused re-run summaries whose window ended (their count record). First,
+        // in its own try, so a failure of the expiry work below never skips it (S-22-03).
+        try {
+            io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit.get().flushPersonSummaries();
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not close the refused re-run summaries", e);
+        }
         // Queue snapshot is taken outside the service lock (lock-order discipline): a request
         // whose approved submission is waiting in the queue is not "unsubmitted" and must not
         // expire while it waits for an executor. The snapshot instant is recorded first so the

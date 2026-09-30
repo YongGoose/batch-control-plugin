@@ -165,6 +165,11 @@ final class GrantAwareACL extends ACL {
                 if (decision.recordable && NewItemName.isWebChangeOperation(decision.operation)) {
                     throw NameRestrictionValidation.refusal(decision.explain());
                 }
+                if (decision.recordable && NewItemName.isCliOperation(decision.operation)) {
+                    // e2e-03 DEF-36: the CLI prints an IllegalStateException as one "ERROR: <message>"
+                    // line (exit 4) instead of "missing the Job/Create permission".
+                    throw new IllegalStateException(decision.explain());
+                }
             }
         }
         return allowed;
@@ -396,6 +401,18 @@ final class GrantAwareACL extends ACL {
             return null;
         }
         String name = context.getName();
+        String current = itemFullName.substring(itemFullName.lastIndexOf('/') + 1);
+        if (context.getKind() == NewItemName.Kind.NAMED && name != null && name.trim().equals(current)
+                && "checkNewName".equals(context.getOperation())
+                && creating.getUser() != null
+                && creating.getUser().equals(Jenkins.getAuthentication2().getName())) {
+            // e2e-03 DEF-36: the Rename page checks its field once on load, with the current name;
+            // core would answer "the same as the current name". The holder is told the restriction
+            // that governs the rename instead. Only the holder's own check; nothing is refused.
+            throw NameRestrictionValidation.notice("Renaming '" + current + "' is limited by your permission"
+                    + " window: it only allows " + CreateNamePattern.describe(creating.getCreateNamePattern())
+                    + ". A name outside that restriction is refused.");
+        }
         if (context.getKind() == NewItemName.Kind.NAMED && creating.allowsCreateName(name)) {
             return null;
         }

@@ -5,9 +5,11 @@ import hudson.model.Failure;
 import hudson.model.ModelObject;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -118,6 +120,27 @@ public class GrantRequestItem implements ModelObject {
     public boolean isCanCancel() {
         return isPending()
                 && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
+    }
+
+    // ---------------------------------------------------------------- SYSTEM builds (D-50a)
+
+    /**
+     * D-50a (SPEC item 2): whether this page shows the fixed warning that builds can run as
+     * SYSTEM on this instance. Only for a pending request that includes CONFIGURE, only while
+     * {@link SystemBuildCheck#buildsMayRunAsSystem()} holds, and only to a viewer who may decide
+     * this request ({@link #isCanDecide()}) or holds {@code BatchControl/Manage}; the requester
+     * sees it only as one of those. The warning is instance-wide and names nothing, so it tells
+     * no viewer anything about the jobs in the scope.
+     */
+    public boolean isShowSystemBuildWarning() {
+        if (!isPending() || request.getActions() == null
+                || !request.getActions().contains(GrantAction.CONFIGURE)) {
+            return false;
+        }
+        if (!isCanDecide() && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return false;
+        }
+        return SystemBuildCheck.buildsMayRunAsSystem();
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)

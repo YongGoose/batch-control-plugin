@@ -154,13 +154,28 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         if (approvalRequired) {
 
             // 2. Pipeline Replay: refused and recorded; explained only to a person (see below).
-            for (Cause cause : causes) {
+            // S-22-05: a Replay only when the submission's own re-run cause is the Replay (a Rebuild
+            // of a replayed build carries a copied ReplayCause and is judged as a Rebuild).
+            for (Cause cause : KIND_REPLAY.equals(lastRerunKind(causes)) ? causes : List.<Cause>of()) {
                 if (REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("replay", job,
                             () -> "Blocked replay of approval-required job '" + job.getFullName() + "'");
-                    recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
-                            "Blocked a Pipeline Replay of job '" + job.getFullName()
-                                    + "' - the job requires an approved batch-control run request");
+                    // D-51a (S-21-09): a person's Replay (on the Replay page or through the CLI) is
+                    // recorded per attempt, naming the replayed build; anything else is unattended.
+                    boolean person = !ACL.SYSTEM2.equals(Jenkins.getAuthentication2())
+                            && (CLICommand.getCurrent() != null
+                                    || (Stapler.getCurrentRequest2() != null && isHumanSubmission(causes)));
+                    if (person) {
+                        String user = Jenkins.getAuthentication2().getName();
+                        String source = sourceBuild(causes);
+                        recordPersonRefusal(job, KIND_REPLAY, source, user, "Blocked a Pipeline Replay of job '"
+                                + job.getFullName() + "'" + (source.isEmpty() ? "" : " build #" + source) + " by '"
+                                + user + "' - the job requires an approved batch-control run request");
+                    } else {
+                        recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
+                                "Blocked a Pipeline Replay of job '" + job.getFullName()
+                                        + "' - the job requires an approved batch-control run request");
+                    }
                     // e2e-03 DEF-16: a person pressing Run on the Replay page gets the refusal
                     // page instead of the replay action's generic "not buildable" crash page;
                     // the CLI gets a one-line error (DEF-14). Anything else stays quiet.
@@ -232,18 +247,21 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             if (!retry || userClickedRetry) {
                 for (Cause cause : causes) {
                     if (cause instanceof Cause.UserIdCause) {
-                        String rerun = retry ? KIND_RETRY
-                                : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : null;
+                        // S-22-05: the submission's own re-run cause is the last one; earlier ones
+                        // were copied from the build it repeats.
+                        String own = lastRerunKind(causes);
+                        String rerun = KIND_RETRY.equals(own) || KIND_REBUILD.equals(own) ? own : null;
                         if (rerun != null) {
                             String user = Jenkins.getAuthentication2().getName();
                             String what = KIND_RETRY.equals(rerun) ? "a Retry" : "a Rebuild";
-                            // e2e re-audit DEF-32: keyed per user, so a person's refused re-run is
-                            // recorded under their name and never merged into the SYSTEM record of
-                            // automatic retries (or another person's).
-                            recordTriggerBlocked(job, rerun, "approvalRequired",
-                                    "Blocked " + what + " of job '" + job.getFullName() + "' by '" + user
-                                            + "' - a re-run does not reuse an earlier approval; submit a new run request",
-                                    user);
+                            String source = sourceBuild(causes);
+                            // e2e re-audit DEF-32: recorded under the person's name and never merged
+                            // into the SYSTEM record of automatic retries, another person's record,
+                            // or the same person's earlier refusal on another build.
+                            recordPersonRefusal(job, rerun, source, user,
+                                    "Blocked " + what + " of job '" + job.getFullName() + "'"
+                                            + (source.isEmpty() ? "" : " build #" + source) + " by '" + user
+                                            + "' - a re-run does not reuse an earlier approval; submit a new run request");
                         }
                         throw refusal(job, causes);
                     }
@@ -257,12 +275,14 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // way to run the job again is a new request. A retry that presents the consumed marker
             // never gets here; step 1 refuses it and writes MARKER_REUSE_BLOCKED (D-30).
             for (Cause cause : effective) {
-                if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause) {
+                // S-23-07: a copied ReplayCause also marks a person's run (a Replay is always manual).
+                if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause
+                        || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
                             + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
                     // Recorded, not only logged (SPEC item 6, e2e-03 DEF-03).
-                    String kind = isAutomaticRetry(causes) ? KIND_RETRY
-                            : hasCause(causes, REBUILD_CAUSE_CLASS) ? KIND_REBUILD : KIND_OTHER;
+                    String own = lastRerunKind(causes);
+                    String kind = KIND_RETRY.equals(own) || KIND_REBUILD.equals(own) ? own : KIND_OTHER;
                     String what = KIND_RETRY.equals(kind) ? "a retry" : KIND_REBUILD.equals(kind) ? "a Rebuild" : "a re-run";
                     recordTriggerBlocked(job, kind, "approvalRequired", "Blocked " + what + " of job '"
                             + job.getFullName() + "' that re-uses an earlier "
@@ -418,6 +438,27 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return "build".equals(lastToken) || "buildWithParameters".equals(lastToken);
     }
 
+    /**
+     * The kind of the submission's own re-run cause (S-22-05): the last naginator, Rebuild or
+     * Replay cause in the list, since both naginator and Rebuild copy the repeated build's causes
+     * before adding their own; {@code null} when there is none.
+     */
+    private static String lastRerunKind(List<Cause> causes) {
+        for (int i = causes.size() - 1; i >= 0; i--) {
+            String name = causes.get(i).getClass().getName();
+            if (NAGINATOR_CAUSE_CLASS.equals(name)) {
+                return KIND_RETRY;
+            }
+            if (REBUILD_CAUSE_CLASS.equals(name)) {
+                return KIND_REBUILD;
+            }
+            if (REPLAY_CAUSE_CLASS.equals(name)) {
+                return KIND_REPLAY;
+            }
+        }
+        return null;
+    }
+
     /** Whether the submission is an automatic retry: a cause {@link #retryAwareCauses} strips. */
     private static boolean isAutomaticRetry(List<Cause> causes) {
         return retryAwareCauses(causes).size() != causes.size();
@@ -464,17 +505,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * fails, and the refusal is already in the controller log.
      */
     private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text) {
-        recordTriggerBlocked(job, kind, blockingSwitch, text, null);
-    }
-
-    /**
-     * As {@link #recordTriggerBlocked(Job, String, String, String)}; a non-null {@code user} is
-     * part of the coalescing key, for refusals a person made (DEF-32).
-     */
-    private static void recordTriggerBlocked(Job<?, ?> job, String kind, String blockingSwitch, String text,
-                                             String user) {
         String fullName = job.getFullName();
-        String key = user == null ? fullName + '|' + kind : fullName + '|' + kind + "|user:" + user;
+        String key = fullName + '|' + kind;
         try {
             BlockedAttemptAudit.get().recordCoalesced(ChangeType.TRIGGER_BLOCKED,
                     key, TRIGGER_AUDIT_INTERVAL, fullName,
@@ -485,6 +517,58 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
                     + " submission of job '" + fullName + "'");
         }
+    }
+
+    /**
+     * Writes the {@link ChangeType#TRIGGER_BLOCKED} record of a re-run a person submitted and was
+     * refused (e2e-03 DEF-32). Unlike the unattended refusals it is not merged per hour: a person
+     * acts rarely, and in the container a second user's Retry, of a later build, within the hour
+     * vanished into the first one's record. Only a repeat of the same attempt by the same user
+     * within {@link BlockedAttemptAudit}'s short cooldown is merged, so a double click stays one
+     * record. Per user the records are budgeted (D-51a, {@link BlockedAttemptAudit#recordPersonRefusal}).
+     * A store failure is logged, like {@link #recordTriggerBlocked}.
+     */
+    private static void recordPersonRefusal(Job<?, ?> job, String kind, String sourceBuild, String user,
+                                            String text) {
+        String fullName = job.getFullName();
+        try {
+            BlockedAttemptAudit.get().recordPersonRefusal(ChangeType.TRIGGER_BLOCKED,
+                    fullName + '|' + kind + '#' + sourceBuild, fullName, user, sourceBuild,
+                    "cause=" + kind + " switch=approvalRequired: " + text);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
+                    + " submission of job '" + fullName + "' by '" + user + "'");
+        }
+    }
+
+    /**
+     * The number of the build a person's re-run repeats (D-51a, S-21-09), or {@code ""} when
+     * unknown: naginator's {@code NaginatorCause#getSourceBuildNumber}, Pipeline's
+     * {@code ReplayCause#getOriginalNumber} (both read reflectively: neither plugin is a
+     * dependency), or for a Rebuild its {@code RebuildCause}, an {@link Cause.UpstreamCause} naming
+     * the rebuilt build.
+     */
+    private static String sourceBuild(List<Cause> causes) {
+        // S-22-05: from the last re-run cause, the submission's own; earlier ones are inherited.
+        for (int i = causes.size() - 1; i >= 0; i--) {
+            Cause cause = causes.get(i);
+            String name = cause.getClass().getName();
+            String getter = NAGINATOR_CAUSE_CLASS.equals(name) ? "getSourceBuildNumber"
+                    : REPLAY_CAUSE_CLASS.equals(name) ? "getOriginalNumber" : null;
+            if (getter != null) {
+                try {
+                    Object number = cause.getClass().getMethod(getter).invoke(cause);
+                    return number == null ? "" : number.toString();
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    LOGGER.log(Level.FINE, "Cannot read the re-run build number", e);
+                    return "";
+                }
+            }
+            if (REBUILD_CAUSE_CLASS.equals(name) && cause instanceof Cause.UpstreamCause) {
+                return Integer.toString(((Cause.UpstreamCause) cause).getUpstreamBuild());
+            }
+        }
+        return "";
     }
 
     /**

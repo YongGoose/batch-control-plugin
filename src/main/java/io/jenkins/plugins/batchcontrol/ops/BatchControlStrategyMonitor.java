@@ -8,6 +8,7 @@ import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.StrategyMigration;
+import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -74,7 +75,19 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     @Override
     public boolean isActivated() {
         return BatchControlGlobalConfiguration.get().isChangeControlEnabled()
-                && (strategyUnsupported() || buildAuthenticatorMissing());
+                && (strategyUnsupported() || buildAuthenticatorMissing()
+                        || SystemBuildCheck.buildsMayRunAsSystem());
+    }
+
+    /**
+     * Condition 3 (D-50, D-50a): with change control on, a build of a job without its own build
+     * authorization and without a user cause would run as SYSTEM under the configured build
+     * authenticators (for example Authorize Project per-project, or a strategy that follows the
+     * triggering user). Instance-wide and cached ({@link SystemBuildCheck}), so rendering a page
+     * never probes on every call.
+     */
+    public boolean isBuildsMayRunAsSystem() {
+        return SystemBuildCheck.buildsMayRunAsSystem();
     }
 
     /**

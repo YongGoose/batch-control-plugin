@@ -29,19 +29,31 @@ final class NameRestrictionValidation extends RuntimeException implements HttpRe
     /** Whether this answers a validation request (a field message) rather than a refused change. */
     private final boolean validation;
 
-    private NameRestrictionValidation(String message, boolean validation) {
+    /** Whether the field message is a warning (nothing refused yet) rather than an error. */
+    private final boolean warning;
+
+    private NameRestrictionValidation(String message, boolean validation, boolean warning) {
         super(message, null, false, false);
         this.validation = validation;
+        this.warning = warning;
     }
 
     /** The answer to {@code checkJobName} / {@code checkNewName}: the error next to the field. */
     static NameRestrictionValidation validation(String message) {
-        return new NameRestrictionValidation(message, true);
+        return new NameRestrictionValidation(message, true, false);
+    }
+
+    /**
+     * The answer to {@code checkNewName} while the field still holds the current name (e2e-03
+     * DEF-36): a warning naming the restriction instead of core's "the same as the current name".
+     */
+    static NameRestrictionValidation notice(String message) {
+        return new NameRestrictionValidation(message, true, true);
     }
 
     /** The answer to a refused {@code createItem} / {@code confirmRename} POST (HTTP 400). */
     static NameRestrictionValidation refusal(String message) {
-        return new NameRestrictionValidation(message, false);
+        return new NameRestrictionValidation(message, false, false);
     }
 
     @Override
@@ -49,7 +61,8 @@ final class NameRestrictionValidation extends RuntimeException implements HttpRe
             throws IOException, ServletException {
         // Both escape the message.
         if (validation) {
-            FormValidation.error(getMessage()).generateResponse(req, rsp, node);
+            (warning ? FormValidation.warning(getMessage()) : FormValidation.error(getMessage()))
+                    .generateResponse(req, rsp, node);
         } else {
             new Failure(getMessage()).generateResponse(req, rsp, node);
         }

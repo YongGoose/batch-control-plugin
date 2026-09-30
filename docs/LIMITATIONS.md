@@ -128,11 +128,25 @@ from scripts.
     describe all of this, which is where an operator whose cron did not fire
     looks first.
 
-    **Records are coalesced, so the trail shows that a job is locked, not how
-    often each attempt recurred.** A `TRIGGER_BLOCKED` record merges every
-    refusal of one job and cause kind into at most one record per hour, whoever
-    the attempt ran as — a per-minute cron on a locked job would otherwise write
-    1,440 identical rows a day. A generated nightly job whose Job DSL or JCasC
+    **Unattended refusals are coalesced, so the trail shows that a job is
+    locked, not how often each attempt recurred.** For unattended submissions
+    (timer, upstream, SCM, scripts, automatic retries), a `TRIGGER_BLOCKED`
+    record merges every refusal of one job and cause kind into at most one
+    record per hour, whoever the attempt ran as — a per-minute cron on a locked
+    job would otherwise write 1,440 identical rows a day. A refusal of something
+    a person did, a clicked Retry, Rebuild or Replay, is not merged that way:
+    each attempt writes its own record naming the user and the build it
+    re-runs, and a repeat of the same attempt by the same user within one
+    minute is merged, so a double click stays one record. These per-attempt
+    records are limited to 20 per user in any 10 minutes. The next refusal by
+    that user in the same 10 minutes writes one summary record saying that
+    further refusals are counted, not listed; later ones are only counted, and
+    when the 10 minutes end one closing record gives their number and the
+    builds they named. No record is ever rewritten to update a count. On a
+    clean shutdown, the closing record of every open summary is written
+    before Jenkins stops and says that the window ended early because Jenkins
+    was shutting down. On a crash the open count is lost: those counted
+    refusals remain only in the controller log, one INFO line each. A generated nightly job whose Job DSL or JCasC
     definition pins `blockTimer: false` (or an allow list) still does not run its
     first night, since that value does not survive a fresh creation (above); the
     difference now is that the first refusal already produced the notice, the
@@ -288,6 +302,16 @@ code does on purpose.
     queue gate still refuses a replay of a job that requires approval, so it is not
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
+
+    A `CONFIGURE` window also lets its holder **rename** the job, to any free
+    name in its folder, because Jenkins allows a rename to anyone who may
+    configure the job. The rename is recorded as `RENAME` with the window it was
+    made under, and like any rename it ends the job's pending requests (item 30).
+    An approver who wants to rule out renames has no narrower window to grant.
+    A `CREATE` window with a name restriction is different: renaming a job its
+    holder created through that window, or a rename that relies on the window's
+    Create permission on the folder, is allowed only to a name that matches the
+    restriction, and any other name is refused and recorded as a violation.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
@@ -302,19 +326,68 @@ code does on purpose.
 
 ## SYSTEM builds and the global-matrix upgrade
 
-35. **A build that runs as SYSTEM can still write a permanent authorization
-    entry.** A Pipeline `properties([authorizationMatrix(...)])` step, or a Job
-    DSL seed job, executes as SYSTEM unless the instance runs builds under a
-    real user; the guard that reverts a grant holder's self-escalating edit to
-    a job's authorization property looks at who saved the item, and SYSTEM is
-    not a grant holder, so nothing is reverted or recorded. This is not new
-    exposure: any user who already holds standing `Item/Configure` on that job
-    has the identical path today, with or without Batch Control, since Jenkins
-    itself does not distinguish a script's save from a human one. Installing
-    **Authorize Project** so the build runs as the configuring user brings
-    that save under the same guard as a manual one. While change control is
-    on, an administrative monitor warns when no build authenticator (a
-    `QueueItemAuthenticator`) is configured.
+35. **A build that runs as SYSTEM, or as an account with Configure
+    permission, can still write a permanent authorization entry.** A Pipeline
+    `properties([authorizationMatrix(...)])` step, or a Job DSL seed job,
+    executes as SYSTEM unless the instance runs builds under a real user; the
+    guard that reverts a grant holder's self-escalating edit to a job's
+    authorization property looks at who saved the item, and SYSTEM is not a
+    grant holder, so nothing is reverted or recorded. The same holds for a
+    build that runs as an account which already holds `Overall/Administer` or
+    `Item/Configure`, such as a privileged service account: that account's
+    save is a legitimate Configure save, so the guard keeps the entry. This is
+    not new exposure: any user who already holds standing `Item/Configure` on
+    that job has the identical path today, with or without Batch Control,
+    since Jenkins itself does not distinguish a script's save from a human
+    one.
+
+    The remedy is **Authorize Project** with a **global default build
+    authorization** that runs every build, whatever the job's own
+    configuration and whatever started it, as an account without Configure
+    permission: for example **Run as Specific User** with a dedicated
+    low-privilege build account. Do not give that account `Overall/Administer`
+    or `Item/Configure`, neither globally nor through a folder's or a job's own
+    authorization entries. **Run as the user who triggered the build** is safe
+    only together with such a fallback: timer and SCM builds have no
+    triggering user, so without one they run as SYSTEM. (A build that does run
+    as the person who triggered it comes under the same guard as that
+    person's manual save.) Installing the plugin is not enough, and a strategy
+    set on a single job does not protect that job: anyone who can configure
+    the job, a `CONFIGURE` window holder included, can remove the strategy.
+    With Authorize Project's per-project setting and no global default, a job
+    without a strategy of its own builds as SYSTEM. A job whose own build
+    authorization runs as an administrator is exposed to anyone who can
+    configure that job, and the instance-wide check below does not see it.
+
+    While change control is on, Batch Control checks this once for the whole
+    instance, not job by job. If builds can run as SYSTEM or as an account
+    with Configure permission, the administrative monitor on Manage Jenkins
+    says so and that a suitable global default build authorization fixes it,
+    and the detail page of a pending request that includes `CONFIGURE` shows
+    the same warning to the users who may decide it and to
+    `BatchControl/Manage` holders, before the decision. The same monitor also
+    warns when no build authenticator (a `QueueItemAuthenticator`) is
+    configured at all. The check has these limits:
+
+    - It looks at the build account's permissions at the Jenkins root only
+      (for example a global matrix entry). If the account gets Configure from
+      a folder's or a job's own authorization entries, the warning does not
+      see it; hence the advice above never to give the build account
+      item-level Configure.
+    - It asks the configured authenticators about one representative job, so
+      it cannot judge an authenticator that decides by job type, by folder or
+      by the identity of the caller; with such an authenticator the warning
+      may be absent although some jobs still build as SYSTEM or as an account
+      with Configure.
+    - The answer is cached for five minutes. After the build authenticators
+      change, or the build account's permissions change, the warning can take
+      up to five minutes to appear or disappear; when the authenticators are
+      replaced by saving the security configuration, it is re-evaluated at
+      once.
+    - When "Run as Specific User" names an account that has no Jenkins user
+      record yet, builds run as anonymous, and the warning judges anonymous's
+      permissions. Once that account exists, the warning reflects its
+      permissions within the same five minutes.
 36. **A legacy wrapper around the global matrix strategy is unwrapped on
     upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
     per-item ACLs, so converting it straight into the Batch Control matrix
@@ -376,8 +449,8 @@ code does on purpose.
     name starts not activated.
 40. **Other plugins' build buttons show their own generic failure message.**
     When Batch Control refuses a run started from another plugin's button
-    (Rebuild, Rebuild Last, naginator's Retry, a button relabelled or replaced by
-    customize-build-now), the refusal happens at queue entry, but that plugin
+    (Rebuild or Rebuild Last where they are shown, naginator's Retry, a button
+    relabelled or replaced by customize-build-now), the refusal happens at queue entry, but that plugin
     submits by script and shows only its own message, such as "Failed to
     schedule build. Reload the page and try again." or "Failed.", which says
     nothing about approval or activation. The run was correctly refused and
@@ -387,14 +460,19 @@ code does on purpose.
     `Request` holder; the activation notice says whether unattended runs are
     allowed, with a **Request activation** link (e2e-03 DEF-01).
 
-41. **Naginator's Retry link cannot be hidden on a job that requires approval.**
-    Naginator contributes its own sidebar/task link unconditionally, and Batch
-    Control has no extension point to suppress another plugin's link, so it
-    stays visible on a protected job. Clicking it is still refused at queue
-    entry like any other unattended trigger (item 40), and the job page's own
-    notice explains why: on a job that requires approval it names the switch
-    and points at **Request Run**, the same notice a manual Build Now attempt
-    shows (e2e-03 DEF-25, DEF-01).
+41. **Some re-run links cannot be hidden on a job that requires approval.**
+    Three entries are drawn for every user who holds the underlying
+    permission, and no extension point lets Batch Control remove them:
+    Jenkins' own build link (relabelled **Direct Build (needs approval)** on
+    such a job), Pipeline's **Replay**, and naginator's **Retry**. They
+    therefore stay visible, and a click is refused at queue entry with an
+    explanation: the job page and the build page carry the approval notice,
+    and the refusal page, or the other plugin's failure message next to that
+    notice (item 40), points to **Request Run**. Nothing is queued. The rebuild
+    plugin's **Rebuild** is different: that plugin lets Batch Control hide it,
+    so it does not appear on such a job. A user who may see the job but not
+    build it is not offered the rerun form, and a rerun submitted anyway is
+    refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
 
 ## Out of scope by design
 
