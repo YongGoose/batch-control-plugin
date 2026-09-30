@@ -177,8 +177,18 @@
 
       <j:if test="${it.canRerun}">
         <h2>Request Rerun</h2>
+        <!-- e2e-04 DD-06: the rerun's parameters are fixed and its reason is generated, as the
+             README says; UX-19: the ordinary run request form is linked for this viewer, who may
+             use it (isCanRerun is the same Request + Item/Read + Item/Build test). -->
         <p class="jenkins-description">
-          Creates a run request pre-filled with the original parameters and linked to this incident.
+          Creates a run request for this job, linked to this incident. It uses the original
+          parameters, which cannot be changed here, and a reason generated from the incident; you
+          only choose the approvers.
+          <j:if test="${it.jobUrl != null}">
+            To run with other parameters, submit an ordinary run request on the job's
+            <a href="${rootURL}/${it.jobUrl}batch-control/">run request form</a> instead; that
+            request is not linked to this incident.
+          </j:if>
         </p>
         <j:choose>
           <j:when test="${empty(it.approverOptions)}">
@@ -224,9 +234,14 @@
           <b>Batch Control/Request</b> and <b>Job/Build</b> on the job, or by a Jenkins
           administrator; ask one of them.
         </p>
+        <!-- e2e-04 UX-19: this viewer may not submit run requests for the job, so the run request
+             form is not linked (it would answer 404 or refuse); the job page is, and its sidebar
+             carries the Request Run entry for users who may use it. -->
         <p class="jenkins-description">
           A user with Batch Control/Request and Job/Build can instead submit an ordinary run
-          request on the job's Request Run page; that request is not linked to this incident.
+          request from the Request Run entry on the page of
+          <a href="${rootURL}/${it.jobUrl}">${it.incident.jobFullName}</a>; that request is not
+          linked to this incident.
         </p>
       </j:if>
     </l:main-panel>
