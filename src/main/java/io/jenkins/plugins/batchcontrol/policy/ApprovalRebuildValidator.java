@@ -49,10 +49,20 @@ public class ApprovalRebuildValidator extends RebuildValidator {
      * e2e-03 DEF-41 (D-58c): a run replayed under a grant cannot be re-run by anyone but an
      * administrator, so Rebuild is not offered on it to anyone else (while change control is on).
      */
+    @SuppressWarnings("deprecation") // getActions(): the persisted actions only, see below
     private static boolean markedForViewer(Run<?, ?> build) {
-        return io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.get().isChangeControlEnabled()
-                && build.getAction(io.jenkins.plugins.batchcontrol.queue.ReplayUnderGrantAction.class) != null
-                && !jenkins.model.Jenkins.get().hasPermission(jenkins.model.Jenkins.ADMINISTER);
+        if (!io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.get().isChangeControlEnabled()
+                || jenkins.model.Jenkins.get().hasPermission(jenkins.model.Jenkins.ADMINISTER)) {
+            return false;
+        }
+        // The persisted actions only: getAction(Class) would ask the transient action factories,
+        // among them the rebuild plugin's, which asks this validator again (endless recursion).
+        for (hudson.model.Action action : build.getActions()) {
+            if (action instanceof io.jenkins.plugins.batchcontrol.queue.ReplayUnderGrantAction) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether the request goes to the rebuild plugin's action ({@code .../rebuild} or below it). */
