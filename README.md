@@ -473,11 +473,13 @@ restriction, renames of what that window created are limited to matching names.
 build runs as, so a `CONFIGURE` window holder could use one to keep access after
 the window ends. While change control is on, Batch Control therefore reverts and
 records any entry added or widened for a user who holds a grant on the item, or
-held one in the last 30 days, and for that user's groups, whoever saves it: a
-build, a script or another user. The only exception is a save made through an
-HTTP request (the web UI, a `config.xml` POST, or REST or CLI over HTTP) by a
-user who holds `Overall/Administer`. The build log names the reverted entries. Entries written for
-other accounts, for example an accomplice's, are outside this rule.
+held one in the last 30 days, and for the groups the security realm reports for
+that user now, whoever saves it: a build, a script or another user. The only
+exception is a save made through an HTTP request (the web UI, a `config.xml`
+POST, or REST or CLI over HTTP) by a user who holds `Overall/Administer`. A
+Pipeline build names the reverted entries in its build log; a Freestyle build
+gets only the change record. Entries written for other accounts, for example
+an accomplice's, are outside this rule.
 
 Run builds under a low-privilege account as well, since a build that runs as
 SYSTEM or as an account with Configure can still change whatever that account

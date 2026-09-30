@@ -342,21 +342,24 @@ code does on purpose.
     therefore guards the entries of grant holders, whoever saves them: while
     change control is on, a save of a job's or folder's authorization entries
     that adds or widens an entry for a user who holds a grant covering that
-    item, or held one in the last 30 days, or for one of that user's groups
-    (`authenticated` included), is reverted and recorded as
-    `GRANT_VIOLATION`. This applies to a build running as any account or as
+    item, or held one in the last 30 days, or for one of the groups the
+    security realm reports for that user now (`authenticated` included), is
+    reverted and recorded as `GRANT_VIOLATION`. Group membership is not
+    stored with a grant, so a group the user belonged to when the grant was
+    issued but has since left is not guarded. This applies to a build running as any account or as
     SYSTEM, to a script, and to another user's save. The only exception is a
     save made through an HTTP request (the web UI, a `config.xml` POST, or
     REST or CLI over HTTP) by a user who holds `Overall/Administer`, who is
-    deliberately giving the entry. A build whose save was reverted names the
-    reverted entries in its build log; a save made through an HTTP request is
-    answered with HTTP 403 and a plain message saying which
+    deliberately giving the entry. A Pipeline build whose save was reverted
+    names the reverted entries in its build log; a Freestyle build gets no
+    such line, only the `GRANT_VIOLATION` record. A save made through an HTTP
+    request is answered with HTTP 403 and a plain message saying which
     authorization entries were not kept and that the other changes were
     saved.
 
-    The rule covers the grant holder's own entries only. An entry written for
-    some other account, such as an accomplice's account or a user who never
-    held a grant on the item, is not reverted: that is collusion between
+    The rule covers only the grant holder and their current groups. An entry
+    written for a principal that is not guarded, such as an accomplice's
+    account or a user who never held a grant on the item, is not reverted: that is collusion between
     users, and Batch Control does not detect it. Neither is this new
     exposure: any user who already holds standing `Item/Configure` on a job
     has the same path today, with or without Batch Control, since Jenkins
