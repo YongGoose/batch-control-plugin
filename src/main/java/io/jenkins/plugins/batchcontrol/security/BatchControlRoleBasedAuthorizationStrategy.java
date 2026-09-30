@@ -177,6 +177,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         /** Assign Roles: renders each user or group row's name (role-strategy tableAssign.js). */
         @RequirePOST
         public FormValidation doCheckName(@QueryParameter String value) {
+            checkRolePagePermission();
             return parent().doCheckName(value);
         }
 
@@ -186,6 +187,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          */
         @RequirePOST
         public FormValidation doCheckPattern(@QueryParameter String value) {
+            checkRolePagePermission();
             try {
                 Pattern.compile(value == null ? "" : value);
             } catch (PatternSyntaxException e) {
@@ -197,7 +199,18 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         /** Role and template names: warns about leading or trailing whitespace. */
         @RequirePOST
         public FormValidation doCheckForWhitespace(@QueryParameter String value) {
+            checkRolePagePermission();
             return parent().doCheckForWhitespace(value);
+        }
+
+        /**
+         * Jenkins Security Scan alerts 31-33: these checks serve role-strategy's Manage Roles and
+         * Assign Roles pages, so they need what role-strategy requires to open those pages
+         * (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
+         * implies them).
+         */
+        private static void checkRolePagePermission() {
+            Jenkins.get().checkAnyPermission(RoleBasedAuthorizationStrategy.SYSTEM_READ_AND_SOME_ROLES_ADMIN);
         }
 
         /** Jelly: the permission groups shown for a role type. */
