@@ -210,7 +210,8 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          * implies them).
          */
         private static void checkRolePagePermission() {
-            Jenkins.get().checkAnyPermission(RoleBasedAuthorizationStrategy.SYSTEM_READ_AND_SOME_ROLES_ADMIN);
+            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
+                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
         }
 
         /** Jelly: the permission groups shown for a role type. */

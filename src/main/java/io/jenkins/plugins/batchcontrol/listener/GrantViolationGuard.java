@@ -744,7 +744,7 @@ public class GrantViolationGuard extends SaveableListener {
                         }
                     }
                 }
-                String user = auth == null ? "unknown" : auth.getName();
+                String user = auth.getName();
                 for (AbstractItem item : items) {
                     String fullName = item.getFullName();
                     if (propertyCount(item) > 0) {
