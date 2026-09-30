@@ -325,6 +325,7 @@ public class AuthorizationEntryGuardTest {
      */
     @Test
     public void t_02_64_explicitReviewClearsTheGuard() throws Exception {
+        requestPermissionFor("c1"); // the job's Batch Control page needs BatchControl/Request (LIMITATIONS 35)
         grantBob();
         editScriptAsBob(entryFor("user", "bob"));
         afterWindow();
@@ -358,6 +359,7 @@ public class AuthorizationEntryGuardTest {
     /** T-02-69 (D-58b (3)): bob, whose Configure comes only from his grant, cannot mark the job reviewed (403). */
     @Test
     public void t_02_69_grantOnlyUserCannotMarkReviewed() throws Exception {
+        requestPermissionFor("bob"); // bob reaches the page, so the refusal is the review rule, not a 404
         grantBob();
         editScriptAsBob(entryFor("user", "bob"));
         int reviewsBefore = records("GUARD_REVIEWED").size();
@@ -367,6 +369,21 @@ public class AuthorizationEntryGuardTest {
         afterWindow();
         j.buildAndAssertSuccess(current());
         assertNoEntryFor("bob");
+    }
+
+    /**
+     * T-02-74 (D-58b (3), LIMITATIONS 35): c1 holds Item/Configure natively but not
+     * BatchControl/Request, so the job's Batch Control page, and with it the job-page review, is
+     * not there for c1: 404 and no GUARD_REVIEWED record (the monitor's review is the other path).
+     */
+    @Test
+    public void t_02_74_jobPageReviewNeedsBatchControlRequest() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        int reviewsBefore = records("GUARD_REVIEWED").size();
+        assertEquals(404, postForm("c1", current().getUrl() + "batch-control/markReviewed", null),
+                "without BatchControl/Request the job's Batch Control page answers 404");
+        assertEquals(reviewsBefore, records("GUARD_REVIEWED").size(), "no GUARD_REVIEWED record");
     }
 
     /** T-02-70 (D-58b (3)): c1's description edit (an ordinary HTTP save) does not clear the state. */
@@ -556,6 +573,11 @@ public class AuthorizationEntryGuardTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private void requestPermissionFor(String user) {
+        ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy())
+                .add(io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.REQUEST, PermissionEntry.user(user));
+    }
 
     private int postForm(String user, String path, String query) throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
