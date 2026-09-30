@@ -24,7 +24,8 @@
           folder, job or agent will start granting the permissions it lists.
         </p>
       </j:if>
-      <j:if test="${it.migratable}">
+      <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders. -->
+      <j:if test="${it.migratable and app.hasPermission(app.ADMINISTER)}">
         <form method="post" action="${rootURL}/${it.url}/migrate">
           <f:submit value="Install the Batch Control variant"/>
         </form>
