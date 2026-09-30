@@ -231,6 +231,45 @@ public final class GrantService {
         return grant != null ? grant : findCreatingGrant(user, itemFullName, itemRootDir);
     }
 
+    /**
+     * D-58: the users who hold, or held within {@code window}, a grant whose scope covers
+     * {@code itemFullName} or through which they created it (D-35c). Read from the in-memory grant
+     * cache (bounded by retention), so no store read happens on a warm cache.
+     */
+    public synchronized java.util.Set<String> recentHolders(String itemFullName, java.time.Duration window) {
+        Instant since = BatchClock.now().minus(window);
+        java.util.Set<String> users = new java.util.LinkedHashSet<>();
+        for (Grant grant : grants()) {
+            if (grant.getUser() == null) {
+                continue;
+            }
+            Instant ended = grant.getRevokedAt() != null ? grant.getRevokedAt() : grant.getExpiresAt();
+            if (ended != null && ended.isBefore(since)) {
+                continue;
+            }
+            // A folder's property is inherited by what is below it, so a grant anywhere below the
+            // folder makes its holder a guarded principal of the folder as well.
+            String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
+            boolean covers = (grant.getScope() != null && grant.getScope().includes(itemFullName))
+                    || (scope != null && !itemFullName.isEmpty() && scope.startsWith(itemFullName + "/"))
+                    || grant.hasCreated(itemFullName)
+                    || createdBelow(grant, itemFullName);
+            if (covers) {
+                users.add(grant.getUser());
+            }
+        }
+        return users;
+    }
+
+    private static boolean createdBelow(Grant grant, String folderFullName) {
+        for (String created : grant.getCreatedItems()) {
+            if (created.startsWith(folderFullName + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Every grant that is active right now (not expired, not revoked). */
     public synchronized List<Grant> listActive() {
         Instant now = BatchClock.now();

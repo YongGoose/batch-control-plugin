@@ -25,12 +25,15 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.security.GuardedPrincipals;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +46,7 @@ import org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy;
 import org.jenkinsci.plugins.matrixauth.inheritance.InheritanceStrategy;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Stapler;
 import org.springframework.security.core.Authentication;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -115,67 +119,207 @@ public class GrantViolationGuard extends SaveableListener {
                 return;
             }
             Authentication auth = Jenkins.getAuthentication2();
-            if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
-                // D-35d (2): SYSTEM saves (builds without a build authenticator, Job DSL, JCasC)
-                // are not blocked; the batch-control-strategy monitor warns about that setup.
+            boolean person = !ACL.SYSTEM2.equals(auth) && !ACL.isAnonymous2(auth);
+            if (person && holdsActiveGrant(auth.getName()) && revertGrantOnlySave(item, fullName, before, now, auth)) {
+                return; // D-35b handled it (reverted, or recorded that it could not)
+            }
+            // D-58: the only exception is an administrator's own save through an HTTP request
+            // (native Overall/Administer, asked with every grant layer off).
+            if (person && Stapler.getCurrentRequest2() != null
+                    && GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER)) {
                 return;
             }
-            String user = auth.getName();
-            if (!holdsActiveGrant(user)) {
-                return; // without any active grant the save cannot have been made possible by one
-            }
-            // D-35d (4): only what this save added is taken back. Entries missing from the saved
-            // property are never re-added, so a stale baseline cannot bring an entry back.
-            String reverted;
-            try {
-                reverted = withoutAdditions(item, before, now);
-            } catch (RuntimeException e) {
-                // S-06: never guess (restoring the baseline could bring removed entries back).
-                LOGGER.log(Level.SEVERE, "Cannot compare the authorization property of '" + fullName
-                        + "' with its baseline", e);
-                Grant grant = namedGrant(user, item);
-                appendViolation(fullName, user, grant,
-                        "The authorization property was changed by a user holding " + grantText(grant)
-                                + ", and comparing it with the previous property FAILED ("
-                                + e.getClass().getSimpleName() + "), so an administrator must check the item.");
-                return;
-            }
-            if (reverted.equals(now)) {
-                return; // nothing was added: entries were only removed, or the save changed nothing else
-            }
-            try {
-                // S-01, D-35d (1): "Configure only from a grant" is decided by permission, not by a
-                // grant lookup: with the additions taken back, the strategy's ACL without the
-                // grant layer (inherited ACLs included) denies Configure, and with it allows
-                // Configure. Any other outcome means the change was not a grant's doing.
-                apply(item, reverted);
-                boolean onlyFromGrant = !GrantLayer.hasPermissionWithoutGrants(item, auth, Item.CONFIGURE)
-                        && item.hasPermission2(auth, Item.CONFIGURE);
-                if (!onlyFromGrant) {
-                    apply(item, now); // the change stands
-                    return;
-                }
-            } catch (IOException | RuntimeException e) {
-                // S-06: fail loudly. The change may still be in place, so it is recorded as a
-                // violation whose restore failed.
-                LOGGER.log(Level.SEVERE, "Could not revert the authorization property of '" + fullName
-                        + "' after a change by '" + user + "'", e);
-                Grant grant = namedGrant(user, item);
-                appendViolation(fullName, user, grant,
-                        "The authorization property was changed by a user whose Item/Configure may come only "
-                                + "from " + grantText(grant) + "; removing the added entries FAILED ("
-                                + e.getClass().getSimpleName() + "), so an administrator must check the item.");
-                return;
-            }
-            BASELINE.put(fullName, reverted);
+            revertGuardedAdditions(item, fullName, before, now, auth);
+        }
+    }
+
+    /**
+     * D-35b: a save by a user whose Item/Configure comes only from a grant loses what it added.
+     *
+     * @return {@code true} when the save was reverted or the attempt was recorded as failed;
+     *         {@code false} when the change stands (the D-58 check still follows)
+     */
+    private static boolean revertGrantOnlySave(AbstractItem item, String fullName, String before, String now,
+                                               Authentication auth) {
+        String user = auth.getName();
+        // D-35d (4): only what this save added is taken back. Entries missing from the saved
+        // property are never re-added, so a stale baseline cannot bring an entry back.
+        String reverted;
+        try {
+            reverted = withoutAdditions(item, before, now);
+        } catch (RuntimeException e) {
+            // S-06: never guess (restoring the baseline could bring removed entries back).
+            LOGGER.log(Level.SEVERE, "Cannot compare the authorization property of '" + fullName
+                    + "' with its baseline", e);
             Grant grant = namedGrant(user, item);
             appendViolation(fullName, user, grant,
-                    "The authorization property was changed by a user whose Item/Configure comes only "
-                            + "from " + grantText(grant) + "; the entries the change added were removed.");
-            // D-48: the saving user is told as well, if the save came through an HTTP request.
-            SelfGrantRevertFilter.flag(item);
-            LOGGER.warning(() -> "Reverted additions to the authorization property of '" + fullName
-                    + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant));
+                    "The authorization property was changed by a user holding " + grantText(grant)
+                            + ", and comparing it with the previous property FAILED ("
+                            + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+            return true;
+        }
+        if (reverted.equals(now)) {
+            return false; // nothing was added: entries were only removed, or the save changed nothing else
+        }
+        try {
+            // S-01, D-35d (1): "Configure only from a grant" is decided by permission, not by a
+            // grant lookup: with the additions taken back, the strategy's ACL without the
+            // grant layer (inherited ACLs included) denies Configure, and with it allows
+            // Configure. Any other outcome means the change was not a grant's doing.
+            apply(item, reverted);
+            boolean onlyFromGrant = !GrantLayer.hasPermissionWithoutGrants(item, auth, Item.CONFIGURE)
+                    && item.hasPermission2(auth, Item.CONFIGURE);
+            if (!onlyFromGrant) {
+                apply(item, now); // the change stands
+                return false;
+            }
+        } catch (IOException | RuntimeException e) {
+            // S-06: fail loudly. The change may still be in place, so it is recorded as a
+            // violation whose restore failed.
+            LOGGER.log(Level.SEVERE, "Could not revert the authorization property of '" + fullName
+                    + "' after a change by '" + user + "'", e);
+            Grant grant = namedGrant(user, item);
+            appendViolation(fullName, user, grant,
+                    "The authorization property was changed by a user whose Item/Configure may come only "
+                            + "from " + grantText(grant) + "; removing the added entries FAILED ("
+                            + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+            return true;
+        }
+        BASELINE.put(fullName, reverted);
+        Grant grant = namedGrant(user, item);
+        appendViolation(fullName, user, grant,
+                "The authorization property was changed by a user whose Item/Configure comes only "
+                        + "from " + grantText(grant) + "; the entries the change added were removed.");
+        // D-48: the saving user is told as well, if the save came through an HTTP request.
+        SelfGrantRevertFilter.flag(item);
+        LOGGER.warning(() -> "Reverted additions to the authorization property of '" + fullName
+                + "' by '" + user + "', whose Item/Configure comes only from " + grantText(grant));
+        return true;
+    }
+
+    /**
+     * D-58 (e2e-03 DEF-38): whoever saved (a build of any identity, SYSTEM, a script, another
+     * user), the entries this save added for a guarded principal of the item
+     * ({@link GuardedPrincipals}) are removed, and the removal is recorded as GRANT_VIOLATION.
+     * Only additions against the baseline are removed; nothing is ever re-added, and other
+     * entries and the inheritance strategy stay as saved. Exception-safe: a failure is logged and
+     * recorded, never thrown into the save.
+     */
+    private static void revertGuardedAdditions(AbstractItem item, String fullName, String before, String now,
+                                               Authentication auth) {
+        String saver = auth == null ? "unknown" : auth.getName();
+        GuardedPrincipals guarded = GuardedPrincipals.of(fullName);
+        if (guarded.isEmpty()) {
+            return;
+        }
+        List<String> removed = new ArrayList<>();
+        String reverted;
+        try {
+            reverted = withoutGuardedAdditions(item, before, now, guarded, removed);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Cannot compare the authorization property of '" + fullName
+                    + "' with its baseline for the grant holders' entries", e);
+            appendViolation(fullName, saver, null, "The authorization property was saved by '" + saver
+                    + "' while grant holders are guarded on this item, and comparing it with the previous property"
+                    + " FAILED (" + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+            return;
+        }
+        if (removed.isEmpty()) {
+            return;
+        }
+        String entries = String.join(", ", removed);
+        try {
+            apply(item, reverted);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Could not remove the entries " + entries + " from '" + fullName + "'", e);
+            appendViolation(fullName, saver, null, "The authorization property was saved by '" + saver
+                    + "' with entries for grant holders (" + entries + "); removing them FAILED ("
+                    + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+            return;
+        }
+        BASELINE.put(fullName, reverted);
+        Grant grant = null;
+        for (String user : guarded.getUsers()) {
+            grant = GrantService.get().findActiveGrant(user, fullName, null);
+            if (grant != null) {
+                break;
+            }
+        }
+        String detail = "The authorization property was saved by '" + saver + "' with entries for users who hold"
+                + " or recently held a permission window on this item (" + entries + "); those entries were"
+                + " removed.";
+        appendViolation(fullName, saver, grant, detail);
+        SelfGrantRevertFilter.flag(item); // D-48 for a save through an HTTP request
+        if (Stapler.getCurrentRequest2() == null && item instanceof Job) {
+            BuildLogNotice.print((Job<?, ?>) item, "[Batch Control] The authorization entries " + entries
+                    + " written to '" + fullName + "' were removed: they are for users who hold or recently held"
+                    + " a permission window on it. Ask an administrator for a permanent entry.");
+        }
+        LOGGER.warning(() -> "Removed authorization entries " + entries + " from '" + fullName + "', saved by '"
+                + saver + "' (D-58)");
+    }
+
+    /**
+     * D-58: {@code now} without the entries it added (against {@code before}) for a guarded
+     * principal: a USER entry naming a guarded user, a GROUP entry naming a guarded group, and an
+     * EITHER entry naming either. The inheritance strategy and every other entry stay as saved.
+     * Each removed entry is described in {@code removed} as {@code TYPE:sid (permission)}.
+     */
+    static String withoutGuardedAdditions(AbstractItem item, String before, String now, GuardedPrincipals guarded,
+                                          List<String> removed) {
+        Object nowProperty = parse(now);
+        if (nowProperty == null) {
+            return now;
+        }
+        Object beforeProperty = parse(before);
+        Map<Permission, Set<PermissionEntry>> beforeEntries = beforeProperty == null
+                ? Collections.emptyMap() : entries(beforeProperty);
+        Map<Permission, Set<PermissionEntry>> kept = new HashMap<>();
+        for (Map.Entry<Permission, Set<PermissionEntry>> e : entries(nowProperty).entrySet()) {
+            Set<PermissionEntry> previous = beforeEntries.getOrDefault(e.getKey(), Collections.emptySet());
+            for (PermissionEntry entry : e.getValue()) {
+                if (!previous.contains(entry) && isGuarded(entry, guarded)) {
+                    removed.add(entry.getType() + ":" + entry.getSid() + " (" + e.getKey().getId() + ")");
+                } else {
+                    kept.computeIfAbsent(e.getKey(), k -> new HashSet<>()).add(entry);
+                }
+            }
+        }
+        if (removed.isEmpty()) {
+            return now;
+        }
+        java.util.Collections.sort(removed);
+        if (beforeProperty == null && kept.isEmpty()) {
+            return "";
+        }
+        InheritanceStrategy inheritance = inheritance(nowProperty);
+        if (inheritance == null) {
+            inheritance = new InheritParentStrategy();
+        }
+        Object result;
+        if (item instanceof Job) {
+            AuthorizationMatrixProperty job = new AuthorizationMatrixProperty(new HashMap<>(), inheritance);
+            kept.forEach((permission, set) -> set.forEach(entry -> job.add(permission, entry)));
+            result = job;
+        } else {
+            com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty folder =
+                    new com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty(new HashMap<>());
+            folder.setInheritanceStrategy(inheritance);
+            kept.forEach((permission, set) -> set.forEach(entry -> folder.add(permission, entry)));
+            result = folder;
+        }
+        return Items.XSTREAM2.toXML(result);
+    }
+
+    private static boolean isGuarded(PermissionEntry entry, GuardedPrincipals guarded) {
+        String sid = entry.getSid();
+        switch (entry.getType()) {
+            case USER:
+                return guarded.isUser(sid);
+            case GROUP:
+                return guarded.isGroup(sid);
+            default: // EITHER
+                return guarded.isUser(sid) || guarded.isGroup(sid);
         }
     }
 
