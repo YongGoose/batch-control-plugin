@@ -14,9 +14,9 @@ import org.kohsuke.stapler.StaplerRequest2;
  * ({@link RunRequestService#requiresApprovalToRun}), because the queue gate refuses every such
  * rebuild. The rebuild plugin is an optional dependency; without it this extension is not loaded.
  *
- * <p>Only page views are affected: while a page is rendered (any request but a POST) the
- * validator withholds the rebuild action, so no screen links it. A POST to the build's
- * {@code rebuild/} endpoint still reaches the action, so a direct call is refused by the queue
+ * <p>Only page views are affected: while a page is rendered (any request but a POST to the
+ * rebuild action, FD-16) the validator withholds the rebuild action, so no screen links it. A
+ * POST to the build's {@code rebuild/} endpoint still reaches the action, so a direct call is refused by the queue
  * gate with its explanation and recorded (SPEC item 6, e2e-03 DEF-03), and code outside a web
  * request sees the action as before. With run control off, or on a job that does not require
  * approval, nothing changes.
@@ -33,6 +33,18 @@ public class ApprovalRebuildValidator extends RebuildValidator {
             return false;
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        return req != null && !"POST".equalsIgnoreCase(req.getMethod());
+        if (req == null) {
+            return false;
+        }
+        // e2e-04 FD-16: a POST that re-renders a page (a refused form showing the job sidebar) is a
+        // page view too; only a request to the rebuild action itself reaches the action, so the
+        // queue gate refuses and records it as before.
+        return !"POST".equalsIgnoreCase(req.getMethod()) || !targetsRebuild(req);
+    }
+
+    /** Whether the request goes to the rebuild plugin's action ({@code .../rebuild} or below it). */
+    private static boolean targetsRebuild(StaplerRequest2 req) {
+        String path = req.getRequestURI();
+        return path != null && (path.endsWith("/rebuild") || path.contains("/rebuild/"));
     }
 }
