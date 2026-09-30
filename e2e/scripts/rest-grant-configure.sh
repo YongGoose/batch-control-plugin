@@ -20,7 +20,7 @@ SCOPE="${1:-batch-daily}"
 echo "### T-E2E-03 / T-E2E-06  CONFIGURE grant, 1 minute"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 # --- 0a. revoke any grant that is already active.
@@ -48,7 +48,7 @@ status=$(bc_post requester "$OUT_DIR/grant-create.html" "/batch-control/grants/c
         --data-urlencode "actions=CONFIGURE" \
         --data-urlencode "durationMinutes=1" \
         --data-urlencode "reason=T-E2E-03 fix the cron expression of $SCOPE" \
-        --data-urlencode "approver=approver")
+        --data-urlencode "approvers=approver-1")
 echo "--- POST /batch-control/grants/create (requester) -> HTTP $status"
 
 # doCreate redirects to the list, so the id comes off the list page (newest first).
@@ -61,7 +61,7 @@ echo "grant request id = $GRANT_ID"
 if [ -z "$GRANT_ID" ]; then echo "e2e: no grant request id found on the list page" >&2; exit 1; fi
 
 # --- 2. approve it
-status=$(bc_post approver "$OUT_DIR/grant-approve.html" "/batch-control/grants/$GRANT_ID/approve" \
+status=$(bc_post approver-1 "$OUT_DIR/grant-approve.html" "/batch-control/grants/$GRANT_ID/approve" \
         --data-urlencode "comment=T-E2E-03 approved, 1 minute window")
 echo "--- POST /batch-control/grants/$GRANT_ID/approve (approver) -> HTTP $status"
 GRANT_APPROVED_AT=$(date +%s)

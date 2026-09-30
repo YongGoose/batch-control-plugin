@@ -23,7 +23,7 @@ set -euo pipefail
 echo "### D-30  blocked approval-marker re-use"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 count_reuse() {
@@ -43,14 +43,14 @@ before_pipeline=$(count_builds batch-pipeline)
 echo "before: $before_records MARKER_REUSE_BLOCKED records, batch-daily $before_daily builds, batch-pipeline $before_pipeline builds"
 
 # --- 1. one ordinary approved run
-json='{"reason":"D-30 baseline: one ordinary approved run","approver":"approver","parameter":[{"name":"DATE","value":"2026-04-04"},{"name":"MODE","value":"full"}]}'
+json='{"reason":"D-30 baseline: one ordinary approved run","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"2026-04-04"},{"name":"MODE","value":"full"}]}'
 status=$(bc_post requester "$OUT_DIR/reuse-create.html" "/job/batch-daily/batch-control/submit" \
         -D "$OUT_DIR/reuse-create.headers" --data-urlencode "json=$json")
 REQUEST_PATH=$(grep -i '^location:' "$OUT_DIR/reuse-create.headers" | tail -1 \
         | sed -e 's/^[Ll]ocation: *//' -e 's#^https*://[^/]*##' | tr -d '\r')
 REQUEST_ID=$(basename "$REQUEST_PATH")
 echo "--- POST submit (requester) -> HTTP $status, request $REQUEST_ID"
-status=$(bc_post approver "$OUT_DIR/reuse-approve.html" "${REQUEST_PATH}approve" \
+status=$(bc_post approver-1 "$OUT_DIR/reuse-approve.html" "${REQUEST_PATH}approve" \
         --data-urlencode "comment=D-30 baseline")
 echo "--- POST ${REQUEST_PATH}approve (approver) -> HTTP $status"
 
@@ -108,7 +108,7 @@ bc_get admin "$OUT_DIR/reuse-queue.json" "/queue/api/json?tree=items[task[name],
 echo "    queue: $(cat "$OUT_DIR/reuse-queue.json")"
 
 # --- 3. the attempts must be readable on the history screen, not just in the log
-status=$(bc_get approver "$OUT_DIR/reuse-history.html" "/batch-control/history/")
+status=$(bc_get approver-1 "$OUT_DIR/reuse-history.html" "/batch-control/history/")
 echo "--- GET /batch-control/history/ (approver, default Runs tab) -> HTTP $status"
 for needle in 'Blocked re-use of an approved-run marker' 'Attempted by' 'attempt(s)' "$REQUEST_ID"; do
   if grep -q -- "$needle" "$OUT_DIR/reuse-history.html"; then r=YES; else r=NO; fi

@@ -20,11 +20,12 @@ fi
 
 JENKINS_URL="http://localhost:${BC_PORT:-8080}"
 
-# Password for one of the three accounts.
+# Password for one of the accounts of casc/jenkins.yaml (checklist 1.2).
 bc_password() {
   case "$1" in
     admin)     printf '%s' "$BC_ADMIN_PASSWORD" ;;
-    approver)  printf '%s' "$BC_APPROVER_PASSWORD" ;;
+    approver|approver-1|approver-2) printf '%s' "$BC_APPROVER_PASSWORD" ;;
+    approver-disc|approver-unlisted|nobc|reqonly|auditor|manager|configurer) printf '%s' "$BC_OTHER_PASSWORD" ;;
     requester) printf '%s' "$BC_REQUESTER_PASSWORD" ;;
     *) echo "e2e: unknown account '$1'" >&2; return 2 ;;
   esac

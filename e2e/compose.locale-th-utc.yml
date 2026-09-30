@@ -1,0 +1,13 @@
+# Profile override for checklist B18-02/03: JVM default locale th_TH_TH (Thai digits)
+# and zone UTC. Usage: docker compose -f docker-compose.yml -f compose.locale-th-utc.yml up -d
+services:
+  jenkins:
+    environment:
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Xmx1536m
+        -Dhudson.model.DownloadService.noSignatureCheck=true
+        -Duser.timezone=UTC
+        -Duser.language=th -Duser.country=TH -Duser.variant=TH
+        -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true
+      TZ: "UTC"

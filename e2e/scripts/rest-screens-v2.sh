@@ -16,7 +16,7 @@ set -euo pipefail
 echo "### screens after the e2e-01 fixes"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 rows() {  # how many recent-run rows the decision screen rendered
@@ -24,14 +24,14 @@ rows() {  # how many recent-run rows the decision screen rendered
 }
 
 # --- a PENDING request to look at
-json='{"reason":"e2e-02 decision screen check: rerun after the feed was corrected","approver":"approver","parameter":[{"name":"DATE","value":"2026-05-05"},{"name":"MODE","value":"partial"}]}'
+json='{"reason":"e2e-02 decision screen check: rerun after the feed was corrected","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"2026-05-05"},{"name":"MODE","value":"partial"}]}'
 status=$(bc_post requester "$OUT_DIR/s2-create.html" "/job/batch-daily/batch-control/submit" \
         -D "$OUT_DIR/s2-create.headers" --data-urlencode "json=$json")
 REQUEST_PATH=$(grep -i '^location:' "$OUT_DIR/s2-create.headers" | tail -1 \
         | sed -e 's/^[Ll]ocation: *//' -e 's#^https*://[^/]*##' | tr -d '\r')
 echo "--- POST submit -> HTTP $status, $REQUEST_PATH"
 
-status=$(bc_get approver "$OUT_DIR/s2-decision.html" "$REQUEST_PATH")
+status=$(bc_get approver-1 "$OUT_DIR/s2-decision.html" "$REQUEST_PATH")
 echo "--- GET $REQUEST_PATH (approver, default) -> HTTP $status"
 # The size control changed shape in e98d211: it used to be a GET form (select +
 # "Show" button), and is now a row of links, because core's hudson-behavior.js
@@ -51,7 +51,7 @@ echo "    count sentence: $(grep -o 'Showing [^<]*' "$OUT_DIR/s2-decision.html" 
 # --- the size control and its allow-list
 for value in 10 20 50 100000 -1 abc ''; do
   body="$OUT_DIR/s2-runs-${value:-empty}.html"
-  status=$(bc_get approver "$body" "${REQUEST_PATH}?runs=$value")
+  status=$(bc_get approver-1 "$body" "${REQUEST_PATH}?runs=$value")
   # The current size is marked by aria-current (links) or selected="selected"
   # (the pre-e98d211 form); read whichever the running build emits.
   sel=$({ grep -o 'aria-current="true">[0-9]*<' "$body" || true; } | head -1 \
@@ -78,9 +78,9 @@ sed 's/EXECUTORS/0/' "$OUT_DIR/s2-executors.groovy" > "$OUT_DIR/s2-executors-0.g
 sed 's/EXECUTORS/2/' "$OUT_DIR/s2-executors.groovy" > "$OUT_DIR/s2-executors-2.groovy"
 echo "--- $(bc_script "$OUT_DIR/s2-executors-0.groovy") (holding the approved build in the queue)"
 
-status=$(bc_post approver "$OUT_DIR/s2-approve.html" "${REQUEST_PATH}approve" --data-urlencode "comment=e2e-02")
+status=$(bc_post approver-1 "$OUT_DIR/s2-approve.html" "${REQUEST_PATH}approve" --data-urlencode "comment=e2e-02")
 echo "--- POST approve -> HTTP $status"
-status=$(bc_get approver "$OUT_DIR/s2-approved.html" "$REQUEST_PATH")
+status=$(bc_get approver-1 "$OUT_DIR/s2-approved.html" "$REQUEST_PATH")
 if grep -q -e 'batch-control-approved-notice' \
         -e 'This request is approved and the run starts shortly' "$OUT_DIR/s2-approved.html"; then
   echo "    APPROVED notice right after approving: YES"
@@ -96,7 +96,7 @@ for _ in $(seq 1 30); do
   if grep -q '"building":false' "$OUT_DIR/s2-last.json"; then break; fi
   sleep 2
 done
-status=$(bc_get approver "$OUT_DIR/s2-executed.html" "$REQUEST_PATH")
+status=$(bc_get approver-1 "$OUT_DIR/s2-executed.html" "$REQUEST_PATH")
 echo "--- GET $REQUEST_PATH after execution -> HTTP $status"
 echo "    status now: $(grep -o '>APPROVED<\|>EXECUTED<' "$OUT_DIR/s2-executed.html" | sort -u | tr '\n' ' ')"
 echo "    executed run rendered as: $(grep -o '<th style="text-align: left;">Executed run</th>[^§]\{0,200\}' "$OUT_DIR/s2-executed.html" | grep -o '<a href="[^"]*">[^<]*</a>\|<td>[^<]*</td>' | head -1)"

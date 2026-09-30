@@ -1,0 +1,35 @@
+# Applied by hand from Manage Jenkins -> Configuration as Code -> Apply (checklist B19-03);
+# not loaded at boot (CASC_JENKINS_CONFIG points at jenkins.yaml only).
+jenkins:
+  authorizationStrategy:
+    batchControlRoleBased:
+      roles:
+        global:
+          - name: admin
+            permissions:
+              - Overall/Administer
+            entries:
+              - user: admin
+          - name: bc-requester
+            permissions:
+              - Overall/Read
+              - BatchControl/Request
+              - BatchControl/RequestGrant
+            entries:
+              - user: requester
+          - name: bc-approver
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+            entries:
+              - user: approver-1
+        items:
+          - name: team-all
+            pattern: "team(/.*)?"
+            permissions:
+              - Job/Read
+              - Job/Build
+            entries:
+              - user: requester

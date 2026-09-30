@@ -1,98 +1,133 @@
 # e2e environment
 
-A real Jenkins in Docker with the built plugin installed, three accounts and
-three sample jobs, used for the Phase 5 end-to-end pass.
+A real Jenkins in Docker with the built plugin installed, the accounts of
+`CHECKLIST.md` section 1.2, the sample jobs of section 1.3 and a mail sink,
+used for the end-to-end passes (`docs/reports/e2e-*.md`).
 
 ## Prerequisites
 
 1. `docker` and `docker compose`.
 2. The artifact: from the project root, `mvn -ntp clean package -DskipTests`
    leaves `target/batch-control.hpi`, which `docker-compose.yml` mounts.
-3. `cp .env.example .env` and set the three passwords.
+3. `cp .env.example .env` and set the four passwords.
+4. For the browser driver: Node.js and Google Chrome; `cd browser && npm install`
+   (Playwright drives the installed Chrome, no browser download).
 
 ## Lifecycle
 
 ```bash
-scripts/up.sh      # build the image (first run), start Jenkins, wait for /login
+scripts/up.sh      # build the image (first run), start Jenkins + mailpit, wait for /login
 scripts/down.sh    # stop, keep JENKINS_HOME
 scripts/reset.sh   # stop and delete JENKINS_HOME (accounts, jobs, store)
 ```
 
-Jenkins is published on `http://localhost:${BC_PORT:-8080}/`.
+Jenkins: `http://localhost:${BC_PORT:-8080}/`. Mail sink UI and API (mailpit):
+`http://localhost:${BC_MAIL_PORT:-8025}/`.
 
-## What the environment contains
+## How it is configured
+
+| What | Where | When |
+|---|---|---|
+| Accounts (with `<id>@e2e.local` addresses), **Batch Control: Matrix-based security** with every entry, Batch Control global configuration, Mailer (`mailpit:1025`), Jenkins URL | `casc/jenkins.yaml` (JCasC) | every boot, before jobs load |
+| Sample jobs, `team/` folder with per-item matrix, `agent-1`, `team-mb` multibranch over a local repository | `init.groovy.d/20-sample-jobs.groovy` | first boot only (existing items are left alone) |
+
+Because JCasC re-applies on every boot, a global setting or strategy changed in
+the UI is reset by a restart.
+
+Other profiles:
+
+| File | How | Used by |
+|---|---|---|
+| `casc/profile-role.yaml` | Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-role.yaml`; back with `/var/jenkins_casc/jenkins.yaml` | Batch Control: Role-Based Strategy (B19-03) |
+| `compose.locale-th-utc.yml` | `docker compose -f docker-compose.yml -f compose.locale-th-utc.yml up -d jenkins`; back with `docker compose up -d jenkins` | JVM locale th_TH_TH and zone UTC (B18-02/03) |
+
+The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
+import works, the README's permission names are right.
+
+## Accounts
 
 | Account | Permissions | Purpose |
 |---|---|---|
-| `admin` | Overall/Administer | administration screens, reading everything |
-| `approver` | Overall/Read, Job/Read, BatchControl Approve + ViewHistory. **No** BatchControl/Request | decides requests; proves a submit by a non-requester is refused |
-| `requester` | Overall/Read, Job/Read, Job/Build, BatchControl Request + RequestGrant. **No** Job/Configure | asks for runs and for JIT permissions; proves a grant is what adds Job/Configure |
+| `admin` | Overall/Administer | administration, self-approval |
+| `manager` | Overall/Read, Job/Read, BatchControl/Manage | configuration and revocation without Administer |
+| `requester` | Overall/Read, Job/Read, Job/Build, Request, RequestGrant. **No** Job/Configure | the normal requester |
+| `approver-1`, `approver-2` | Overall/Read, Job/Read, Approve, ViewHistory | listed approvers |
+| `approver-disc` | Overall/Read, Approve; Job/Discover on `team/` only | approver without job read access |
+| `approver-unlisted` | Overall/Read, Job/Read, Approve | holds Approve, not on the Approvers list |
+| `reqonly` | Overall/Read, Job/Read, Request (no Build) | D-38 refusal, section refusals |
+| `auditor` | Overall/Read, ViewHistory | history family only |
+| `nobc` | Overall/Read, Job/Read, Job/Build, no Batch Control permission | root action and job action absent |
+| `configurer` | Overall/Read, Job/Read, Job/Configure (standing), Request | standing-permission monitor, delete veto |
 
-The authorization strategy is the plugin's own delegating strategy wrapping
-matrix-auth's `ProjectMatrixAuthorizationStrategy`, which is what makes JIT
-change control observable.
+Passwords: `admin` = `BC_ADMIN_PASSWORD`, `requester` = `BC_REQUESTER_PASSWORD`,
+`approver-1`/`approver-2` = `BC_APPROVER_PASSWORD`, everyone else =
+`BC_OTHER_PASSWORD`. Global Approvers list: `approver-1, approver-2,
+approver-disc, admin`.
 
-| Job | Type | Batch Control | Notes |
-|---|---|---|---|
-| `batch-daily` | Freestyle, parameters `DATE` (string), `MODE` (choice full/partial) | approval required | the main run-request subject |
-| `batch-pipeline` | Pipeline | approval required | proves both job types are recorded |
-| `batch-cron` | Freestyle, `* * * * *` timer | not controlled | feeds the run dashboard with volume |
+## Jobs and activation
 
-Global configuration is applied once (marker file
-`$JENKINS_HOME/.batch-control-e2e-config-applied`) so changes made while testing
-survive a restart: run control and change control on, approvers
-`[approver, admin]`, grant duration options `1, 15, 30, 60` minutes — the
-1-minute option exists so the grant-expiry scenarios do not have to wait out the
-15-minute default.
+Run control is already on when the seed creates the jobs, so every job starts
+under the new-job lock (D-31/D-34) and **not activated** (SPEC 6a). The seed
+replaces the lock with each job's intended property (see the header of
+`20-sample-jobs.groovy`) but deliberately does not activate anything: nothing in
+a job's configuration can. A job that must run unattended is activated through
+the real ACTIVATE request flow (job page -> "Request activation" -> an approver
+approves); the pre-flight does this for `batch-cron` (checklist E-10).
 
-## Scenario scripts
+The Section E jobs (`batch-cbn`, `batch-rebuild`, `batch-nag`, `batch-token`,
+`batch-lock`, `batch-throttle`, `batch-authz`, `batch-jch`, `batch-up-target`,
+`batch-pt-source`) are created empty; each plugin is configured on them in the
+browser by `browser/section-e.mjs`, as an administrator would.
 
-All of them print the HTTP status and the relevant part of every response, and
-write raw responses to `out/` (git-ignored).
+## Screenshots are local only
 
-| Script | Rows |
-|---|---|
-| `rest-run-request.sh` | T-E2E-01 request -> approve -> build -> dashboard |
-| `rest-permission-denied.sh` | negative half: submit without Request, approve without Approve, history without ViewHistory |
-| `rest-grant-configure.sh` | T-E2E-03 / T-E2E-06 CONFIGURE grant, save, expiry |
-| `rest-screens.sh` | T-E2E-02 / T-E2E-05 / T-E2E-07 markup content |
-| `rest-csv-export.sh` | T-E2E-04 the four CSV exports |
-| `rest-approvers-empty.sh` | T-E2E-08 empty approver list warning |
-| `rest-dashboard.sh` | T-10-06 7-day window and 50-row paging |
-| `rest-blocked-build.sh` | direct build attempt refused with guidance |
-| `rest-admin-screens.sh` | global configuration, security screen, /manage |
+Screenshots are kept on the machine that ran the pass and are **never committed** (owner decision
+2026-09-30): `e2e/.gitignore` ignores every `screenshots/` directory and image files. The reports
+(`docs/reports/e2e-*.md`), `CHECKLIST.md` and `reaudit/results.jsonl` still name each capture
+(for example `run-3-verify/B5-01-refusal-page.png`) so that it can be looked up on that machine.
+The e2e-01/02 images that were committed earlier are no longer tracked.
 
-Helpers for a browser pass: `grant-setup.sh <job> <minutes>` arranges an active
-CONFIGURE grant, `approvers-clear.sh` / `approvers-restore.sh` toggle the empty
-approver list.
+## Browser driver (`browser/`)
 
-`lib.sh` holds the shared curl helpers (login with a cookie jar, crumb header on
-every POST) and `bc_script`, which runs Groovy on the admin script console. The
-script console is used only to read or arrange state that has no HTTP surface,
-never to perform the behaviour under test.
+`lib.mjs` opens a fresh context per account (real login form), outlines the
+relevant element in red and saves a clipped screenshot to
+`screenshots/run-3/<name>.png`; `api()` reads server state with basic auth;
+`groovy()` uses the script console only to arrange or read state. Scenario
+files: `preflight.mjs`, `section-a.mjs`, `section-e.mjs`. Evidence logs go to
+`out/` (git-ignored).
 
-## Scenario scripts added for e2e-02
+## Older scenario scripts
 
-| Script | Rows |
-|---|---|
-| `rest-marker-reuse.sh` | D-30 - a blocked approval-marker re-use is refused and audited |
-| `rest-new-job-default.sh` | D-31/D-32 - every newly created job starts approval-required |
-| `rest-incident-flow.sh` | the incident lifecycle: auto-registration -> ACKNOWLEDGED -> comment -> RESOLVED |
-| `rest-monitor-misconfig.sh` | `ConfigureWithoutGrantMonitor` really fires (breaks the configuration on purpose, then restores it) |
-| `rest-screens-v2.sh` | the screens that changed after e2e-01: recent-run table and its `?runs=` allow-list, executed-run link, approved-but-not-run notice, global-config label, grant remaining time |
+`scripts/rest-*.sh` (curl with crumb and cookie jar, raw output to `out/`) are
+from e2e-01/e2e-02; `lib.sh` knows every account above. `scripts/cli.sh <user>
+<command>` runs jenkins-cli inside the container (it needs Java 21).
 
-Extra helper: `executors.sh <count>` sets the controller's executor count; with 0
-an approved run stays queued, which is the only way to hold a request in
-APPROVED-but-not-yet-run long enough to look at its notice.
+`browser/audit-shots.mjs` lists screenshots that break the rule (no red box or a
+full-viewport capture); `browser/fix-shots.mjs` re-crops such a capture to its
+content and boxes it.
 
-Two things to know before changing the seed:
+## Re-audit driver (`browser/audit/`)
 
-* While run control is on, **D-31 gives every newly created job
-  `approvalRequired=true`, including the jobs this seed creates.** `batch-cron` and
-  `batch-failing` must run unattended, so `20-sample-jobs.groovy` removes the
-  property from them right after creation. Without that they simply never build,
-  and nothing in the log looks wrong.
-* `rest-grant-configure.sh` revokes every active grant before it starts (otherwise
-  a longer grant keeps the permission alive past its own 1-minute window and the
-  expiry assertion fails for the wrong reason) and restores the job description it
-  rewrites.
+The five-criterion re-audit of run 3 (checklist 0a) lives in `browser/audit/`:
+one script per section (`e1.mjs`, `e10.mjs`, `sa-read.mjs`, `a02.mjs` ... `b15.mjs`),
+`rec.mjs` appends one JSON line per row (`V G R C E`, verdict, defect) to
+`out/audit.jsonl` (copied to `reaudit/results.jsonl` at each commit; the last line
+per id wins) and `amend.mjs <id> '<json>'` re-appends a row with corrected cells.
+Run with `BC_SHOTS=run-3-audit` so `shot()` writes to `screenshots/run-3-audit/`
+(`lib.mjs` honours `BC_SHOTS`; the default is `run-3`). `audit/audit-shots.mjs` and
+`audit/fix-shots.mjs` are the screenshot checks for that directory.
+
+`init.groovy.d/20-sample-jobs.groovy` runs on the first boot only and leaves
+existing items alone, so a fix to a seed job does not reach a kept `JENKINS_HOME`:
+`batch-self` still had the pre-fix self-trigger guard in the re-audit and looped
+until its hold was approved; it was corrected by posting the seed's script to the
+existing job. After changing a seed job, either `scripts/reset.sh` or update the
+existing item.
+
+## Faked clock (`faketime/`)
+
+`faketime/Dockerfile` builds a throwaway variant of the e2e image with libfaketime, used once for checklist D-05
+(month boundary). Run it as a second, fresh Jenkins only while the main one is stopped, e.g. with
+`-e LD_PRELOAD=/usr/local/lib/libfaketime.so.1 -e "FAKETIME=@2026-10-31 14:56:30" -e FAKETIME_DONT_FAKE_MONOTONIC=1
+-e TZ=UTC` and `-Duser.timezone=Asia/Seoul` in `JAVA_OPTS` (the plugin clock is the JVM default zone), no volume for
+JENKINS_HOME, and remove it with `docker rm -f -v`. With `@` each process starts at that time and the clock runs on.

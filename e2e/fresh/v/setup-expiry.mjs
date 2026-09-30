@@ -1,0 +1,26 @@
+// Re-verification: file a pending run, activation and grant request that will expire (pendingTimeoutHours=1).
+import fs from 'node:fs';
+import { login, BASE, text, log, close, OUT } from '../lib.mjs';
+const ids = {};
+const { page } = await login('requester');
+await page.goto(`${BASE}/job/fresh-daily/batch-control/`);
+await page.fill('textarea[name="reason"]', 'verify: pending run request left to expire');
+await page.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
+await Promise.all([page.waitForLoadState('load'), page.click('button[name="Submit"]')]);
+ids.run = page.url().match(/requests\/([^/]+)/)[1];
+await page.goto(`${BASE}/job/fresh-secret/batch-control/activation`);
+await page.fill('textarea[name="reason"]', 'verify: activation left to expire');
+await page.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
+await Promise.all([page.waitForLoadState('load'), page.locator('#main-panel form button[name="Submit"]').first().click()]);
+ids.act = page.url().match(/activations\/([^/]+)/)[1];
+await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=fresh-secret`);
+const f = page.locator('form[action$="grants/create"]');
+await f.locator('input[name="actions"][value="CONFIGURE"]').setChecked(true, { force: true });
+await f.locator('textarea[name="reason"]').fill('verify: grant request left to expire');
+await f.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
+await Promise.all([page.waitForLoadState('load'), f.locator('button[name="Submit"]').click()]);
+ids.grant = (page.url().match(/grants\/(\d{8}-\d{6}-\w+)/) || [])[1] || ((await text(page)).match(/(\d{8}-\d{6}-\w+)\s+JOB: fresh-secret\s+CONFIGURE[^\n]*PENDING/) || [])[1];
+ids.at = new Date().toISOString();
+log('expiry setup', ids);
+fs.writeFileSync(`${OUT}/verify-expiry.json`, JSON.stringify(ids));
+await close();
