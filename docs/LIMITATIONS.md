@@ -502,16 +502,21 @@ code does on purpose.
     allowed, with a **Request activation** link (e2e-03 DEF-01).
 
 41. **Some re-run links cannot be hidden on a job that requires approval.**
-    Three entries are drawn for every user who holds the underlying
+    Four entries are drawn for every user who holds the underlying
     permission, and no extension point lets Batch Control remove them:
     Jenkins' own build link (relabelled **Direct Build (needs approval)** on
-    such a job), Pipeline's **Replay**, and naginator's **Retry**. They
+    such a job), Pipeline's **Replay**, Pipeline's own **Rebuild** on a
+    Pipeline build page (shown to users who may build the job, even without
+    `Run/Replay`), and naginator's **Retry**. They
     therefore stay visible, and a click is refused at queue entry with an
     explanation: the job page and the build page carry the approval notice,
     and the refusal page, or the other plugin's failure message next to that
-    notice (item 40), points to **Request Run**. Nothing is queued. The rebuild
-    plugin's **Rebuild** is different: that plugin lets Batch Control hide it,
-    so it does not appear on such a job. A user who may see the job but not
+    notice (item 40), points to **Request Run**. Nothing is queued. A refused
+    click on Pipeline's **Rebuild** shows the "Approval required" page and is
+    recorded in the change history like a refused Replay. The rebuild
+    plugin's **Rebuild** (a different link from a different plugin) is not
+    among these: that plugin lets Batch Control hide it, so it does not
+    appear on such a job. A user who may see the job but not
     build it is not offered the rerun form, and a rerun submitted anyway is
     refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
 

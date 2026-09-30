@@ -366,8 +366,9 @@ parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
 each with the last 100 console lines, and offers acknowledge, resolve, comment and
 a rerun request. The rerun request carries the failed build's original parameters
-as they were; they are fixed, not offered for editing, and only the reason and the
-approvers are filled in. Submitting it needs `BatchControl/Request` plus
+as they were; they are fixed, not offered for editing. The rerun form has only
+the approver checkboxes: the reason is generated from the incident and cannot be
+typed in. Submitting it needs `BatchControl/Request` plus
 `Item/Read` and `Item/Build` on the job, like any run request, and the Incidents
 screen itself needs `BatchControl/ViewHistory`, so the user needs all four; the
 typical roles in step 3 give that combination only to administrators unless you
@@ -551,13 +552,15 @@ and keep their schedules.
 
 **Some re-run links stay visible on a job that requires approval.** Jenkins'
 own build link (relabelled **Direct Build (needs approval)**), Pipeline's
-**Replay** and naginator's **Retry** are drawn for everyone with the underlying
-permission, and Batch Control has no way to remove them. A click is refused,
-nothing is queued, and the job and build pages explain why and point to
-**Request Run**. On a job without parameters, **Direct Build (needs approval)**
+**Replay**, Pipeline's own **Rebuild** on a Pipeline build page, and naginator's
+**Retry** are drawn for everyone with the underlying permission, and Batch
+Control has no way to remove them. A click is refused, nothing is queued, and
+the job and build pages explain why and point to **Request Run**; a refused
+Pipeline **Rebuild** shows the "Approval required" page and is recorded. On a job without parameters, **Direct Build (needs approval)**
 answers only with Jenkins' own toast, "Failed to schedule build. Reload the page
 and try again.", which wrongly suggests trying again, and that first click writes
-no record; use the approval notice on the job page and **Request Run** instead. The rebuild plugin's **Rebuild** can be hidden, and is.
+no record; use the approval notice on the job page and **Request Run** instead.
+The rebuild plugin's **Rebuild**, a different link, can be hidden, and is.
 
 **Other plugins' build buttons fail with their own generic message.** When
 Batch Control refuses a run started from naginator's Retry, Rebuild or Rebuild
