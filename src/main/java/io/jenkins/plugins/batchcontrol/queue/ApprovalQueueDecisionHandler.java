@@ -275,7 +275,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // way to run the job again is a new request. A retry that presents the consumed marker
             // never gets here; step 1 refuses it and writes MARKER_REUSE_BLOCKED (D-30).
             for (Cause cause : effective) {
-                if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause) {
+                // S-23-07: a copied ReplayCause also marks a person's run (a Replay is always manual).
+                if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause
+                        || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
                             + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
                     // Recorded, not only logged (SPEC item 6, e2e-03 DEF-03).
