@@ -9,6 +9,7 @@ import hudson.model.Result;
 import hudson.model.Run;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
@@ -27,6 +28,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import jenkins.model.Jenkins;
+import jenkins.model.ParameterizedJobMixIn;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.QueryParameter;
@@ -241,6 +243,24 @@ public class RequestItem implements ModelObject {
      */
     public boolean isAwaitingExecution() {
         return request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null;
+    }
+
+    /**
+     * D-55 (SPEC item 3): whether the request's job is disabled, so the decision form says to
+     * enable it first and offers no Approve button, and an approved request says that it waits.
+     * Resolved through the permission-aware {@link #findJob()} (P-09): for a viewer who may not
+     * read the job this is {@code false}, and the service's own refusal of the approval is what
+     * they see. Display only; the service enforces the refusal.
+     */
+    public boolean isJobDisabled() {
+        Job<?, ?> job = findJob();
+        return job instanceof ParameterizedJobMixIn.ParameterizedJob
+                && ((ParameterizedJobMixIn.ParameterizedJob<?, ?>) job).isDisabled();
+    }
+
+    /** The approved-but-not-run timeout, for the disabled-job notice. */
+    public int getApprovedRunTimeoutMinutes() {
+        return BatchControlGlobalConfiguration.get().getApprovedRunTimeoutMinutes();
     }
 
     /** Whether the current user is the requester (view gating only; the service re-checks). */

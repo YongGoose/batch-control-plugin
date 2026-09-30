@@ -35,7 +35,13 @@
               </j:choose>
             </td>
           </tr>
-          <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
+          <tr>
+            <th style="text-align: left;">Status</th>
+            <td>
+              ${it.request.status}
+              <j:if test="${it.awaitingExecution and it.jobDisabled}"> (waiting: the job is disabled)</j:if>
+            </td>
+          </tr>
           <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
           <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
@@ -209,15 +215,26 @@
         <j:set var="approveErrors" value="${it.formErrors('approve')}"/>
         <j:set var="rejectErrors" value="${it.formErrors('reject')}"/>
         <bc:formError errors="${approveErrors}"/>
-        <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/approve" name="approve">
-          <f:entry title="Comment (optional)">
-            <f:textarea name="comment" value="${approveErrors.value('comment')}"/>
-            <bc:fieldError errors="${approveErrors}" field="comment"/>
-          </f:entry>
-          <f:bottomButtonBar>
-            <f:submit value="Approve"/>
-          </f:bottomButtonBar>
-        </f:form>
+        <!-- D-55: no Approve while the job is disabled; Reject stays. The service refuses an
+             approval of a disabled job on its own, whatever this page shows. -->
+        <j:choose>
+          <j:when test="${it.jobDisabled}">
+            <div class="jenkins-alert jenkins-alert-warning" role="status">
+              This job is disabled. Enable it first, then approve.
+            </div>
+          </j:when>
+          <j:otherwise>
+            <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/approve" name="approve">
+              <f:entry title="Comment (optional)">
+                <f:textarea name="comment" value="${approveErrors.value('comment')}"/>
+                <bc:fieldError errors="${approveErrors}" field="comment"/>
+              </f:entry>
+              <f:bottomButtonBar>
+                <f:submit value="Approve"/>
+              </f:bottomButtonBar>
+            </f:form>
+          </j:otherwise>
+        </j:choose>
         <bc:formError errors="${rejectErrors}"/>
         <f:form method="post" action="${rootURL}/batch-control/requests/${it.id}/reject" name="reject">
           <f:entry title="Rejection comment (required)" description="Rejection is final for this request; a rejected request cannot be reopened.">
@@ -241,8 +258,18 @@
       <j:if test="${it.awaitingExecution}">
         <div id="batch-control-approved-notice" class="jenkins-alert jenkins-alert-info"
              style="margin-top: 1rem;">
-          This request is approved and the run starts shortly. Reload this page to see the status
-          change to EXECUTED and the build number appear.
+          <!-- D-55: an approval that cannot start because the job was disabled says so. -->
+          <j:choose>
+            <j:when test="${it.jobDisabled}">
+              This request is approved, but it is waiting because the job is disabled: the run
+              cannot start while the job is disabled. The approval expires
+              ${it.approvedRunTimeoutMinutes} minute(s) after it was given if no run has started.
+            </j:when>
+            <j:otherwise>
+              This request is approved and the run starts shortly. Reload this page to see the
+              status change to EXECUTED and the build number appear.
+            </j:otherwise>
+          </j:choose>
         </div>
       </j:if>
 
