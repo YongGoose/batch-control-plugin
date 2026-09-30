@@ -319,24 +319,137 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-64 (D-58a review): bob edits the script inside his window; after the window c1, who
-     * holds Item/Configure natively, saves the job through an HTTP request (the review). The
-     * build then writes the entry the reviewed script asks for, and it is kept without a record.
+     * T-02-64 (D-58b (3) review): bob plants the script inside his window; after the window c1
+     * (native Item/Configure) POSTs {@code <job>/batch-control/markReviewed}. A GUARD_REVIEWED
+     * record names c1, and the build's entry for bob is then kept without a GRANT_VIOLATION.
      */
     @Test
-    public void t_02_64_reviewByANativeConfigureHolderClearsTheGuard() throws Exception {
+    public void t_02_64_explicitReviewClearsTheGuard() throws Exception {
         grantBob();
         editScriptAsBob(entryFor("user", "bob"));
         afterWindow();
-        String reviewed = withDescription(current().getConfigFile().asString(), "reviewed");
-        int code = post("c1", reviewed);
-        assertTrue(code < 400, "fixture: c1's review save must succeed, got " + code);
+        int reviewsBefore = records("GUARD_REVIEWED").size();
+        int code = postForm("c1", current().getUrl() + "batch-control/markReviewed", null);
+        assertTrue(code < 400, "c1's explicit review must succeed, got " + code);
+        assertReviewedBy("c1", reviewsBefore);
         int violations = violations().size();
 
-        j.buildAndAssertSuccess(pipe);
+        j.buildAndAssertSuccess(current());
 
         assertTrue(entryExists("bob"), "after the review a Jenkinsfile widening is kept");
         assertEquals(violations, violations().size(), "no GRANT_VIOLATION after the review");
+    }
+
+    /** T-02-64b (D-58b (3)): the administrator reviews through the monitor; the widening is then kept. */
+    @Test
+    public void t_02_64b_administratorReviewThroughTheMonitor() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        afterWindow();
+        int reviewsBefore = records("GUARD_REVIEWED").size();
+        int code = postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=pipe");
+        assertTrue(code < 400, "the administrator's review must succeed, got " + code);
+        assertReviewedBy("admin", reviewsBefore);
+
+        j.buildAndAssertSuccess(current());
+        assertTrue(entryExists("bob"), "after the review a Jenkinsfile widening is kept");
+    }
+
+    /** T-02-69 (D-58b (3)): bob, whose Configure comes only from his grant, cannot mark the job reviewed (403). */
+    @Test
+    public void t_02_69_grantOnlyUserCannotMarkReviewed() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        int reviewsBefore = records("GUARD_REVIEWED").size();
+        assertEquals(403, postForm("bob", current().getUrl() + "batch-control/markReviewed", null),
+                "a user whose Configure comes from a grant must not review");
+        assertEquals(reviewsBefore, records("GUARD_REVIEWED").size(), "no GUARD_REVIEWED record");
+        afterWindow();
+        j.buildAndAssertSuccess(current());
+        assertNoEntryFor("bob");
+    }
+
+    /** T-02-70 (D-58b (3)): c1's description edit (an ordinary HTTP save) does not clear the state. */
+    @Test
+    public void t_02_70_descriptionEditDoesNotClearTheState() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        afterWindow();
+        assertTrue(post("c1", withDescription(current().getConfigFile().asString(), "edited")) < 400,
+                "fixture: c1's description edit must be saved");
+        j.buildAndAssertSuccess(current());
+        assertNoEntryFor("bob");
+    }
+
+    /**
+     * T-02-71 (D-58b (2)): bob, whose Run/Replay comes only from his CONFIGURE grant, replays build
+     * #1 with a script that gives him Job/Configure. The job becomes guarded: the replay's entry is
+     * reverted, and after the window a build of that script (kept by a script save) still has it
+     * reverted.
+     */
+    @Test
+    public void t_02_71_replayByAGrantHolderMarksTheJob() throws Exception {
+        WorkflowJob other = j.jenkins.createProject(WorkflowJob.class, "replay-me");
+        other.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        j.buildAndAssertSuccess(other);
+        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "replay-me", Arrays.asList(GrantAction.CONFIGURE));
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("bob");
+        List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
+        String script = entryFor("user", "bob");
+        params.add(new org.htmlunit.util.NameValuePair("mainScript", script));
+        params.add(new org.htmlunit.util.NameValuePair("json", "{\"mainScript\":" + jsonString(script) + "}"));
+        WebRequest req = new WebRequest(wc.createCrumbedUrl(other.getUrl() + "1/replay/run"), HttpMethod.POST);
+        req.setRequestParameters(params);
+        wc.getPage(req);
+        j.waitUntilNoActivity();
+        assertTrue(other.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
+        assertFalse(entryOn(other, "bob"), "the replay's entry must be reverted");
+
+        afterWindow();
+        other.setDefinition(new CpsFlowDefinition(script, true));
+        j.buildAndAssertSuccess(other);
+        assertFalse(entryOn(other, "bob"), "the replayed job stays guarded after the window");
+    }
+
+    /**
+     * T-02-72 (D-58b (1)): bob holds a FOLDER CONFIGURE grant on {@code outer}; {@code outer/inner/deep}
+     * is a Pipeline job two levels below whose script gives alice Job/Configure; the build's entry
+     * is reverted, because guarding covers descendants.
+     */
+    @Test
+    public void t_02_72_jobInANestedFolderIsGuarded() throws Exception {
+        com.cloudbees.hudson.plugins.folder.Folder outer = j.jenkins.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "outer");
+        com.cloudbees.hudson.plugins.folder.Folder inner = outer.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "inner");
+        WorkflowJob deep = inner.createProject(WorkflowJob.class, "deep");
+        deep.setDefinition(new CpsFlowDefinition(entryFor("user", "alice"), true));
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "outer", Arrays.asList(GrantAction.CONFIGURE));
+        j.buildAndAssertSuccess(deep);
+        assertFalse(entryOn(deep, "alice"), "a job two levels below the guarded folder is guarded");
+    }
+
+    /**
+     * T-02-73 (D-58b (4)): a script saves the guarded job with 101 AuthorizationMatrixProperty
+     * elements (the nonInheriting baseline plus 100, the last giving carol Job/Configure); after the revert exactly one authorization
+     * property remains and carol has no entry.
+     */
+    @Test
+    public void t_02_73_manyPropertiesEndAsOneMergedProperty() throws Exception {
+        baselineNonInheriting();
+        grantBob();
+        StringBuilder props = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            props.append(propertyXml(i == 99 ? "carol" : "admin"));
+        }
+        String xml = current().getConfigFile().asString();
+        String close = "</hudson.security.AuthorizationMatrixProperty>";
+        int at = xml.indexOf(close) + close.length();
+        assertTrue(at > close.length(), "fixture: the baseline property must be in config.xml: " + xml);
+        String many = xml.substring(0, at) + props + xml.substring(at); // the baseline plus 100 more: 101 in all
+        saveAsScript(many);
+
+        long count = current().getAllProperties().stream().filter(p -> p instanceof AuthorizationMatrixProperty).count();
+        assertEquals(1, count, "after the revert exactly one merged authorization property must remain");
+        assertNoEntryFor("carol");
     }
 
     /**
@@ -443,6 +556,45 @@ public class AuthorizationEntryGuardTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private int postForm(String user, String path, String query) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
+        java.net.URL url = new java.net.URL(wc.createCrumbedUrl(path).toExternalForm() + (query == null ? "" : "&" + query));
+        return wc.getPage(new WebRequest(url, HttpMethod.POST)).getWebResponse().getStatusCode();
+    }
+
+    /** Records of the type named {@code type} in the months of T0, of T0 plus 40 days, and of now. */
+    private static List<ChangeRecord> records(String type) {
+        java.util.Set<java.time.YearMonth> months = new java.util.LinkedHashSet<>(Arrays.asList(
+                java.time.YearMonth.from(T0.atZone(ZoneOffset.UTC)),
+                java.time.YearMonth.from(T0.plus(Duration.ofDays(40)).atZone(ZoneOffset.UTC)),
+                java.time.YearMonth.now()));
+        List<ChangeRecord> out = new java.util.ArrayList<>();
+        for (java.time.YearMonth month : months) {
+            for (ChangeRecord r : io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(month)) {
+                if (r.getType() != null && type.equals(r.getType().name()) && !out.contains(r)) {
+                    out.add(r);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void assertReviewedBy(String user, int before) {
+        List<ChangeRecord> reviews = records("GUARD_REVIEWED");
+        assertEquals(before + 1, reviews.size(), "the review must write one GUARD_REVIEWED record");
+        assertEquals(user, reviews.get(reviews.size() - 1).getUser(), "the GUARD_REVIEWED record must name the reviewer");
+    }
+
+    private static boolean entryOn(WorkflowJob job, String sid) {
+        AuthorizationMatrixProperty amp = job.getProperty(AuthorizationMatrixProperty.class);
+        return amp != null && amp.getGrantedPermissionEntries().values().stream()
+                .anyMatch(set -> set.stream().anyMatch(pe -> sid.equals(pe.getSid())));
+    }
+
+    private static String jsonString(String text) {
+        return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"";
+    }
 
     private void grantBob() throws Exception {
         StrategyFixtures.grant("bob", GrantScope.Type.JOB, "pipe", Arrays.asList(GrantAction.CONFIGURE));
