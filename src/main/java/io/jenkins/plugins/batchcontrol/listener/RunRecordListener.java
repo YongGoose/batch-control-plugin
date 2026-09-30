@@ -72,7 +72,7 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
     private static RunRecord buildRecord(Run<?, ?> run) {
         String jobFullName = run.getParent().getFullName();
         String runId = jobFullName + "#" + run.getNumber();
-        ApprovedCause approved = run.getCause(ApprovedCause.class);
+        ApprovedCause approved = ownApproval(run);
         Result result = run.getResult();
         RunRecord record = new RunRecord(runId, jobFullName, run.getNumber(),
                 classify(run, approved),
@@ -93,6 +93,29 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
         record.setParameters(IncidentService.maskedParameters(run));
         record.setAbortedBy(abortedBy(run));
         return record;
+    }
+
+    /**
+     * The run's {@link ApprovedCause} only when this run is that request's own execution (the
+     * request's {@code executedRunId} names it), else {@code null} (security-25 S-25-01). A Rebuild
+     * or a retry copies the cause of the build it repeats; such a run is its clicker's, not the
+     * earlier requester's, so its user, cause type and request link come from its own causes.
+     */
+    @edu.umd.cs.findbugs.annotations.CheckForNull
+    static ApprovedCause ownApproval(Run<?, ?> run) {
+        ApprovedCause approved = run.getCause(ApprovedCause.class);
+        if (approved == null) {
+            return null;
+        }
+        String runId = run.getParent().getFullName() + "#" + run.getNumber();
+        try {
+            RunRequest request = RunRequestService.get().load(approved.getRequestId());
+            return request != null && runId.equals(request.getExecutedRunId()) ? approved : null;
+        } catch (RuntimeException e) {
+            java.util.logging.Logger.getLogger(RunRecordListener.class.getName()).log(java.util.logging.Level.WARNING,
+                    "Could not read run request " + approved.getRequestId() + " for " + runId, e);
+            return null;
+        }
     }
 
     /**
@@ -149,7 +172,7 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
         if (run.getResult() != Result.SUCCESS) {
             return;
         }
-        ApprovedCause approved = run.getCause(ApprovedCause.class);
+        ApprovedCause approved = ownApproval(run);
         if (approved == null) {
             return;
         }
