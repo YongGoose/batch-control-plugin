@@ -346,8 +346,8 @@ code does on purpose.
     (`authenticated` included), is reverted and recorded as
     `GRANT_VIOLATION`. This applies to a build running as any account or as
     SYSTEM, to a script, and to another user's save. The only exception is a
-    save made through an HTTP request (the web UI, a `config.xml` POST or the
-    REST/CLI over HTTP) by a user who holds `Overall/Administer`, who is
+    save made through an HTTP request (the web UI, a `config.xml` POST, or
+    REST or CLI over HTTP) by a user who holds `Overall/Administer`, who is
     deliberately giving the entry. A build whose save was reverted names the
     reverted entries in its build log; a save made through an HTTP request is
     answered with HTTP 403 and a plain message saying which

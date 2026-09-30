@@ -475,7 +475,7 @@ the window ends. While change control is on, Batch Control therefore reverts and
 records any entry added or widened for a user who holds a grant on the item, or
 held one in the last 30 days, and for that user's groups, whoever saves it: a
 build, a script or another user. The only exception is a save made through an
-HTTP request (the web UI, a `config.xml` POST or the REST/CLI over HTTP) by a
+HTTP request (the web UI, a `config.xml` POST, or REST or CLI over HTTP) by a
 user who holds `Overall/Administer`. The build log names the reverted entries. Entries written for
 other accounts, for example an accomplice's, are outside this rule.
 
