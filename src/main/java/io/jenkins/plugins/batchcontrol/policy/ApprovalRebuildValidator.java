@@ -45,6 +45,7 @@ public class ApprovalRebuildValidator extends RebuildValidator {
     /** Whether the request goes to the rebuild plugin's action ({@code .../rebuild} or below it). */
     private static boolean targetsRebuild(StaplerRequest2 req) {
         String path = req.getRequestURI();
-        return path != null && (path.endsWith("/rebuild") || path.contains("/rebuild/"));
+        // S-28-13: the rebuild action of a build (a number or a permalink), not an item named "rebuild".
+        return path != null && path.matches(".*/(\\d+|last[A-Za-z]*Build)/rebuild(/.*)?");
     }
 }

@@ -213,6 +213,22 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         return io.jenkins.plugins.batchcontrol.security.GrantService.get().itemsChangedUnderGrant(50);
     }
 
+    /**
+     * D-58b (3): "Mark as reviewed" for one listed item. Administrators only; the item and
+     * everything below it leave the "changed under a grant" state and a GUARD_REVIEWED record is
+     * written. Answers 404 for an item that does not exist.
+     */
+    @RequirePOST
+    public HttpResponse doMarkReviewed(@org.kohsuke.stapler.QueryParameter String item) {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        hudson.model.Item target = item == null ? null : Jenkins.get().getItemByFullName(item);
+        if (target == null) {
+            return HttpResponses.error(404, "No item named '" + item + "'.");
+        }
+        io.jenkins.plugins.batchcontrol.security.GrantService.get().markReviewed(target);
+        return backToReferrer();
+    }
+
     /** The {@code target} of a {@link ChangeType#STRATEGY_CHANGE} record (D-52). */
     public static final String STRATEGY_CHANGE_TARGET = "authorization-strategy";
 

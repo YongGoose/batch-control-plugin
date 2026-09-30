@@ -123,6 +123,58 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
 
     @Override
     public boolean shouldSchedule(Queue.Task p, List<Action> actions) {
+        boolean decision = decide(p, actions);
+        if (decision) {
+            markReplayUnderGrant(p, actions);
+        }
+        return decision;
+    }
+
+    /** Restart from Stage's cause (pipeline-model-definition, optional), matched by name. */
+    private static final String RESTART_CAUSE_CLASS =
+            "org.jenkinsci.plugins.pipeline.modeldefinition.causes.RestartDeclarativePipelineCause";
+
+    /**
+     * D-58b (2), S-28-02: an accepted Replay, Pipeline Rebuild or Restart from Stage submitted by a
+     * person who holds an active grant covering the job and does not hold Item/Configure on it
+     * natively puts the job into the "changed under a grant" state: the replayed script is a
+     * configuration change that is never saved. Only reads the grant cache and, rarely, writes the
+     * grant file; never throws.
+     */
+    private static void markReplayUnderGrant(Queue.Task p, List<Action> actions) {
+        try {
+            if (!(p instanceof Job) || !BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+                return;
+            }
+            boolean rerun = false;
+            for (Cause cause : collectCauses(actions)) {
+                String name = cause.getClass().getName();
+                if (REPLAY_CAUSE_CLASS.equals(name) || RESTART_CAUSE_CLASS.equals(name)) {
+                    rerun = true;
+                    break;
+                }
+            }
+            if (!rerun) {
+                return;
+            }
+            org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+            if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
+                return;
+            }
+            Job<?, ?> job = (Job<?, ?>) p;
+            io.jenkins.plugins.batchcontrol.model.Grant grant = io.jenkins.plugins.batchcontrol.security.GrantService
+                    .get().findActiveGrant(auth.getName(), job.getFullName(), null);
+            if (grant != null && !io.jenkins.plugins.batchcontrol.security.GrantLayer
+                    .hasPermissionWithoutGrants(job, auth, hudson.model.Item.CONFIGURE)) {
+                io.jenkins.plugins.batchcontrol.security.GrantService.get().markChanged(grant.getId(),
+                        job.getFullName());
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Could not mark a replayed job as changed under a grant", e);
+        }
+    }
+
+    private boolean decide(Queue.Task p, List<Action> actions) {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
             return true;
         }

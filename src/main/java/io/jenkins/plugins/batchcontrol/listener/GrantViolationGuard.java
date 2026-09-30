@@ -104,7 +104,10 @@ public class GrantViolationGuard extends SaveableListener {
         }
         AbstractItem item = (AbstractItem) o;
         String fullName = item.getFullName();
-        synchronized (LOCK) {
+        // S-28-04: the item's own monitor, taken first, is the lock: a save already holds it (core
+        // Job/AbstractFolder save() is synchronized), and apply() needs it, so the order is always
+        // item monitor only and no two saves can wait on each other in opposite orders.
+        synchronized (item) {
             String now = propertyXml(item);
             int count = propertyCount(item);
             String remembered = BASELINE.put(fullName, now);
@@ -125,16 +128,15 @@ public class GrantViolationGuard extends SaveableListener {
                     && GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER);
             // Judged before this save updates the state, so a save cannot un-guard itself.
             boolean guarded = GrantService.get().isGuardedItem(fullName);
-            boolean reverted = false;
             if (before != null && (!before.equals(now) || count > 1)) {
-                reverted = person && holdsActiveGrant(auth.getName())
+                boolean handled = person && holdsActiveGrant(auth.getName())
                         && revertGrantOnlySave(item, fullName, before, now, auth);
-                if (!reverted && guarded && !adminHttp) {
-                    reverted = revertWidening(item, fullName, before, now, count, auth);
+                if (!handled && guarded && !adminHttp) {
+                    revertWidening(item, fullName, before, now, count, auth);
                 }
             }
-            // D-58a (5): a save that was reverted (in whole or in part) is never the review.
-            updateChangedState(item, fullName, auth, person, http && !reverted);
+            // D-58b (3): a save never counts as the review (GrantService#markReviewed does).
+            updateChangedState(item, fullName, auth, person);
         }
     }
 
@@ -144,8 +146,7 @@ public class GrantViolationGuard extends SaveableListener {
      * Overall/Administer holder is the review that takes it out. Judged on the saved state (after
      * any revert above). Never throws.
      */
-    private static void updateChangedState(AbstractItem item, String fullName, Authentication auth, boolean person,
-                                           boolean http) {
+    private static void updateChangedState(AbstractItem item, String fullName, Authentication auth, boolean person) {
         if (!person) {
             return;
         }
@@ -156,8 +157,6 @@ public class GrantViolationGuard extends SaveableListener {
                 if (grant != null) {
                     GrantService.get().markChanged(grant.getId(), fullName);
                 }
-            } else if (http && nativeConfigure) {
-                GrantService.get().clearChanged(fullName);
             }
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not update the changed-under-grant state of '" + fullName + "'", e);
@@ -447,7 +446,7 @@ public class GrantViolationGuard extends SaveableListener {
 
     private static boolean holdsActiveGrant(String user) {
         for (Grant grant : GrantService.get().listActive()) {
-            if (user.equals(grant.getUser())) {
+            if (io.jenkins.plugins.batchcontrol.model.Approvers.sameUser(user, grant.getUser())) { // S-28-15
                 return true;
             }
         }
@@ -618,8 +617,13 @@ public class GrantViolationGuard extends SaveableListener {
             if (item instanceof Job) {
                 Job<?, ?> job = (Job<?, ?>) item;
                 // S-27-02: every authorization property goes, not only the first.
-                for (int i = 0; i < 100 && job.getProperty(AuthorizationMatrixProperty.class) != null; i++) {
-                    job.removeProperty(AuthorizationMatrixProperty.class);
+                // S-28-01: every one of them, with no cap, before the single merged one is written.
+                @SuppressWarnings({"rawtypes", "unchecked"})
+                Job rawJob = job;
+                for (Object existing : new ArrayList<>(job.getAllProperties())) {
+                    if (existing instanceof AuthorizationMatrixProperty) {
+                        rawJob.removeProperty((JobProperty) existing);
+                    }
                 }
                 if (property != null) {
                     job.addProperty((JobProperty) property);
@@ -695,21 +699,20 @@ public class GrantViolationGuard extends SaveableListener {
                 return;
             }
             AbstractItem created = (AbstractItem) item;
-            synchronized (LOCK) {
-                Grant grant = creationGrant(created);
-                if (grant != null) {
-                    stripPayload(created, grant);
-                    if (created instanceof AbstractFolder) {
-                        for (AbstractItem inner : ((AbstractFolder<?>) created).getAllItems(AbstractItem.class)) {
-                            if (inner instanceof Job || inner instanceof AbstractFolder) {
-                                stripPayload(inner, grant);
-                            }
+            // S-28-04: no global lock here; each item is changed under its own monitor only.
+            Grant grant = creationGrant(created);
+            if (grant != null) {
+                stripPayload(created, grant);
+                if (created instanceof AbstractFolder) {
+                    for (AbstractItem inner : ((AbstractFolder<?>) created).getAllItems(AbstractItem.class)) {
+                        if (inner instanceof Job || inner instanceof AbstractFolder) {
+                            stripPayload(inner, grant);
                         }
                     }
                 }
-                guardCreationInGuardedFolder(created);
-                BASELINE.putIfAbsent(created.getFullName(), propertyXml(created));
             }
+            guardCreationInGuardedFolder(created);
+            BASELINE.putIfAbsent(created.getFullName(), propertyXml(created));
         }
 
         /**
@@ -747,6 +750,7 @@ public class GrantViolationGuard extends SaveableListener {
                 String user = auth.getName();
                 for (AbstractItem item : items) {
                     String fullName = item.getFullName();
+                    synchronized (item) { // S-28-04
                     if (propertyCount(item) > 0) {
                         try {
                             apply(item, "");
@@ -762,6 +766,7 @@ public class GrantViolationGuard extends SaveableListener {
                                     + " a guarded item with authorization entries; removing them FAILED ("
                                     + e.getClass().getSimpleName() + "), so an administrator must check the item.");
                         }
+                    }
                     }
                     GrantService.get().markChanged(grantId, fullName);
                 }
@@ -802,6 +807,12 @@ public class GrantViolationGuard extends SaveableListener {
         }
 
         private static void stripPayload(AbstractItem item, Grant grant) {
+            synchronized (item) {
+                stripPayloadLocked(item, grant);
+            }
+        }
+
+        private static void stripPayloadLocked(AbstractItem item, Grant grant) {
             String fullName = item.getFullName();
             if (propertyCount(item) == 0) {
                 BASELINE.put(fullName, "");

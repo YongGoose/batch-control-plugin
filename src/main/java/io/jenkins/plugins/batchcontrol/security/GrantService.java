@@ -245,7 +245,7 @@ public final class GrantService {
         }
         Instant now = BatchClock.now();
         for (Grant grant : grants()) {
-            if (grant.hasChanged(itemFullName)) {
+            if (changedAtOrAbove(grant, itemFullName)) {
                 return true;
             }
             if (grant.isActiveAt(now) && covers(grant, itemFullName)) {
@@ -255,13 +255,40 @@ public final class GrantService {
         return false;
     }
 
+    /**
+     * D-58b (1): whether the grant lists the item, or an item above it, as changed under it (a
+     * changed folder shapes what its children run: branch jobs of a multibranch project, jobs in a
+     * folder).
+     */
+    private static boolean changedAtOrAbove(Grant grant, String itemFullName) {
+        for (String changed : grant.getChangedItems()) {
+            if (itemFullName.equals(changed) || itemFullName.startsWith(changed + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item. */
     private static boolean covers(Grant grant, String itemFullName) {
         String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
-        return (grant.getScope() != null && grant.getScope().includes(itemFullName))
+        if (grant.getScope() != null && grant.getScope().includes(itemFullName)) {
+            return true;
+        }
+        if (scope != null && !scope.isEmpty()
                 // a folder's property is inherited below it, so a scope below the folder guards it
-                || (scope != null && scope.startsWith(itemFullName + "/"))
-                || grant.hasCreated(itemFullName);
+                && (scope.startsWith(itemFullName + "/")
+                        // D-58b (1): everything below a scope item (branch jobs of a multibranch
+                        // project in a JOB scope, for example)
+                        || itemFullName.startsWith(scope + "/"))) {
+            return true;
+        }
+        for (String created : grant.getCreatedItems()) {
+            if (itemFullName.equals(created) || itemFullName.startsWith(created + "/")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -276,7 +303,7 @@ public final class GrantService {
         Instant now = BatchClock.now();
         String covering = null;
         for (Grant grant : grants()) {
-            if (grant.hasChanged(itemFullName)) {
+            if (changedAtOrAbove(grant, itemFullName)) {
                 return grant.getId();
             }
             if (covering == null && grant.isActiveAt(now) && covers(grant, itemFullName)) {
@@ -329,18 +356,35 @@ public final class GrantService {
             store.saveGrant(grant);
             replaceInCache(grant);
         } catch (RuntimeException e) {
-            LOGGER.log(java.util.logging.Level.WARNING, "Could not mark '" + itemFullName
-                    + "' as changed under grant " + grantId, e);
+            // S-28-06: a lost mark would let the item go unguarded once the window ends.
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not mark '" + itemFullName
+                    + "' as changed under grant " + grantId + "; an administrator must check it", e);
         }
     }
 
     /**
-     * D-58a: the review. {@code itemFullName} was saved through the web by an administrator or a
-     * native Configure holder, so it leaves the "changed under a grant" state (the item itself
-     * only, not what is below it).
+     * D-58b (3): the deliberate review. The item and everything below it leave the "changed under a
+     * grant" state, and a {@code GUARD_REVIEWED} change record names the reviewer. The caller must
+     * hold Item/Configure on the item natively (asked with every grant layer off) or
+     * Overall/Administer; a user whose permission on the item comes from a grant cannot review it.
+     *
+     * @throws org.springframework.security.access.AccessDeniedException (AccessDeniedException3)
+     *         when the caller may not review the item
      */
-    public synchronized void clearChanged(String itemFullName) {
-        rewriteChanged(itemFullName, null, false);
+    public void markReviewed(hudson.model.Item item) {
+        org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+        if (!GrantLayer.hasPermissionWithoutGrants(item, auth, hudson.model.Item.CONFIGURE)
+                && !GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER)) {
+            throw new hudson.security.AccessDeniedException3(auth, hudson.model.Item.CONFIGURE);
+        }
+        String fullName = item.getFullName();
+        synchronized (this) {
+            rewriteChanged(fullName, null, true);
+        }
+        store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
+                "Marked as reviewed by '" + auth.getName() + "': the item and everything below it are no longer"
+                        + " guarded as changed under a permission window."));
+        LOGGER.info(() -> "'" + fullName + "' marked as reviewed by '" + auth.getName() + "'");
     }
 
     /**
