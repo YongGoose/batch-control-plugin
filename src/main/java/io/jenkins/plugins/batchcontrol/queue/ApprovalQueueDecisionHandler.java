@@ -495,9 +495,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 + "' (" + notActivated + ")");
         // e2e-04 FD-07: a refusal after a HOLD is not merged into a record written before the job
         // was activated: the time the activation last ended is part of the coalescing key.
-        io.jenkins.plugins.batchcontrol.model.ActivationState state = ActivationService.get().getState(subject);
-        String epoch = state == null || state.getDeactivatedAt() == null ? "never-activated"
-                : "held-" + state.getDeactivatedAt().toEpochMilli();
+        // S-25-03: from the activation cache (no disk read under the queue lock); never throws.
+        String epoch = ActivationService.get().holdEpoch(subject);
         recordTriggerBlocked(job, kind, "activation", "Blocked " + what + " of job '" + job.getFullName()
                 + "' - " + notActivated + "; an approved activation request puts it into service", epoch);
         return false;

@@ -68,9 +68,17 @@ public final class ActivationService {
     private final ReentrantLock lock = new ReentrantLock();
     private final Store store = Store.get();
 
-    /** A cached state: whether it is activated and the directory marker it is bound to. */
-    private record Cached(boolean activated, String identity) {
-        static final Cached NOT_ACTIVATED = new Cached(false, null);
+    /**
+     * A cached state: whether it is activated, the directory marker it is bound to, and when the
+     * activation last ended (S-25-03: read by the queue gate from memory, never from disk).
+     */
+    private record Cached(boolean activated, String identity, Long deactivatedAtMillis) {
+        static final Cached NOT_ACTIVATED = new Cached(false, null, null);
+
+        static Cached of(ActivationState state) {
+            java.time.Instant ended = state.getDeactivatedAt();
+            return new Cached(state.isActivated(), state.getItemIdentity(), ended == null ? null : ended.toEpochMilli());
+        }
     }
 
     /** Item full name to its cached state, for the current Jenkins session only. */
@@ -109,8 +117,7 @@ public final class ActivationService {
             long before = generation.get();
             try {
                 ActivationState state = store.loadActivationState(fullName);
-                cached = state == null ? Cached.NOT_ACTIVATED
-                        : new Cached(state.isActivated(), state.getItemIdentity());
+                cached = state == null ? Cached.NOT_ACTIVATED : Cached.of(state);
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, e, () -> "Could not read the activation state of '" + fullName
                         + "'; treating it as not activated");
@@ -134,6 +141,29 @@ public final class ActivationService {
             }
         }
         return true;
+    }
+
+    /**
+     * e2e-04 FD-07, security-25 S-25-03: the part of a refusal record's coalescing key that changes
+     * when the item's activation ends: {@code never-activated}, {@code held-<epoch millis>}, or
+     * {@code unknown} when the state cannot be read. Answered from the activation cache that
+     * {@link #isActivated(Item)} fills, so the queue gate does not read the disk; never throws.
+     */
+    public String holdEpoch(Item item) {
+        try {
+            Cached cached = cache().get(item.getFullName());
+            if (cached == null) {
+                isActivated(item); // fills the cache (or fails closed and leaves it empty)
+                cached = cache().get(item.getFullName());
+            }
+            if (cached == null) {
+                return "unknown";
+            }
+            return cached.deactivatedAtMillis() == null ? "never-activated" : "held-" + cached.deactivatedAtMillis();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not tell when the activation of '" + item.getFullName() + "' ended", e);
+            return "unknown";
+        }
     }
 
     /** Job form of {@link #isActivated(Item)}. */
@@ -720,7 +750,7 @@ public final class ActivationService {
         // item not activated in memory, never activated.
         setCached(state.getJobFullName(), Cached.NOT_ACTIVATED);
         store.saveActivationState(state);
-        setCached(state.getJobFullName(), new Cached(state.isActivated(), state.getItemIdentity()));
+        setCached(state.getJobFullName(), Cached.of(state));
     }
 
     /**
