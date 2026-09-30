@@ -209,7 +209,8 @@ public final class NotificationDispatcher {
     private static List<String> endDetails(@CheckForNull String reason) {
         List<String> details = new ArrayList<>();
         if (reason != null && !reason.trim().isEmpty()) {
-            details.add("Reason: " + reason.trim());
+            // e2e-04 UX-18: labelled apart from the request's own "Reason:" block of the mail.
+            details.add("Why it ended: " + reason.trim());
         }
         return details;
     }

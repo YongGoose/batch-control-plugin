@@ -116,5 +116,16 @@ public enum ChangeType {
      * {@code target} is {@code authorization-strategy}, {@code detail} names the strategy classes
      * before and after.
      */
-    STRATEGY_CHANGE
+    STRATEGY_CHANGE,
+    /**
+     * An administrator or a native Configure holder marked an item as reviewed (D-58b): it and
+     * everything below it left the "changed under a grant" state. {@code user} is the reviewer.
+     */
+    GUARD_REVIEWED,
+    /**
+     * A run was started by a Replay, Pipeline Rebuild or Restart from Stage by a user whose
+     * permission for it came only from a grant (D-58c). {@code target} is the job, {@code user}
+     * the submitter, {@code grantId} the grant; the detail names the run.
+     */
+    REPLAY_UNDER_GRANT
 }

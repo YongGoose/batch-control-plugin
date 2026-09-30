@@ -13,6 +13,26 @@
 
 ---
 
+## 2026-09-30 — DEF-38 per-item authorization guard and final e2e defects (part 6); #50 merged
+- #50 merged (part 5; GitHub `build` passed 588 tests).
+- The final re-verification on 80e5271 passed everything that had been open, except C-08, which failed on DEF-38 (High).
+  - DEF-38: a Pipeline `properties` step running as any build identity could write a permanent self-grant for a Configure window holder.
+  - The owner ruled per-item guarding over per-principal guarding (D-58, then D-58a).
+  - security-27..30 closed the remaining gaps: descendants, Replay/Rebuild/Restart from Stage marking and explicit "Mark as reviewed" (D-58b); runs replayed under a grant stay untrusted, and their re-runs inherit the marker (D-58c).
+  - The grant file gained an optional `changedItems` list (ARCHITECTURE 5).
+- Also in this part:
+  - Jenkins Security Scan alerts 31-33 (role form checks now require permission);
+  - e2e-04 re-verification defects FD-14/15/16 and DD-05/06;
+  - UX-18/19;
+  - D-05, verified with a faked clock.
+- Reviews:
+  - security-27 (3 BLOCKER / 3 HIGH);
+  - security-28 (3 BLOCKER);
+  - security-29 (1 MEDIUM);
+  - security-30 (1 BLOCKER / 1 MEDIUM) — all fixed;
+  - security-31: 0/0/0/4/5. The LOW items are follow-ups.
+- Gate at d0f243d: 620 tests, 0 failures, SpotBugs 0.
+
 ## 2026-09-30 — fresh-eyes e2e (e2e-04) defects fixed (part 5); #49 merged
 - #49 merged (part 4, GitHub `build` 566 tests green).
 - An independent fresh-eyes e2e pass (docs/reports/e2e-04.md, on main 99be699) found 13 defects FD-01..13 and 4 doc defects DD-01..04. The core flows held: an approved run executes once, activation, grant windows, and the self-grant refusal. Rulings D-52..D-57. Part 5 fixes:

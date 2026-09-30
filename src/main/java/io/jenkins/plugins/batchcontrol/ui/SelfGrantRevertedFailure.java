@@ -15,10 +15,12 @@ import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 
 /**
- * Tells the saving user that the self-grant guard reverted the authorization part of their save
- * (SPEC item 2, D-48): their Configure permission on the item comes only from a temporary grant,
- * which cannot add permanent permission entries, so the item's authorization entries were
- * restored while the rest of the save was kept.
+ * Tells the saving user that the guard reverted the authorization part of their save (SPEC item 2,
+ * D-48, D-58): the save added entries for a user who holds or recently held a permission window
+ * on the item (or for that user's groups), which covers the saver's own entry when their
+ * Configure comes only from such a window. The item's authorization entries were restored while
+ * the rest of the save was kept. One wording covers both cases, because the refusal is built
+ * from the item alone.
  *
  * <p>Answers HTTP 403. A browser (a request that accepts {@code text/html}) gets
  * {@code index.jelly} with the standard layout; any other caller (a {@code config.xml} POST,
@@ -40,10 +42,11 @@ public class SelfGrantRevertedFailure extends Failure {
     }
 
     private static String message(String itemFullName) {
-        return "The authorization entries of '" + itemFullName + "' were not kept, because your"
-                + " Configure permission comes only from a temporary grant, which cannot add"
-                + " permanent permission entries. Your other changes were saved. Ask an"
-                + " administrator for a permanent entry.";
+        return "Some authorization entries of '" + itemFullName + "' were not kept: they would give"
+                + " lasting permissions to a user who holds or recently held a temporary permission"
+                + " window (for example you, if your Configure permission comes only from such a"
+                + " window). Your other changes were saved. Ask an administrator if the entry is"
+                + " really needed.";
     }
 
     public String getItemFullName() {

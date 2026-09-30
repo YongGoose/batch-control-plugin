@@ -74,6 +74,8 @@ public final class GrantService {
 
     private synchronized void clearCache() {
         cache = null;
+        markedRuns.clear();
+        markedRunsLoaded = false;
     }
 
     /**
@@ -231,6 +233,469 @@ public final class GrantService {
         return grant != null ? grant : findCreatingGrant(user, itemFullName, itemRootDir);
     }
 
+    // ---------------------------------------------------------------- D-58a guarded items
+
+    /**
+     * D-58a: whether the item is guarded: covered by an active grant (its scope includes the item,
+     * the scope lies below the item when the item is a folder, or the item was created through
+     * it), or changed under a grant (active or ended) and not reviewed since. Answered from the
+     * in-memory grant cache.
+     */
+    public synchronized boolean isGuardedItem(String itemFullName) {
+        if (itemFullName == null || itemFullName.isEmpty()) {
+            return false;
+        }
+        Instant now = BatchClock.now();
+        for (Grant grant : grants()) {
+            if (changedAtOrAbove(grant, itemFullName)) {
+                return true;
+            }
+            if (grant.isActiveAt(now) && covers(grant, itemFullName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** D-58c: at most this many marked runs are listed per item. */
+    static final int MAX_MARKED_RUNS = 50;
+
+    /** At most this many REPLAY_UNDER_GRANT records are read to rebuild the index after a restart. */
+    static final int MARKED_RUN_RECORDS = 5_000;
+
+    /**
+     * D-58c (S-30-05): job full name to the ids of its marked runs, newest first. Filled when a
+     * marked run starts, and once per session from the REPLAY_UNDER_GRANT change records (bounded,
+     * no build is loaded); never computed while a map lock is held.
+     */
+    private final java.util.Map<String, List<String>> markedRuns = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private volatile boolean markedRunsLoaded;
+
+    /** The marked-run index follows a rename or move, and forgets a deleted item ({@code null}). */
+    private void relocateMarkedRuns(String oldFullName, @CheckForNull String newFullName) {
+        for (String job : new ArrayList<>(markedRuns.keySet())) {
+            if (!job.equals(oldFullName) && !job.startsWith(oldFullName + "/")) {
+                continue;
+            }
+            List<String> runs = markedRuns.remove(job);
+            if (runs == null || newFullName == null) {
+                continue;
+            }
+            String moved = newFullName + job.substring(oldFullName.length());
+            List<String> renamed = new ArrayList<>();
+            for (String runId : runs) {
+                renamed.add(moved + runId.substring(job.length()));
+            }
+            markedRuns.put(moved, renamed);
+        }
+    }
+
+    /** D-58c: a marked run started (called by the run listener). */
+    public void noteMarkedRun(String jobFullName, String runId) {
+        markedRuns.compute(jobFullName, (job, runs) -> prepend(runs, runId));
+    }
+
+    private static List<String> prepend(List<String> runs, String runId) {
+        List<String> updated = new ArrayList<>();
+        updated.add(runId);
+        if (runs != null) {
+            for (String existing : runs) {
+                if (updated.size() >= MAX_MARKED_RUNS) {
+                    break;
+                }
+                if (!existing.equals(runId)) {
+                    updated.add(existing);
+                }
+            }
+        }
+        return updated;
+    }
+
+    /**
+     * D-58c: the ids ({@code job#number}) of the runs of the item (a job, or the jobs below a
+     * folder) that were replayed under a grant, at most {@value #MAX_MARKED_RUNS}. Served from the
+     * in-memory index; no build is loaded.
+     */
+    public List<String> markedRuns(hudson.model.Item item) {
+        loadMarkedRunsOnce();
+        List<String> out = new ArrayList<>();
+        String fullName = item.getFullName();
+        List<String> own = markedRuns.get(fullName);
+        if (own != null) {
+            out.addAll(own);
+        }
+        if (item instanceof hudson.model.ItemGroup) {
+            for (java.util.Map.Entry<String, List<String>> e : markedRuns.entrySet()) {
+                if (out.size() >= MAX_MARKED_RUNS) {
+                    break;
+                }
+                if (e.getKey().startsWith(fullName + "/")) {
+                    out.addAll(e.getValue());
+                }
+            }
+        }
+        return out.size() > MAX_MARKED_RUNS ? new ArrayList<>(out.subList(0, MAX_MARKED_RUNS)) : out;
+    }
+
+    /**
+     * Rebuilds the index once per session from the REPLAY_UNDER_GRANT records of the retained months
+     * (the record's target is the job, its detail starts with "Run #n"). Bounded by
+     * {@value #MARKED_RUN_RECORDS} records; a failure leaves the index as it is.
+     */
+    private void loadMarkedRunsOnce() {
+        if (markedRunsLoaded) {
+            return;
+        }
+        synchronized (markedRuns) {
+            if (markedRunsLoaded) {
+                return;
+            }
+            markedRunsLoaded = true;
+            try {
+                io.jenkins.plugins.batchcontrol.store.RecordPage<ChangeRecord> page = store.pageChangeRecords(
+                        store.listStoredMonths(), r -> r.getType() == ChangeType.REPLAY_UNDER_GRANT,
+                        0, MARKED_RUN_RECORDS, MARKED_RUN_RECORDS * 20);
+                List<ChangeRecord> records = new ArrayList<>(page.getItems());
+                java.util.Collections.reverse(records); // oldest first, so prepend leaves the newest first
+                for (ChangeRecord record : records) {
+                    String detail = record.getDetail();
+                    if (record.getTarget() == null || detail == null || !detail.startsWith("Run #")) {
+                        continue;
+                    }
+                    int end = 5;
+                    while (end < detail.length() && Character.isDigit(detail.charAt(end))) {
+                        end++;
+                    }
+                    if (end > 5) {
+                        String runId = record.getTarget() + "#" + detail.substring(5, end);
+                        markedRuns.compute(record.getTarget(), (job, runs) -> runs != null && runs.contains(runId)
+                                ? runs : prepend(runs, runId));
+                    }
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not rebuild the index of runs replayed under a grant", e);
+            }
+        }
+    }
+
+    /**
+     * D-58b: whether the item, or an item above it, is in the "changed under a grant" state (any
+     * grant, active or ended). Served from the in-memory grant cache, for page rendering.
+     */
+    public synchronized boolean isChangedUnderGrant(hudson.model.Item item) {
+        if (item == null) {
+            return false;
+        }
+        String fullName = item.getFullName();
+        for (Grant grant : grants()) {
+            if (changedAtOrAbove(grant, fullName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * D-58b (1): whether the grant lists the item, or an item above it, as changed under it (a
+     * changed folder shapes what its children run: branch jobs of a multibranch project, jobs in a
+     * folder).
+     */
+    private static boolean changedAtOrAbove(Grant grant, String itemFullName) {
+        for (String changed : grant.getChangedItems()) {
+            if (itemFullName.equals(changed) || itemFullName.startsWith(changed + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item. */
+    private static boolean covers(Grant grant, String itemFullName) {
+        String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
+        if (grant.getScope() != null && grant.getScope().includes(itemFullName)) {
+            return true;
+        }
+        if (scope != null && !scope.isEmpty()
+                // a folder's property is inherited below it, so a scope below the folder guards it
+                && (scope.startsWith(itemFullName + "/")
+                        // D-58b (1): everything below a scope item (branch jobs of a multibranch
+                        // project in a JOB scope, for example)
+                        || itemFullName.startsWith(scope + "/"))) {
+            return true;
+        }
+        for (String created : grant.getCreatedItems()) {
+            if (itemFullName.equals(created) || itemFullName.startsWith(created + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * D-58a: the id of a grant that makes the item guarded (one that lists it as changed, else an
+     * active one covering it), or {@code null} when it is not guarded.
+     */
+    @CheckForNull
+    public synchronized String guardingGrantId(String itemFullName) {
+        if (itemFullName == null || itemFullName.isEmpty()) {
+            return null;
+        }
+        Instant now = BatchClock.now();
+        String covering = null;
+        for (Grant grant : grants()) {
+            if (changedAtOrAbove(grant, itemFullName)) {
+                return grant.getId();
+            }
+            if (covering == null && grant.isActiveAt(now) && covers(grant, itemFullName)) {
+                covering = grant.getId();
+            }
+        }
+        return covering;
+    }
+
+    /** D-58a: the items in the "changed under a grant" state, sorted, at most {@code limit}. */
+    public synchronized List<String> itemsChangedUnderGrant(int limit) {
+        java.util.TreeSet<String> items = new java.util.TreeSet<>();
+        for (Grant grant : grants()) {
+            items.addAll(grant.getChangedItems());
+        }
+        List<String> out = new ArrayList<>();
+        for (String item : items) {
+            if (out.size() >= limit) {
+                break;
+            }
+            out.add(item);
+        }
+        return out;
+    }
+
+    /**
+     * D-58a: notes that {@code itemFullName} was changed under {@code grantId} (a save or creation
+     * by the holder while their permission came only from the grant), persisting the grant. A
+     * store failure is logged; it never fails the save.
+     */
+    public synchronized void markChanged(String grantId, String itemFullName) {
+        if (grantId == null || itemFullName == null || itemFullName.isEmpty()) {
+            return;
+        }
+        for (Grant cached : grants()) {
+            if (cached.getId().equals(grantId) && cached.hasChanged(itemFullName)) {
+                return; // already marked
+            }
+        }
+        try {
+            Grant grant = store.loadGrant(grantId);
+            if (grant == null) {
+                return;
+            }
+            List<String> items = grant.getChangedItems();
+            if (!items.contains(itemFullName)) {
+                items.add(itemFullName);
+            }
+            grant.setChangedItems(items);
+            store.saveGrant(grant);
+            replaceInCache(grant);
+        } catch (RuntimeException e) {
+            // S-28-06: a lost mark would let the item go unguarded once the window ends.
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not mark '" + itemFullName
+                    + "' as changed under grant " + grantId + "; an administrator must check it", e);
+        }
+    }
+
+    /**
+     * D-58b (3): the deliberate review. The item and everything below it leave the "changed under a
+     * grant" state, and a {@code GUARD_REVIEWED} change record names the reviewer. The caller must
+     * hold Item/Configure on the item natively (asked with every grant layer off) or
+     * Overall/Administer; a user whose permission on the item comes from a grant cannot review it.
+     *
+     * @throws org.springframework.security.access.AccessDeniedException (AccessDeniedException3)
+     *         when the caller may not review the item
+     */
+    public void markReviewed(hudson.model.Item item) {
+        org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+        if (!mayReview(item, auth)) {
+            throw new hudson.security.AccessDeniedException3(auth, hudson.model.Item.CONFIGURE);
+        }
+        String fullName = item.getFullName();
+        // S-29-02: an entry below the item is cleared only if the reviewer may review that item too.
+        java.util.Set<String> clear = new java.util.LinkedHashSet<>();
+        java.util.Set<String> kept = new java.util.LinkedHashSet<>();
+        for (String name : changedAtOrBelow(fullName)) {
+            // S-30-03: found as SYSTEM (read-only lookup, ApprovalPolicy#itemForPolicy), so an item the
+            // reviewer cannot read is not taken for a deleted one; the reviewer's own permission
+            // on it is what decides below.
+            hudson.model.Item below = name.equals(fullName) ? item
+                    : io.jenkins.plugins.batchcontrol.policy.ApprovalPolicy.itemForPolicy(name);
+            if (below == null || below == item || mayReview(below, auth)) {
+                clear.add(name);
+            } else {
+                kept.add(name);
+            }
+        }
+        int cleared = removeChanged(clear);
+        // S-29-03: recorded only when something was cleared, and says what is still guarded.
+        if (cleared > 0) {
+            String still = isGuardedItem(fullName)
+                    ? " The item is still guarded through an active permission window or a changed folder above it."
+                    : "";
+            String skipped = kept.isEmpty() ? "" : " Not cleared, because the reviewer may not review them: "
+                    + String.join(", ", kept) + ".";
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
+                    "Marked as reviewed by '" + auth.getName() + "': " + cleared + " changed-under-a-permission-window"
+                            + " entr" + (cleared == 1 ? "y" : "ies") + " at or below this item cleared." + skipped + still));
+            LOGGER.info(() -> "'" + fullName + "' marked as reviewed by '" + auth.getName() + "'");
+        }
+    }
+
+    /**
+     * S-29-04: an administrator clears a listed entry whose item no longer resolves (a stale entry).
+     * Checked here too: Overall/Administer.
+     */
+    public void clearStaleEntry(String fullName) {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        int cleared = removeChanged(java.util.Set.of(fullName));
+        if (cleared > 0) {
+            String user = Jenkins.getAuthentication2().getName();
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, user,
+                    "Marked as reviewed by '" + user + "': the entry named an item that no longer exists."));
+        }
+    }
+
+    private static boolean mayReview(hudson.model.Item item, org.springframework.security.core.Authentication auth) {
+        return GrantLayer.hasPermissionWithoutGrants(item, auth, hudson.model.Item.CONFIGURE)
+                || GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER);
+    }
+
+    /** The changed entries (any grant) equal to or below {@code fullName}. */
+    private synchronized java.util.Set<String> changedAtOrBelow(String fullName) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        for (Grant grant : grants()) {
+            for (String name : grant.getChangedItems()) {
+                if (name.equals(fullName) || name.startsWith(fullName + "/")) {
+                    found.add(name);
+                }
+            }
+        }
+        return found;
+    }
+
+    /** Removes the exact entries {@code names} from every grant; the number of entries removed. */
+    private synchronized int removeChanged(java.util.Set<String> names) {
+        int removed = 0;
+        if (names.isEmpty()) {
+            return 0;
+        }
+        for (Grant cached : new ArrayList<>(grants())) {
+            boolean affected = false;
+            for (String name : cached.getChangedItems()) {
+                if (names.contains(name)) {
+                    affected = true;
+                    break;
+                }
+            }
+            if (!affected) {
+                continue;
+            }
+            try {
+                Grant grant = store.loadGrant(cached.getId());
+                if (grant == null) {
+                    continue;
+                }
+                List<String> kept = new ArrayList<>();
+                for (String name : grant.getChangedItems()) {
+                    if (names.contains(name)) {
+                        removed++;
+                    } else {
+                        kept.add(name);
+                    }
+                }
+                grant.setChangedItems(kept);
+                store.saveGrant(grant);
+                replaceInCache(grant);
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.SEVERE, "Could not clear the changed-under-grant entries of grant "
+                        + cached.getId(), e);
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * D-58a (S-27-03): an item was renamed or moved. The "changed under a grant" state follows it
+     * and what is below it; and an item that was covered by an active grant under its old name,
+     * but is not under its new name, is marked as changed under that grant, so it stays guarded.
+     */
+    public synchronized void relocateChanged(String oldFullName, String newFullName) {
+        Instant now = BatchClock.now();
+        List<String> carriers = new ArrayList<>();
+        for (Grant grant : grants()) {
+            if (grant.isActiveAt(now) && covers(grant, oldFullName) && !covers(grant, newFullName)) {
+                carriers.add(grant.getId());
+            }
+            // S-30-04: guarded through a changed folder above it, and moved out of that folder.
+            for (String changed : grant.getChangedItems()) {
+                if (oldFullName.startsWith(changed + "/") && !newFullName.startsWith(changed + "/")) {
+                    carriers.add(grant.getId());
+                }
+            }
+        }
+        rewriteChanged(oldFullName, newFullName, true);
+        relocateMarkedRuns(oldFullName, newFullName);
+        for (String grantId : carriers) {
+            markChanged(grantId, newFullName);
+        }
+    }
+
+    /** D-58a: a deleted item (and what was below it) leaves the "changed under a grant" state. */
+    public synchronized void forgetChanged(String fullName) {
+        rewriteChanged(fullName, null, true);
+        relocateMarkedRuns(fullName, null);
+    }
+
+    /**
+     * Replaces (or removes, with a {@code null} replacement) {@code fullName}, and with
+     * {@code descendants} what is below it, in the changed-items list of every grant.
+     */
+    private void rewriteChanged(String fullName, @CheckForNull String replacement, boolean descendants) {
+        if (fullName == null || fullName.isEmpty()) {
+            return;
+        }
+        for (Grant cached : new ArrayList<>(grants())) {
+            boolean affected = false;
+            for (String item : cached.getChangedItems()) {
+                if (item.equals(fullName) || (descendants && item.startsWith(fullName + "/"))) {
+                    affected = true;
+                    break;
+                }
+            }
+            if (!affected) {
+                continue;
+            }
+            try {
+                Grant grant = store.loadGrant(cached.getId());
+                if (grant == null) {
+                    continue;
+                }
+                java.util.LinkedHashSet<String> updated = new java.util.LinkedHashSet<>();
+                for (String item : grant.getChangedItems()) {
+                    boolean match = item.equals(fullName) || (descendants && item.startsWith(fullName + "/"));
+                    if (!match) {
+                        updated.add(item);
+                    } else if (replacement != null) {
+                        updated.add(replacement + item.substring(fullName.length()));
+                    }
+                }
+                grant.setChangedItems(new ArrayList<>(updated));
+                store.saveGrant(grant);
+                replaceInCache(grant);
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not update the changed-under-grant state of '"
+                        + fullName + "' in grant " + cached.getId(), e);
+            }
+        }
+    }
+
     /** Every grant that is active right now (not expired, not revoked). */
     public synchronized List<Grant> listActive() {
         Instant now = BatchClock.now();
@@ -296,6 +761,12 @@ public final class GrantService {
         }
         grant.setCreatedItems(items);
         grant.setCreatedItemIdentities(identities);
+        // D-58a: an item created through the grant alone is changed under it.
+        List<String> changed = grant.getChangedItems();
+        if (!changed.contains(itemFullName)) {
+            changed.add(itemFullName);
+        }
+        grant.setChangedItems(changed);
         store.saveGrant(grant);
         replaceInCache(grant);
         return grant;

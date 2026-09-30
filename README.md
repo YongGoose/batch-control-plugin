@@ -366,8 +366,9 @@ parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
 each with the last 100 console lines, and offers acknowledge, resolve, comment and
 a rerun request. The rerun request carries the failed build's original parameters
-as they were; they are fixed, not offered for editing, and only the reason and the
-approvers are filled in. Submitting it needs `BatchControl/Request` plus
+as they were; they are fixed, not offered for editing. The rerun form has only
+the approver checkboxes: the reason is generated from the incident and cannot be
+typed in. Submitting it needs `BatchControl/Request` plus
 `Item/Read` and `Item/Build` on the job, like any run request, and the Incidents
 screen itself needs `BatchControl/ViewHistory`, so the user needs all four; the
 typical roles in step 3 give that combination only to administrators unless you
@@ -468,28 +469,52 @@ in its folder, since Jenkins allows a rename to anyone who may configure the job
 the rename is recorded with the window. Under a `CREATE` window with a name
 restriction, renames of what that window created are limited to matching names.
 
-**Builds that run as SYSTEM, or as an account with Configure, are outside the
-self-grant guard.** Such a build can write a permanent authorization entry on
-its job, so a `CONFIGURE` window holder could use one to keep access after the
-window ends. Authorize Project closes this only with a global default build
-authorization that runs every build as an account without Configure
-permission, for example **Run as Specific User** with a dedicated low-privilege
-build account. Give that account neither `Overall/Administer` nor
-`Item/Configure`, and no Configure on folders or jobs either. **Run as the user
-who triggered the build** is safe only with such a fallback, since timer and
-SCM builds have no triggering user and would otherwise run as SYSTEM. A
-strategy on a single job is not enough: anyone who can configure the job, a
-window holder included, can remove it. While change control is on and builds
-can run as SYSTEM or as an account with Configure, the administrative monitor
-says so for the whole instance, and the detail page of a pending `CONFIGURE`
-request shows the same warning to its approvers and to `BatchControl/Manage`
-holders. The check looks at the build account's permissions at the Jenkins root
-only, so Configure given to it on a folder or job is not detected. It cannot
-judge authenticators that decide by job type, folder or the caller's identity.
-Its answer is cached for five minutes, so after the build authenticators or the
-build account's permissions change the warning can take that long to appear or
-clear; replacing the authenticators through the security configuration updates
-it at once.
+**On an item a grant has touched, only an administrator can widen
+authorization.** A Pipeline `properties` step saves its job's authorization
+entries whatever account the build runs as, so a `CONFIGURE` window holder could
+use one to keep access after the window ends. While change control is on, Batch
+Control therefore guards every item under an active grant, and every item whose
+configuration was changed under a grant, including a Pipeline job on which a
+grant holder ran a Replay, a Pipeline Rebuild or a Restart from Stage. Guarding
+covers the item and everything below it. A changed item stays guarded until
+someone marks it as reviewed with **Mark as reviewed**: administrators find it
+next to the item on the Manage Jenkins monitor, which lists the items waiting
+for review, and users with native Configure who also hold
+`BatchControl/Request` find it on the item's Batch Control page (without
+`Request` that page is not shown, so they ask an administrator). It writes a `GUARD_REVIEWED` record; an ordinary save is not a review. On
+a guarded item, any change that widens access is put back and recorded, whoever
+makes it, a non-administrator with native Configure included (an HTTP save gets
+a 403 message). The only exception is a save made through an HTTP request (the
+web UI, a `config.xml` POST, or REST or CLI over HTTP) by a user who holds
+`Overall/Administer`. A Pipeline build whose own save was put back names the
+reverted entries in its build log; a save whose build cannot be identified,
+such as a seed job saving another job or a Freestyle build, gets only the change
+record. Until the review, a Jenkinsfile, Job DSL, JCasC or non-HTTP CLI change
+that widens authorization on such an item is put back, even an administrator's
+CLI over WebSocket or SSH; use the web UI or the CLI over HTTP instead. Items
+that no grant touched are unaffected. Deleting a guarded item and re-creating it
+under the same name drops the guard.
+
+Run builds under a low-privilege account as well, since a build that runs as
+SYSTEM or as an account with Configure can still change whatever that account
+may change. Use Authorize Project with a global default build authorization
+that runs every build as an account without Configure permission, for example
+**Run as Specific User** with a dedicated low-privilege build account. Give that
+account neither `Overall/Administer` nor `Item/Configure`, and no Configure on
+folders or jobs either. **Run as the user who triggered the build** is safe only
+with such a fallback, since timer and SCM builds have no triggering user and
+would otherwise run as SYSTEM. A strategy on a single job is not enough: anyone
+who can configure the job, a window holder included, can remove it. While change
+control is on and builds can run as SYSTEM or as an account with Configure, the
+administrative monitor says so for the whole instance, and the detail page of a
+pending `CONFIGURE` request shows the same warning to its approvers and to
+`BatchControl/Manage` holders. The check looks at the build account's
+permissions at the Jenkins root only, so Configure given to it on a folder or
+job is not detected. It cannot judge authenticators that decide by job type,
+folder or the caller's identity. Its answer is cached for five minutes, so after
+the build authenticators or the build account's permissions change the warning
+can take that long to appear or clear; replacing the authenticators through the
+security configuration updates it at once.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
 **Batch Control: Matrix-based security** or **Batch Control: Role-Based
@@ -536,13 +561,15 @@ and keep their schedules.
 
 **Some re-run links stay visible on a job that requires approval.** Jenkins'
 own build link (relabelled **Direct Build (needs approval)**), Pipeline's
-**Replay** and naginator's **Retry** are drawn for everyone with the underlying
-permission, and Batch Control has no way to remove them. A click is refused,
-nothing is queued, and the job and build pages explain why and point to
-**Request Run**. On a job without parameters, **Direct Build (needs approval)**
+**Replay**, Pipeline's own **Rebuild** on a Pipeline build page, and naginator's
+**Retry** are drawn for everyone with the underlying permission, and Batch
+Control has no way to remove them. A click is refused, nothing is queued, and
+the job and build pages explain why and point to **Request Run**; a refused
+Pipeline **Rebuild** shows the "Approval required" page and is recorded. On a job without parameters, **Direct Build (needs approval)**
 answers only with Jenkins' own toast, "Failed to schedule build. Reload the page
 and try again.", which wrongly suggests trying again, and that first click writes
-no record; use the approval notice on the job page and **Request Run** instead. The rebuild plugin's **Rebuild** can be hidden, and is.
+no record; use the approval notice on the job page and **Request Run** instead.
+The rebuild plugin's **Rebuild**, a different link, can be hidden, and is.
 
 **Other plugins' build buttons fail with their own generic message.** When
 Batch Control refuses a run started from naginator's Retry, Rebuild or Rebuild

@@ -84,11 +84,15 @@ public class GrantSelfGrantGuardTest {
     }
 
     private int postConfigXml(String user, FreeStyleProject job, String xml) throws Exception {
+        return postConfigXmlPage(user, job, xml).getWebResponse().getStatusCode();
+    }
+
+    private org.htmlunit.Page postConfigXmlPage(String user, FreeStyleProject job, String xml) throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
         WebRequest req = new WebRequest(wc.createCrumbedUrl(job.getUrl() + "config.xml"), HttpMethod.POST);
         req.setAdditionalHeader("Content-Type", "application/xml");
         req.setRequestBody(xml);
-        return wc.getPage(req).getWebResponse().getStatusCode();
+        return wc.getPage(req);
     }
 
     private static String withExtraEntry(String xml, String permissionId, String sid) {
@@ -149,13 +153,14 @@ public class GrantSelfGrantGuardTest {
     }
 
     /**
-     * T-02-23 (negative twin of T-02-22): the guard does not touch legitimate saves. bob's
-     * ordinary config change inside the window is saved; c1, whose Item/Configure is native,
-     * changes the job's authorization property and the change is kept. Neither writes a
-     * GRANT_VIOLATION record.
+     * T-02-23 (negative twin of T-02-22, revised for D-58a (5)): bob's ordinary config change
+     * inside the window is saved without a record. c1, whose Item/Configure is native but who is
+     * not an administrator, adds an authorization entry for carol to the job while it is in the
+     * active grant's scope: the save answers 403 with the D-48 message, the entry is reverted and
+     * one GRANT_VIOLATION is recorded (note 177).
      */
     @Test
-    public void t_02_23_legitimateSavesAreNotViolations() throws Exception {
+    public void t_02_23_ordinarySaveIsKeptAndNativeConfigureWideningIsReverted() throws Exception {
         FreeStyleProject p = jobWithAliceProperty("job");
         StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
 
@@ -169,14 +174,19 @@ public class GrantSelfGrantGuardTest {
         assertEquals(200, postConfigXml("bob", p, changed), "bob's ordinary save inside the window must succeed");
         assertEquals("edited-in-window", j.jenkins.getItemByFullName("job", FreeStyleProject.class).getDescription());
 
-        assertFalse(has(p, "carol", Item.CONFIGURE), "premise: carol has no Configure on the job");
-        assertEquals(200, postConfigXml("c1", p, withExtraEntry(p.getConfigFile().asString(), "hudson.model.Item.Configure", "carol")),
-                "c1 (native Configure) must be able to save an authorization change");
-        FreeStyleProject current = j.jenkins.getItemByFullName("job", FreeStyleProject.class);
-        assertTrue(has(current, "carol", Item.CONFIGURE), "a native Configure holder's authorization change must be kept");
-
         assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(),
-                "no GRANT_VIOLATION record may be written for legitimate saves");
+                "no GRANT_VIOLATION record may be written for bob's ordinary save");
+
+        assertFalse(has(p, "carol", Item.CONFIGURE), "premise: carol has no Configure on the job");
+        org.htmlunit.Page answer = postConfigXmlPage("c1", p,
+                withExtraEntry(p.getConfigFile().asString(), "hudson.model.Item.Configure", "carol"));
+        assertEquals(403, answer.getWebResponse().getStatusCode(), "on a job in an active grant's scope a native Configure"
+                + " holder who is not an administrator is not exempt: the widening answers 403 (D-58a (5))");
+        GrantSelfGrantFeedbackTest.assertGuardFeedback("c1's widening", UsabilityFixtures.text(answer), "job");
+        FreeStyleProject current = j.jenkins.getItemByFullName("job", FreeStyleProject.class);
+        assertFalse(has(current, "carol", Item.CONFIGURE), "c1's widening must be reverted");
+        assertEquals(1, StrategyFixtures.records(ChangeType.GRANT_VIOLATION).size(),
+                "c1's reverted widening must be recorded as one GRANT_VIOLATION");
     }
 
     /**

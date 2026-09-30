@@ -102,6 +102,10 @@ public class CreatedItemGrantListener extends ItemListener {
 
     @Override
     public void onLocationChanged(Item item, String oldFullName, String newFullName) {
+        // D-58a (S-27-03): the "changed under a grant" state follows the item whatever the switch
+        // says; and an item covered by an active grant stays guarded under its new name. Before the
+        // created-items record moves, so coverage by the old name is still visible.
+        GrantService.get().relocateChanged(oldFullName, newFullName);
         // With change control off every window was revoked (S-15), so no record can be active.
         if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             GrantService.get().relocateCreatedItem(oldFullName, newFullName);
@@ -110,6 +114,7 @@ public class CreatedItemGrantListener extends ItemListener {
 
     @Override
     public void onDeleted(Item item) {
+        GrantService.get().forgetChanged(item.getFullName()); // D-58a
         if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             GrantService.get().forgetCreatedItem(item.getFullName());
         }

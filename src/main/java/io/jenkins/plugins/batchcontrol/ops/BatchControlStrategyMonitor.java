@@ -79,7 +79,10 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     public boolean isActivated() {
         return BatchControlGlobalConfiguration.get().isChangeControlEnabled()
                 && (strategyUnsupported() || buildAuthenticatorMissing()
-                        || SystemBuildCheck.buildsMayRunAsSystem());
+                        || SystemBuildCheck.buildsMayRunAsSystem()
+                        // D-58a (4): answered from the in-memory grant cache, no disk scan per page.
+                        || !io.jenkins.plugins.batchcontrol.security.GrantService.get()
+                                .itemsChangedUnderGrant(1).isEmpty());
     }
 
     /**
@@ -198,6 +201,38 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         LOGGER.info(() -> "Authorization strategy " + current.getClass().getName() + " reverted to "
                 + plain.getClass().getName() + " by " + Jenkins.getAuthentication2().getName());
         recordStrategyChange("reverted", current, plain);
+        return backToReferrer();
+    }
+
+    /**
+     * D-58a: the items in the "changed under a grant" state (saved or created under a grant and not
+     * reviewed since by an administrator or a native Configure holder through the web), sorted, at
+     * most 50. They stay guarded until reviewed. Administrator-only page.
+     */
+    public java.util.List<String> getItemsChangedUnderGrant() {
+        return io.jenkins.plugins.batchcontrol.security.GrantService.get().itemsChangedUnderGrant(50);
+    }
+
+    /**
+     * D-58b (3): "Mark as reviewed" for one listed item. Administrators only; the item and
+     * everything below it leave the "changed under a grant" state and a GUARD_REVIEWED record is
+     * written. Answers 404 for an item that does not exist.
+     */
+    @RequirePOST
+    public HttpResponse doMarkReviewed(@org.kohsuke.stapler.QueryParameter String item) {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        hudson.model.Item target = item == null ? null : Jenkins.get().getItemByFullName(item);
+        io.jenkins.plugins.batchcontrol.security.GrantService grants =
+                io.jenkins.plugins.batchcontrol.security.GrantService.get();
+        if (target == null) {
+            // S-29-04: a listed name that no longer resolves can be cleared; anything else is a 404.
+            if (item != null && grants.itemsChangedUnderGrant(Integer.MAX_VALUE).contains(item)) {
+                grants.clearStaleEntry(item);
+                return backToReferrer();
+            }
+            return HttpResponses.notFound(); // S-29-09: no stack trace, no reflected name
+        }
+        grants.markReviewed(target);
         return backToReferrer();
     }
 

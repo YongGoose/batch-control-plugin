@@ -55,6 +55,14 @@ public final class Grant {
      * the permission-check hot path never has to load the request.
      */
     private String createNamePattern;
+    /**
+     * D-58a: full names of the items whose configuration was changed under this grant (saved or
+     * created by its holder while the holder's permission came only from the grant). Such an item
+     * stays guarded, also after the grant ended, until an administrator or a native Configure
+     * holder saves it through the web (the review). {@code null} in grant files written before
+     * D-58a and when empty (XStream skips the initializer).
+     */
+    private List<String> changedItems;
     /** D-36: the GRANT_EXPIRING notification was sent (persisted so a restart does not resend). */
     private boolean expiringNotified;
     /** Compiled {@link #createNamePattern}, built lazily. */
@@ -222,6 +230,21 @@ public final class Grant {
             });
         }
         this.createdItemIdentities = kept.isEmpty() ? null : kept;
+    }
+
+    /** D-58a: the items changed under this grant and not reviewed since (a copy; never {@code null}). */
+    public List<String> getChangedItems() {
+        return changedItems == null ? new ArrayList<>() : new ArrayList<>(changedItems);
+    }
+
+    /** Whether {@code itemFullName} was changed under this grant and not reviewed since (D-58a). */
+    public boolean hasChanged(String itemFullName) {
+        return changedItems != null && itemFullName != null && changedItems.contains(itemFullName);
+    }
+
+    /** Replaces the changed-items list (D-58a). Only {@code security.GrantService} calls this. */
+    public void setChangedItems(List<String> items) {
+        this.changedItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
     }
 
     /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */

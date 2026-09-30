@@ -135,6 +135,17 @@ public class IncidentItem implements ModelObject {
         return findJob() != null;
     }
 
+    /**
+     * e2e-04 UX-19: the job's URL for a viewer who may read it (P-09, {@link #findJob()}), else
+     * {@code null}. Its run request form is {@code <url>batch-control/}; the view links that form
+     * only together with {@link #isCanRerun()}, the same Request + Item/Read + Item/Build test the
+     * form itself applies (D-38).
+     */
+    public String getJobUrl() {
+        Job<?, ?> job = findJob();
+        return job == null ? null : job.getUrl();
+    }
+
     /** The refusal of form {@code form} on this request, or an empty one (DEF-09, Jelly). */
     public FormErrors formErrors(String form) {
         return FormErrors.current(form);

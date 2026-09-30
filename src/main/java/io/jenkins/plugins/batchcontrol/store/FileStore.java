@@ -830,6 +830,11 @@ public final class FileStore implements Store {
                 if (fresh == null || !fresh.endedAt().isBefore(cutoff)) {
                     continue;
                 }
+                if (!grant.getChangedItems().isEmpty()) {
+                    // D-58a (5): the "changed under a grant" state never lapses through retention;
+                    // the grant file is kept until every item on it has been reviewed or deleted.
+                    continue;
+                }
                 if (deleteFile(PathCodec.resolveUnder(grantDir(), id + ".xml"), "grant " + id)) {
                     grantIds.add(id);
                 }

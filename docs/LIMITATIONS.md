@@ -333,38 +333,97 @@ code does on purpose.
 
 ## SYSTEM builds and the global-matrix upgrade
 
-35. **A build that runs as SYSTEM, or as an account with Configure
-    permission, can still write a permanent authorization entry.** A Pipeline
-    `properties([authorizationMatrix(...)])` step, or a Job DSL seed job,
-    executes as SYSTEM unless the instance runs builds under a real user; the
-    guard that reverts a grant holder's self-escalating edit to a job's
-    authorization property looks at who saved the item, and SYSTEM is not a
-    grant holder, so nothing is reverted or recorded. The same holds for a
-    build that runs as an account which already holds `Overall/Administer` or
-    `Item/Configure`, such as a privileged service account: that account's
-    save is a legitimate Configure save, so the guard keeps the entry. This is
-    not new exposure: any user who already holds standing `Item/Configure` on
-    that job has the identical path today, with or without Batch Control,
-    since Jenkins itself does not distinguish a script's save from a human
-    one.
+35. **On an item a grant has touched, authorization can only be widened by
+    an administrator's HTTP save until the item is reviewed.** A Pipeline
+    `properties([authorizationMatrix(...)])` step saves its job's
+    authorization property without asking whether the build's account holds
+    Configure, so running builds as a low-privilege account does not by
+    itself stop a `CONFIGURE` window holder from giving themself a permanent
+    entry through the Pipeline script. Batch Control therefore guards
+    *items*, not accounts. While change control is on, these items are
+    guarded:
 
-    The remedy is **Authorize Project** with a **global default build
-    authorization** that runs every build, whatever the job's own
-    configuration and whatever started it, as an account without Configure
-    permission: for example **Run as Specific User** with a dedicated
-    low-privilege build account. Do not give that account `Overall/Administer`
-    or `Item/Configure`, neither globally nor through a folder's or a job's own
-    authorization entries. **Run as the user who triggered the build** is safe
-    only together with such a fallback: timer and SCM builds have no
-    triggering user, so without one they run as SYSTEM. (A build that does run
-    as the person who triggered it comes under the same guard as that
-    person's manual save.) Installing the plugin is not enough, and a strategy
-    set on a single job does not protect that job: anyone who can configure
-    the job, a `CONFIGURE` window holder included, can remove the strategy.
-    With Authorize Project's per-project setting and no global default, a job
-    without a strategy of its own builds as SYSTEM. A job whose own build
-    authorization runs as an administrator is exposed to anyone who can
-    configure that job, and the instance-wide check below does not see it.
+    - every item in the scope of an active grant;
+    - every item whose configuration was changed under a grant (saved or
+      created by a user whose permission came only from a grant), every item
+      a non-administrator created inside a guarded folder, and every
+      Pipeline job on which a user whose permission came only from a grant
+      submitted a **Replay**, a Pipeline **Rebuild** or a **Restart from
+      Stage** (a replayed script is a configuration change that is never
+      saved), until the item is marked as reviewed.
+
+    Guarding covers the item and everything below it: the jobs in a guarded
+    folder and the branch jobs of a guarded multibranch project.
+
+    The guard on a changed item ends only through **Mark as reviewed**, a
+    deliberate action offered to administrators next to each item on the
+    Manage Jenkins monitor, and to users who hold `Item/Configure` natively
+    (not from a grant) on the item's Batch Control page. That page exists
+    only for holders of `BatchControl/Request`, so a native Configure holder
+    needs `BatchControl/Request` as well to use the button there; otherwise
+    they ask an administrator, who uses the monitor. It writes a
+    `GUARD_REVIEWED` change record naming the reviewer. An ordinary save,
+    even an administrator's, is not a review.
+
+    Guarding follows renames and moves. On a guarded item, any change that
+    widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
+    it: a build running as any account or as SYSTEM, a script, the CLI, or
+    another user. Widening means an added or widened entry for anyone
+    (`anonymous` and `authenticated` included), an inheritance change that
+    widens, removing the authorization property, or adding a second one; a
+    new item created inside a guarded folder has its authorization entries
+    removed. The only exception is a save made through an HTTP request (the
+    web UI, a `config.xml` POST, or REST or CLI over HTTP) by a user who holds
+    `Overall/Administer`. A user who holds `Item/Configure` natively but is
+    not an administrator is not exempt: until the item is marked as
+    reviewed, their widening is put back like anyone else's. A save made through an HTTP
+    request is answered with HTTP 403 and a plain message saying which
+    authorization entries were not kept and that the other changes were
+    saved. A Pipeline build whose own save was put back gets a line in its
+    build log naming the reverted entries. A save whose build cannot be
+    identified gets no such line, only the `GRANT_VIOLATION` record: for
+    example a seed job saving another job, or a Freestyle build.
+
+    This changes how administrators manage authorization on those items, and
+    only on those. Until the item is marked as reviewed, a Jenkinsfile, Job
+    DSL or JCasC change that widens authorization on a guarded item is put
+    back, and so is one made with the CLI over WebSocket or SSH, even by an
+    administrator: only the CLI over HTTP (`-http`) or the web UI carries the
+    exemption, so use one of those. Items that no grant has touched are not
+    affected. The administrative monitor on Manage Jenkins lists the items
+    waiting for review. Before marking an item as reviewed, check what was
+    changed under the grant, the Pipeline script and any replayed runs
+    included: once it is marked the item is no longer guarded, and a script
+    left in it that writes authorization entries will then succeed.
+
+    Deleting a guarded item and creating a new one under the same name drops
+    the state: the new item is not guarded. An account that may delete and
+    create jobs, typically a Job DSL seed job, can therefore re-create a
+    guarded job with any authorization entries once the grant has ended.
+    This is one more reason to run such builds under a low-privilege account
+    (below).
+
+    **Run builds under a low-privilege account as well.** The guard above does
+    not make the build account irrelevant: a build that runs as SYSTEM or as
+    an account with Configure permission can still change whatever such an
+    account may change on items that are not guarded, and anything else
+    besides authorization entries.
+    Use **Authorize Project** with a **global default build authorization**
+    that runs every build, whatever the job's own configuration and whatever
+    started it, as an account without Configure permission: for example
+    **Run as Specific User** with a dedicated low-privilege build account. Do
+    not give that account `Overall/Administer` or `Item/Configure`, neither
+    globally nor through a folder's or a job's own authorization entries.
+    **Run as the user who triggered the build** is safe only together with
+    such a fallback: timer and SCM builds have no triggering user, so without
+    one they run as SYSTEM. Installing the plugin is not enough, and a
+    strategy set on a single job does not protect that job: anyone who can
+    configure the job, a `CONFIGURE` window holder included, can remove the
+    strategy. With Authorize Project's per-project setting and no global
+    default, a job without a strategy of its own builds as SYSTEM. A job
+    whose own build authorization runs as an administrator is exposed to
+    anyone who can configure that job, and the instance-wide check below does
+    not see it.
 
     While change control is on, Batch Control checks this once for the whole
     instance, not job by job. If builds can run as SYSTEM or as an account
@@ -469,16 +528,21 @@ code does on purpose.
     allowed, with a **Request activation** link (e2e-03 DEF-01).
 
 41. **Some re-run links cannot be hidden on a job that requires approval.**
-    Three entries are drawn for every user who holds the underlying
+    Four entries are drawn for every user who holds the underlying
     permission, and no extension point lets Batch Control remove them:
     Jenkins' own build link (relabelled **Direct Build (needs approval)** on
-    such a job), Pipeline's **Replay**, and naginator's **Retry**. They
+    such a job), Pipeline's **Replay**, Pipeline's own **Rebuild** on a
+    Pipeline build page (shown to users who may build the job, even without
+    `Run/Replay`), and naginator's **Retry**. They
     therefore stay visible, and a click is refused at queue entry with an
     explanation: the job page and the build page carry the approval notice,
     and the refusal page, or the other plugin's failure message next to that
-    notice (item 40), points to **Request Run**. Nothing is queued. The rebuild
-    plugin's **Rebuild** is different: that plugin lets Batch Control hide it,
-    so it does not appear on such a job. A user who may see the job but not
+    notice (item 40), points to **Request Run**. Nothing is queued. A refused
+    click on Pipeline's **Rebuild** shows the "Approval required" page and is
+    recorded in the change history like a refused Replay. The rebuild
+    plugin's **Rebuild** (a different link from a different plugin) is not
+    among these: that plugin lets Batch Control hide it, so it does not
+    appear on such a job. A user who may see the job but not
     build it is not offered the rerun form, and a rerun submitted anyway is
     refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
 
