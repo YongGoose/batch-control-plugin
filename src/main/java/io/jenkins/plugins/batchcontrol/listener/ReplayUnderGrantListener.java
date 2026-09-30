@@ -33,10 +33,14 @@ public class ReplayUnderGrantListener extends RunListener<Run<?, ?>> {
         String job = run.getParent().getFullName();
         String runId = job + "#" + run.getNumber();
         try {
-            ChangeRecord record = ChangeRecord.create(ChangeType.REPLAY_UNDER_GRANT, job, marker.getUser(),
-                    "Run #" + run.getNumber() + " was started by a Replay, Pipeline Rebuild or Restart from Stage"
+            String detail = marker.getInheritedFrom() != null
+                    ? "Run #" + run.getNumber() + " was started by '" + marker.getUser() + "' as a re-run of run #"
+                            + marker.getInheritedFrom() + ", whose script was replayed under a permission window; it"
+                            + " carries the same mark and cannot be re-run except by an administrator."
+                    : "Run #" + run.getNumber() + " was started by a Replay, Pipeline Rebuild or Restart from Stage"
                             + " by '" + marker.getUser() + "' whose permission came only from a permission window;"
-                            + " it cannot be re-run except by an administrator.");
+                            + " it cannot be re-run except by an administrator.";
+            ChangeRecord record = ChangeRecord.create(ChangeType.REPLAY_UNDER_GRANT, job, marker.getUser(), detail);
             record.setGrantId(marker.getGrantId());
             Store.get().appendChangeRecord(record);
         } catch (RuntimeException e) {

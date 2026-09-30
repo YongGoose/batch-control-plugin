@@ -29,7 +29,10 @@ public class ApprovalRebuildValidator extends RebuildValidator {
 
     @Override
     public boolean isApplicable(Run build) {
-        if (build == null || !RunRequestService.requiresApprovalToRun(build.getParent())) {
+        if (build == null) {
+            return false;
+        }
+        if (!RunRequestService.requiresApprovalToRun(build.getParent()) && !markedForViewer(build)) {
             return false;
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
@@ -40,6 +43,16 @@ public class ApprovalRebuildValidator extends RebuildValidator {
         // page view too; only a request to the rebuild action itself reaches the action, so the
         // queue gate refuses and records it as before.
         return !"POST".equalsIgnoreCase(req.getMethod()) || !targetsRebuild(req);
+    }
+
+    /**
+     * e2e-03 DEF-41 (D-58c): a run replayed under a grant cannot be re-run by anyone but an
+     * administrator, so Rebuild is not offered on it to anyone else (while change control is on).
+     */
+    private static boolean markedForViewer(Run<?, ?> build) {
+        return io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.get().isChangeControlEnabled()
+                && build.getAction(io.jenkins.plugins.batchcontrol.queue.ReplayUnderGrantAction.class) != null
+                && !jenkins.model.Jenkins.get().hasPermission(jenkins.model.Jenkins.ADMINISTER);
     }
 
     /** Whether the request goes to the rebuild plugin's action ({@code .../rebuild} or below it). */
