@@ -358,7 +358,10 @@ code does on purpose.
     The guard on a changed item ends only through **Mark as reviewed**, a
     deliberate action offered to administrators next to each item on the
     Manage Jenkins monitor, and to users who hold `Item/Configure` natively
-    (not from a grant) on the item's Batch Control page. It writes a
+    (not from a grant) on the item's Batch Control page. That page exists
+    only for holders of `BatchControl/Request`, so a native Configure holder
+    needs `BatchControl/Request` as well to use the button there; otherwise
+    they ask an administrator, who uses the monitor. It writes a
     `GUARD_REVIEWED` change record naming the reviewer. An ordinary save,
     even an administrator's, is not a review.
 
