@@ -345,10 +345,12 @@ code does on purpose.
 
     - every item in the scope of an active grant;
     - every item whose configuration was changed under a grant (saved or
-      created by a user whose permission came only from a grant), until a
-      user who holds `Item/Configure` natively or `Overall/Administer` saves
-      it through an HTTP request. That save counts as the review and ends
-      the guard for that item.
+      created by a user whose permission came only from a grant), and every
+      item a non-administrator created inside a guarded folder, until the
+      item is reviewed. The review is a save of the item through an HTTP
+      request by an `Overall/Administer` holder, or by a user who holds
+      `Item/Configure` natively (not from a grant) provided that save does
+      not widen authorization. The review ends the guard for that item.
 
     Guarding follows renames and moves. On a guarded item, any change that
     widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
@@ -359,11 +361,15 @@ code does on purpose.
     new item created inside a guarded folder has its authorization entries
     removed. The only exception is a save made through an HTTP request (the
     web UI, a `config.xml` POST, or REST or CLI over HTTP) by a user who holds
-    `Overall/Administer`. A Pipeline build whose save was put back names the
-    reverted entries in its build log; a Freestyle build gets no such line,
-    only the `GRANT_VIOLATION` record. A save made through an HTTP request is
-    answered with HTTP 403 and a plain message saying which authorization
-    entries were not kept and that the other changes were saved.
+    `Overall/Administer`. A user who holds `Item/Configure` natively but is
+    not an administrator is not exempt: until the item is reviewed, their
+    widening is put back like anyone else's. A save made through an HTTP
+    request is answered with HTTP 403 and a plain message saying which
+    authorization entries were not kept and that the other changes were
+    saved. A Pipeline build whose own save was put back gets a line in its
+    build log naming the reverted entries. A save whose build cannot be
+    identified gets no such line, only the `GRANT_VIOLATION` record: for
+    example a seed job saving another job, or a Freestyle build.
 
     This changes how administrators manage authorization on those items, and
     only on those. Until the review, a Jenkinsfile, Job DSL or JCasC change

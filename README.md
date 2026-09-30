@@ -474,13 +474,16 @@ authorization.** A Pipeline `properties` step saves its job's authorization
 entries whatever account the build runs as, so a `CONFIGURE` window holder could
 use one to keep access after the window ends. While change control is on, Batch
 Control therefore guards every item under an active grant, and every item whose
-configuration was changed under a grant until a user with native Configure or
-Administer saves it through HTTP, which counts as the review. On a guarded item,
-any change that widens access is put back and recorded, whoever makes it. The
-only exception is a save made through an HTTP request (the web UI, a
-`config.xml` POST, or REST or CLI over HTTP) by a user who holds
-`Overall/Administer`. A Pipeline build names the reverted entries in its build
-log; a Freestyle build gets only the change record. Until the review, a
+configuration was changed under a grant until it is reviewed. The review is a
+save through HTTP by an administrator, or by a user with native Configure if
+that save does not widen authorization. On a guarded item, any change that
+widens access is put back and recorded, whoever makes it, a non-administrator
+with native Configure included (an HTTP save gets a 403 message). The only
+exception is a save made through an HTTP request (the web UI, a `config.xml`
+POST, or REST or CLI over HTTP) by a user who holds `Overall/Administer`. A
+Pipeline build whose own save was put back names the reverted entries in its
+build log; a save whose build cannot be identified, such as a seed job saving
+another job or a Freestyle build, gets only the change record. Until the review, a
 Jenkinsfile, Job DSL, JCasC or non-HTTP CLI change that widens authorization on
 such an item is put back, even an administrator's CLI over WebSocket or SSH; use
 the web UI or the CLI over HTTP instead. Items that no grant touched are
