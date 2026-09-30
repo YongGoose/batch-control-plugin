@@ -194,6 +194,42 @@ public class ConfigAuditTest {
                 + " Overall/Administer: " + excerpt(manager.asNormalizedText()));
     }
 
+    /**
+     * T-CFG-09 (security-25 S-25-09): the approver field's check. Premise: the manager's POST of
+     * {@code checkApproversText?value=no-such-user} answers a check result naming the id. A user
+     * without BatchControl/Manage (Overall/Read only) gets 403 and no check result; a GET by the
+     * manager is refused (the check requires POST) without a check result. Note 173.
+     */
+    @Test
+    public void t_cfg_09_approverCheckIsForManageHoldersAndPostOnly() throws Exception {
+        BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
+        strategy.add(Jenkins.READ, PermissionEntry.user("a2"));
+        String path = "descriptorByName/io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration/"
+                + "checkApproversText?value=no-such-user";
+
+        org.htmlunit.WebResponse manager = postAs("manager", path);
+        assertEquals(200, manager.getStatusCode(), "premise: the manager's check must be served");
+        assertTrue(manager.getContentAsString().contains("no-such-user"), "premise: the manager's check names the"
+                + " unknown id: " + excerpt(manager.getContentAsString()));
+
+        org.htmlunit.WebResponse other = postAs("a2", path);
+        assertEquals(403, other.getStatusCode(), "a user without BatchControl/Manage must be refused with 403, got "
+                + other.getStatusCode() + ": " + excerpt(other.getContentAsString()));
+        assertFalse(other.getContentAsString().contains("no-such-user"), "no check result for a user without Manage");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("manager");
+        org.htmlunit.WebResponse get = wc.getPage(new WebRequest(new URL(j.getURL(), path), HttpMethod.GET)).getWebResponse();
+        assertTrue(get.getStatusCode() >= 400, "the check requires POST; a GET must be refused, got " + get.getStatusCode());
+        assertFalse(get.getContentAsString().contains("no-such-user"), "a GET must not give a check result");
+    }
+
+    private org.htmlunit.WebResponse postAs(String userId, String path) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
+        int q = path.indexOf('?');
+        URL url = new URL(wc.createCrumbedUrl(path.substring(0, q)).toExternalForm() + "&" + path.substring(q + 1));
+        return wc.getPage(new WebRequest(url, HttpMethod.POST)).getWebResponse();
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private HtmlPage configPage(String userId) throws Exception {

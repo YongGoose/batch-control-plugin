@@ -395,6 +395,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-10-08 | 10, 4 (#13) | integration | P1 | 1,500 runs in 2025-08; 35,000 runs (5,000/day) in the 7 days before 2025-09-28T12:00Z (months away from the real current month, note 64); files generated from a line the store itself wrote | dashboard default view with the clock at 2025-08-28, then at 2025-09-28 (one warm-up load each, then measured) | the large view renders < 2 s and allocates < 24 MiB more than the small one (note 64) | BoundedReadTest |
 | T-10-09 | 6, 10 (#13) | integration | P1 | the same 35,000 runs in 7 days | dashboard default view and `history/?from=2025-09-21&to=2025-09-28`: one warm-up, three measured loads | median < 2 s for each; the figures are printed as `[spec6-measurement]` for docs/HOSTING-READINESS.md (note 66) | BoundedReadTest |
 | T-10-10 | 10, 12, 4 (security-10 S-02) | integration | P1 | Uncontrolled job with 70 string parameters (P01..P70, distinct defaults); one completed build (premise: its RunRecord is stored) | GET `dashboard/` and `history/` | both list the run and show all 70 parameter values (a reader that rejected records with more than 64 members hid the run, note 82) | StoreReadRegressionTest |
+| T-10-11 | 10 (security-25 S-25-01) | integration | P1 | Run control on; an activated job without approvalRequired; u1 and u2 hold Item/Build and Request; u1's approved request ran as #1 | u2 POSTs `rebuild/` on #1 (runs as #2) | History `?kind=runs&job=`: #1 names u1; #2 names u2 and not u1, is not APPROVED_REQUEST and carries no request id; runs.csv: only one line of the job carries the request id, and one names u2 and not u1 (note 173) | HistoryUsabilityTest |
 | T-11-01 | 11 | integration | P0 | cron 잡이 FAILURE | 완료 | Incident OPEN 생성, logTail 100줄 이하 | IncidentTest (fixture: the uncontrolled cron job is activated first, D-46, note 103) |
 | T-11-02 | 11 | integration | P0 | Incident i1 | 재실행 요청→승인→SUCCESS | i1.resolvedByRunId 설정, 상태는 OPEN 유지 (SPEC 6a: the job is activated by the fixture first, note 91) | IncidentTest |
 | T-11-03 | 11 | integration | P0 | incidentResults=[FAILURE] | UNSTABLE 완료 | Incident 없음 | IncidentTest |
@@ -447,6 +448,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-CFG-06 | config (D-52) | integration | P1 | Plain `ProjectMatrixAuthorizationStrategy`, change control on | admin POSTs the monitor's `migrate`, then `revert` | one STRATEGY_CHANGE record by admin after each (note 167) | ConfigAuditTest |
 | T-CFG-07 | config (D-53) (e2e-04 FD-03) | integration | P1 | Same realm; approvers [a1] | manager saves approvers `no-such-user` with timeout 24 | approvers stay [a1], timeout stays 72; the answer names `no-such-user`, is a plain refusal and keeps the typed value (note 167) | ConfigAuditTest |
 | T-CFG-08 | config (D-53) | integration | P1 | Run control on | manager saves an empty approver list | approvers stay [a1]; a plain refusal (note 167) | ConfigAuditTest |
+| T-CFG-09 | config (D-53), 2 (security-25 S-25-09) | integration | P1 | Jenkins user database realm; `manager` (BatchControl/Manage), `a2` (Overall/Read only) | manager POSTs `descriptorByName/<BatchControlGlobalConfiguration>/checkApproversText?value=no-such-user` (premise); a2 POSTs the same; manager GETs it | manager: 200 naming `no-such-user` (premise); a2: 403 without a check result; the GET: >= 400 without a check result (note 173) | ConfigAuditTest |
 | T-SEC-01 | 6 | integration | P0 | 결재자 | GET /batch-control/requests/<id>/approve | 405 또는 거부 (POST만) | RunRequestWebTest |
 | T-SEC-02 | 5, 2 (#31) | integration | P0 | Batch Control 권한이 전혀 없는 사용자(u2) | POST approve | 404 (루트 액션과 그 하위 모든 URL은 부재 — SPEC 2, #31; was 403, note 50) | RunRequestWebTest |
 | T-SEC-03 | 8 | unit | P0 | scope=FOLDER "team/batch" | item "team/batch-other" | 범위 밖 판정 (prefix 오판 방지) | PathCodecTest |
@@ -867,6 +869,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 172. **Store failure and the shutdown flush (T-06-86/87, S-23-03, S-23-06).** core-dev's test seam (security-24 S-24-04) makes these observable: `BlockedAttemptAudit.swapStoreForTesting(Store)` (restored after each row), `BlockedAttemptAudit.flushAtShutdown()` and `BlockedAttemptAudit.get().flushPersonSummaries()`. The failing store is a dynamic proxy over `Store` that forwards every call and throws once from `appendChangeRecord`, so the rows depend on no other method of the interface. The row checks that the failure was actually met, so a flush that never tried to write cannot pass. The end of the 10-minute window is reached by moving `BatchClock` (it drives the budget, as the premise of T-06-86 shows). Both rows were green on 99c402e. This supersedes the "not added" entry for S-23-03 in note 166.
 
 
+173. **security-25 rows (T-CFG-09, T-10-11).** T-CFG-09 uses the realm of ConfigAuditTest, so `no-such-user` is really unknown, and the manager's POST is the premise that the check exists at that URL. T-10-11 drives a real Rebuild (the rebuild plugin copies the approved cause) instead of the report's synthetic cause list. The run's user and classification are read from the History row (`#n` prefix) and from runs.csv; the request id is the one `requestAndApprove` returns.
+
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -917,3 +922,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **security-23 row, note 166**: +1 row, integration, P1: T-06-84 (S-23-08). S-23-03 not added (note 166). Totals: P1 +1; T-06 +1.
 - **e2e-04 part 5 rows, notes 167-171**: +14 rows, all integration: T-CFG-05..08 (D-52/53), T-UI-25 (FD-01), T-UI-26 (FD-08, P2), T-13-21..23 (D-54), T-05-20 (D-55), T-07-10 (FD-05, P2), T-06-85 (FD-07), T-12-13 (FD-09), T-12-14 (FD-11, P2). Totals: P1 11, P2 3; T-CFG +4, T-UI +2, T-13 +3, T-05 +1, T-07 +1, T-06 +1, T-12 +2.
 - **security-23/24 seam rows, note 172**: +2 rows, integration, P1: T-06-86 (S-23-03), T-06-87 (S-23-06). Totals: P1 +2; T-06 +2.
+- **security-25 rows, note 173**: +2 rows, integration, P1: T-CFG-09 (S-25-09), T-10-11 (S-25-01). Totals: P1 +2; T-CFG +1, T-10 +1.

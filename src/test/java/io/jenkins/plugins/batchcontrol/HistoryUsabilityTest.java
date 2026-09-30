@@ -19,6 +19,7 @@ import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.assertAp
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.requestAndApprove;
 import static io.jenkins.plugins.batchcontrol.PluginInteractionFixtures.secureWithRunControl;
 import static io.jenkins.plugins.batchcontrol.UsabilityFixtures.excerpt;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -87,7 +88,69 @@ public class HistoryUsabilityTest {
         }
     }
 
+    /**
+     * T-10-11 (security-25 S-25-01): on a job without approvalRequired (run control on, job
+     * activated), u1's approved run #1 completes; u2 then rebuilds #1 (Rebuild passes the gate: a
+     * person acting, D-47). Run #2 is u2's: its History row and runs.csv line name u2 and not u1,
+     * it is not classed APPROVED_REQUEST and carries no link to u1's request id. Run #1 still names
+     * u1. Note 173.
+     */
+    @Test
+    public void t_10_11_rebuildOfAnApprovedRunIsTheRebuildersRun() throws Exception {
+        j.jenkins.setAuthorizationStrategy(new org.jvnet.hudson.test.MockAuthorizationStrategy()
+                .grant(jenkins.model.Jenkins.ADMINISTER).everywhere().to("admin")
+                .grant(jenkins.model.Jenkins.READ, hudson.model.Item.READ, hudson.model.Item.BUILD,
+                        io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.REQUEST).everywhere().to("u1", "u2")
+                .grant(jenkins.model.Jenkins.READ, hudson.model.Item.READ,
+                        io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.APPROVE).everywhere().to("a1"));
+        FreeStyleProject job = BatchControlFixtures.uncontrolled(j.createFreeStyleProject("hist-rebuild"));
+        BatchControlFixtures.activate(job);
+        String requestId = requestAndApprove(job).getId();
+        j.waitUntilNoActivity();
+        assertNotNull(job.getBuildByNumber(1), "fixture: the approved request must have run as #1");
+
+        PluginInteractionFixtures.post(j, "u2", job.getBuildByNumber(1).getUrl() + "rebuild/");
+        j.waitUntilNoActivity();
+        assertNotNull(job.getBuildByNumber(2), "fixture: u2's Rebuild must run as #2 on a job without approvalRequired");
+
+        HtmlPage runs = UsabilityFixtures.htmlPage(j, "admin", "batch-control/history/?kind=runs&job=hist-rebuild");
+        String first = rowStarting(runs, "#1");
+        String second = rowStarting(runs, "#2");
+        assertNotNull(first, "fixture: the History must list #1");
+        assertNotNull(second, "fixture: the History must list #2");
+        assertTrue(first.matches("(?s).*\\bu1\\b.*"), "u1's approved run must still name u1: " + first);
+        assertTrue(second.matches("(?s).*\\bu2\\b.*") && !second.matches("(?s).*\\bu1\\b.*"),
+                "u2's Rebuild must be recorded as u2's run, not u1's: " + second);
+        assertTrue(!second.contains("APPROVED_REQUEST"), "the Rebuild must not be classed as an approved-request run: " + second);
+        assertTrue(!second.contains(requestId), "the Rebuild must carry no link to u1's request " + requestId + ": " + second);
+
+        String csv = ApproverFormFixtures.get(j, "admin", "batch-control/history/runs.csv").getContentAsString();
+        List<String> withRequest = new ArrayList<>();
+        boolean u2Line = false;
+        for (String line : csv.split("\\R")) {
+            if (!line.contains("hist-rebuild")) {
+                continue;
+            }
+            if (line.contains(requestId)) {
+                withRequest.add(line);
+            }
+            u2Line |= line.matches("(?s).*\\bu2\\b.*") && !line.matches("(?s).*\\bu1\\b.*");
+        }
+        assertEquals(1, withRequest.size(), "only u1's own run may carry the request id in runs.csv: " + withRequest);
+        assertTrue(u2Line, "runs.csv must list the Rebuild as u2's run: " + excerpt(csv));
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private static String rowStarting(HtmlPage page, String prefix) {
+        for (DomElement tr : page.getElementsByTagName("tr")) {
+            String text = tr.asNormalizedText().trim();
+            if (text.startsWith(prefix + "\t") || text.startsWith(prefix + " ")) {
+                return text;
+            }
+        }
+        return null;
+    }
 
     /** The text of the element holding the {@code from} date field: its form, else its parent three levels up. */
     private static String filterText(HtmlPage page) {
