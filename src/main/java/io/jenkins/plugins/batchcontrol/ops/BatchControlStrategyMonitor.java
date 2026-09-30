@@ -213,9 +213,9 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         try {
             Store.get().appendChangeRecord(ChangeRecord.create(ChangeType.STRATEGY_CHANGE, STRATEGY_CHANGE_TARGET,
                     user, "Batch Control authorization strategy " + what + ": "
-                            + (before == null ? "none" : before.getDescriptor().getDisplayName()
-                                    + " (" + before.getClass().getName() + ")")
-                            + " -> " + after.getDescriptor().getDisplayName() + " (" + after.getClass().getName() + ")"));
+                            // S-25-07: display names only; the record is shown to every ViewHistory holder.
+                            + (before == null ? "none" : before.getDescriptor().getDisplayName())
+                            + " -> " + after.getDescriptor().getDisplayName()));
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.WARNING, "Could not record the authorization strategy change", e);
         }
