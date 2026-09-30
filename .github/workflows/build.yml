@@ -1,5 +1,10 @@
 # Pre-hosting regression gate (issue #11, docs/CI-PROPOSAL.md N1).
 # Runs with the default read-only token and no secrets, so fork pull requests work too.
+#
+# The Surefire run is split into parallel shards (issue #54). Shard patterns live in
+# .github/test-shards.txt; .github/scripts/test-shards.py fails the run when a test class
+# matches no shard or two shards. The static checks run once, in the "checks" job. The
+# final "build" job aggregates every job and is the single required status.
 ---
 name: Build
 on:
@@ -17,10 +22,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
-    name: build
+  plan:
+    name: shard safeguard
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check that every test class is in exactly one shard
+        id: shards
+        run: python3 .github/scripts/test-shards.py check
+
+  checks:
+    name: static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,13 +49,68 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Build and test
-        run: mvn -B -ntp clean verify
+      # Enforcer, access-modifier checker, SpotBugs and the other verify-phase checks,
+      # plus compilation of the test sources. Tests run in the shard jobs.
+      - name: Build and check (tests skipped)
+        run: mvn -B -ntp clean verify -DskipTests
+
+  test:
+    name: test (shard ${{ matrix.shard }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # The access-modifier checker runs once, in the checks job; SpotBugs is bound to
+      # verify, which this job does not reach. The enforcer rules take seconds and the
+      # parent POM does not honour -Denforcer.skip, so they run here too.
+      - name: Test
+        env:
+          SHARD_TESTS: ${{ matrix.tests }}
+        run: >-
+          mvn -B -ntp clean test
+          -Dtest="$SHARD_TESTS"
+          -Daccess-modifier-checker.skip=true
+      - name: Check that the shard ran exactly its classes
+        env:
+          SHARD_ID: ${{ matrix.shard }}
+        run: python3 .github/scripts/test-shards.py verify "$SHARD_ID"
       - name: Upload surefire reports
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: surefire-reports
+          name: surefire-reports-shard-${{ matrix.shard }}
           path: target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
+
+  build:
+    name: build
+    needs: [plan, checks, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed
+        env:
+          PLAN: ${{ needs.plan.result }}
+          CHECKS: ${{ needs.checks.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "plan=$PLAN checks=$CHECKS test=$TEST"
+          for r in "$PLAN" "$CHECKS" "$TEST"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::a required job did not succeed (plan=$PLAN checks=$CHECKS test=$TEST)"
+              exit 1
+            fi
+          done

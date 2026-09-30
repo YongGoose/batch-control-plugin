@@ -1,0 +1,23 @@
+# Surefire shards for the Build workflow (issue #54).
+#
+# Format: <shard-id> <comma-separated Surefire -Dtest patterns>
+# Patterns match the simple class name; only letters, digits, '_' and '*' are allowed.
+#
+# Shards are contiguous first-letter ranges of the test class name, so every class that
+# starts with an upper-case A-Z letter is covered by construction. The ranges were balanced
+# with per-class times from the last single-job CI run (8,992 s of class time in total):
+#   1  A     ~1,850 s  (includes AuthorizationEntryGuardTest, the slowest class at ~460 s)
+#   2  B-F   ~1,270 s
+#   3  G-L   ~1,510 s
+#   4  M-P   ~1,830 s
+#   5  Q-R   ~1,580 s
+#   6  S-Z     ~960 s
+#
+# .github/scripts/test-shards.py check fails the workflow when a test class matches no shard
+# or more than one shard. Rebalance here when a range grows much slower than the others.
+1 A*Test
+2 B*Test,C*Test,D*Test,E*Test,F*Test
+3 G*Test,H*Test,I*Test,J*Test,K*Test,L*Test
+4 M*Test,N*Test,O*Test,P*Test
+5 Q*Test,R*Test
+6 S*Test,T*Test,U*Test,V*Test,W*Test,X*Test,Y*Test,Z*Test
