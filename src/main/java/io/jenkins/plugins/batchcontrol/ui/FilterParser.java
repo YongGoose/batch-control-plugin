@@ -53,8 +53,19 @@ public final class FilterParser {
     /** Parses the filter from the current request; never returns null. */
     public static Filter parse(@CheckForNull StaplerRequest2 req) {
         LocalDate today = LocalDate.now(BatchClock.clock());
-        LocalDate from = parseDate(param(req, "from"));
-        LocalDate to = parseDate(param(req, "to"));
+        String rawFrom = param(req, "from");
+        String rawTo = param(req, "to");
+        LocalDate from = parseDate(rawFrom);
+        LocalDate to = parseDate(rawTo);
+        // e2e-04 FD-11: a date that was given but cannot be used, or a reversed range, is
+        // reported next to its field (the screen then lists nothing). The fallback values below
+        // stay as before for the CSV exports and any other caller that ignores the errors.
+        String fromError = given(rawFrom) && from == null ? DATE_MESSAGE : null;
+        String toError = given(rawTo) && to == null ? DATE_MESSAGE : null;
+        if (from != null && to != null && from.isAfter(to)) {
+            toError = "The end date is before the start date. Enter an end date on or after "
+                    + from + ".";
+        }
         if (to == null) {
             to = today;
         }
@@ -66,11 +77,24 @@ public final class FilterParser {
             from = to;
             to = swap;
         }
-        return new Filter(from, to,
+        Filter filter = new Filter(from, to,
                 text(param(req, "job")),
                 text(param(req, "user")),
                 token(param(req, "result")),
                 token(param(req, "status")));
+        filter.fromError = fromError;
+        filter.toError = toError;
+        filter.fromInput = fromError != null || toError != null ? text(rawFrom) : null;
+        filter.toInput = fromError != null || toError != null ? text(rawTo) : null;
+        return filter;
+    }
+
+    /** The message for a date that is not a plain ISO date in the accepted years. */
+    static final String DATE_MESSAGE = "Enter a date as YYYY-MM-DD (a real calendar day, year "
+            + MIN_YEAR + " to " + MAX_YEAR + ").";
+
+    private static boolean given(@CheckForNull String raw) {
+        return raw != null && !raw.trim().isEmpty();
     }
 
     @CheckForNull
@@ -143,6 +167,12 @@ public final class FilterParser {
         private final String result;
         private final String status;
 
+        // Set once by FilterParser#parse, before the filter is handed out.
+        private String fromError;
+        private String toError;
+        private String fromInput;
+        private String toInput;
+
         Filter(LocalDate from, LocalDate to, @CheckForNull String job, @CheckForNull String user,
                 @CheckForNull String result, @CheckForNull String status) {
             this.from = from;
@@ -161,6 +191,33 @@ public final class FilterParser {
 
         public String getToValue() {
             return to.toString();
+        }
+
+        /** e2e-04 FD-11: the refusal of the {@code from} date, or {@code null}. */
+        @CheckForNull
+        public String getFromError() {
+            return fromError;
+        }
+
+        /** e2e-04 FD-11: the refusal of the {@code to} date (or of a reversed range), or {@code null}. */
+        @CheckForNull
+        public String getToError() {
+            return toError;
+        }
+
+        /** Whether both dates were usable; the screen lists nothing otherwise. */
+        public boolean isValid() {
+            return fromError == null && toError == null;
+        }
+
+        /** The {@code from} field's value for redisplay: what the user entered after a refusal. */
+        public String getFromInput() {
+            return isValid() ? getFromValue() : (fromInput == null ? "" : fromInput);
+        }
+
+        /** The {@code to} field's value for redisplay: what the user entered after a refusal. */
+        public String getToInput() {
+            return isValid() ? getToValue() : (toInput == null ? "" : toInput);
         }
 
         @CheckForNull
