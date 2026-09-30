@@ -334,7 +334,7 @@ code does on purpose.
 ## SYSTEM builds and the global-matrix upgrade
 
 35. **On an item a grant has touched, authorization can only be widened by
-    an administrator's HTTP save.** A Pipeline
+    an administrator's HTTP save until the item is reviewed.** A Pipeline
     `properties([authorizationMatrix(...)])` step saves its job's
     authorization property without asking whether the build's account holds
     Configure, so running builds as a low-privilege account does not by
@@ -345,12 +345,22 @@ code does on purpose.
 
     - every item in the scope of an active grant;
     - every item whose configuration was changed under a grant (saved or
-      created by a user whose permission came only from a grant), and every
-      item a non-administrator created inside a guarded folder, until the
-      item is reviewed. The review is a save of the item through an HTTP
-      request by an `Overall/Administer` holder, or by a user who holds
-      `Item/Configure` natively (not from a grant) provided that save does
-      not widen authorization. The review ends the guard for that item.
+      created by a user whose permission came only from a grant), every item
+      a non-administrator created inside a guarded folder, and every
+      Pipeline job on which a user whose permission came only from a grant
+      submitted a **Replay**, a Pipeline **Rebuild** or a **Restart from
+      Stage** (a replayed script is a configuration change that is never
+      saved), until the item is marked as reviewed.
+
+    Guarding covers the item and everything below it: the jobs in a guarded
+    folder and the branch jobs of a guarded multibranch project.
+
+    The guard on a changed item ends only through **Mark as reviewed**, a
+    deliberate action offered to administrators next to each item on the
+    Manage Jenkins monitor, and to users who hold `Item/Configure` natively
+    (not from a grant) on the item's Batch Control page. It writes a
+    `GUARD_REVIEWED` change record naming the reviewer. An ordinary save,
+    even an administrator's, is not a review.
 
     Guarding follows renames and moves. On a guarded item, any change that
     widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
@@ -362,8 +372,8 @@ code does on purpose.
     removed. The only exception is a save made through an HTTP request (the
     web UI, a `config.xml` POST, or REST or CLI over HTTP) by a user who holds
     `Overall/Administer`. A user who holds `Item/Configure` natively but is
-    not an administrator is not exempt: until the item is reviewed, their
-    widening is put back like anyone else's. A save made through an HTTP
+    not an administrator is not exempt: until the item is marked as
+    reviewed, their widening is put back like anyone else's. A save made through an HTTP
     request is answered with HTTP 403 and a plain message saying which
     authorization entries were not kept and that the other changes were
     saved. A Pipeline build whose own save was put back gets a line in its
@@ -372,16 +382,23 @@ code does on purpose.
     example a seed job saving another job, or a Freestyle build.
 
     This changes how administrators manage authorization on those items, and
-    only on those. Until the review, a Jenkinsfile, Job DSL or JCasC change
-    that widens authorization on a guarded item is put back, and so is one
-    made with the CLI over WebSocket or SSH, even by an administrator: only
-    the CLI over HTTP (`-http`) or the web UI carries the exemption, so use
-    one of those. Items that no grant has touched are not affected. The
-    administrative monitor on Manage Jenkins lists the items waiting for
-    review. Review what was changed under the grant before saving, the
-    Pipeline script included: once the review save is made the item is no
-    longer guarded, and a script left in it that writes authorization entries
-    will then succeed.
+    only on those. Until the item is marked as reviewed, a Jenkinsfile, Job
+    DSL or JCasC change that widens authorization on a guarded item is put
+    back, and so is one made with the CLI over WebSocket or SSH, even by an
+    administrator: only the CLI over HTTP (`-http`) or the web UI carries the
+    exemption, so use one of those. Items that no grant has touched are not
+    affected. The administrative monitor on Manage Jenkins lists the items
+    waiting for review. Before marking an item as reviewed, check what was
+    changed under the grant, the Pipeline script and any replayed runs
+    included: once it is marked the item is no longer guarded, and a script
+    left in it that writes authorization entries will then succeed.
+
+    Deleting a guarded item and creating a new one under the same name drops
+    the state: the new item is not guarded. An account that may delete and
+    create jobs, typically a Job DSL seed job, can therefore re-create a
+    guarded job with any authorization entries once the grant has ended.
+    This is one more reason to run such builds under a low-privilege account
+    (below).
 
     **Run builds under a low-privilege account as well.** The guard above does
     not make the build account irrelevant: a build that runs as SYSTEM or as
