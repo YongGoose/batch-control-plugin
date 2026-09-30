@@ -5,7 +5,7 @@
       <l:app-bar title="Incidents"/>
       <p class="jenkins-description">
         Failed and unstable builds are registered automatically as incidents.
-        Open an incident to acknowledge, comment, resolve, or request a rerun.
+        Open an incident to acknowledge, comment or resolve it; a user who may submit run requests for its job can also request a rerun there.
       </p>
 
       <!-- Month selector: a plain GET form; changing the month never changes state. -->
