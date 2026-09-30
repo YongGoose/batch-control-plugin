@@ -83,7 +83,11 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
             record.setRunRequestId(approved.getRequestId());
         }
         Cause.UserIdCause userCause = run.getCause(Cause.UserIdCause.class);
-        if (userCause != null) {
+        if (approved != null && approved.getRequester() != null) {
+            // e2e-04 FD-09: a run started by an approved request is the requester's run (History,
+            // runs.csv, the dashboard and the user= filter); the request id stays on the record.
+            record.setUser(approved.getRequester());
+        } else if (userCause != null) {
             record.setUser(userCause.getUserId());
         }
         record.setParameters(IncidentService.maskedParameters(run));
