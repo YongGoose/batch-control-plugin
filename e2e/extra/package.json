@@ -1,0 +1,9 @@
+{
+  "name": "batch-control-e2e-extra",
+  "private": true,
+  "description": "Playwright driver for the batch-control e2e checklist (e2e-05 extra checks)",
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.58.2"
+  }
+}
