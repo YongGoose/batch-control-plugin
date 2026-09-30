@@ -363,7 +363,7 @@ public class GrantServiceTest {
     }
 
     private ChangeRecord lastRecord(ChangeType type) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == type)
                 .reduce((first, second) -> second)
                 .orElse(null);

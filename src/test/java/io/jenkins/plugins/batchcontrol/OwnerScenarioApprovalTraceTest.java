@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -166,7 +167,7 @@ public class OwnerScenarioApprovalTraceTest {
     }
 
     private RunRecord record(String runId) {
-        return FileStore.get().listRunRecords(YearMonth.now()).stream()
+        return FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> runId.equals(rec.getRunId()))
                 .findFirst().orElse(null);
     }

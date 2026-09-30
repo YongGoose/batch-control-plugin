@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
@@ -362,7 +363,7 @@ public class IncidentTest {
     }
 
     private Incident incidentForRun(String runId) {
-        return IncidentService.get().list(YearMonth.now()).stream()
+        return IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(incident -> runId.equals(incident.getRunId()))
                 .findFirst().orElse(null);
     }

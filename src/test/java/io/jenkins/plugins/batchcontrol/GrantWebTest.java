@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
@@ -145,7 +146,7 @@ public class GrantWebTest {
                 + page.getWebResponse().getStatusCode());
 
         assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "the grant must be inactive immediately after the revoke");
-        assertTrue(FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        assertTrue(FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                         .anyMatch(rec -> rec.getType() == ChangeType.GRANT_REVOKE
                                 && "m1".equals(rec.getUser())), "revocation must leave a ChangeRecord(GRANT_REVOKE)");
     }

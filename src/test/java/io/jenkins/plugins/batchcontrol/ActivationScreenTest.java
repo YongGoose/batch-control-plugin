@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -148,7 +149,7 @@ public class ActivationScreenTest {
         String hold = submitActivationOk(j, "u1", job, "HOLD", "pause", "a1");
         assertSuccess(decideActivation(j, "a1", hold, "approve", "ok"), "fixture: hold approval");
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(BatchClock.clock());
         String period = "from=" + today.withDayOfMonth(1) + "&to=" + today.withDayOfMonth(today.lengthOfMonth());
         WebResponse history = get(j, "viewer", "batch-control/history/?kind=changes&" + period);
         assertEquals(200, history.getStatusCode());

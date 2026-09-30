@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
@@ -258,7 +259,7 @@ public class OwnerScenarioLiveToggleTest {
     }
 
     private RunRecord record(String runId) {
-        return FileStore.get().listRunRecords(YearMonth.now()).stream()
+        return FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> runId.equals(rec.getRunId()))
                 .findFirst().orElse(null);
     }

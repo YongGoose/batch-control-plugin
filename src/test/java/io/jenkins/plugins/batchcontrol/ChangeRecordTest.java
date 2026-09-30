@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import com.cloudbees.hudson.plugins.folder.Folder;
 import hudson.cli.CLICommandInvoker;
 import hudson.model.FreeStyleProject;
@@ -343,7 +344,7 @@ public class ChangeRecordTest {
 
     /** All records of the given type; target=null matches any target. */
     private List<ChangeRecord> records(ChangeType type, String target) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == type)
                 .filter(rec -> target == null || target.equals(rec.getTarget()))
                 .collect(Collectors.toList());

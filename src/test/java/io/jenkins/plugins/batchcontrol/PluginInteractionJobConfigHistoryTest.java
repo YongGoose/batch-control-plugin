@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.plugins.jobConfigHistory.PluginUtils;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -116,7 +117,7 @@ public class PluginInteractionJobConfigHistoryTest {
     }
 
     private static List<ChangeRecord> configureRecords(String target) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> target.equals(rec.getTarget()))
                 .collect(Collectors.toList());

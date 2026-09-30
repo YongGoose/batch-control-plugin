@@ -793,7 +793,7 @@ public class AuthorizationEntryGuardTest {
     private static List<ChangeRecord> byUserOn(String user, String target) {
         List<ChangeRecord> out = new java.util.ArrayList<>();
         for (java.time.YearMonth month : new java.util.LinkedHashSet<>(Arrays.asList(
-                java.time.YearMonth.from(T0.atZone(ZoneOffset.UTC)), java.time.YearMonth.now()))) {
+                java.time.YearMonth.from(T0.atZone(ZoneOffset.UTC)), java.time.YearMonth.now(io.jenkins.plugins.batchcontrol.store.BatchClock.clock())))) {
             for (ChangeRecord r : io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(month)) {
                 if (user.equals(r.getUser()) && target.equals(r.getTarget()) && !out.contains(r)) {
                     out.add(r);
@@ -814,7 +814,7 @@ public class AuthorizationEntryGuardTest {
         java.util.Set<java.time.YearMonth> months = new java.util.LinkedHashSet<>(Arrays.asList(
                 java.time.YearMonth.from(T0.atZone(ZoneOffset.UTC)),
                 java.time.YearMonth.from(T0.plus(Duration.ofDays(40)).atZone(ZoneOffset.UTC)),
-                java.time.YearMonth.now()));
+                java.time.YearMonth.now(io.jenkins.plugins.batchcontrol.store.BatchClock.clock())));
         List<ChangeRecord> out = new java.util.ArrayList<>();
         for (java.time.YearMonth month : months) {
             for (ChangeRecord r : io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(month)) {

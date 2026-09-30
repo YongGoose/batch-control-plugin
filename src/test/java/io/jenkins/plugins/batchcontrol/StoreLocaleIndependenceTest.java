@@ -182,7 +182,7 @@ public class StoreLocaleIndependenceTest {
         for (String dir : new String[] {"runs", "changes"}) {
             assertNoFileForMonth(dir, oldMonth);
         }
-        assertTrue(FileStore.get().listChangeRecords(YearMonth.now(ZoneOffset.UTC)).stream()
+        assertTrue(FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .anyMatch(rec -> rec.getType() == ChangeType.RETENTION), "the deletion must be recorded as RETENTION");
     }
 

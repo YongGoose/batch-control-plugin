@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -198,9 +199,9 @@ final class ApproverFormFixtures {
     /** Change records of {@code type} in the current month and in the months of the given instants. */
     static List<ChangeRecord> records(ChangeType type, Instant... alsoMonthsOf) {
         Set<YearMonth> months = new LinkedHashSet<>();
-        months.add(YearMonth.now());
+        months.add(YearMonth.now(BatchClock.clock()));
         for (Instant instant : alsoMonthsOf) {
-            months.add(YearMonth.from(instant.atZone(ZoneOffset.UTC)));
+            months.add(YearMonth.from(instant.atZone(BatchClock.clock().getZone())));
         }
         List<ChangeRecord> out = new ArrayList<>();
         for (YearMonth month : months) {

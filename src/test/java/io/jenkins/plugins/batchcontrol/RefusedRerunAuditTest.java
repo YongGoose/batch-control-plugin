@@ -542,7 +542,7 @@ public class RefusedRerunAuditTest {
     /** Change records of the current month written by {@code user} after the baseline, whatever their type or target. */
     private List<ChangeRecord> byUser(String user) {
         java.util.Set<String> skip = baselineIds.get();
-        return io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(java.time.YearMonth.now()).stream()
+        return io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(java.time.YearMonth.now(io.jenkins.plugins.batchcontrol.store.BatchClock.clock())).stream()
                 .filter(r -> user.equals(r.getUser()) && !skip.contains(r.getId())).collect(Collectors.toList());
     }
 

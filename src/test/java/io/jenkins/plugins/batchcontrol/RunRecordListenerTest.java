@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.FreeStyleProject;
@@ -264,7 +265,7 @@ public class RunRecordListenerTest {
             first.get();
         }
         j.waitUntilNoActivity();
-        long recorded = FileStore.get().listRunRecords(YearMonth.now()).stream()
+        long recorded = FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> "mb/main".equals(rec.getJobFullName()))
                 .count();
         assertTrue(recorded >= 1, "a multibranch child completion must be recorded");
@@ -300,7 +301,7 @@ public class RunRecordListenerTest {
     }
 
     private RunRecord record(String runId) {
-        return FileStore.get().listRunRecords(YearMonth.now()).stream()
+        return FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> runId.equals(rec.getRunId()))
                 .findFirst().orElse(null);
     }

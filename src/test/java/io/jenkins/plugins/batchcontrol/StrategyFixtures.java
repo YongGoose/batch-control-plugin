@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry;
 import com.michelin.cio.hudson.plugins.rolestrategy.Role;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleBasedAuthorizationStrategy;
@@ -151,7 +152,7 @@ final class StrategyFixtures {
 
     /** Change records of {@code type} in the month of T0 and the current month (deduplicated by identity). */
     static List<ChangeRecord> records(ChangeType type) {
-        Set<YearMonth> months = new LinkedHashSet<>(Arrays.asList(YearMonth.from(T0.atZone(ZoneOffset.UTC)), YearMonth.now()));
+        Set<YearMonth> months = new LinkedHashSet<>(Arrays.asList(YearMonth.from(T0.atZone(ZoneOffset.UTC)), YearMonth.now(BatchClock.clock())));
         List<ChangeRecord> out = new ArrayList<>();
         for (YearMonth month : months) {
             for (ChangeRecord rec : FileStore.get().listChangeRecords(month)) {

@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
@@ -106,7 +107,7 @@ public class RunLinkRuleTest {
         j.waitUntilNoActivity();
         assertEquals(1, job.getBuilds().size(), "fixture: the approved run must have executed once");
 
-        Incident incident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident incident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(i -> (JOB + "#1").equals(i.getRunId())).findFirst().orElse(null);
         assertNotNull(incident, "fixture: the failed run must have opened an incident");
 

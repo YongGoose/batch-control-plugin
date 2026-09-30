@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.XmlFile;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -332,7 +333,7 @@ public class SwitchSaveFailureTest {
     }
 
     private static List<ChangeRecord> records(ChangeType type, String target) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> r.getType() == type)
                 .filter(r -> target == null || target.equals(r.getTarget()))
                 .collect(Collectors.toList());

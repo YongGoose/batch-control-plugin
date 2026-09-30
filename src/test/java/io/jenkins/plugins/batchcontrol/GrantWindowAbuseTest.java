@@ -219,7 +219,7 @@ public class GrantWindowAbuseTest {
         }
         assertEquals("rev-30", hot.getDescription());
 
-        List<ChangeRecord> hotRecords = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        List<ChangeRecord> hotRecords = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> "hot-job".equals(rec.getTarget()))
                 .collect(Collectors.toList());
@@ -238,7 +238,7 @@ public class GrantWindowAbuseTest {
                     + removed + " -> " + added + ")");
         }
 
-        assertTrue(FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        assertTrue(FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                         .anyMatch(rec -> rec.getType() == ChangeType.CONFIGURE
                                 && "side-job".equals(rec.getTarget())), "the interleaved change of the other job must be recorded too "
                 + "(the record pipeline must not block other jobs)");
