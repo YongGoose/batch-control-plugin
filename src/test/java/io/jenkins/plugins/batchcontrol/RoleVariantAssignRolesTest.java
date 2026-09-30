@@ -80,6 +80,37 @@ public class RoleVariantAssignRolesTest {
         }
     }
 
+    /**
+     * T-SEC-52 (security scan alerts 31-33): the variant descriptor's form checks checkName,
+     * checkPattern and checkForWhitespace answer 403 to bob (Overall/Read, no Administer) with no
+     * check result, refuse a GET by the administrator, and answer the administrator's POST with a
+     * check result (premise). Note 177.
+     */
+    @Test
+    public void t_sec_52_variantFormChecksRequireAdministerAndPost() throws Exception {
+        String[][] calls = {
+            {"checkName", "[USER:bob]"},
+            {"checkPattern", "team-.*"},
+            {"checkForWhitespace", "team-a"},
+        };
+        for (String[] call : calls) {
+            String path = "descriptorByName/" + VARIANT + "/" + call[0];
+            WebResponse admin = check(path, call[1]);
+            assertEquals(200, admin.getStatusCode(), "premise: the administrator's POST of " + call[0] + " gets a check result");
+
+            List<NameValuePair> params = new ArrayList<>();
+            params.add(new NameValuePair("value", call[1]));
+            WebResponse bob = ApproverFormFixtures.post(j, "bob", path, params);
+            assertEquals(403, bob.getStatusCode(), call[0] + " must answer 403 to a user without Overall/Administer, got "
+                    + bob.getStatusCode() + ": " + excerpt(bob.getContentAsString()));
+
+            WebResponse get = ApproverFormFixtures.get(j, "admin", path + "?value="
+                    + java.net.URLEncoder.encode(call[1], java.nio.charset.StandardCharsets.UTF_8));
+            assertTrue(get.getStatusCode() >= 400, call[0] + " must refuse a GET, got " + get.getStatusCode() + ": "
+                    + excerpt(get.getContentAsString()));
+        }
+    }
+
     private WebResponse check(String path, String value) throws Exception {
         List<NameValuePair> params = new ArrayList<>();
         params.add(new NameValuePair("value", value));

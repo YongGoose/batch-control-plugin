@@ -388,6 +388,60 @@ public class AuthorizationEntryGuardTest {
         assertTrue(entryExists("bob"), "with change control off nothing is reverted");
     }
 
+    /**
+     * T-02-66 (D-58a (5)): bob plants the script inside his window and the window ends. c1 (native
+     * Item/Configure, not an administrator) saves the job through HTTP adding carol: 403, reverted.
+     * That save widened, so it is not the review: the build then still has bob's entry reverted.
+     */
+    @Test
+    public void t_02_66_revertedNativeWideningDoesNotClearTheState() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        afterWindow();
+        String xml = current().getConfigFile().asString();
+        String widened = xml.replace("<properties/>", "<properties>" + propertyXml("carol") + "</properties>");
+        assertFalse(widened.equals(xml), "fixture: the job config must have an empty <properties/>: " + xml);
+        assertEquals(403, post("c1", widened), "c1's widening on the guarded job must answer 403");
+        assertNoEntryFor("carol");
+
+        j.buildAndAssertSuccess(current());
+        assertNoEntryFor("bob");
+    }
+
+    /**
+     * T-02-67 (D-58a (1)(5)): bob holds a FOLDER CONFIGURE grant on {@code team}; carol (native
+     * Job/Create, not an administrator) creates the Pipeline job {@code team/p2} whose script gives
+     * her Job/Configure. The window ends; the item stays guarded, so the build's entry is reverted.
+     */
+    @Test
+    public void t_02_67_itemCreatedInAGuardedFolderIsGuarded() throws Exception {
+        BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
+        strategy.add(Item.CREATE, PermissionEntry.user("carol"));
+        j.jenkins.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "team");
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CONFIGURE));
+
+        String script = entryFor("user", "carol").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("'", "&apos;");
+        String payload = "<?xml version='1.1' encoding='UTF-8'?><flow-definition><definition class=\""
+                + "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition\"><script>" + script
+                + "</script><sandbox>true</sandbox></definition></flow-definition>";
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("carol");
+        WebRequest req = new WebRequest(new java.net.URL(wc.createCrumbedUrl("job/team/createItem").toExternalForm()
+                + "&name=p2"), HttpMethod.POST);
+        req.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
+        req.setRequestBody(payload);
+        wc.getPage(req);
+        WorkflowJob p2 = j.jenkins.getItemByFullName("team/p2", WorkflowJob.class);
+        assertTrue(p2 != null, "fixture: carol's creation must have made team/p2");
+
+        afterWindow();
+        j.buildAndAssertSuccess(p2);
+        AuthorizationMatrixProperty amp = p2.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || amp.getGrantedPermissionEntries().values().stream()
+                .noneMatch(s -> s.stream().anyMatch(pe -> "carol".equals(pe.getSid()))),
+                "an item created inside a guarded folder by a non-administrator stays guarded after the window");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void grantBob() throws Exception {
