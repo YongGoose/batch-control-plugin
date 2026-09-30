@@ -84,9 +84,30 @@ public class BatchControlConfigurationLink extends ManagementLink {
         return Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
     }
 
-    /** The configuration the page edits (Jelly binds its fields to it). */
+    /** Request attribute carrying the refused submission's draft (D-53, e2e-04 FD-03). */
+    static final String DRAFT = BatchControlConfigurationLink.class.getName() + ".draft";
+
+    /** Request attribute carrying the refusal message of the submission. */
+    static final String SAVE_ERROR = BatchControlConfigurationLink.class.getName() + ".error";
+
+    /**
+     * The configuration the page edits (Jelly binds its fields to it). While a refused submission
+     * is being answered, the submitted values instead (a detached draft that is never saved), so
+     * the page keeps what the user typed and the field checks show the message next to the field.
+     */
     public BatchControlGlobalConfiguration getConfiguration() {
-        return BatchControlGlobalConfiguration.get();
+        org.kohsuke.stapler.StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
+        Object draft = req == null ? null : req.getAttribute(DRAFT);
+        return draft instanceof BatchControlGlobalConfiguration
+                ? (BatchControlGlobalConfiguration) draft : BatchControlGlobalConfiguration.get();
+    }
+
+    /** The refusal message of the submission being answered, or {@code null} (for the view). */
+    @CheckForNull
+    public String getSaveError() {
+        org.kohsuke.stapler.StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
+        Object error = req == null ? null : req.getAttribute(SAVE_ERROR);
+        return error instanceof String ? (String) error : null;
     }
 
     /**
@@ -102,7 +123,21 @@ public class BatchControlConfigurationLink extends ManagementLink {
         JSONObject json = req.getSubmittedForm();
         String key = configuration.getJsonSafeClassName();
         JSONObject section = json.has(key) ? json.getJSONObject(key) : json;
-        configuration.configure(req, section);
+        try {
+            configuration.configure(req, section);
+        } catch (FormException e) {
+            // D-53 / SPEC 6 usability: the refused form is shown again with the submitted values
+            // (HTTP 400); nothing was saved.
+            BatchControlGlobalConfiguration draft = BatchControlGlobalConfiguration.draftOf(req, section);
+            if (draft == null) {
+                throw e;
+            }
+            req.setAttribute(DRAFT, draft);
+            req.setAttribute(SAVE_ERROR, e.getMessage());
+            rsp.setStatus(jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST);
+            req.getView(this, "index.jelly").forward(req, rsp);
+            return;
+        }
         FormApply.success(".").generateResponse(req, rsp, null);
     }
 }

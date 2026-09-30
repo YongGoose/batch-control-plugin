@@ -87,6 +87,24 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         copyFrom(source);
     }
 
+    /**
+     * A detached copy of this configuration with {@code json} bound onto it, for re-showing a
+     * refused form with what the user typed (D-53). Never registered, saved or used for any
+     * decision; {@code null} when the submission cannot even be bound (then the plain refusal
+     * stands).
+     */
+    @edu.umd.cs.findbugs.annotations.CheckForNull
+    static BatchControlGlobalConfiguration draftOf(StaplerRequest2 req, JSONObject json) {
+        try {
+            BatchControlGlobalConfiguration draft = new BatchControlGlobalConfiguration(get());
+            req.bindJSON(draft, normalizeListFields(json));
+            return draft;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not bind the refused configuration form for re-display", e);
+            return null;
+        }
+    }
+
     public static BatchControlGlobalConfiguration get() {
         return ExtensionList.lookupSingleton(BatchControlGlobalConfiguration.class);
     }
