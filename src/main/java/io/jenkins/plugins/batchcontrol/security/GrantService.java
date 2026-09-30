@@ -75,6 +75,7 @@ public final class GrantService {
     private synchronized void clearCache() {
         cache = null;
         markedRuns.clear();
+        markedRunsLoaded = false;
     }
 
     /**
@@ -259,69 +260,123 @@ public final class GrantService {
     /** D-58c: at most this many marked runs are listed per item. */
     static final int MAX_MARKED_RUNS = 50;
 
-    /** At most this many builds of a job are scanned for markers on a cache miss. */
-    static final int MARKED_RUN_SCAN = 100;
+    /** At most this many REPLAY_UNDER_GRANT records are read to rebuild the index after a restart. */
+    static final int MARKED_RUN_RECORDS = 5_000;
 
-    /** D-58c: job full name to the ids of its marked runs (newest first), for the current session. */
+    /**
+     * D-58c (S-30-05): job full name to the ids of its marked runs, newest first. Filled when a
+     * marked run starts, and once per session from the REPLAY_UNDER_GRANT change records (bounded,
+     * no build is loaded); never computed while a map lock is held.
+     */
     private final java.util.Map<String, List<String>> markedRuns = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private volatile boolean markedRunsLoaded;
+
+    /** The marked-run index follows a rename or move, and forgets a deleted item ({@code null}). */
+    private void relocateMarkedRuns(String oldFullName, @CheckForNull String newFullName) {
+        for (String job : new ArrayList<>(markedRuns.keySet())) {
+            if (!job.equals(oldFullName) && !job.startsWith(oldFullName + "/")) {
+                continue;
+            }
+            List<String> runs = markedRuns.remove(job);
+            if (runs == null || newFullName == null) {
+                continue;
+            }
+            String moved = newFullName + job.substring(oldFullName.length());
+            List<String> renamed = new ArrayList<>();
+            for (String runId : runs) {
+                renamed.add(moved + runId.substring(job.length()));
+            }
+            markedRuns.put(moved, renamed);
+        }
+    }
 
     /** D-58c: a marked run started (called by the run listener). */
     public void noteMarkedRun(String jobFullName, String runId) {
-        markedRuns.compute(jobFullName, (job, runs) -> {
-            List<String> updated = new ArrayList<>();
-            updated.add(runId);
-            if (runs != null) {
-                for (String existing : runs) {
-                    if (updated.size() >= MAX_MARKED_RUNS) {
-                        break;
-                    }
-                    if (!existing.equals(runId)) {
-                        updated.add(existing);
-                    }
+        markedRuns.compute(jobFullName, (job, runs) -> prepend(runs, runId));
+    }
+
+    private static List<String> prepend(List<String> runs, String runId) {
+        List<String> updated = new ArrayList<>();
+        updated.add(runId);
+        if (runs != null) {
+            for (String existing : runs) {
+                if (updated.size() >= MAX_MARKED_RUNS) {
+                    break;
+                }
+                if (!existing.equals(runId)) {
+                    updated.add(existing);
                 }
             }
-            return updated;
-        });
+        }
+        return updated;
     }
 
     /**
      * D-58c: the ids ({@code job#number}) of the runs of the item (a job, or the jobs below a
-     * folder) that were replayed under a grant, at most {@value #MAX_MARKED_RUNS}. Served from a
-     * per-session cache; a job not seen yet is scanned once over its newest
-     * {@value #MARKED_RUN_SCAN} builds.
+     * folder) that were replayed under a grant, at most {@value #MAX_MARKED_RUNS}. Served from the
+     * in-memory index; no build is loaded.
      */
     public List<String> markedRuns(hudson.model.Item item) {
+        loadMarkedRunsOnce();
         List<String> out = new ArrayList<>();
-        if (item instanceof hudson.model.Job) {
-            out.addAll(markedRunsOf((hudson.model.Job<?, ?>) item));
-        } else if (item instanceof hudson.model.ItemGroup) {
-            int jobs = 0;
-            for (hudson.model.Job<?, ?> job : ((hudson.model.ItemGroup<?>) item).getAllItems(hudson.model.Job.class)) {
-                if (out.size() >= MAX_MARKED_RUNS || ++jobs > MAX_MARKED_RUNS) {
+        String fullName = item.getFullName();
+        List<String> own = markedRuns.get(fullName);
+        if (own != null) {
+            out.addAll(own);
+        }
+        if (item instanceof hudson.model.ItemGroup) {
+            for (java.util.Map.Entry<String, List<String>> e : markedRuns.entrySet()) {
+                if (out.size() >= MAX_MARKED_RUNS) {
                     break;
                 }
-                out.addAll(markedRunsOf(job));
+                if (e.getKey().startsWith(fullName + "/")) {
+                    out.addAll(e.getValue());
+                }
             }
         }
         return out.size() > MAX_MARKED_RUNS ? new ArrayList<>(out.subList(0, MAX_MARKED_RUNS)) : out;
     }
 
-    private List<String> markedRunsOf(hudson.model.Job<?, ?> job) {
-        return markedRuns.computeIfAbsent(job.getFullName(), name -> {
-            List<String> found = new ArrayList<>();
-            int scanned = 0;
-            for (hudson.model.Run<?, ?> run = job.getLastBuild(); run != null && scanned < MARKED_RUN_SCAN;
-                    run = run.getPreviousBuild()) {
-                scanned++;
-                if (run.getAction(io.jenkins.plugins.batchcontrol.queue.ReplayUnderGrantAction.class) != null) {
-                    found.add(name + "#" + run.getNumber());
-                    if (found.size() >= MAX_MARKED_RUNS) {
-                        break;
+    /**
+     * Rebuilds the index once per session from the REPLAY_UNDER_GRANT records of the retained months
+     * (the record's target is the job, its detail starts with "Run #n"). Bounded by
+     * {@value #MARKED_RUN_RECORDS} records; a failure leaves the index as it is.
+     */
+    private void loadMarkedRunsOnce() {
+        if (markedRunsLoaded) {
+            return;
+        }
+        synchronized (markedRuns) {
+            if (markedRunsLoaded) {
+                return;
+            }
+            markedRunsLoaded = true;
+            try {
+                io.jenkins.plugins.batchcontrol.store.RecordPage<ChangeRecord> page = store.pageChangeRecords(
+                        store.listStoredMonths(), r -> r.getType() == ChangeType.REPLAY_UNDER_GRANT,
+                        0, MARKED_RUN_RECORDS, MARKED_RUN_RECORDS * 20);
+                List<ChangeRecord> records = new ArrayList<>(page.getItems());
+                java.util.Collections.reverse(records); // oldest first, so prepend leaves the newest first
+                for (ChangeRecord record : records) {
+                    String detail = record.getDetail();
+                    if (record.getTarget() == null || detail == null || !detail.startsWith("Run #")) {
+                        continue;
+                    }
+                    int end = 5;
+                    while (end < detail.length() && Character.isDigit(detail.charAt(end))) {
+                        end++;
+                    }
+                    if (end > 5) {
+                        String runId = record.getTarget() + "#" + detail.substring(5, end);
+                        markedRuns.compute(record.getTarget(), (job, runs) -> runs != null && runs.contains(runId)
+                                ? runs : prepend(runs, runId));
                     }
                 }
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not rebuild the index of runs replayed under a grant", e);
             }
-            return found;
-        });
+        }
     }
 
     /**
@@ -467,7 +522,11 @@ public final class GrantService {
         java.util.Set<String> clear = new java.util.LinkedHashSet<>();
         java.util.Set<String> kept = new java.util.LinkedHashSet<>();
         for (String name : changedAtOrBelow(fullName)) {
-            hudson.model.Item below = name.equals(fullName) ? item : Jenkins.get().getItemByFullName(name);
+            // S-30-03: found as SYSTEM (read-only lookup, ApprovalPolicy#itemForPolicy), so an item the
+            // reviewer cannot read is not taken for a deleted one; the reviewer's own permission
+            // on it is what decides below.
+            hudson.model.Item below = name.equals(fullName) ? item
+                    : io.jenkins.plugins.batchcontrol.policy.ApprovalPolicy.itemForPolicy(name);
             if (below == null || below == item || mayReview(below, auth)) {
                 clear.add(name);
             } else {
@@ -574,8 +633,15 @@ public final class GrantService {
             if (grant.isActiveAt(now) && covers(grant, oldFullName) && !covers(grant, newFullName)) {
                 carriers.add(grant.getId());
             }
+            // S-30-04: guarded through a changed folder above it, and moved out of that folder.
+            for (String changed : grant.getChangedItems()) {
+                if (oldFullName.startsWith(changed + "/") && !newFullName.startsWith(changed + "/")) {
+                    carriers.add(grant.getId());
+                }
+            }
         }
         rewriteChanged(oldFullName, newFullName, true);
+        relocateMarkedRuns(oldFullName, newFullName);
         for (String grantId : carriers) {
             markChanged(grantId, newFullName);
         }
@@ -584,6 +650,7 @@ public final class GrantService {
     /** D-58a: a deleted item (and what was below it) leaves the "changed under a grant" state. */
     public synchronized void forgetChanged(String fullName) {
         rewriteChanged(fullName, null, true);
+        relocateMarkedRuns(fullName, null);
     }
 
     /**

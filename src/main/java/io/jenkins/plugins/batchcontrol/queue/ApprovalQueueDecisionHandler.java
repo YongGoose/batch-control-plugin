@@ -153,6 +153,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 return;
             }
             org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
+            // S-30-02: a re-run of a marked run is marked too, whoever submitted it (an
+            // administrator's routine re-run included), so the replayed script cannot be laundered.
+            Source source = sourceRun((Job<?, ?>) p, collectCauses(actions), actions);
+            ReplayUnderGrantAction inherited = source.run() == null ? null
+                    : source.run().getAction(ReplayUnderGrantAction.class);
+            if (inherited != null) {
+                actions.add(new ReplayUnderGrantAction(auth.getName(), inherited.getGrantId()));
+                return;
+            }
             if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
                 return;
             }
@@ -182,7 +191,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      */
     private static boolean isScriptRerun(List<Action> actions) {
         for (Action action : actions) {
-            if (action != null && REPLAY_FLOW_ACTION_CLASS.equals(action.getClass().getName())) {
+            if (action != null && (REPLAY_FLOW_ACTION_CLASS.equals(action.getClass().getName())
+                    || RESTART_FLOW_ACTION_CLASS.equals(action.getClass().getName()))) {
                 return true;
             }
         }
@@ -203,14 +213,16 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      */
     private static boolean refuseMarkedSource(Queue.Task p, List<Action> actions) {
         Job<?, ?> job;
-        hudson.model.Run<?, ?> source;
+        Source source;
         try {
             if (!(p instanceof Job) || !BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
                 return false;
             }
             job = (Job<?, ?>) p;
-            source = sourceRun(job, collectCauses(actions));
-            if (source == null || source.getAction(ReplayUnderGrantAction.class) == null) {
+            source = sourceRun(job, collectCauses(actions), actions);
+            // S-30-01: a re-run whose source cannot be resolved is refused like a marked one.
+            if (!source.unresolved()
+                    && (source.run() == null || source.run().getAction(ReplayUnderGrantAction.class) == null)) {
                 return false;
             }
             if (Jenkins.get().hasPermission2(Jenkins.getAuthentication2(), Jenkins.ADMINISTER)) {
@@ -220,11 +232,15 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             LOGGER.log(Level.WARNING, "Could not check the source run of a re-run", e);
             return false;
         }
-        String message = "Build #" + source.getNumber() + " of '" + job.getFullName() + "' cannot be re-run: this run's"
-                + " script was replayed under a temporary permission window. Ask an administrator.";
+        boolean unresolved = source.unresolved();
+        String message = unresolved
+                ? "This re-run of '" + job.getFullName() + "' cannot be checked: the run it repeats could not be"
+                        + " identified, so it is refused. Ask an administrator."
+                : "Build #" + source.run().getNumber() + " of '" + job.getFullName() + "' cannot be re-run: this run's"
+                        + " script was replayed under a temporary permission window. Ask an administrator.";
         org.springframework.security.core.Authentication auth = Jenkins.getAuthentication2();
         boolean person = !ACL.SYSTEM2.equals(auth) && !ACL.isAnonymous2(auth);
-        String source1 = Integer.toString(source.getNumber());
+        String source1 = unresolved ? "?" : Integer.toString(source.run().getNumber());
         if (person) {
             recordPersonRefusal(job, KIND_REPLAY, source1, auth.getName(), "Blocked a re-run of job '"
                     + job.getFullName() + "' build #" + source1 + " by '" + auth.getName()
@@ -243,29 +259,88 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         return true;
     }
 
+    /** Restart from Stage's flow action (pipeline-model-definition, optional), matched by name. */
+    private static final String RESTART_FLOW_ACTION_CLASS =
+            "org.jenkinsci.plugins.pipeline.modeldefinition.actions.RestartFlowFactoryAction";
+
     /**
-     * The run a re-run repeats, from the submission's own (last) re-run cause: Pipeline's Replay or
-     * Rebuild ({@code ReplayCause#getOriginalNumber}), Restart from Stage ({@code getOriginal} or
-     * {@code getOriginalNumber}), or the rebuild plugin's {@code RebuildCause} (an upstream cause
-     * naming the rebuilt build). Plugin classes are read reflectively; {@code null} when unknown.
+     * The source of a re-run: the run it repeats, or {@code unresolved} when it is a re-run whose
+     * source cannot be identified (S-30-01), or {@link #NONE} when it is not such a re-run.
      */
-    private static hudson.model.Run<?, ?> sourceRun(Job<?, ?> job, List<Cause> causes) {
+    private record Source(hudson.model.Run<?, ?> run, boolean unresolved) {
+        static final Source NONE = new Source(null, false);
+        static final Source UNKNOWN = new Source(null, true);
+
+        static Source of(hudson.model.Run<?, ?> run) {
+            return run != null ? new Source(run, false) : UNKNOWN;
+        }
+    }
+
+    /**
+     * The run a re-run repeats, from the submission's own (last) re-run cause, or {@link Source#UNKNOWN}
+     * when there is a re-run cause but its source cannot be found, or {@code null} when the
+     * submission is not a re-run of a Pipeline script or a rebuild-plugin Rebuild:
+     * <ul>
+     *   <li>Pipeline Replay and Rebuild: {@code ReplayCause#getOriginalNumber};</li>
+     *   <li>Restart from Stage: {@code RestartDeclarativePipelineCause#getOriginRunNumber}, or the
+     *       {@code originRunId} of its {@code RestartFlowFactoryAction} (S-30-01);</li>
+     *   <li>the rebuild plugin's {@code RebuildCause}: the upstream build it names.</li>
+     * </ul>
+     * Plugin classes are read reflectively (the plugins are optional).
+     */
+    private static Source sourceRun(Job<?, ?> job, List<Cause> causes, List<Action> actions) {
         for (int i = causes.size() - 1; i >= 0; i--) {
             Cause cause = causes.get(i);
             String name = cause.getClass().getName();
-            if (REPLAY_CAUSE_CLASS.equals(name) || RESTART_CAUSE_CLASS.equals(name)) {
-                Object number = invokeQuietly(cause, "getOriginalNumber");
-                if (number instanceof Integer) {
-                    return job.getBuildByNumber((Integer) number);
-                }
-                Object original = invokeQuietly(cause, "getOriginal");
-                return original instanceof hudson.model.Run ? (hudson.model.Run<?, ?>) original : null;
+            if (REPLAY_CAUSE_CLASS.equals(name)) {
+                return byNumber(job, invokeQuietly(cause, "getOriginalNumber"));
+            }
+            if (RESTART_CAUSE_CLASS.equals(name)) {
+                Source byCause = byNumber(job, invokeQuietly(cause, "getOriginRunNumber"));
+                return byCause.unresolved() ? restartOrigin(actions, true) : byCause;
             }
             if (REBUILD_CAUSE_CLASS.equals(name) && cause instanceof Cause.UpstreamCause) {
-                return job.getBuildByNumber(((Cause.UpstreamCause) cause).getUpstreamBuild());
+                return Source.of(job.getBuildByNumber(((Cause.UpstreamCause) cause).getUpstreamBuild()));
             }
         }
-        return null;
+        for (Action action : actions) {
+            if (action != null && REPLAY_FLOW_ACTION_CLASS.equals(action.getClass().getName())) {
+                return Source.UNKNOWN; // a replay without its cause: the source is unknown
+            }
+        }
+        return restartOrigin(actions, false);
+    }
+
+    private static Source byNumber(Job<?, ?> job, Object number) {
+        return number instanceof Integer ? Source.of(job.getBuildByNumber((Integer) number)) : Source.UNKNOWN;
+    }
+
+    /**
+     * The origin run named by a {@code RestartFlowFactoryAction}. Without such an action:
+     * {@link Source#UNKNOWN} when {@code restart} (the cause said it is a restart), else
+     * {@link Source#NONE}.
+     */
+    private static Source restartOrigin(List<Action> actions, boolean restart) {
+        for (Action action : actions) {
+            if (action != null && RESTART_FLOW_ACTION_CLASS.equals(action.getClass().getName())) {
+                Object id = invokeQuietly(action, "getOriginRunId");
+                if (id == null) {
+                    id = fieldQuietly(action, "originRunId");
+                }
+                return Source.of(id instanceof String ? hudson.model.Run.fromExternalizableId((String) id) : null);
+            }
+        }
+        return restart ? Source.UNKNOWN : Source.NONE;
+    }
+
+    private static Object fieldQuietly(Object target, String field) {
+        try {
+            java.lang.reflect.Field f = target.getClass().getDeclaredField(field);
+            f.setAccessible(true);
+            return f.get(target);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
     }
 
     private static Object invokeQuietly(Object target, String method) {
