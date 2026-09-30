@@ -10,12 +10,22 @@
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
         <p>
           <strong>Some authorization entries of ${it.itemFullName} were not kept.</strong>
-          They would give lasting permissions to a user who holds or recently held a temporary
-          permission window, for example you, if your Configure permission on it comes only from
-          such a window.
+          The item is guarded because it is covered by a temporary permission window, or was
+          changed under one and has not been reviewed. Until it is marked as reviewed, changes
+          that widen its authorization are undone, whoever saves it.
         </p>
+        <p>Your other changes were saved.</p>
+        <!-- DEF-39: what to do next. The job's Batch Control page is linked only for a viewer who
+             may open it (SelfGrantRevertedFailure#getReviewPageUrl). -->
+        <j:set var="reviewUrl" value="${it.reviewPageUrl}"/>
         <p style="margin-bottom: 0;">
-          Your other changes were saved. Ask an administrator if the entry is really needed.
+          An administrator can mark it as reviewed on the Batch Control monitor under Manage
+          Jenkins. A user with Configure permission on it and Batch Control/Request can do so on
+          <j:choose>
+            <j:when test="${reviewUrl != null}"><a href="${rootURL}/${reviewUrl}">its Batch Control page</a>.</j:when>
+            <j:otherwise>its Batch Control page.</j:otherwise>
+          </j:choose>
+          While a permission window still covers it, ask an administrator.
         </p>
       </div>
     </l:main-panel>

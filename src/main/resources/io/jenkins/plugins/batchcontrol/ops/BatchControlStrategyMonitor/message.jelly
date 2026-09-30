@@ -76,9 +76,10 @@
     <j:if test="${!empty(changedItems)}">
       <p>
         <strong>Batch Control:</strong> these items were changed under a temporary permission
-        window and have not been reviewed. Until an administrator or a user with Configure
-        permission saves them, changes that widen their authorization are undone. Check the
-        Pipeline script, if any, before saving.
+        window and have not been reviewed. Until one of them is marked as reviewed (below, or by a
+        user with Configure permission and Batch Control/Request on the job's Batch Control
+        page), changes that widen its authorization are undone, whoever saves it. Saving the
+        item does not end this.
       </p>
       <!-- D-58b (3): a deliberate review per item (POST, crumb added to every POST form by
            Jenkins; BatchControlStrategyMonitor#doMarkReviewed checks Administer). -->
