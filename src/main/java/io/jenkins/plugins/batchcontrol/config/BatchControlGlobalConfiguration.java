@@ -654,9 +654,9 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         boolean switchOn = json.optBoolean("runControlEnabled", runControlEnabled)
                 || json.optBoolean("changeControlEnabled", changeControlEnabled);
-        FormValidation check = approversValidation(String.valueOf(json.get("approversText")), switchOn);
-        if (check.kind == FormValidation.Kind.ERROR) {
-            throw new FormException(check.getMessage(), "approversText");
+        ApproversCheck check = approversCheck(String.valueOf(json.get("approversText")), switchOn);
+        if (check.kind() == FormValidation.Kind.ERROR) {
+            throw new FormException(check.text(), "approversText"); // plain text (FD-14)
         }
     }
 
@@ -667,23 +667,55 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * {@code switchOn}. The message is plain text (FormValidation escapes it).
      */
     static FormValidation approversValidation(String text, boolean switchOn) {
+        return approversCheck(text, switchOn).toValidation();
+    }
+
+    /**
+     * The approver check's outcome with a plain-text message (e2e-04 FD-14): a FormException must
+     * carry plain text, because the banner and core's error page escape it themselves, while
+     * {@code FormValidation#getMessage()} is already HTML-escaped.
+     */
+    record ApproversCheck(FormValidation.Kind kind, String text) {
+        static final ApproversCheck OK = new ApproversCheck(FormValidation.Kind.OK, null);
+
+        static ApproversCheck error(String text) {
+            return new ApproversCheck(FormValidation.Kind.ERROR, text);
+        }
+
+        static ApproversCheck warning(String text) {
+            return new ApproversCheck(FormValidation.Kind.WARNING, text);
+        }
+
+        FormValidation toValidation() {
+            switch (kind) {
+                case ERROR:
+                    return FormValidation.error(text);
+                case WARNING:
+                    return FormValidation.warning(text);
+                default:
+                    return FormValidation.ok();
+            }
+        }
+    }
+
+    static ApproversCheck approversCheck(String text, boolean switchOn) {
         // S-25-02: de-duplicated and capped before any lookup.
         List<String> ids = new ArrayList<>(new java.util.LinkedHashSet<>(parseStrings(text)));
         if (ids.size() > MAX_APPROVERS) {
-            return FormValidation.error(LABEL_APPROVERS + ": at most " + MAX_APPROVERS + " approvers can be listed.");
+            return ApproversCheck.error(LABEL_APPROVERS + ": at most " + MAX_APPROVERS + " approvers can be listed.");
         }
         for (String id : ids) {
             if (id.length() > MAX_ID_LENGTH) {
                 // S-26-03: never sent to the realm.
-                return FormValidation.error(LABEL_APPROVERS + ": an id longer than " + MAX_ID_LENGTH
+                return ApproversCheck.error(LABEL_APPROVERS + ": an id longer than " + MAX_ID_LENGTH
                         + " characters is not a user id.");
             }
         }
         if (ids.isEmpty()) {
             return switchOn
-                    ? FormValidation.error(LABEL_APPROVERS + ": at least one approver is required while run control"
+                    ? ApproversCheck.error(LABEL_APPROVERS + ": at least one approver is required while run control"
                             + " or change control is on.")
-                    : FormValidation.ok();
+                    : ApproversCheck.OK;
         }
         List<String> unknown = new ArrayList<>();
         List<String> unchecked = new ArrayList<>();
@@ -707,17 +739,17 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             }
         }
         if (!unknown.isEmpty()) {
-            return FormValidation.error(LABEL_APPROVERS + ": " + quoted(unknown)
+            return ApproversCheck.error(LABEL_APPROVERS + ": " + quoted(unknown)
                     + (unknown.size() == 1 ? " is not a known Jenkins user" : " are not known Jenkins users")
                     + (stoppedEarly ? " (the remaining ids were not checked)" : "")
                     + ". Enter existing user ids, one per line. Nothing was saved.");
         }
         if (!unchecked.isEmpty()) {
-            return FormValidation.warning(LABEL_APPROVERS + ": " + quoted(unchecked) + " could not be checked"
+            return ApproversCheck.warning(LABEL_APPROVERS + ": " + quoted(unchecked) + " could not be checked"
                     + " against the security realm right now" + (stoppedEarly ? " (nor the ids after it)" : "")
                     + "; make sure the ids are correct.");
         }
-        return FormValidation.ok();
+        return ApproversCheck.OK;
     }
 
     /** S-25-02: the most approver ids a list may hold. */
