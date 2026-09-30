@@ -159,7 +159,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             ReplayUnderGrantAction inherited = source.run() == null ? null
                     : source.run().getAction(ReplayUnderGrantAction.class);
             if (inherited != null) {
-                actions.add(new ReplayUnderGrantAction(auth.getName(), inherited.getGrantId()));
+                // DEF-40: recorded as a marker inherited from the marked run, not as the submitter's grant.
+                actions.add(new ReplayUnderGrantAction(auth.getName(), inherited.getGrantId(), source.run().getNumber()));
                 return;
             }
             if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
@@ -244,7 +245,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         if (person) {
             recordPersonRefusal(job, KIND_REPLAY, source1, auth.getName(), "Blocked a re-run of job '"
                     + job.getFullName() + "' build #" + source1 + " by '" + auth.getName()
-                    + "' - the run's script was replayed under a permission window");
+                    + (unresolved ? "' - the run it repeats could not be identified"
+                            : "' - the run's script was replayed under a permission window"),
+                    unresolved ? "unresolvedSource" : "replayedUnderGrant");
         } else {
             recordTriggerBlocked(job, KIND_REPLAY, "replayedUnderGrant", "Blocked a re-run of job '"
                     + job.getFullName() + "' build #" + source1 + " - the run's script was replayed under a"
@@ -779,11 +782,17 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      */
     private static void recordPersonRefusal(Job<?, ?> job, String kind, String sourceBuild, String user,
                                             String text) {
+        recordPersonRefusal(job, kind, sourceBuild, user, text, "approvalRequired");
+    }
+
+    /** As above, naming the rule that refused it (e2e-03 DEF-40: a marked-run refusal is not an approval one). */
+    private static void recordPersonRefusal(Job<?, ?> job, String kind, String sourceBuild, String user,
+                                            String text, String blockingSwitch) {
         String fullName = job.getFullName();
         try {
             BlockedAttemptAudit.get().recordPersonRefusal(ChangeType.TRIGGER_BLOCKED,
                     fullName + '|' + kind + '#' + sourceBuild, fullName, user, sourceBuild,
-                    "cause=" + kind + " switch=approvalRequired: " + text);
+                    "cause=" + kind + " switch=" + blockingSwitch + ": " + text);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, e, () -> "Could not record the blocked " + kind
                     + " submission of job '" + fullName + "' by '" + user + "'");

@@ -16,10 +16,25 @@ public final class ReplayUnderGrantAction extends InvisibleAction {
 
     private final String user;
     private final String grantId;
+    /**
+     * e2e-03 DEF-40: the number of the marked run this run re-runs, when the marker was inherited
+     * (for example an administrator's allowed re-run); {@code null} when the submitter's own
+     * grant-only permission caused the mark.
+     */
+    private final Integer inheritedFrom;
 
     public ReplayUnderGrantAction(String user, String grantId) {
+        this(user, grantId, null);
+    }
+
+    public ReplayUnderGrantAction(String user, String grantId, Integer inheritedFrom) {
         this.user = user;
         this.grantId = grantId;
+        this.inheritedFrom = inheritedFrom;
+    }
+
+    public Integer getInheritedFrom() {
+        return inheritedFrom;
     }
 
     public String getUser() {
