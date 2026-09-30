@@ -333,42 +333,55 @@ code does on purpose.
 
 ## SYSTEM builds and the global-matrix upgrade
 
-35. **A build can write its own job's authorization entries, whatever
-    identity it runs as.** A Pipeline `properties([authorizationMatrix(...)])`
-    step saves the job's authorization property without asking whether the
-    build's account holds Configure, so running builds as a low-privilege
-    account does not by itself stop a `CONFIGURE` window holder from giving
-    themself a permanent entry through the Pipeline script. Batch Control
-    therefore guards the entries of grant holders, whoever saves them: while
-    change control is on, a save of a job's or folder's authorization entries
-    that adds or widens an entry for a user who holds a grant covering that
-    item, or held one in the last 30 days, or for one of the groups the
-    security realm reports for that user now (`authenticated` included), is
-    reverted and recorded as `GRANT_VIOLATION`. Group membership is not
-    stored with a grant, so a group the user belonged to when the grant was
-    issued but has since left is not guarded. This applies to a build running as any account or as
-    SYSTEM, to a script, and to another user's save. The only exception is a
-    save made through an HTTP request (the web UI, a `config.xml` POST, or
-    REST or CLI over HTTP) by a user who holds `Overall/Administer`, who is
-    deliberately giving the entry. A Pipeline build whose save was reverted
-    names the reverted entries in its build log; a Freestyle build gets no
-    such line, only the `GRANT_VIOLATION` record. A save made through an HTTP
-    request is answered with HTTP 403 and a plain message saying which
-    authorization entries were not kept and that the other changes were
-    saved.
+35. **On an item a grant has touched, authorization can only be widened by
+    an administrator's HTTP save.** A Pipeline
+    `properties([authorizationMatrix(...)])` step saves its job's
+    authorization property without asking whether the build's account holds
+    Configure, so running builds as a low-privilege account does not by
+    itself stop a `CONFIGURE` window holder from giving themself a permanent
+    entry through the Pipeline script. Batch Control therefore guards
+    *items*, not accounts. While change control is on, these items are
+    guarded:
 
-    The rule covers only the grant holder and their current groups. An entry
-    written for a principal that is not guarded, such as an accomplice's
-    account or a user who never held a grant on the item, is not reverted: that is collusion between
-    users, and Batch Control does not detect it. Neither is this new
-    exposure: any user who already holds standing `Item/Configure` on a job
-    has the same path today, with or without Batch Control, since Jenkins
-    itself does not distinguish a script's save from a human one.
+    - every item in the scope of an active grant;
+    - every item whose configuration was changed under a grant (saved or
+      created by a user whose permission came only from a grant), until a
+      user who holds `Item/Configure` natively or `Overall/Administer` saves
+      it through an HTTP request. That save counts as the review and ends
+      the guard for that item.
+
+    Guarding follows renames and moves. On a guarded item, any change that
+    widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
+    it: a build running as any account or as SYSTEM, a script, the CLI, or
+    another user. Widening means an added or widened entry for anyone
+    (`anonymous` and `authenticated` included), an inheritance change that
+    widens, removing the authorization property, or adding a second one; a
+    new item created inside a guarded folder has its authorization entries
+    removed. The only exception is a save made through an HTTP request (the
+    web UI, a `config.xml` POST, or REST or CLI over HTTP) by a user who holds
+    `Overall/Administer`. A Pipeline build whose save was put back names the
+    reverted entries in its build log; a Freestyle build gets no such line,
+    only the `GRANT_VIOLATION` record. A save made through an HTTP request is
+    answered with HTTP 403 and a plain message saying which authorization
+    entries were not kept and that the other changes were saved.
+
+    This changes how administrators manage authorization on those items, and
+    only on those. Until the review, a Jenkinsfile, Job DSL or JCasC change
+    that widens authorization on a guarded item is put back, and so is one
+    made with the CLI over WebSocket or SSH, even by an administrator: only
+    the CLI over HTTP (`-http`) or the web UI carries the exemption, so use
+    one of those. Items that no grant has touched are not affected. The
+    administrative monitor on Manage Jenkins lists the items waiting for
+    review. Review what was changed under the grant before saving, the
+    Pipeline script included: once the review save is made the item is no
+    longer guarded, and a script left in it that writes authorization entries
+    will then succeed.
 
     **Run builds under a low-privilege account as well.** The guard above does
     not make the build account irrelevant: a build that runs as SYSTEM or as
-    an account with Configure permission can still change what such an
-    account may change, including entries for accounts that are not guarded.
+    an account with Configure permission can still change whatever such an
+    account may change on items that are not guarded, and anything else
+    besides authorization entries.
     Use **Authorize Project** with a **global default build authorization**
     that runs every build, whatever the job's own configuration and whatever
     started it, as an account without Configure permission: for example

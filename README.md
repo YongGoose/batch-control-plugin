@@ -468,18 +468,22 @@ in its folder, since Jenkins allows a rename to anyone who may configure the job
 the rename is recorded with the window. Under a `CREATE` window with a name
 restriction, renames of what that window created are limited to matching names.
 
-**A build can write its own job's authorization entries.** A Pipeline
-`properties` step saves the job's authorization entries whatever account the
-build runs as, so a `CONFIGURE` window holder could use one to keep access after
-the window ends. While change control is on, Batch Control therefore reverts and
-records any entry added or widened for a user who holds a grant on the item, or
-held one in the last 30 days, and for the groups the security realm reports for
-that user now, whoever saves it: a build, a script or another user. The only
-exception is a save made through an HTTP request (the web UI, a `config.xml`
-POST, or REST or CLI over HTTP) by a user who holds `Overall/Administer`. A
-Pipeline build names the reverted entries in its build log; a Freestyle build
-gets only the change record. Entries written for other accounts, for example
-an accomplice's, are outside this rule.
+**On an item a grant has touched, only an administrator can widen
+authorization.** A Pipeline `properties` step saves its job's authorization
+entries whatever account the build runs as, so a `CONFIGURE` window holder could
+use one to keep access after the window ends. While change control is on, Batch
+Control therefore guards every item under an active grant, and every item whose
+configuration was changed under a grant until a user with native Configure or
+Administer saves it through HTTP, which counts as the review. On a guarded item,
+any change that widens access is put back and recorded, whoever makes it. The
+only exception is a save made through an HTTP request (the web UI, a
+`config.xml` POST, or REST or CLI over HTTP) by a user who holds
+`Overall/Administer`. A Pipeline build names the reverted entries in its build
+log; a Freestyle build gets only the change record. Until the review, a
+Jenkinsfile, Job DSL, JCasC or non-HTTP CLI change that widens authorization on
+such an item is put back, even an administrator's CLI over WebSocket or SSH; use
+the web UI or the CLI over HTTP instead. Items that no grant touched are
+unaffected. The administrative monitor lists the items waiting for review.
 
 Run builds under a low-privilege account as well, since a build that runs as
 SYSTEM or as an account with Configure can still change whatever that account
