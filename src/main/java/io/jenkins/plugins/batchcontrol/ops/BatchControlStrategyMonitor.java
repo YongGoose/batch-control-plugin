@@ -79,7 +79,10 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     public boolean isActivated() {
         return BatchControlGlobalConfiguration.get().isChangeControlEnabled()
                 && (strategyUnsupported() || buildAuthenticatorMissing()
-                        || SystemBuildCheck.buildsMayRunAsSystem());
+                        || SystemBuildCheck.buildsMayRunAsSystem()
+                        // D-58a (4): answered from the in-memory grant cache, no disk scan per page.
+                        || !io.jenkins.plugins.batchcontrol.security.GrantService.get()
+                                .itemsChangedUnderGrant(1).isEmpty());
     }
 
     /**
