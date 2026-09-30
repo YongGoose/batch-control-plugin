@@ -78,6 +78,13 @@
         permission saves them, changes that widen their authorization are undone. Check the
         Pipeline script, if any, before saving.
       </p>
+      <!-- D-58b (3): a deliberate review per item (POST, crumb added to every POST form by
+           Jenkins; BatchControlStrategyMonitor#doMarkReviewed checks Administer). -->
+      <p>
+        Check what was changed under the permission window (see
+        <a href="${rootURL}/batch-control/changes/">Change Records</a>) and the Pipeline script
+        first, then mark the item as reviewed.
+      </p>
       <ul>
         <j:forEach var="name" items="${changedItems}">
           <j:set var="changedItem" value="${app.getItemByFullName(name)}"/>
@@ -85,6 +92,10 @@
             <j:choose>
               <j:when test="${changedItem != null}">
                 <a href="${rootURL}/${changedItem.url}configure"><code>${name}</code></a>
+                <form method="post" action="${rootURL}/${it.url}/markReviewed" style="display: inline; margin-left: 0.5rem;">
+                  <input type="hidden" name="item" value="${name}"/>
+                  <button type="submit" class="jenkins-button jenkins-button--tertiary">Mark as reviewed</button>
+                </form>
               </j:when>
               <j:otherwise><code>${name}</code></j:otherwise>
             </j:choose>

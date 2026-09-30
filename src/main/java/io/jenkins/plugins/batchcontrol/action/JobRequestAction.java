@@ -14,6 +14,7 @@ import hudson.util.Secret;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
@@ -30,6 +31,8 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.HttpResponse;
+import org.kohsuke.stapler.HttpResponses;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
@@ -193,6 +196,35 @@ public class JobRequestAction implements Action, StaplerProxy {
     }
 
     // ---------------------------------------------------------------- submission
+
+    /**
+     * D-58b (3): whether this page offers "Mark as reviewed": the job is in the "changed under a
+     * grant" state and the viewer holds Item/Configure on it. Hidden for now: core has no per-item
+     * "changed under a grant" query yet ({@code GrantService#itemsChangedUnderGrant} is capped and
+     * lists only the marked item, not its descendants). {@link #doMarkReviewed} works regardless.
+     */
+    public boolean isShowMarkReviewed() {
+        return false;
+    }
+
+    /**
+     * POST {@code markReviewed} (D-58b (3)): the deliberate review of this job after changes made
+     * under a permission window. {@link GrantService#markReviewed} refuses a user whose Configure
+     * comes from a grant and writes the {@code GUARD_REVIEWED} record; this page only asks for
+     * Item/Configure first. Redirects back to this page with a short confirmation.
+     */
+    @RequirePOST
+    public HttpResponse doMarkReviewed() {
+        job.checkPermission(Item.CONFIGURE);
+        GrantService.get().markReviewed(job);
+        return HttpResponses.redirectTo(".?reviewed=1");
+    }
+
+    /** Whether the page shows the "marked as reviewed" confirmation (constant text only). */
+    public boolean isReviewedNotice() {
+        StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
+        return req != null && "1".equals(req.getParameter("reviewed"));
+    }
 
     /**
      * POST {@code submit} — creates the run request and redirects to its detail page at
