@@ -572,11 +572,110 @@ public class AuthorizationEntryGuardTest {
                 "an item created inside a guarded folder by a non-administrator stays guarded after the window");
     }
 
+    /**
+     * T-02-75 (D-58c): bob (Run/Replay only through his CONFIGURE grant) replays {@code replay-me}
+     * #1; the replay runs as #2 and a REPLAY_UNDER_GRANT record names bob and that run.
+     */
+    @Test
+    public void t_02_75_replayUnderGrantIsRecorded() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        List<ChangeRecord> marks = records("REPLAY_UNDER_GRANT");
+        assertEquals(1, marks.size(), "one REPLAY_UNDER_GRANT record: " + describe(marks));
+        String text = marks.get(0).getUser() + " " + marks.get(0).getTarget() + " " + marks.get(0).getDetail();
+        assertTrue(text.contains("bob") && text.matches("(?s).*(#|/)2\\b.*"), "the record must name bob and run #2: " + text);
+        assertTrue(job.getBuildByNumber(2) != null);
+    }
+
+    /**
+     * T-02-76 (D-58c): after the administrator marks {@code replay-me} reviewed, c1 (native
+     * Configure and Job/Build, not an administrator) re-runs the marked #2 by Pipeline Rebuild and
+     * by Replay. Both are refused with the plain message, no build follows, and a refusal record
+     * by c1 is written.
+     */
+    @Test
+    public void t_02_76_markedRunCannotBeReRunAfterTheReview() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=replay-me") < 400,
+                "fixture: the administrator's review must succeed");
+        int before = byUserOn("c1", "replay-me").size();
+
+        org.htmlunit.Page rebuild = postPage("c1", job.getUrl() + "2/replay/rebuild", null);
+        org.htmlunit.Page replay = replay("c1", job, 2, "echo 'again'");
+        j.waitUntilNoActivity();
+        assertEquals(3, job.getNextBuildNumber(), "no build may follow a re-run of the marked run");
+        for (org.htmlunit.Page answer : new org.htmlunit.Page[] {rebuild, replay}) {
+            String text = UsabilityFixtures.text(answer);
+            UsabilityFixtures.assertPlainRefusal("re-run of a marked run", text,
+                    java.util.regex.Pattern.compile("(?i)temporary|permission window|replayed under"));
+        }
+        assertTrue(byUserOn("c1", "replay-me").size() > before, "the refusal must be recorded");
+    }
+
+    /** T-02-77 (D-58c): the administrator may re-run the marked run (Pipeline Rebuild); a build follows. */
+    @Test
+    public void t_02_77_administratorMayReRunAMarkedRun() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        postPage("admin", job.getUrl() + "2/replay/rebuild", null);
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuildByNumber(3) != null, "the administrator's re-run of the marked run must build");
+    }
+
+    /** T-02-78 (D-58c): run #1, which was not replayed under a grant, is re-run by c1 (Pipeline Rebuild); a build follows. */
+    @Test
+    public void t_02_78_unmarkedRunIsUnaffected() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        postPage("c1", job.getUrl() + "1/replay/rebuild", null);
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuildByNumber(3) != null, "a re-run of an unmarked run must build");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void requestPermissionFor(String user) {
         ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy())
                 .add(io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.REQUEST, PermissionEntry.user(user));
+    }
+
+    /** replay-me with #1; bob's JOB CONFIGURE grant; bob replays #1 as #2 (a harmless script). c1 gets Job/Build. */
+    private WorkflowJob replayedUnderGrant() throws Exception {
+        ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).add(Item.BUILD, PermissionEntry.user("c1"));
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "replay-me");
+        job.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
+        j.buildAndAssertSuccess(job);
+        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "replay-me", Arrays.asList(GrantAction.CONFIGURE));
+        replay("bob", job, 1, "echo 'planted'");
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
+        return job;
+    }
+
+    private org.htmlunit.Page replay(String user, WorkflowJob job, int number, String script) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
+        List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
+        params.add(new org.htmlunit.util.NameValuePair("mainScript", script));
+        params.add(new org.htmlunit.util.NameValuePair("json", "{\"mainScript\":" + jsonString(script) + "}"));
+        WebRequest req = new WebRequest(wc.createCrumbedUrl(job.getUrl() + number + "/replay/run"), HttpMethod.POST);
+        req.setRequestParameters(params);
+        return wc.getPage(req);
+    }
+
+    private org.htmlunit.Page postPage(String user, String path, String query) throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(user);
+        java.net.URL url = new java.net.URL(wc.createCrumbedUrl(path).toExternalForm() + (query == null ? "" : "&" + query));
+        return wc.getPage(new WebRequest(url, HttpMethod.POST));
+    }
+
+    private static List<ChangeRecord> byUserOn(String user, String target) {
+        List<ChangeRecord> out = new java.util.ArrayList<>();
+        for (java.time.YearMonth month : new java.util.LinkedHashSet<>(Arrays.asList(
+                java.time.YearMonth.from(T0.atZone(ZoneOffset.UTC)), java.time.YearMonth.now()))) {
+            for (ChangeRecord r : io.jenkins.plugins.batchcontrol.store.FileStore.get().listChangeRecords(month)) {
+                if (user.equals(r.getUser()) && target.equals(r.getTarget()) && !out.contains(r)) {
+                    out.add(r);
+                }
+            }
+        }
+        return out;
     }
 
     private int postForm(String user, String path, String query) throws Exception {

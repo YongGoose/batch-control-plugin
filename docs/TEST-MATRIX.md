@@ -107,6 +107,10 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-02-72 | 2 (D-58b (1)) | integration | P0 | bob holds a FOLDER CONFIGURE grant on `outer`; Pipeline `outer/inner/deep` with a script giving alice Job/Configure | a build of `deep` runs | no entry for alice (note 178) | AuthorizationEntryGuardTest |
 | T-02-73 | 2 (D-58b (4)) | integration | P1 | As T-02-59 (nonInheriting baseline), bob's grant | a script saves `config.xml` with 101 AuthorizationMatrixProperty elements (the baseline plus 100, the last giving carol Job/Configure) | exactly one authorization property remains; no entry for carol (note 178) | AuthorizationEntryGuardTest |
 | T-02-74 | 2 (D-58b (3)), LIMITATIONS 35 | integration | P2 | As T-02-51; c1 holds native Item/Configure but not BatchControl/Request | c1 POSTs `<job>/batch-control/markReviewed` | 404; no GUARD_REVIEWED record (note 178) | AuthorizationEntryGuardTest |
+| T-02-75 | 2 (D-58c) | integration | P1 | Pipeline `replay-me` with #1; bob's JOB CONFIGURE grant; bob replays #1 as #2; c1 has native Configure and Job/Build | (the replay) | one REPLAY_UNDER_GRANT record naming bob and #2 (note 179) | AuthorizationEntryGuardTest |
+| T-02-76 | 2 (D-58c) | integration | P0 | Same; the administrator marks `replay-me` reviewed | c1 POSTs `2/replay/rebuild` and `2/replay/run` | both refused with a plain message ("temporary" / "permission window" / "replayed under"); next build number stays 3; a new record by c1 on the job (note 179) | AuthorizationEntryGuardTest |
+| T-02-77 | 2 (D-58c) | integration | P1 | Same, no review | the administrator POSTs `2/replay/rebuild` | build #3 runs (note 179) | AuthorizationEntryGuardTest |
+| T-02-78 | 2 (D-58c) | integration | P1 | Same | c1 POSTs `1/replay/rebuild` (#1 was not replayed under a grant) | build #3 runs (note 179) | AuthorizationEntryGuardTest |
 | T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | RunRequestServiceTest |
 | T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | RunRequestServiceTest |
 | T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | RunRequestServiceTest |
@@ -917,6 +921,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 178. **D-58b rows (T-02-64 reworked, T-02-64b, T-02-69..73).** D-58b (3) makes the review explicit: T-02-64 now reviews through `<job>/batch-control/markReviewed` (c1) and T-02-64b through the monitor (admin), each with a GUARD_REVIEWED record naming the reviewer (the type is looked up by name). T-02-70 is the old T-02-64 path (an ordinary save), now expected not to clear the state. T-02-71 replays with the form POST of T-06-68. T-02-72 uses nested folders (a multibranch branch job is the other descendant form and is not added). T-02-73 starts from a nonInheriting baseline so that "one merged property" is observable (with no baseline the correct revert leaves none). The first run answered 404 on the job-level URL; the coordinator ruled that the job's Batch Control page exists only for BatchControl/Request holders (LIMITATIONS 35), so T-02-64/69 give c1 and bob that permission and T-02-74 pins the 404 without it.
 
 
+179. **Runs replayed under a grant (T-02-75..78, D-58c).** Pipeline Rebuild is workflow-cps's `replay/rebuild`; Replay is the form POST of T-06-68. The refusal is recognised as a plain refusal naming "temporary", "permission window" or "replayed under"; the record type of the refusal is not pinned (a new record by c1 on the job). Restart from Stage and the rebuild-plugin Rebuild are not added.
+
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -974,3 +981,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **D-58a (5) and alerts 31-33, note 177**: T-02-23 revised (P0); +4 rows: T-02-66..68 (P0), T-SEC-52 (P1). Totals: P0 +3 (T-02-23 P1 to P0), P1 +1; T-02 +3, T-SEC +1.
 - **D-58b rows, note 178**: T-02-64 reworked; +6 rows: T-02-64b, T-02-73 (P1), T-02-69..72 (P0). Totals: P0 +4, P1 +2; T-02 +6.
 - **D-58b fixture ruling, note 178**: T-02-64/69 give BatchControl/Request to the reviewer; +1 row T-02-74 (P2). Totals: P2 +1; T-02 +1.
+- **D-58c rows, note 179**: +4 rows: T-02-76 (P0), T-02-75/77/78 (P1). Totals: P0 +1, P1 +3; T-02 +4.
