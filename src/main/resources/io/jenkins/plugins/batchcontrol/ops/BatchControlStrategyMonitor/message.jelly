@@ -67,5 +67,30 @@
         strategy on a single job is not enough.
       </p>
     </j:if>
+    <!-- D-58a (4): items in the "changed under a grant" state (at most 50, sorted), from
+         BatchControlStrategyMonitor#getItemsChangedUnderGrant. Administrator-only page; names are
+         escaped by default. An item that no longer resolves is listed as plain text. -->
+    <j:set var="changedItems" value="${it.itemsChangedUnderGrant}"/>
+    <j:if test="${!empty(changedItems)}">
+      <p>
+        <strong>Batch Control:</strong> these items were changed under a temporary permission
+        window and have not been reviewed. Until an administrator or a user with Configure
+        permission saves them, changes that widen their authorization are undone. Check the
+        Pipeline script, if any, before saving.
+      </p>
+      <ul>
+        <j:forEach var="name" items="${changedItems}">
+          <j:set var="changedItem" value="${app.getItemByFullName(name)}"/>
+          <li>
+            <j:choose>
+              <j:when test="${changedItem != null}">
+                <a href="${rootURL}/${changedItem.url}configure"><code>${name}</code></a>
+              </j:when>
+              <j:otherwise><code>${name}</code></j:otherwise>
+            </j:choose>
+          </li>
+        </j:forEach>
+      </ul>
+    </j:if>
   </l:adminMonitor>
 </j:jelly>
