@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<!-- SPEC item 2 (the self-grant guard feedback): the browser page of SelfGrantRevertedFailure,
+<!-- SPEC item 2 (the self-grant guard feedback, D-48; D-58 widened who is guarded): the browser page of SelfGrantRevertedFailure,
      answered with HTTP 403 after a save whose authorization part was reverted. Only the item's
      full name (escaped by default) and constant text are rendered; no script and no Back link,
      the breadcrumb bar leads back. -->
@@ -9,12 +9,13 @@
       <l:app-bar title="Authorization entries not kept"/>
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
         <p>
-          <strong>The authorization entries of ${it.itemFullName} were not kept.</strong>
-          Your Configure permission on it comes only from a temporary grant, which cannot add
-          permanent permission entries.
+          <strong>Some authorization entries of ${it.itemFullName} were not kept.</strong>
+          They would give lasting permissions to a user who holds or recently held a temporary
+          permission window, for example you, if your Configure permission on it comes only from
+          such a window.
         </p>
         <p style="margin-bottom: 0;">
-          Your other changes were saved. Ask an administrator for a permanent entry.
+          Your other changes were saved. Ask an administrator if the entry is really needed.
         </p>
       </div>
     </l:main-panel>
