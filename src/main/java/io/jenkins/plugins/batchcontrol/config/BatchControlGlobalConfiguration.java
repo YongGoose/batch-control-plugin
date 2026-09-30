@@ -361,7 +361,8 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     public void setApprovers(List<String> approvers) {
-        this.approvers = sanitizeStrings(approvers);
+        // S-26-03: stored de-duplicated (first occurrence wins), as validated.
+        this.approvers = new ArrayList<>(new java.util.LinkedHashSet<>(sanitizeStrings(approvers)));
     }
 
     public String getApproversText() {
@@ -369,7 +370,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     public void setApproversText(String text) {
-        this.approvers = parseStrings(text);
+        this.approvers = new ArrayList<>(new java.util.LinkedHashSet<>(parseStrings(text))); // S-26-03
     }
 
     public boolean isAllowAdminSelfApproval() {
@@ -671,6 +672,13 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         if (ids.size() > MAX_APPROVERS) {
             return FormValidation.error(LABEL_APPROVERS + ": at most " + MAX_APPROVERS + " approvers can be listed.");
         }
+        for (String id : ids) {
+            if (id.length() > MAX_ID_LENGTH) {
+                // S-26-03: never sent to the realm.
+                return FormValidation.error(LABEL_APPROVERS + ": an id longer than " + MAX_ID_LENGTH
+                        + " characters is not a user id.");
+            }
+        }
         if (ids.isEmpty()) {
             return switchOn
                     ? FormValidation.error(LABEL_APPROVERS + ": at least one approver is required while run control"
@@ -681,8 +689,10 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         List<String> unchecked = new ArrayList<>();
         boolean stoppedEarly = false;
         for (String id : ids) {
-            if (unknown.size() >= MAX_UNKNOWN_REPORTED) {
-                stoppedEarly = true; // S-25-02: the realm is not asked about the rest
+            if (unknown.size() >= MAX_UNKNOWN_REPORTED || !unchecked.isEmpty()) {
+                // S-25-02, S-26-03: after a few unknown ids, or once the realm failed to answer (an
+                // unreachable realm will not answer the next id either), the rest is not asked.
+                stoppedEarly = true;
                 break;
             }
             switch (resolve(id)) {
@@ -704,7 +714,8 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         if (!unchecked.isEmpty()) {
             return FormValidation.warning(LABEL_APPROVERS + ": " + quoted(unchecked) + " could not be checked"
-                    + " against the security realm right now; make sure the id is correct.");
+                    + " against the security realm right now" + (stoppedEarly ? " (nor the ids after it)" : "")
+                    + "; make sure the ids are correct.");
         }
         return FormValidation.ok();
     }
@@ -714,6 +725,9 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
 
     /** S-25-02: after this many unknown ids the realm is not asked any more. */
     static final int MAX_UNKNOWN_REPORTED = 5;
+
+    /** S-26-03: the longest approver id that is looked up. */
+    static final int MAX_ID_LENGTH = 256;
 
     private enum Resolution { KNOWN, UNKNOWN, UNCHECKED }
 
