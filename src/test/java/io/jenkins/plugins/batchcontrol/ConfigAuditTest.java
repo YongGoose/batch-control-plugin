@@ -223,6 +223,97 @@ public class ConfigAuditTest {
         assertFalse(get.getContentAsString().contains("no-such-user"), "a GET must not give a check result");
     }
 
+    /**
+     * T-CFG-10 (security-26 S-26-05, the 100-id cap): the manager saves 101 approver ids, all
+     * existing users. The save is refused with a message naming the limit of 100, and the stored
+     * approvers stay [a1].
+     */
+    @Test
+    public void t_cfg_10_approverListIsCappedAtOneHundred() throws Exception {
+        HudsonPrivateSecurityRealm realm = (HudsonPrivateSecurityRealm) j.jenkins.getSecurityRealm();
+        StringBuilder ids = new StringBuilder();
+        for (int i = 0; i < 101; i++) {
+            String id = "appr" + i;
+            realm.createAccount(id, id);
+            ids.append(i == 0 ? "" : ", ").append(id);
+        }
+        HtmlForm form = configForm("manager");
+        setApprovers(form, ids.toString());
+        Page answer = j.submit(form);
+        assertEquals(Arrays.asList("a1"), BatchControlGlobalConfiguration.get().getApprovers(),
+                "a list of 101 approvers must not be saved");
+        String text = UsabilityFixtures.text(answer);
+        assertTrue(text.contains("100"), "the refusal must name the limit of 100: " + excerpt(text));
+        UsabilityFixtures.assertPlainRefusal("101 approvers", text, null);
+    }
+
+    /**
+     * T-CFG-11 (S-26-05, the early stop): the manager saves seven unknown ids. The save is
+     * refused; the message names the first unknown id and says that the remaining ids were not
+     * checked.
+     */
+    @Test
+    public void t_cfg_11_unknownIdCheckStopsAfterFive() throws Exception {
+        HtmlForm form = configForm("manager");
+        setApprovers(form, "nobody1, nobody2, nobody3, nobody4, nobody5, nobody6, nobody7");
+        Page answer = j.submit(form);
+        assertEquals(Arrays.asList("a1"), BatchControlGlobalConfiguration.get().getApprovers(), "nothing may be saved");
+        String text = UsabilityFixtures.text(answer);
+        assertTrue(text.contains("nobody1"), "the refusal must name the unknown ids: " + excerpt(text));
+        assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("not checked"), "after five unknown ids the message"
+                + " must say that the remaining ids were not checked: " + excerpt(text));
+    }
+
+    /**
+     * T-CFG-12 (D-53, security-25 S-25-05): an id the realm cannot tell about (its lookup throws
+     * UserMayOrMayNotExistException2) is accepted with a warning: the save goes through with that
+     * id, and the field's check answers a warning, not an error.
+     */
+    @Test
+    public void t_cfg_12_idTheRealmCannotTellAboutIsAcceptedWithAWarning() throws Exception {
+        MaybeRealm realm = new MaybeRealm();
+        for (String id : new String[] {"admin", "manager", "a1", "a2"}) {
+            realm.createAccount(id, id);
+        }
+        j.jenkins.setSecurityRealm(realm);
+
+        HtmlForm form = configForm("manager");
+        setApprovers(form, "a1, maybe-user");
+        Page saved = j.submit(form);
+        assertTrue(saved.getWebResponse().getStatusCode() < 400, "the save must go through, got "
+                + saved.getWebResponse().getStatusCode() + ": " + excerpt(UsabilityFixtures.text(saved)));
+        assertEquals(Arrays.asList("a1", "maybe-user"), BatchControlGlobalConfiguration.get().getApprovers(),
+                "an id the realm cannot tell about must be accepted");
+
+        org.htmlunit.WebResponse check = postAs("manager", "descriptorByName/io.jenkins.plugins.batchcontrol.config."
+                + "BatchControlGlobalConfiguration/checkApproversText?value=maybe-user");
+        assertEquals(200, check.getStatusCode());
+        String body = check.getContentAsString();
+        assertTrue(body.contains("warning"), "the check must answer a warning for an id the realm cannot tell about: "
+                + excerpt(body));
+        assertFalse(body.contains("class=\"error\"") || body.contains("class='error'"), "not an error: " + excerpt(body));
+    }
+
+    /** A user database whose lookup of {@code maybe-user} cannot tell whether the user exists. */
+    public static class MaybeRealm extends HudsonPrivateSecurityRealm {
+        public MaybeRealm() {
+            super(false, false, null);
+        }
+
+        @Override
+        public org.springframework.security.core.userdetails.UserDetails loadUserByUsername2(String username) {
+            if ("maybe-user".equals(username)) {
+                throw new hudson.security.UserMayOrMayNotExistException2("test: the realm cannot tell");
+            }
+            return super.loadUserByUsername2(username);
+        }
+
+        @Override
+        public hudson.model.Descriptor<hudson.security.SecurityRealm> getDescriptor() {
+            return Jenkins.get().getDescriptorByType(HudsonPrivateSecurityRealm.DescriptorImpl.class);
+        }
+    }
+
     private org.htmlunit.WebResponse postAs(String userId, String path) throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
         int q = path.indexOf('?');
