@@ -165,15 +165,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     boolean person = !ACL.SYSTEM2.equals(Jenkins.getAuthentication2())
                             && (CLICommand.getCurrent() != null
                                     || (Stapler.getCurrentRequest2() != null && isHumanSubmission(causes)));
+                    // e2e-04 DD-05: Pipeline's own Rebuild link submits through the Replay action with
+                    // a ReplayCause marked as rebuilt; it is recorded as what the user clicked.
+                    boolean rebuilt = isPipelineRebuild(cause);
+                    String kind = rebuilt ? KIND_REBUILD : KIND_REPLAY;
+                    String what = rebuilt ? "a Pipeline Rebuild" : "a Pipeline Replay";
                     if (person) {
                         String user = Jenkins.getAuthentication2().getName();
                         String source = sourceBuild(causes);
-                        recordPersonRefusal(job, KIND_REPLAY, source, user, "Blocked a Pipeline Replay of job '"
+                        recordPersonRefusal(job, kind, source, user, "Blocked " + what + " of job '"
                                 + job.getFullName() + "'" + (source.isEmpty() ? "" : " build #" + source) + " by '"
                                 + user + "' - the job requires an approved batch-control run request");
                     } else {
-                        recordTriggerBlocked(job, KIND_REPLAY, "approvalRequired",
-                                "Blocked a Pipeline Replay of job '" + job.getFullName()
+                        recordTriggerBlocked(job, kind, "approvalRequired",
+                                "Blocked " + what + " of job '" + job.getFullName()
                                         + "' - the job requires an approved batch-control run request");
                     }
                     // e2e-03 DEF-16: a person pressing Run on the Replay page gets the refusal
@@ -667,6 +672,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     private static String remoteRefusedMessage(Job<?, ?> job) {
         return "Not scheduled: job '" + job.getFullName() + "' requires an approved batch-control run "
                 + "request, and a build token does not substitute for one. " + requestHint(job);
+    }
+
+    /**
+     * Whether a Pipeline {@code ReplayCause} comes from Pipeline's own Rebuild link
+     * ({@code ReplayCause#isRebuilt}, read reflectively: workflow-cps is optional). {@code false}
+     * when it cannot be read.
+     */
+    private static boolean isPipelineRebuild(Cause replayCause) {
+        try {
+            Object rebuilt = replayCause.getClass().getMethod("isRebuilt").invoke(replayCause);
+            return Boolean.TRUE.equals(rebuilt);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
+        }
     }
 
     /** The refusal of a Pipeline Replay a person submitted (e2e-03 DEF-16). */
