@@ -117,6 +117,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         // e2e-03 DEF-08: an invalid value refuses the whole submission, before anything is bound.
         JSONObject form = normalizeListFields(json);
         validate(form);
+        validateApprovers(form);
         BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
         req.bindJSON(bound, form);
         try {
@@ -128,9 +129,13 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         boolean previousRun = runControlEnabled;
         boolean previousChange = changeControlEnabled;
+        String changes = describeChanges(this, bound);
         copyFrom(bound);
         SaveableListener.fireOnChange(this, getConfigFile());
         afterSwitchesChanged(previousRun, previousChange);
+        if (!changes.isEmpty()) {
+            recordConfigChange(changes);
+        }
         return true;
     }
 
@@ -257,6 +262,48 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         this.retentionMonths = source.retentionMonths;
         this.emailNotifications = source.emailNotifications;
         this.notifyBeforeExpiryMinutes = source.notifyBeforeExpiryMinutes;
+    }
+
+    /** The {@code target} of a {@link ChangeType#CONFIG_CHANGE} record (D-52). */
+    public static final String CONFIG_CHANGE_TARGET = "batch-control-configuration";
+
+    /**
+     * D-52: every field besides the two switches that differs between {@code before} and
+     * {@code after}, as {@code "label: old -> new"} joined by {@code "; "} (the approver list in
+     * full); {@code ""} when nothing changed.
+     */
+    static String describeChanges(BatchControlGlobalConfiguration before, BatchControlGlobalConfiguration after) {
+        List<String> changes = new ArrayList<>();
+        diff(changes, "approvers", before.approvers, after.approvers);
+        diff(changes, "allowAdminSelfApproval", before.allowAdminSelfApproval, after.allowAdminSelfApproval);
+        diff(changes, "pendingTimeoutHours", before.pendingTimeoutHours, after.pendingTimeoutHours);
+        diff(changes, "approvedRunTimeoutMinutes", before.approvedRunTimeoutMinutes, after.approvedRunTimeoutMinutes);
+        diff(changes, "grantDurationOptions", before.grantDurationOptions, after.grantDurationOptions);
+        diff(changes, "maxGrantMinutes", before.maxGrantMinutes, after.maxGrantMinutes);
+        diff(changes, "incidentResults", before.incidentResults, after.incidentResults);
+        diff(changes, "retentionMonths", before.retentionMonths, after.retentionMonths);
+        diff(changes, "emailNotifications", before.emailNotifications, after.emailNotifications);
+        diff(changes, "notifyBeforeExpiryMinutes", before.notifyBeforeExpiryMinutes, after.notifyBeforeExpiryMinutes);
+        return String.join("; ", changes);
+    }
+
+    private static void diff(List<String> changes, String field, Object before, Object after) {
+        if (!java.util.Objects.equals(before, after)) {
+            changes.add(field + ": " + before + " -> " + after);
+        }
+    }
+
+    /**
+     * D-52: one {@link ChangeType#CONFIG_CHANGE} record for the save. Written after the new state is
+     * durable; a store failure is logged and does not undo the save (as for the toggle records).
+     */
+    private static void recordConfigChange(String changes) {
+        try {
+            Store.get().appendChangeRecord(ChangeRecord.create(ChangeType.CONFIG_CHANGE, CONFIG_CHANGE_TARGET,
+                    Jenkins.getAuthentication2().getName(), "Batch Control configuration changed: " + changes));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not record the Batch Control configuration change: " + changes, e);
+        }
     }
 
     private static void recordToggle(String key, boolean previous, boolean current) {
@@ -550,6 +597,99 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             }
         }
         return null;
+    }
+
+    static final String LABEL_APPROVERS = "Approvers";
+
+    /**
+     * D-53: refuses the submission when its approver list names an unknown id, or is empty while
+     * either switch is (or will be) on. A field the submission does not carry is left alone.
+     */
+    private void validateApprovers(JSONObject json) throws FormException {
+        if (!json.has("approversText")) {
+            return;
+        }
+        boolean switchOn = json.optBoolean("runControlEnabled", runControlEnabled)
+                || json.optBoolean("changeControlEnabled", changeControlEnabled);
+        FormValidation check = approversValidation(String.valueOf(json.get("approversText")), switchOn);
+        if (check.kind == FormValidation.Kind.ERROR) {
+            throw new FormException(check.getMessage(), "approversText");
+        }
+    }
+
+    /**
+     * D-53: each id must name an existing Jenkins user or one the security realm resolves. An
+     * unknown id is an error naming it; an id the realm could not be asked about (an error other
+     * than "not found") is accepted with a warning. An empty list is an error while
+     * {@code switchOn}. The message is plain text (FormValidation escapes it).
+     */
+    static FormValidation approversValidation(String text, boolean switchOn) {
+        List<String> ids = parseStrings(text);
+        if (ids.isEmpty()) {
+            return switchOn
+                    ? FormValidation.error(LABEL_APPROVERS + ": at least one approver is required while run control"
+                            + " or change control is on.")
+                    : FormValidation.ok();
+        }
+        List<String> unknown = new ArrayList<>();
+        List<String> unchecked = new ArrayList<>();
+        for (String id : ids) {
+            switch (resolve(id)) {
+                case UNKNOWN:
+                    unknown.add(id);
+                    break;
+                case UNCHECKED:
+                    unchecked.add(id);
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (!unknown.isEmpty()) {
+            return FormValidation.error(LABEL_APPROVERS + ": " + quoted(unknown)
+                    + (unknown.size() == 1 ? " is not a known Jenkins user" : " are not known Jenkins users")
+                    + ". Enter existing user ids, one per line. Nothing was saved.");
+        }
+        if (!unchecked.isEmpty()) {
+            return FormValidation.warning(LABEL_APPROVERS + ": " + quoted(unchecked) + " could not be checked"
+                    + " against the security realm right now; make sure the id is correct.");
+        }
+        return FormValidation.ok();
+    }
+
+    private enum Resolution { KNOWN, UNKNOWN, UNCHECKED }
+
+    private static Resolution resolve(String id) {
+        if (hudson.model.User.getById(id, false) != null) {
+            return Resolution.KNOWN;
+        }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null || jenkins.getSecurityRealm() == hudson.security.SecurityRealm.NO_AUTHENTICATION) {
+            return Resolution.UNCHECKED; // no realm to ask
+        }
+        try {
+            jenkins.getSecurityRealm().loadUserByUsername2(id);
+            return Resolution.KNOWN;
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
+            return Resolution.UNKNOWN;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "The security realm could not be asked about approver '" + id + "'", e);
+            return Resolution.UNCHECKED;
+        }
+    }
+
+    private static String quoted(List<String> ids) {
+        List<String> out = new ArrayList<>();
+        for (String id : ids) {
+            out.add("'" + id + "'");
+        }
+        return String.join(", ", out);
+    }
+
+    /** Stapler form validation of the approver list (read-only, D-53). */
+    @POST
+    public FormValidation doCheckApproversText(@QueryParameter String value) {
+        return mayCheck() ? approversValidation(value, runControlEnabled || changeControlEnabled) : FormValidation.ok();
     }
 
     /** The form's inline checks answer only a user who may save the form. */
