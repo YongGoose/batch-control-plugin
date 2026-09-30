@@ -104,6 +104,18 @@ public final class BlockedAttemptAudit {
     /** Per-attempt keys of {@link #recordPersonRefusal} (one-minute merge), bounded like the coalesced map. */
     private final Map<String, Instant> lastPersonAttempt = new LinkedHashMap<>();
 
+    /**
+     * Closing count records whose append failed, retried by the next {@link #flushPersonSummaries()}
+     * (S-23-03). Bounded at {@link #MAX_PENDING_CLOSING}; beyond that a record's text is only in
+     * the WARNING log.
+     */
+    private final List<ChangeRecord> pendingClosing = new ArrayList<>();
+
+    static final int MAX_PENDING_CLOSING = 1_000;
+
+    /** Set by {@link #flushAtShutdown()}: no summary is opened any more (S-23-06). */
+    private boolean shutDown;
+
     /** Per-user budgets of {@link #recordPersonRefusal} (D-51a). */
     private final Map<String, PersonBudget> personBudgets = new LinkedHashMap<>();
 
@@ -270,9 +282,15 @@ public final class BlockedAttemptAudit {
         ChangeRecord closing = budget.summaryUntil != null && !budget.summaryUntil.isAfter(now)
                 ? close(budgetKey, budget, null) : null;
         if (closing != null) {
-            store.appendChangeRecord(closing);
+            // S-23-03: a failed closing append never stops the caller's own record; it is retried.
+            appendOrKeep(closing);
         }
         budget.forgetOld(now);
+        if (shutDown && budget.summaryUntil == null) {
+            // S-23-06: after the shutdown flush no summary is opened, since nothing would close it.
+            store.appendChangeRecord(ChangeRecord.create(type, target, user, detail));
+            return true;
+        }
         if (budget.summaryUntil == null && budget.writes.size() < PERSON_BUDGET && !OVERFLOW_USER.equals(budgetKey)) {
             budget.writes.addLast(now);
             store.appendChangeRecord(ChangeRecord.create(type, target, user, detail));
@@ -319,6 +337,8 @@ public final class BlockedAttemptAudit {
         List<ChangeRecord> closing = new ArrayList<>();
         synchronized (this) {
             forgetOtherInstance();
+            closing.addAll(pendingClosing); // S-23-03: retry what failed last time, first
+            pendingClosing.clear();
             Instant now = BatchClock.now();
             Iterator<Map.Entry<String, PersonBudget>> it = personBudgets.entrySet().iterator();
             while (it.hasNext()) {
@@ -333,7 +353,25 @@ public final class BlockedAttemptAudit {
             }
         }
         for (ChangeRecord record : closing) {
+            appendOrKeep(record); // S-23-03: one failure never drops the records after it
+        }
+    }
+
+    /**
+     * Appends a closing count record; on failure logs its full text at WARNING and keeps it for
+     * the next flush (S-23-03), so the count is never silently lost.
+     */
+    private void appendOrKeep(ChangeRecord record) {
+        try {
             store.appendChangeRecord(record);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, e, () -> "Could not write a refused re-run count; it is"
+                    + " retried on the next flush: " + record.getDetail());
+            synchronized (this) {
+                if (pendingClosing.size() < MAX_PENDING_CLOSING) {
+                    pendingClosing.add(record);
+                }
+            }
         }
     }
 
@@ -350,6 +388,9 @@ public final class BlockedAttemptAudit {
     private void closeAllOpen() {
         List<ChangeRecord> closing = new ArrayList<>();
         synchronized (this) {
+            shutDown = true; // S-23-06
+            closing.addAll(pendingClosing);
+            pendingClosing.clear();
             Instant now = BatchClock.now();
             for (Map.Entry<String, PersonBudget> e : personBudgets.entrySet()) {
                 PersonBudget b = e.getValue();
@@ -362,7 +403,8 @@ public final class BlockedAttemptAudit {
             try {
                 store.appendChangeRecord(record);
             } catch (RuntimeException ex) {
-                LOGGER.log(java.util.logging.Level.WARNING, "Could not write a refused re-run count at shutdown", ex);
+                LOGGER.log(java.util.logging.Level.WARNING, ex, () -> "Could not write a refused re-run count at"
+                        + " shutdown: " + record.getDetail());
             }
         }
     }
@@ -422,6 +464,8 @@ public final class BlockedAttemptAudit {
             lastCoalesced.clear();
             lastPersonAttempt.clear();
             personBudgets.clear();
+            pendingClosing.clear();
+            shutDown = false;
             trackedFor = new WeakReference<>(current);
         }
     }
