@@ -156,6 +156,12 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     private boolean bindWriteApply(StaplerRequest2 req, JSONObject form) throws FormException {
         BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
         req.bindJSON(bound, form);
+        // S-26-02: the empty-list rule again on the bound state, under the monitor (no realm call),
+        // so a switch turned on meanwhile cannot leave the instance without approvers.
+        if (bound.approvers.isEmpty() && (bound.runControlEnabled || bound.changeControlEnabled)) {
+            throw new FormException(LABEL_APPROVERS + ": at least one approver is required while run control"
+                    + " or change control is on.", "approversText");
+        }
         try {
             bound.writeConfigFile();
         } catch (IOException e) {
