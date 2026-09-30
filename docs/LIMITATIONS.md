@@ -495,6 +495,21 @@ code does on purpose.
     the job is the approval notice on the job page and its **Request Run**
     link.
 
+## Records from earlier releases and strategy changes
+
+42. **Approved runs recorded by an earlier release have no user.** A run
+    record written before this release for a build started by an approved
+    request carries no user, so the user filter on History does not find it;
+    it can still be found by job or period. From this release on, such a run
+    carries the requester as its user, and the request id is kept as before.
+    Existing records are not rewritten.
+43. **Only Batch Control's own strategy actions write a `STRATEGY_CHANGE`
+    record.** Installing a Batch Control authorization strategy with the
+    administrative monitor's button, or reverting it with **Revert to the
+    plain strategy**, is recorded. Changing the authorization strategy
+    directly on **Manage Jenkins → Security** writes no Batch Control record,
+    so that change is not in the Batch Control history.
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting

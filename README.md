@@ -211,7 +211,9 @@ something is recorded, whichever page it was saved from: flipping either switch
 writes a `CONFIG_TOGGLE` change record, and a change to any other field (the
 approver list included) writes one `CONFIG_CHANGE` record naming the user and
 each changed field with its old and new value. Installing or reverting a Batch
-Control authorization strategy (step 2) writes a `STRATEGY_CHANGE` record. A
+Control authorization strategy (step 2) through Batch Control's own buttons
+writes a `STRATEGY_CHANGE` record; changing the strategy directly on
+**Manage Jenkins → Security** writes no Batch Control record. A
 save that changes nothing writes nothing.
 
 | Field | Default | Meaning |
