@@ -60,10 +60,11 @@ public final class FilterParser {
         // e2e-04 FD-11: a date that was given but cannot be used, or a reversed range, is
         // reported next to its field (the screen then lists nothing). The fallback values below
         // stay as before for the CSV exports and any other caller that ignores the errors.
-        String fromError = given(rawFrom) && from == null ? DATE_MESSAGE : null;
-        String toError = given(rawTo) && to == null ? DATE_MESSAGE : null;
+        // The echoed input is length-capped here and escaped by the page (Jelly default).
+        String fromError = given(rawFrom) && from == null ? dateMessage(rawFrom) : null;
+        String toError = given(rawTo) && to == null ? dateMessage(rawTo) : null;
         if (from != null && to != null && from.isAfter(to)) {
-            toError = "The end date is before the start date. Enter an end date on or after "
+            toError = "The start date is after the end date. Enter an end date on or after "
                     + from + ".";
         }
         if (to == null) {
@@ -89,9 +90,11 @@ public final class FilterParser {
         return filter;
     }
 
-    /** The message for a date that is not a plain ISO date in the accepted years. */
-    static final String DATE_MESSAGE = "Enter a date as YYYY-MM-DD (a real calendar day, year "
-            + MIN_YEAR + " to " + MAX_YEAR + ").";
+    /** The message for a date that is not a plain ISO date in the accepted years: what is wrong, then the format. */
+    static String dateMessage(String raw) {
+        return "'" + text(raw) + "' is not a valid date. Enter a date as YYYY-MM-DD (a real"
+                + " calendar day, year " + MIN_YEAR + " to " + MAX_YEAR + ").";
+    }
 
     private static boolean given(@CheckForNull String raw) {
         return raw != null && !raw.trim().isEmpty();
