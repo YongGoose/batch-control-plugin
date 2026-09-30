@@ -13,6 +13,16 @@
 
 ---
 
+## 2026-09-30 — final e2e check on 30e9252: DEF-39..41 fixed (part 7); #51 merged
+- #51 merged (GitHub `build` passed 620 tests). Code-scanning alerts 31-33 are closed as fixed.
+- The final check on 30e9252 passed: DEF-38 is closed, Mark as reviewed and replay marking work, and FD-14..16 and DD-05/06 are fixed.
+- It found three low defects, all fixed here:
+  - DEF-39: monitor and 403 texts now say that only Mark as reviewed ends the guard, and where to find it;
+  - DEF-40: records for re-runs of a marked run give the true reason;
+  - DEF-41: Rebuild is hidden on marked runs for non-administrators.
+- security-32 found 0/0/0/1/3. The LOW and INFO items are in issue #52.
+- Gate at ffbf5e7: 623 tests, 0 failures, SpotBugs 0.
+
 ## 2026-09-30 — DEF-38 per-item authorization guard and final e2e defects (part 6); #50 merged
 - #50 merged (part 5; GitHub `build` passed 588 tests).
 - The final re-verification on 80e5271 passed everything that had been open, except C-08, which failed on DEF-38 (High).
