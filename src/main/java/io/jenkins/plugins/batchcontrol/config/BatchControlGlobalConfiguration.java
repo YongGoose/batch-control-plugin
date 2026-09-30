@@ -105,6 +105,15 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
     }
 
+    /** S-25-06: a detached draft or candidate is never written to {@code config.xml}. */
+    @Override
+    public synchronized void save() {
+        if (candidate) {
+            return;
+        }
+        super.save();
+    }
+
     public static BatchControlGlobalConfiguration get() {
         return ExtensionList.lookupSingleton(BatchControlGlobalConfiguration.class);
     }
@@ -131,11 +140,20 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     @Override
-    public synchronized boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
+    public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // e2e-03 DEF-08: an invalid value refuses the whole submission, before anything is bound.
+        // S-25-02: validation (which may ask a slow security realm) runs before the monitor is
+        // taken, so it never holds up the switch setters; binding, write and apply stay one
+        // transaction under the monitor (#19).
         JSONObject form = normalizeListFields(json);
         validate(form);
         validateApprovers(form);
+        synchronized (this) {
+            return bindWriteApply(req, form);
+        }
+    }
+
+    private boolean bindWriteApply(StaplerRequest2 req, JSONObject form) throws FormException {
         BatchControlGlobalConfiguration bound = new BatchControlGlobalConfiguration(this);
         req.bindJSON(bound, form);
         try {
@@ -642,7 +660,11 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * {@code switchOn}. The message is plain text (FormValidation escapes it).
      */
     static FormValidation approversValidation(String text, boolean switchOn) {
-        List<String> ids = parseStrings(text);
+        // S-25-02: de-duplicated and capped before any lookup.
+        List<String> ids = new ArrayList<>(new java.util.LinkedHashSet<>(parseStrings(text)));
+        if (ids.size() > MAX_APPROVERS) {
+            return FormValidation.error(LABEL_APPROVERS + ": at most " + MAX_APPROVERS + " approvers can be listed.");
+        }
         if (ids.isEmpty()) {
             return switchOn
                     ? FormValidation.error(LABEL_APPROVERS + ": at least one approver is required while run control"
@@ -651,7 +673,12 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         List<String> unknown = new ArrayList<>();
         List<String> unchecked = new ArrayList<>();
+        boolean stoppedEarly = false;
         for (String id : ids) {
+            if (unknown.size() >= MAX_UNKNOWN_REPORTED) {
+                stoppedEarly = true; // S-25-02: the realm is not asked about the rest
+                break;
+            }
             switch (resolve(id)) {
                 case UNKNOWN:
                     unknown.add(id);
@@ -666,6 +693,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         if (!unknown.isEmpty()) {
             return FormValidation.error(LABEL_APPROVERS + ": " + quoted(unknown)
                     + (unknown.size() == 1 ? " is not a known Jenkins user" : " are not known Jenkins users")
+                    + (stoppedEarly ? " (the remaining ids were not checked)" : "")
                     + ". Enter existing user ids, one per line. Nothing was saved.");
         }
         if (!unchecked.isEmpty()) {
@@ -674,6 +702,12 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
         return FormValidation.ok();
     }
+
+    /** S-25-02: the most approver ids a list may hold. */
+    static final int MAX_APPROVERS = 100;
+
+    /** S-25-02: after this many unknown ids the realm is not asked any more. */
+    static final int MAX_UNKNOWN_REPORTED = 5;
 
     private enum Resolution { KNOWN, UNKNOWN, UNCHECKED }
 
@@ -688,6 +722,10 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         try {
             jenkins.getSecurityRealm().loadUserByUsername2(id);
             return Resolution.KNOWN;
+        } catch (hudson.security.UserMayOrMayNotExistException2 e) {
+            // S-25-05: the realm cannot tell (for example AD without a bind account): D-53 accepts
+            // the id with a warning. This subclass of UsernameNotFoundException is caught first.
+            return Resolution.UNCHECKED;
         } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
             return Resolution.UNKNOWN;
         } catch (RuntimeException e) {

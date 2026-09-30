@@ -132,10 +132,14 @@ public class BatchControlConfigurationLink extends ManagementLink {
             if (draft == null) {
                 throw e;
             }
+            jakarta.servlet.RequestDispatcher view = req.getView(this, "index.jelly");
+            if (view == null) {
+                throw e; // S-25-06: no page to show it on; the plain refusal stands
+            }
             req.setAttribute(DRAFT, draft);
             req.setAttribute(SAVE_ERROR, e.getMessage());
             rsp.setStatus(jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST);
-            req.getView(this, "index.jelly").forward(req, rsp);
+            view.forward(req, rsp);
             return;
         }
         FormApply.success(".").generateResponse(req, rsp, null);
