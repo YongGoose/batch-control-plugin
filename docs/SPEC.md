@@ -85,7 +85,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 사유가 4,000자를 초과하거나 문자열 파라미터 값이 개당 10,000자를 초과하면 요청 생성이 거부된다. (R-7 부분 채택, D-22)
 - 수용 기준: 실행된 빌드에는 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다.
 - 잡 단위 설정(JobProperty): `approvalRequired`(bool), 잡별 결재자 목록 제한(선택).
-- Acceptance: submitting a run request (job request form, incident rerun, and the service API) requires `Item/Build` on the job as the requester, in addition to `BatchControl/Request` and `Item/Read`; without it the submission is refused with 403 and no request is stored. (D-38, #24)
+- Acceptance: submitting a run request (job request form, incident rerun, and the service API) requires `Item/Build` on the job as the requester, in addition to `BatchControl/Request` and `Item/Read`; without it the submission is refused with 403 and no request is stored. An incident rerun also needs `BatchControl/ViewHistory`, which the Incidents screen requires. (D-38, #24, D-57)
 - Acceptance: whether an approver may approve is decided by the approval policy alone. An approved request is submitted even when the approver holds only `Item/Discover` or no permission on the job: the job lookup for the submission runs as SYSTEM after the policy check. (#26)
 
 **6. 실행 경로 차단**
