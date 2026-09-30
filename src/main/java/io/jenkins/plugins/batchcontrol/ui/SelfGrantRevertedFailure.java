@@ -46,12 +46,12 @@ public class SelfGrantRevertedFailure extends Failure {
     private static String message(String itemFullName) {
         return "Some authorization entries of '" + itemFullName + "' were not kept: the item is"
                 + " guarded because it is covered by a temporary permission window, or was changed"
-                + " under one and has not been reviewed. Until it is marked as reviewed, changes"
-                + " that widen its authorization are undone, whoever saves it. Your other changes"
-                + " were saved. An administrator can mark it as reviewed on the Batch Control"
-                + " monitor under Manage Jenkins; a user with Configure permission on it and Batch"
-                + " Control/Request can do so on its Batch Control page. While a window still"
-                + " covers it, ask an administrator.";
+                + " under one and has not been reviewed. Changes that widen its authorization are"
+                + " undone, whoever saves it, until someone uses Mark as reviewed on the Batch"
+                + " Control monitor under Manage Jenkins (an administrator) or on the job's Batch"
+                + " Control page (a user with Configure permission on it and Batch Control/Request)."
+                + " Your other changes were saved. While a window still covers it, ask an"
+                + " administrator.";
     }
 
     /**
