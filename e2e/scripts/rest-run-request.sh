@@ -13,7 +13,7 @@ REASON="${3:-T-E2E-01 month-end reprocessing}"
 echo "### T-E2E-01  run request -> approval -> build"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 # --- 1. the request form is reachable for the requester
@@ -22,7 +22,7 @@ bc_report "GET /job/batch-daily/batch-control/ (requester)" "$status" "$OUT_DIR/
 
 # --- 2. submit. doSubmit() reads req.getSubmittedForm(), so the payload is the
 #        single `json` parameter a Jenkins form would post.
-json=$(printf '{"reason":"%s","approver":"approver","parameter":[{"name":"DATE","value":"%s"},{"name":"MODE","value":"%s"}]}' \
+json=$(printf '{"reason":"%s","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"%s"},{"name":"MODE","value":"%s"}]}' \
         "$REASON" "$DATE" "$MODE")
 status=$(bc_post requester "$OUT_DIR/e2e01-submit.html" "/job/batch-daily/batch-control/submit" \
         -D "$OUT_DIR/e2e01-submit.headers" --data-urlencode "json=$json")
@@ -42,11 +42,11 @@ echo "request id = $REQUEST_ID"
 printf '%s' "$REQUEST_ID" > "$OUT_DIR/e2e01-request-id.txt"
 
 # --- 3. the approver sees the pending request (T-E2E-05 reads the same page)
-status=$(bc_get approver "$OUT_DIR/e2e01-detail-approver.html" "$REQUEST_PATH")
+status=$(bc_get approver-1 "$OUT_DIR/e2e01-detail-approver.html" "$REQUEST_PATH")
 bc_report "GET $REQUEST_PATH (approver)" "$status" "$OUT_DIR/e2e01-detail-approver.html" 3
 
 # --- 4. approve
-status=$(bc_post approver "$OUT_DIR/e2e01-approve.html" "${REQUEST_PATH}approve" \
+status=$(bc_post approver-1 "$OUT_DIR/e2e01-approve.html" "${REQUEST_PATH}approve" \
         --data-urlencode "comment=T-E2E-01 approved by e2e script")
 echo "--- POST ${REQUEST_PATH}approve (approver) -> HTTP $status"
 

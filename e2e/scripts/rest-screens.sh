@@ -13,7 +13,7 @@ set -euo pipefail
 echo "### T-E2E-02 / T-E2E-05 / T-E2E-07"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 # ---------------------------------------------------------------- T-E2E-02
@@ -28,13 +28,13 @@ done
 
 # ---------------------------------------------------------------- T-E2E-05
 # A fresh PENDING request with a reason and parameters, read by the approver.
-json='{"reason":"T-E2E-05 rerun after the upstream feed was corrected","approver":"approver","parameter":[{"name":"DATE","value":"2026-09-20"},{"name":"MODE","value":"partial"}]}'
+json='{"reason":"T-E2E-05 rerun after the upstream feed was corrected","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"2026-09-20"},{"name":"MODE","value":"partial"}]}'
 status=$(bc_post requester "$OUT_DIR/screens-create.html" "/job/batch-daily/batch-control/submit" \
         -D "$OUT_DIR/screens-create.headers" --data-urlencode "json=$json")
 path=$(grep -i '^location:' "$OUT_DIR/screens-create.headers" | tail -1 \
         | sed -e 's/^[Ll]ocation: *//' -e 's#^https*://[^/]*##' | tr -d '\r')
 echo "--- created $path -> HTTP $status"
-status=$(bc_get approver "$OUT_DIR/screens-decision.html" "$path")
+status=$(bc_get approver-1 "$OUT_DIR/screens-decision.html" "$path")
 echo "--- GET $path (approver) -> HTTP $status"
 for needle in 'batch-daily' 'requester' 'T-E2E-05 rerun after the upstream feed was corrected' 'DATE' '2026-09-20' 'MODE' 'partial' 'approve' 'reject'; do
   if grep -q -- "$needle" "$OUT_DIR/screens-decision.html"; then r=YES; else r=NO; fi

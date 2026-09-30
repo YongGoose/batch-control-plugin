@@ -1,0 +1,196 @@
+# JCasC profile "matrix" (default) for the batch-control e2e environment
+# (checklist E-08, 1.2, 1.4). Applied on every boot by configuration-as-code,
+# before jobs are loaded and before init.groovy.d runs.
+#
+# Passwords come from the container environment (e2e/.env), never from here.
+# Permission names use the stable group id "BatchControl/<Name>" (D-41): if the
+# import of this file works, the README's permission names are right (A-07).
+#
+# Because JCasC re-applies on every boot, a setting changed in the UI is reset
+# by a restart. Scenarios that need a changed setting to survive a restart
+# switch profile (scripts/profile.sh) instead of editing through the UI.
+jenkins:
+  systemMessage: "Batch Control e2e (profile: matrix)"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: E2E Administrator
+          password: "${BC_ADMIN_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: admin@e2e.local
+        - id: manager
+          name: E2E Manager
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: manager@e2e.local
+        - id: requester
+          name: E2E Requester
+          password: "${BC_REQUESTER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: requester@e2e.local
+        - id: approver-1
+          name: E2E Approver One
+          password: "${BC_APPROVER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: approver-1@e2e.local
+        - id: approver-2
+          name: E2E Approver Two
+          password: "${BC_APPROVER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: approver-2@e2e.local
+        - id: approver-disc
+          name: E2E Approver Discover-only
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: approver-disc@e2e.local
+        - id: approver-unlisted
+          name: E2E Approver not listed
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: approver-unlisted@e2e.local
+        - id: reqonly
+          name: E2E Request-only
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: reqonly@e2e.local
+        - id: auditor
+          name: E2E Auditor
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: auditor@e2e.local
+        - id: nobc
+          name: E2E No Batch Control
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: nobc@e2e.local
+        - id: configurer
+          name: E2E Standing Configurer
+          password: "${BC_OTHER_PASSWORD}"
+          properties:
+            - mailer:
+                emailAddress: configurer@e2e.local
+  authorizationStrategy:
+    batchControlProjectMatrix:
+      entries:
+        - user:
+            name: admin
+            permissions:
+              - Overall/Administer
+        - user:
+            name: manager
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Manage
+        - user:
+            name: requester
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - Job/Build
+              - BatchControl/Request
+              - BatchControl/RequestGrant
+        - user:
+            name: approver-1
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+        - user:
+            name: approver-2
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+        # Discover (no Read) is granted on the team/ folder by init.groovy.d.
+        - user:
+            name: approver-disc
+            permissions:
+              - Overall/Read
+              - BatchControl/Approve
+        - user:
+            name: approver-unlisted
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Approve
+        - user:
+            name: reqonly
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - BatchControl/Request
+        - user:
+            name: auditor
+            permissions:
+              - Overall/Read
+              - View/Read
+              - BatchControl/ViewHistory
+        - user:
+            name: nobc
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - Job/Build
+        - user:
+            name: configurer
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - View/Read
+              - Job/Configure
+              - Job/Delete
+              - BatchControl/Request
+unclassified:
+  location:
+    url: "http://localhost:8080/"
+    adminAddress: "Batch Control e2e <jenkins@e2e.local>"
+  mailer:
+    smtpHost: mailpit
+    smtpPort: "1025"
+    defaultSuffix: "@e2e.local"
+  batchControl:
+    runControlEnabled: true
+    changeControlEnabled: true
+    approvers:
+      - approver-1
+      - approver-2
+      - approver-disc
+      - admin
+    allowAdminSelfApproval: true
+    pendingTimeoutHours: 1
+    approvedRunTimeoutMinutes: 1
+    grantDurationOptions:
+      - 1
+      - 15
+      - 30
+      - 60
+    maxGrantMinutes: 240
+    incidentResults:
+      - FAILURE
+      - UNSTABLE
+    retentionMonths: 24
+    notifyBeforeExpiryMinutes: 1
+    emailNotifications: true

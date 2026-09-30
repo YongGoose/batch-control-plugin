@@ -15,7 +15,7 @@ set -euo pipefail
 echo "### permission enforcement (matrix-auth + BatchControl wrapper)"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 count_requests() {
@@ -33,18 +33,18 @@ before_builds=$(count_builds)
 echo "state before: $before_requests run requests, $before_builds builds of batch-daily"
 
 # --- a) approver has APPROVE but not REQUEST
-json='{"reason":"approver tries to request","approver":"approver","parameter":[{"name":"DATE","value":"2026-01-01"},{"name":"MODE","value":"full"}]}'
-status=$(bc_post approver "$OUT_DIR/perm-a.html" "/job/batch-daily/batch-control/submit" \
+json='{"reason":"approver tries to request","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"2026-01-01"},{"name":"MODE","value":"full"}]}'
+status=$(bc_post approver-1 "$OUT_DIR/perm-a.html" "/job/batch-daily/batch-control/submit" \
         --data-urlencode "json=$json")
 echo "--- (a) POST submit as approver -> HTTP $status (expected 403)"
 grep -o -i 'Request is missing[^<]*\|is missing the [^<]*permission[^<]*\|Access Denied[^<]*' "$OUT_DIR/perm-a.html" | head -2
 
 # also the GET of the form must be refused (getTarget gate)
-status_get=$(bc_get approver "$OUT_DIR/perm-a-get.html" "/job/batch-daily/batch-control/")
+status_get=$(bc_get approver-1 "$OUT_DIR/perm-a-get.html" "/job/batch-daily/batch-control/")
 echo "--- (a) GET the request form as approver -> HTTP $status_get (expected 403)"
 
 # --- b) requester creates a request, then tries to approve it himself
-json='{"reason":"self-approval attempt","approver":"approver","parameter":[{"name":"DATE","value":"2026-01-02"},{"name":"MODE","value":"partial"}]}'
+json='{"reason":"self-approval attempt","approvers":["approver-1"],"parameter":[{"name":"DATE","value":"2026-01-02"},{"name":"MODE","value":"partial"}]}'
 status=$(bc_post requester "$OUT_DIR/perm-b-create.html" "/job/batch-daily/batch-control/submit" \
         -D "$OUT_DIR/perm-b-create.headers" --data-urlencode "json=$json")
 path=$(grep -i '^location:' "$OUT_DIR/perm-b-create.headers" | tail -1 \

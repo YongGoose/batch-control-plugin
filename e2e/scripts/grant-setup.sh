@@ -10,7 +10,7 @@ JOB="${1:-batch-daily}"
 MINUTES="${2:-30}"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 
 status=$(bc_post requester "$OUT_DIR/setup-grant-create.html" "/batch-control/grants/create" \
         --data-urlencode "scopeType=JOB" \
@@ -18,12 +18,12 @@ status=$(bc_post requester "$OUT_DIR/setup-grant-create.html" "/batch-control/gr
         --data-urlencode "actions=CONFIGURE" \
         --data-urlencode "durationMinutes=$MINUTES" \
         --data-urlencode "reason=visual pass: look at the job configuration screen under a grant" \
-        --data-urlencode "approver=approver")
+        --data-urlencode "approvers=approver-1")
 echo "create -> HTTP $status"
 bc_get requester "$OUT_DIR/setup-grant-list.html" "/batch-control/grants/" > /dev/null
 id=$(grep -o 'href="[0-9]\{8\}-[0-9]\{6\}-[a-z0-9]\{6\}/"' "$OUT_DIR/setup-grant-list.html" \
         | sed -e 's#href="##' -e 's#/"##' | sort | tail -1)
-status=$(bc_post approver "$OUT_DIR/setup-grant-approve.html" "/batch-control/grants/$id/approve" \
+status=$(bc_post approver-1 "$OUT_DIR/setup-grant-approve.html" "/batch-control/grants/$id/approve" \
         --data-urlencode "comment=approved for the visual pass")
 echo "approve -> HTTP $status"
 echo "grant $id is active on $JOB for $MINUTES minutes (actions: CONFIGURE)"

@@ -16,11 +16,11 @@ JOB="${1:-batch-failing}"
 echo "### incident lifecycle on $JOB"
 
 bc_login admin
-bc_login approver
+bc_login approver-1
 bc_login requester
 
 count_incidents() {
-  bc_get approver "$OUT_DIR/inc-list.csv" "/batch-control/history/incidents.csv" > /dev/null
+  bc_get approver-1 "$OUT_DIR/inc-list.csv" "/batch-control/history/incidents.csv" > /dev/null
   echo $(( $(grep -c '' "$OUT_DIR/inc-list.csv") - 1 ))
 }
 
@@ -48,44 +48,44 @@ done
 echo "incidents after the failure: $(count_incidents) (expected $((before + 1)))"
 echo "    newest row: $(tail -1 "$OUT_DIR/inc-list.csv")"
 
-bc_get approver "$OUT_DIR/inc-index.html" "/batch-control/incidents/" > /dev/null
+bc_get approver-1 "$OUT_DIR/inc-index.html" "/batch-control/incidents/" > /dev/null
 INCIDENT_ID=$(grep -o 'href="[0-9]\{8\}-[0-9]\{6\}-[a-z0-9]\{6\}/"' "$OUT_DIR/inc-index.html" \
         | sed -e 's#href="##' -e 's#/"##' | sort | tail -1)
 echo "incident id = $INCIDENT_ID"
 if [ -z "$INCIDENT_ID" ]; then echo "e2e: no incident id on the list page" >&2; exit 1; fi
 DETAIL="/batch-control/incidents/$INCIDENT_ID/"
 
-status=$(bc_get approver "$OUT_DIR/inc-detail-open.html" "$DETAIL")
+status=$(bc_get approver-1 "$OUT_DIR/inc-detail-open.html" "$DETAIL")
 echo "--- GET $DETAIL (approver) -> HTTP $status"
 echo "    status on the page: $(grep -o 'OPEN\|ACKNOWLEDGED\|RESOLVED' "$OUT_DIR/inc-detail-open.html" | sort -u | tr '\n' ' ')"
 echo "    links the failing run: $(grep -o 'href="[^"]*/job/'"$JOB"'/[0-9]*/*"' "$OUT_DIR/inc-detail-open.html" | sort -u | head -2 | tr '\n' ' ')"
 
 # --- 3. the state machine must refuse a shortcut
-status=$(bc_post approver "$OUT_DIR/inc-resolve-early.html" "${DETAIL}resolve" \
+status=$(bc_post approver-1 "$OUT_DIR/inc-resolve-early.html" "${DETAIL}resolve" \
         --data-urlencode "comment=skipping acknowledgement on purpose")
 echo "--- POST ${DETAIL}resolve while still OPEN -> HTTP $status (expected 400)"
 echo "    message: $(grep -o -i '<h1>[^<]*\|Incident [^<]*is OPEN[^<]*' "$OUT_DIR/inc-resolve-early.html" | head -2 | tr '\n' ' ')"
 
 # --- 4. acknowledge with the cause
-status=$(bc_post approver "$OUT_DIR/inc-ack.html" "${DETAIL}acknowledge" \
+status=$(bc_post approver-1 "$OUT_DIR/inc-ack.html" "${DETAIL}acknowledge" \
         --data-urlencode "comment=Cause: the upstream feed delivered an empty file, the job exits 1 on an empty input.")
 echo "--- POST ${DETAIL}acknowledge -> HTTP $status"
 
 # --- 5. a comment for the action taken
-status=$(bc_post approver "$OUT_DIR/inc-comment.html" "${DETAIL}comment" \
+status=$(bc_post approver-1 "$OUT_DIR/inc-comment.html" "${DETAIL}comment" \
         --data-urlencode "comment=Action: asked the provider to redeliver; will rerun once the file is in place.")
 echo "--- POST ${DETAIL}comment -> HTTP $status"
 
 # an empty comment must be refused
-status=$(bc_post approver "$OUT_DIR/inc-comment-empty.html" "${DETAIL}comment" --data-urlencode "comment=")
+status=$(bc_post approver-1 "$OUT_DIR/inc-comment-empty.html" "${DETAIL}comment" --data-urlencode "comment=")
 echo "--- POST ${DETAIL}comment with an empty comment -> HTTP $status (expected 400)"
 
 # --- 6. resolve
-status=$(bc_post approver "$OUT_DIR/inc-resolve.html" "${DETAIL}resolve" \
+status=$(bc_post approver-1 "$OUT_DIR/inc-resolve.html" "${DETAIL}resolve" \
         --data-urlencode "comment=Resolved: the redelivered file processed cleanly.")
 echo "--- POST ${DETAIL}resolve -> HTTP $status"
 
-status=$(bc_get approver "$OUT_DIR/inc-detail-final.html" "$DETAIL")
+status=$(bc_get approver-1 "$OUT_DIR/inc-detail-final.html" "$DETAIL")
 echo "--- GET $DETAIL after the lifecycle -> HTTP $status"
 echo "    status on the page: $(grep -o 'OPEN\|ACKNOWLEDGED\|RESOLVED' "$OUT_DIR/inc-detail-final.html" | sort -u | tr '\n' ' ')"
 for needle in 'Cause: the upstream feed delivered an empty file' \
@@ -96,11 +96,11 @@ for needle in 'Cause: the upstream feed delivered an empty file' \
 done
 
 echo "--- incidents.csv row for $INCIDENT_ID:"
-bc_get approver "$OUT_DIR/inc-list.csv" "/batch-control/history/incidents.csv" > /dev/null
+bc_get approver-1 "$OUT_DIR/inc-list.csv" "/batch-control/history/incidents.csv" > /dev/null
 grep "$INCIDENT_ID" "$OUT_DIR/inc-list.csv" | sed 's/^/    /'
 
 echo "--- a resolved incident must not accept another transition:"
-status=$(bc_post approver "$OUT_DIR/inc-ack-again.html" "${DETAIL}acknowledge" --data-urlencode "comment=again")
+status=$(bc_post approver-1 "$OUT_DIR/inc-ack-again.html" "${DETAIL}acknowledge" --data-urlencode "comment=again")
 echo "    POST acknowledge on a RESOLVED incident -> HTTP $status (expected 400)"
 
 echo "--- and the requester (no ViewHistory) must not reach any of it:"

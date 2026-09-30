@@ -28,7 +28,7 @@ SCOPE="${1:-batch-daily}"
 echo "### S-15  change-control kill switch"
 
 bc_login requester
-bc_login approver
+bc_login approver-1
 bc_login admin
 
 FAILS=0
@@ -69,7 +69,7 @@ request_grant() {   # $1 = body file -> HTTP status
     --data-urlencode "actions=CONFIGURE" \
     --data-urlencode "durationMinutes=15" \
     --data-urlencode "reason=S-15 kill-switch scenario on $SCOPE" \
-    --data-urlencode "approver=approver"
+    --data-urlencode "approvers=approver-1"
 }
 check "(a) requester POST /batch-control/grants/create" 302 "$(request_grant "$OUT_DIR/ks-create.html")"
 bc_get requester "$OUT_DIR/ks-list.html" "/batch-control/grants/" > /dev/null
@@ -77,7 +77,7 @@ GRANT_ID=$(grep -o 'href="[0-9]\{8\}-[0-9]\{6\}-[a-z0-9]\{6\}/"' "$OUT_DIR/ks-li
         | sed -e 's#href="##' -e 's#/"##' | sort | tail -1 || true)
 echo "grant request id = $GRANT_ID"
 check "(a) approver approves $GRANT_ID" 302 \
-  "$(bc_post approver "$OUT_DIR/ks-approve.html" "/batch-control/grants/$GRANT_ID/approve" \
+  "$(bc_post approver-1 "$OUT_DIR/ks-approve.html" "/batch-control/grants/$GRANT_ID/approve" \
       --data-urlencode "comment=S-15 approved")"
 check "(a) requester GET /job/$SCOPE/configure inside the window" 200 \
   "$(bc_get requester "$OUT_DIR/ks-configure-a.html" "/job/$SCOPE/configure")"

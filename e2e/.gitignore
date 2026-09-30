@@ -1,4 +1,14 @@
 # Secrets: real passwords live here, only .env.example is committed.
 .env
-# Transient curl output captured by scripts/rest-*.sh.
+# Transient output of the scripts and drivers (evidence logs, CSV/JSON dumps).
 out/
+browser/node_modules
+fresh/node_modules
+
+# Screenshots are kept on disk and never committed (owner decision 2026-09-30);
+# the reports name them.
+**/screenshots/
+*.png
+*.jpg
+*.jpeg
+*.tmp.mjs

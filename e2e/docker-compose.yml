@@ -11,6 +11,8 @@ services:
     image: batch-control-e2e-jenkins:2.568.3
     container_name: batch-control-e2e
     restart: "no"
+    # Shared machine: keep the footprint modest.
+    mem_limit: 2560m
     ports:
       - "${BC_PORT:-8080}:8080"
     environment:
@@ -18,19 +20,27 @@ services:
       # noSignatureCheck: no update-centre traffic is wanted during a test run.
       JAVA_OPTS: >-
         -Djenkins.install.runSetupWizard=false
+        -Xmx1536m
         -Dhudson.model.DownloadService.noSignatureCheck=true
         -Duser.timezone=${TZ:-Asia/Seoul}
+        -Duser.language=en
+        -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true
       TZ: "${TZ:-Asia/Seoul}"
-      # Consumed by init.groovy.d/00-security.groovy; values come from e2e/.env.
+      # JCasC profile (E-08): accounts, strategy, Batch Control, Mailer, URL.
+      # scripts/profile.sh switches the mounted file for the other profiles.
+      CASC_JENKINS_CONFIG: /var/jenkins_casc/jenkins.yaml
+      # Consumed by casc/jenkins.yaml; values come from e2e/.env.
       BC_ADMIN_PASSWORD: "${BC_ADMIN_PASSWORD:?set BC_ADMIN_PASSWORD in e2e/.env}"
       BC_APPROVER_PASSWORD: "${BC_APPROVER_PASSWORD:?set BC_APPROVER_PASSWORD in e2e/.env}"
       BC_REQUESTER_PASSWORD: "${BC_REQUESTER_PASSWORD:?set BC_REQUESTER_PASSWORD in e2e/.env}"
+      BC_OTHER_PASSWORD: "${BC_OTHER_PASSWORD:?set BC_OTHER_PASSWORD in e2e/.env}"
     volumes:
       # JENKINS_HOME is a named volume so a restart keeps state (grants must
       # survive a restart) while scripts/reset.sh can wipe it in one step.
       - jenkins_home:/var/jenkins_home
       # Bootstrap scripts, re-read on every boot.
       - ./init.groovy.d:/var/jenkins_home/init.groovy.d:ro
+      - ./casc:/var/jenkins_casc:ro
       # The artifact under test. Built by `mvn -ntp clean package -DskipTests`
       # in the project root; mounted rather than copied so a rebuilt .hpi only
       # needs a container restart, not an image rebuild.
@@ -51,6 +61,17 @@ services:
       timeout: 5s
       retries: 60
       start_period: 30s
+
+    depends_on:
+      - mailpit
+
+  # Mail sink (E-04): SMTP on 1025 inside the network, web UI/API on 8025.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: batch-control-e2e-mail
+    restart: "no"
+    ports:
+      - "${BC_MAIL_PORT:-8025}:8025"
 
 volumes:
   jenkins_home:

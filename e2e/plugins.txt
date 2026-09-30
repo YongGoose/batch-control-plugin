@@ -1,14 +1,36 @@
 # Plugins installed into the image by jenkins-plugin-cli (transitive
-# dependencies are resolved automatically).
+# dependencies are resolved automatically). Checklist row E-02.
 #
-# Hard dependencies of batch-control, read from the .hpi manifest
-# (Plugin-Dependencies: cloudbees-folder, structs):
+# Dependencies of batch-control, read from the .hpi manifest:
+#   required: ionicons-api, cloudbees-folder
+#   optional: matrix-auth, mailer, configuration-as-code, role-strategy
 structs
+ionicons-api
 cloudbees-folder
-# Needed by the e2e scenarios themselves:
-#  matrix-auth         - the real authorization strategy the plugin wraps, so
-#                        the five Batch Control permissions can be assigned per
-#                        user and JIT change control can be observed.
-#  workflow-aggregator - the Pipeline sample job (batch-pipeline).
+# matrix-auth: "Batch Control: Matrix-based security" extends
+# ProjectMatrixAuthorizationStrategy, so it is only offered with matrix-auth.
 matrix-auth
+# role-strategy: "Batch Control: Role-Based Strategy" (role profile, B8-R*).
+role-strategy
+mailer
+# configuration-as-code: the environment is configured by e2e/casc/jenkins.yaml
+# (E-08) and the permission-name export check (A-07, B19).
+configuration-as-code
+# Pipeline (batch-pipeline, batch-upstream, Replay) incl. pipeline-build-step.
 workflow-aggregator
+workflow-multibranch
+# git: the multibranch sample over a local file:// repository (team-mb).
+git
+job-dsl
+# Section E - plugin precedence. Each one adds a build button, a trigger, a
+# queue restriction, a configuration history or a build authenticator next to
+# Batch Control's own gate.
+customize-build-now
+rebuild
+parameterized-trigger
+build-token-root
+naginator
+lockable-resources
+throttle-concurrents
+authorize-project
+jobConfigHistory
