@@ -111,6 +111,8 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-02-76 | 2 (D-58c) | integration | P0 | Same; the administrator marks `replay-me` reviewed | c1 POSTs `2/replay/rebuild` and `2/replay/run` | both refused with a plain message ("temporary" / "permission window" / "replayed under"); next build number stays 3; a new record by c1 on the job (note 179) | AuthorizationEntryGuardTest |
 | T-02-77 | 2 (D-58c) | integration | P1 | Same, no review | the administrator POSTs `2/replay/rebuild` | build #3 runs (note 179) | AuthorizationEntryGuardTest |
 | T-02-78 | 2 (D-58c) | integration | P1 | Same | c1 POSTs `1/replay/rebuild` (#1 was not replayed under a grant) | build #3 runs (note 179) | AuthorizationEntryGuardTest |
+| T-02-79 | 2 (D-58c) (security-30 S-30-01) | integration | P0 | Declarative Pipeline `restart-me` with #1; bob replays it under his grant as #2; the administrator marks the job reviewed; c1 has native Configure and Job/Build | c1 POSTs `2/restart/restart` (stage `only`) | no new build (next build number 3) (note 180) | AuthorizationEntryGuardTest |
+| T-02-80 | 2 (D-58c amended) (S-30-02) | integration | P0 | As T-02-76 | the administrator POSTs `2/replay/rebuild` (runs as #3); the administrator marks the job reviewed; c1 POSTs `3/replay/rebuild` | no new build (next build number 4) (note 180) | AuthorizationEntryGuardTest |
 | T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | RunRequestServiceTest |
 | T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | RunRequestServiceTest |
 | T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | RunRequestServiceTest |
@@ -924,6 +926,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 179. **Runs replayed under a grant (T-02-75..78, D-58c).** Pipeline Rebuild is workflow-cps's `replay/rebuild`; Replay is the form POST of T-06-68. The refusal is recognised as a plain refusal naming "temporary", "permission window" or "replayed under"; the record type of the refusal is not pinned (a new record by c1 on the job). Restart from Stage and the rebuild-plugin Rebuild are not added.
 
 
+180. **security-30 rows (T-02-79/80).** T-02-79 needs the real pipeline-model-definition plugin for the declarative script and the Restart from Stage action (`<run>/restart/restart`); it is not a test dependency yet (Request to release-manager for pom.xml), so the row fails at its declarative fixture build until it is added. T-02-80 checks that a re-run of a marked run inherits the marker through the administrator's Pipeline Rebuild.
+
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -982,3 +987,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **D-58b rows, note 178**: T-02-64 reworked; +6 rows: T-02-64b, T-02-73 (P1), T-02-69..72 (P0). Totals: P0 +4, P1 +2; T-02 +6.
 - **D-58b fixture ruling, note 178**: T-02-64/69 give BatchControl/Request to the reviewer; +1 row T-02-74 (P2). Totals: P2 +1; T-02 +1.
 - **D-58c rows, note 179**: +4 rows: T-02-76 (P0), T-02-75/77/78 (P1). Totals: P0 +1, P1 +3; T-02 +4.
+- **security-30 rows, note 180**: +2 rows, P0: T-02-79/80. Totals: P0 +2; T-02 +2.

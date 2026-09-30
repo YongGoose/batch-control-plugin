@@ -629,6 +629,56 @@ public class AuthorizationEntryGuardTest {
         assertTrue(job.getBuildByNumber(3) != null, "a re-run of an unmarked run must build");
     }
 
+    /**
+     * T-02-79 (D-58c, security-30 S-30-01): a declarative Pipeline job; bob (grant-only) replays #1
+     * as the marked #2; the administrator marks the job reviewed; c1 (native Configure and
+     * Job/Build) restarts #2 from its stage. Refused: no new build. Needs pipeline-model-definition
+     * (note 180); without it the declarative fixture build fails first.
+     */
+    @Test
+    public void t_02_79_restartFromStageOfAMarkedRunIsRefused() throws Exception {
+        ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).add(Item.BUILD, PermissionEntry.user("c1"));
+        WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "restart-me");
+        String declarative = "pipeline { agent any; stages { stage('only') { steps { echo 'hello' } } } }";
+        job.setDefinition(new CpsFlowDefinition(declarative, true));
+        j.buildAndAssertSuccess(job);
+        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "restart-me", Arrays.asList(GrantAction.CONFIGURE));
+        replay("bob", job, 1, declarative.replace("hello", "planted"));
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
+        assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=restart-me") < 400,
+                "fixture: the administrator's review must succeed");
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("c1");
+        List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
+        params.add(new org.htmlunit.util.NameValuePair("stageName", "only"));
+        params.add(new org.htmlunit.util.NameValuePair("json", "{\"stageName\":\"only\"}"));
+        WebRequest req = new WebRequest(wc.createCrumbedUrl(job.getUrl() + "2/restart/restart"), HttpMethod.POST);
+        req.setRequestParameters(params);
+        wc.getPage(req);
+        j.waitUntilNoActivity();
+        assertEquals(3, job.getNextBuildNumber(), "a Restart from Stage of the marked run must be refused: no new build");
+    }
+
+    /**
+     * T-02-80 (D-58c as amended, security-30 S-30-02): the administrator's Pipeline Rebuild of the
+     * marked #2 runs as #3, which is itself marked. After the review, c1's Pipeline Rebuild of #3 is
+     * refused: no new build.
+     */
+    @Test
+    public void t_02_80_reRunOfAMarkedRunInheritsTheMarker() throws Exception {
+        WorkflowJob job = replayedUnderGrant();
+        postPage("admin", job.getUrl() + "2/replay/rebuild", null);
+        j.waitUntilNoActivity();
+        assertTrue(job.getBuildByNumber(3) != null, "fixture: the administrator's re-run must have run as #3");
+        assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=replay-me") < 400,
+                "fixture: the administrator's review must succeed");
+
+        postPage("c1", job.getUrl() + "3/replay/rebuild", null);
+        j.waitUntilNoActivity();
+        assertEquals(4, job.getNextBuildNumber(), "a re-run of a run inheriting the marker must be refused: no new build");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void requestPermissionFor(String user) {
