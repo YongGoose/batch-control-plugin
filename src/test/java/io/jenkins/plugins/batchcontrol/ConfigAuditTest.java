@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.Item;
 import hudson.security.HudsonPrivateSecurityRealm;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
@@ -388,7 +389,7 @@ public class ConfigAuditTest {
 
     /** Records of the type named {@code type} (looked up by name: the constant is new with D-52). */
     private static List<ChangeRecord> records(String type) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> r.getType() != null && type.equals(r.getType().name()))
                 .collect(Collectors.toList());
     }

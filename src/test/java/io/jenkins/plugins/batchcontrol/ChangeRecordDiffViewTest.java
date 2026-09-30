@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -85,7 +86,7 @@ public class ChangeRecordDiffViewTest {
         // The description change is what identifies this record: a job created while a control is
         // on can carry more than one CONFIGURE record (the D-31 property default saves it too), so
         // "the newest CONFIGURE record" is not a stable handle.
-        List<ChangeRecord> mine = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        List<ChangeRecord> mine = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> r.getType() == ChangeType.CONFIGURE && "diff-x".equals(r.getTarget()))
                 .filter(r -> r.getDiff() != null && r.getDiff().contains("after-ui-change"))
                 .collect(Collectors.toList());

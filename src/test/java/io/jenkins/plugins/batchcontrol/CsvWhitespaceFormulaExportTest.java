@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
@@ -146,13 +147,13 @@ public class CsvWhitespaceFormulaExportTest {
         }
 
         // 3. The CREATE record's target column, which is where changes.csv carries the name.
-        ChangeRecord created = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        ChangeRecord created = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> r.getType() == ChangeType.CREATE
                         && HOSTILE_JOB_NAME.equals(r.getTarget()))
                 .findFirst().orElse(null);
         assertNotNull(created, "fixture: creating the job must have left a CREATE record whose target is the"
                 + " hostile name; records were "
-                + FileStore.get().listChangeRecords(YearMonth.now()).stream()
+                + FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                         .map(r -> r.getType() + ":" + describe(r.getTarget()))
                         .collect(Collectors.toList()));
 

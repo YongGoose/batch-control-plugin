@@ -302,7 +302,7 @@ public class GrantUsabilityTest {
     }
 
     private static List<ChangeRecord> byUser(String user) {
-        return new ArrayList<>(FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return new ArrayList<>(FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> user.equals(r.getUser()))
                 .collect(Collectors.toList()));
     }

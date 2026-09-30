@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import com.cloudbees.hudson.plugins.folder.Folder;
 import hudson.model.FreeStyleProject;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -229,7 +230,7 @@ public class StoreFileNameUniquenessTest {
 
     /** The diff of the newest CONFIGURE record of {@code target} in the current month. */
     private static List<ChangeRecord> configures(String target) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> target.equals(rec.getTarget()))
                 .collect(Collectors.toList());

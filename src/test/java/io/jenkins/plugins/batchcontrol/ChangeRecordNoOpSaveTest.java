@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.XmlFile;
 import hudson.cli.CLICommandInvoker;
 import hudson.model.AbstractItem;
@@ -434,7 +435,7 @@ public class ChangeRecordNoOpSaveTest {
     }
 
     private static List<ChangeRecord> configureRecords(String target) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> target.equals(rec.getTarget()))
                 .collect(Collectors.toList());

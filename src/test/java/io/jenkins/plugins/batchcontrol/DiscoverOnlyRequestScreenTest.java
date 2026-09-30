@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import com.cloudbees.hudson.plugins.folder.Folder;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -382,7 +383,7 @@ public class DiscoverOnlyRequestScreenTest {
                 jobJ.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
         j.waitUntilNoActivity();
 
-        Incident incident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident incident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(i -> "secret-j#1".equals(i.getRunId()))
                 .findFirst().orElse(null);
         assertNotNull(incident, "fixture: the failed run of the discover-only job must have opened an incident");

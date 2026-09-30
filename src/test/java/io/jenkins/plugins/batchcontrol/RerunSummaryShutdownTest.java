@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.Cause;
 import hudson.model.FreeStyleProject;
 import hudson.model.Result;
@@ -101,7 +102,7 @@ public class RerunSummaryShutdownTest {
     }
 
     private static List<ChangeRecord> byU1(Set<String> skip) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> "u1".equals(r.getUser()) && !skip.contains(r.getId()))
                 .collect(Collectors.toList());
     }

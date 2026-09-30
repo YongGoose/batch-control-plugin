@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.Result;
@@ -237,7 +238,7 @@ public class RequesterBuildPermissionTest {
         j.waitUntilNoActivity();
         failing.getBuildersList().clear();
         setBatchControl(failing, new BatchControlJobProperty(true));
-        Incident incident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident incident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(i -> (name + "#1").equals(i.getRunId()))
                 .findFirst().orElse(null);
         assertNotNull(incident, "fixture: the FAILURE must have opened an incident");

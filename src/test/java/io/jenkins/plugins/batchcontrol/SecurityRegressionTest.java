@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.AdministrativeMonitor;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -207,7 +208,7 @@ public class SecurityRegressionTest {
         BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
-        Incident incident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident incident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(i -> "inc-job#1".equals(i.getRunId()))
                 .findFirst().orElse(null);
         assertNotNull(incident, "fixture: the FAILURE must have opened an incident");

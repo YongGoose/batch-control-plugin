@@ -256,7 +256,7 @@ public class RunControlUsabilityTest {
         failing.getBuildersList().clear();
         setBatchControl(failing, new BatchControlJobProperty(true));
         io.jenkins.plugins.batchcontrol.model.Incident incident = io.jenkins.plugins.batchcontrol.ops.IncidentService.get()
-                .list(java.time.YearMonth.now()).stream()
+                .list(java.time.YearMonth.now(io.jenkins.plugins.batchcontrol.store.BatchClock.clock())).stream()
                 .filter(i -> "offer-rerun#1".equals(i.getRunId())).findFirst().orElse(null);
         assertNotNull(incident, "fixture: the FAILURE must have opened an incident");
         String submit = failing.getUrl() + "batch-control/submit";

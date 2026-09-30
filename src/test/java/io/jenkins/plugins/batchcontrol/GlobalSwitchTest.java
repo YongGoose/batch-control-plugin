@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.User;
@@ -265,7 +266,7 @@ public class GlobalSwitchTest {
 
     /** Finds the latest CONFIG_TOGGLE record for the given setting key and old/new detail. */
     private ChangeRecord findConfigToggle(String target, String detail) {
-        List<ChangeRecord> records = FileStore.get().listChangeRecords(YearMonth.now());
+        List<ChangeRecord> records = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock()));
         return records.stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIG_TOGGLE)
                 .filter(rec -> target.equals(rec.getTarget()))

@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
@@ -183,13 +184,13 @@ public class OwnerScenarioConfigChangeTest {
     }
 
     private RunRecord record(String runId) {
-        return FileStore.get().listRunRecords(YearMonth.now()).stream()
+        return FileStore.get().listRunRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> runId.equals(rec.getRunId()))
                 .findFirst().orElse(null);
     }
 
     private ChangeRecord lastConfigureRecord(String target) {
-        List<ChangeRecord> matching = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        List<ChangeRecord> matching = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.CONFIGURE)
                 .filter(rec -> target.equals(rec.getTarget()))
                 .collect(Collectors.toList());

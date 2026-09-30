@@ -184,7 +184,7 @@ public class RerunSummaryFlushTest {
     }
 
     private static List<ChangeRecord> byU1(Set<String> skip) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(r -> "u1".equals(r.getUser()) && !skip.contains(r.getId()))
                 .collect(Collectors.toList());
     }

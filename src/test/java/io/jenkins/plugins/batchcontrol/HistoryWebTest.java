@@ -135,7 +135,7 @@ public class HistoryWebTest {
         cfg.setRetentionMonths(1);
         cfg.save();
 
-        YearMonth oldMonth = YearMonth.now().minusMonths(3);
+        YearMonth oldMonth = YearMonth.now(BatchClock.clock()).minusMonths(3);
         // mid-month noon UTC keeps the instant inside the same month in every zone
         Instant oldInstant = oldMonth.atDay(15).atTime(12, 0).atZone(ZoneOffset.UTC).toInstant();
         BatchClock.setForTest(Clock.fixed(oldInstant, ZoneOffset.UTC));
@@ -161,7 +161,7 @@ public class HistoryWebTest {
         assertTrue(FileStore.get().listChangeRecords(oldMonth).isEmpty(), "change records past retentionMonths must be deleted");
         assertTrue(IncidentService.get().list(oldMonth).isEmpty(), "incidents past retentionMonths must no longer be listed");
 
-        List<ChangeRecord> retention = FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        List<ChangeRecord> retention = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(rec -> rec.getType() == ChangeType.RETENTION)
                 .collect(Collectors.toList());
         assertFalse(retention.isEmpty(), "the deletion itself must be recorded as ChangeRecord(RETENTION)");
@@ -190,7 +190,7 @@ public class HistoryWebTest {
         }
         j.waitUntilNoActivity();
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(BatchClock.clock());
         String inclusive = "?from=" + today.minusDays(1) + "&to=" + today.plusDays(1);
         String exclusive = "?from=2020-01-01&to=2020-01-02";
         String[] markers = {"hist-x", "hist-fail", "hist-x", "hist-req"};
@@ -262,7 +262,7 @@ public class HistoryWebTest {
         j.waitUntilNoActivity();
 
         // resolve the UNSTABLE incident -> OPEN 1 / RESOLVED 1
-        Incident unstableIncident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident unstableIncident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(incident -> "sum-u#1".equals(incident.getRunId()))
                 .findFirst().orElse(null);
         assertNotNull(unstableIncident, "fixture: the UNSTABLE completion must have opened an incident");
@@ -284,7 +284,7 @@ public class HistoryWebTest {
         }
 
         WebResponse summary = get(webClient("viewer"),
-                "batch-control/history/summary?month=" + YearMonth.now());
+                "batch-control/history/summary?month=" + YearMonth.now(BatchClock.clock()));
         assertEquals(200, summary.getStatusCode(), "the monthly summary must render for a ViewHistory holder");
         String body = summary.getContentAsString();
         assertSummaryCount(body, "runs", 4);
@@ -366,7 +366,7 @@ public class HistoryWebTest {
         BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
         j.assertBuildStatus(Result.FAILURE, job.scheduleBuild2(0));
         j.waitUntilNoActivity();
-        Incident incident = IncidentService.get().list(YearMonth.now()).stream()
+        Incident incident = IncidentService.get().list(YearMonth.now(BatchClock.clock())).stream()
                 .filter(i -> "sec-fail#1".equals(i.getRunId()))
                 .findFirst().orElse(null);
         assertNotNull(incident);

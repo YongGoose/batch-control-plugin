@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import hudson.model.Cause;
 import hudson.model.Failure;
 import hudson.model.FreeStyleBuild;
@@ -216,7 +217,7 @@ public class MarkerReuseAuditTest {
 
         assertTrue(reuseRecords(request.getId()).isEmpty(), "one approved submission must not be recorded as a marker re-use"
                 + " - found " + describe(reuseRecords(request.getId())));
-        List<ChangeRecord> foreignTypes = FileStore.get().listChangeRecords(YearMonth.now())
+        List<ChangeRecord> foreignTypes = FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock()))
                 .stream()
                 .filter(record -> !SPEC_DEFINED_TYPES.contains(record.getType()))
                 .collect(Collectors.toList());
@@ -333,7 +334,7 @@ public class MarkerReuseAuditTest {
 
     /** Audit records that refer to the consumed request; see the class derivation note. */
     private List<ChangeRecord> reuseRecords(String requestId) {
-        return FileStore.get().listChangeRecords(YearMonth.now()).stream()
+        return FileStore.get().listChangeRecords(YearMonth.now(BatchClock.clock())).stream()
                 .filter(record -> textOf(record).contains(requestId))
                 .collect(Collectors.toList());
     }
