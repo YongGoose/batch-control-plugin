@@ -92,6 +92,22 @@ triggers`와 `Block upstream triggers`가 그 역할을 하고, 뒤쪽 항목에
 Jenkins 2.568.3 이상(플러그인이 컴파일되는 기준선), 그리고 `cloudbees-folder`.
 의존성은 플러그인 관리자가 알아서 해결합니다.
 
+아래 플러그인과의 연동은 선택 사항이라 없어도 Batch Control은 로드됩니다. 다만 설치되어 있다면
+Batch Control이 컴파일된 버전 이상이어야 하며, Jenkins가 플러그인을 로드할 때 이를 강제합니다.
+
+| 선택 플러그인 | 최소 버전 |
+|---|---|
+| `matrix-auth` | 3.3 |
+| `role-strategy` | 898.vc050ed2424ca_ |
+| `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
+| `mailer` | 534.v1b_36f5864073 |
+| `rebuild` | 338.va_0a_b_50e29397 |
+
+이 중 하나라도 더 오래된 버전이 설치되어 있으면 그 플러그인을 업그레이드할 때까지 Batch Control이
+로드되지 않습니다. **Manage Jenkins → Plugins → Available**에서 설치하면 필요한 업그레이드를 함께
+제안하지만, **Deploy Plugin**으로 `.hpi`를 직접 올리면 제안하지 않으므로 해당 플러그인을 먼저
+업그레이드하십시오.
+
 Batch Control의 다섯 권한은 권한 매트릭스를 그려 주는 권한 전략에서만 보입니다. Jenkins 내장
 "Logged-in users can do anything"에서는 이 권한들을 할당할 화면 자체가 없으므로, **Matrix
 Authorization Strategy**나 그에 준하는 것을 먼저 설치하십시오. 변경 통제에는 아래에 적은 한

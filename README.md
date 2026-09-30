@@ -168,6 +168,23 @@ Jenkins 2.568.3 or newer, the baseline the plugin is compiled against;
 `cloudbees-folder` and `ionicons-api`, both required, which the Plugin Manager
 (or Deploy Plugin, when installing a build of your own) resolves for you.
 
+The integrations with these plugins are optional: Batch Control loads without
+them. If one of them is installed, though, it must be at least the version
+Batch Control is compiled against, which Jenkins enforces when loading plugins:
+
+| Optional plugin | Minimum version |
+|---|---|
+| `matrix-auth` | 3.3 |
+| `role-strategy` | 898.vc050ed2424ca_ |
+| `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
+| `mailer` | 534.v1b_36f5864073 |
+| `rebuild` | 338.va_0a_b_50e29397 |
+
+If an older version of any of these is installed, Batch Control fails to load
+until that plugin is upgraded. Installing Batch Control from **Manage Jenkins →
+Plugins → Available** offers the needed upgrade along with it. Uploading the
+`.hpi` through **Deploy Plugin** does not, so upgrade those plugins first.
+
 The five Batch Control permissions are only visible on authorization strategies
 that draw a permission matrix, so with Jenkins' built-in "Logged-in users can do
 anything" there is no screen on which to assign them. Install **Matrix
@@ -280,9 +297,10 @@ action: on the plugin set this project is built against, a `CONFIGURE` window
 additionally confers `Item/ExtendedRead`, `Credentials/UseItem` and
 `Run/Replay`, which is worth knowing before approving one
 ([Limitations](#limitations)). An administrative monitor warns if change control
-is on without one of these two variants installed. Tested against
-role-strategy 918, saving **Manage Roles** or **Assign Roles** keeps the Batch
-Control variant in place, so grants keep conferring; the monitor's one-click
+is on without one of these two variants installed. In the end-to-end tests,
+run against role-strategy 918, saving **Manage Roles** or **Assign Roles** keeps
+the Batch Control variant in place (the unit tests run against the plugin BOM's
+role-strategy 898), so grants keep conferring; the monitor's one-click
 reinstall stays available as a safety net in case a different role-strategy
 release swaps the variant out another way. Run control and recording do not
 need any of this. A window confers its permissions only when a Batch Control
@@ -522,9 +540,10 @@ Strategy** keeps that plugin's own per-item configuration (folder, job and
 agent authorization properties, item and agent roles) configurable and
 effective, since each variant is a subclass of the corresponding upstream
 strategy. Selecting any other strategy gets you run control and recording only,
-and an administrative monitor says so. Tested against role-strategy 918, its own
-**Manage Roles** and **Assign Roles** saves keep the Batch Control variant in
-place, so grants keep conferring; the administrative monitor's one-click
+and an administrative monitor says so. In the end-to-end tests, run against
+role-strategy 918, its own **Manage Roles** and **Assign Roles** saves keep the
+Batch Control variant in place (the unit tests run against the plugin BOM's
+role-strategy 898), so grants keep conferring; the administrative monitor's one-click
 reinstall remains available as a safety net should a different role-strategy
 release swap the variant out another way.
 
