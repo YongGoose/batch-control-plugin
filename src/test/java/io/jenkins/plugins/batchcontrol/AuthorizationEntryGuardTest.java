@@ -25,6 +25,7 @@ import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.authorizeproject.GlobalQueueItemAuthenticator;
 import org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.jenkinsci.plugins.matrixauth.inheritance.NonInheritingStrategy;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
@@ -47,7 +48,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * held within the last 30 days a grant covering the item (or for a group of that user, including
  * {@code authenticated}) is reverted and recorded as GRANT_VIOLATION, whoever makes it, unless it
  * is made through an HTTP request by an Overall/Administer holder; a build's reverted save is
- * named in its build log. Matrix rows T-02-51 .. T-02-56 (note 175).
+ * named in its build log. Matrix rows T-02-51 .. T-02-65 (notes 175, 176).
+ *
+ * <p>D-58a (security-27) replaced the principal rule with a per-item rule: an item in the scope of an
+ * active grant, or whose configuration was changed under a grant and not reviewed since by an HTTP
+ * save of a native Item/Configure or Overall/Administer holder, is guarded; any widening of access on
+ * it is reverted whoever makes it, except an administrator's HTTP save.
  *
  * <p>bob (StrategyFixtures) holds a JOB CONFIGURE grant on the Pipeline job {@code pipe} and
  * edits its script through {@code POST config.xml} to a {@code properties([authorizationMatrix(...)])}
@@ -116,8 +122,9 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-52 (D-58, "held within the last 30 days"): bob edits the script inside the window, the
-     * window ends, then the build runs. The entry is still reverted and recorded.
+     * T-02-52 (D-58a): bob edits the script inside the window, the window ends, then the build
+     * runs. The job stays guarded because its configuration was changed under the grant and not
+     * reviewed since, so the entry is still reverted and recorded.
      */
     @Test
     public void t_02_52_entryIsRevertedWhenTheBuildRunsAfterTheWindow() throws Exception {
@@ -149,18 +156,206 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-54 (D-58, outside the rule): the script gives Job/Configure to alice, who never held a
-     * grant. The entry is kept and no GRANT_VIOLATION is written (documented as outside the rule).
+     * T-02-54 (D-58a, revised): on the guarded item the script gives Job/Configure to alice, who
+     * never held a grant. Guarding is per item, so the entry is reverted and recorded.
      */
     @Test
-    public void t_02_54_entryForAnUnguardedPrincipalIsKept() throws Exception {
+    public void t_02_54_entryForAnyPrincipalOnAGuardedItemIsReverted() throws Exception {
         grantBob();
         int violations = violations().size();
         editScriptAsBob(entryFor("user", "alice"));
         j.buildAndAssertSuccess(pipe);
 
-        assertTrue(entryExists("alice"), "an entry for a principal that never held a grant is outside the rule and kept");
-        assertEquals(violations, violations().size(), "no GRANT_VIOLATION for an unguarded principal");
+        assertNoEntryFor("alice");
+        assertEquals(violations + 1, violations().size(), "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /** T-02-57 (D-58a, S-27-01): the script gives Job/Configure to {@code anonymous}; it is reverted. */
+    @Test
+    public void t_02_57_anonymousEntryIsReverted() throws Exception {
+        grantBob();
+        int violations = violations().size();
+        editScriptAsBob(entryFor("user", "anonymous"));
+        j.buildAndAssertSuccess(pipe);
+
+        assertNoEntryFor("anonymous");
+        assertEquals(violations + 1, violations().size(), "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-58 (D-58a, S-27-02): a script (SYSTEM, not an HTTP request) saves the guarded job with
+     * two AuthorizationMatrixProperty elements, the second giving carol Job/Configure. Afterwards
+     * the job carries at most one authorization property, carol has no entry and no Configure, and
+     * the save is recorded.
+     */
+    @Test
+    public void t_02_58_secondAuthorizationPropertyIsReverted() throws Exception {
+        grantBob();
+        int violations = violations().size();
+        String xml = current().getConfigFile().asString();
+        String two = xml.replace("<properties/>", "<properties>" + propertyXml("Inherit", "alice")
+                + propertyXml("Inherit", "carol") + "</properties>");
+        assertFalse(two.equals(xml), "fixture: the job config must have an empty <properties/>: " + xml);
+        saveAsScript(two);
+
+        long count = current().getAllProperties().stream().filter(p -> p instanceof AuthorizationMatrixProperty).count();
+        assertTrue(count <= 1, "the job must not keep two authorization properties, found " + count);
+        assertNoEntryFor("carol");
+        assertFalse(has(current(), "carol", Item.CONFIGURE), "carol must not gain Configure through a second property");
+        assertTrue(violations().size() > violations, "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-59 (D-58a, S-27-04): the guarded job's property is nonInheriting (only admin listed); a
+     * script save switches it to inheriting from the parent. The switch is reverted: the property is
+     * still nonInheriting, and the save is recorded.
+     */
+    @Test
+    public void t_02_59_wideningInheritanceChangeIsReverted() throws Exception {
+        baselineNonInheriting();
+        grantBob();
+        int violations = violations().size();
+        String xml = current().getConfigFile().asString();
+        String widened = xml.replace(NON_INHERITING, INHERITING);
+        assertFalse(widened.equals(xml), "fixture: the baseline must be nonInheriting: " + xml);
+        saveAsScript(widened);
+
+        AuthorizationMatrixProperty amp = current().getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp != null && amp.getInheritanceStrategy() instanceof NonInheritingStrategy,
+                "the widening inheritance change must be reverted to nonInheriting: " + (amp == null ? "no property"
+                        : amp.getInheritanceStrategy()));
+        assertTrue(violations().size() > violations, "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-60 (D-58a, S-27-04): a script save removes the guarded job's nonInheriting property.
+     * The removal is reverted: the property is back, still nonInheriting, and the save is recorded.
+     */
+    @Test
+    public void t_02_60_removingThePropertyIsReverted() throws Exception {
+        baselineNonInheriting();
+        grantBob();
+        int violations = violations().size();
+        String xml = current().getConfigFile().asString();
+        int start = xml.indexOf("<hudson.security.AuthorizationMatrixProperty>");
+        int end = xml.indexOf("</hudson.security.AuthorizationMatrixProperty>") + "</hudson.security.AuthorizationMatrixProperty>".length();
+        assertTrue(start > 0 && end > start, "fixture: the baseline property must be in config.xml: " + xml);
+        saveAsScript(xml.substring(0, start) + xml.substring(end));
+
+        AuthorizationMatrixProperty amp = current().getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp != null && amp.getInheritanceStrategy() instanceof NonInheritingStrategy,
+                "removing the property must be reverted: " + (amp == null ? "no property" : amp.getInheritanceStrategy()));
+        assertTrue(violations().size() > violations, "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-61 (D-58a, S-27-03): bob edits the script inside his window, the administrator renames
+     * the job, and the build runs under the new name. Guarding follows the rename: bob's entry is
+     * reverted and recorded.
+     */
+    @Test
+    public void t_02_61_guardingFollowsARename() throws Exception {
+        grantBob();
+        int violations = violations().size();
+        editScriptAsBob(entryFor("user", "bob"));
+        current().renameTo("pipe-renamed");
+        WorkflowJob renamed = j.jenkins.getItemByFullName("pipe-renamed", WorkflowJob.class);
+        j.buildAndAssertSuccess(renamed);
+
+        AuthorizationMatrixProperty amp = renamed.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || amp.getGrantedPermissionEntries().values().stream()
+                .noneMatch(s -> s.stream().anyMatch(pe -> "bob".equals(pe.getSid()))),
+                "after the rename the widening must still be reverted");
+        assertTrue(violations().size() > violations, "the reverted save must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-62 (D-58a, S-27-05): bob holds a FOLDER CONFIGURE grant on {@code team}, which makes the
+     * folder guarded. carol, who holds Job/Create natively (not an administrator), creates
+     * {@code team/new} through {@code createItem} with a payload giving herself Job/Configure. The
+     * new item's authorization entries are removed and the creation is recorded.
+     */
+    @Test
+    public void t_02_62_creationInsideAGuardedFolderLosesItsEntries() throws Exception {
+        BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
+        strategy.add(Item.CREATE, PermissionEntry.user("carol"));
+        j.jenkins.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "team");
+        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CONFIGURE));
+        int violations = violations().size();
+
+        String payload = "<?xml version='1.1' encoding='UTF-8'?><project><properties>" + propertyXml("Inherit", "carol")
+                + "</properties><builders/><publishers/><buildWrappers/></project>";
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("carol");
+        WebRequest req = new WebRequest(new java.net.URL(wc.createCrumbedUrl("job/team/createItem").toExternalForm()
+                + "&name=new"), HttpMethod.POST);
+        req.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
+        req.setRequestBody(payload);
+        wc.getPage(req);
+
+        hudson.model.FreeStyleProject created = j.jenkins.getItemByFullName("team/new", hudson.model.FreeStyleProject.class);
+        assertTrue(created != null, "fixture: carol's creation must have made team/new");
+        AuthorizationMatrixProperty amp = created.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp == null || amp.getGrantedPermissionEntries().values().stream()
+                .noneMatch(s -> s.stream().anyMatch(pe -> "carol".equals(pe.getSid()))),
+                "the new item's authorization entries must be removed inside a guarded folder");
+        assertTrue(violations().size() > violations, "the removal must be recorded as GRANT_VIOLATION");
+    }
+
+    /**
+     * T-02-63 (D-58a, S-27-07): bob plants the script inside his window and no build runs; the
+     * first build runs 31 days after the window ended. The item was never reviewed, so it is still
+     * guarded and bob's entry is reverted.
+     */
+    @Test
+    public void t_02_63_plantedScriptIsStillRevertedAfterThirtyOneDays() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(WINDOW_MINUTES)).plus(Duration.ofDays(31)),
+                ZoneOffset.UTC));
+        j.buildAndAssertSuccess(pipe);
+
+        assertNoEntryFor("bob");
+        assertFalse(has(current(), "bob", Item.CONFIGURE), "bob must hold no Configure");
+    }
+
+    /**
+     * T-02-64 (D-58a review): bob edits the script inside his window; after the window c1, who
+     * holds Item/Configure natively, saves the job through an HTTP request (the review). The
+     * build then writes the entry the reviewed script asks for, and it is kept without a record.
+     */
+    @Test
+    public void t_02_64_reviewByANativeConfigureHolderClearsTheGuard() throws Exception {
+        grantBob();
+        editScriptAsBob(entryFor("user", "bob"));
+        afterWindow();
+        String reviewed = withDescription(current().getConfigFile().asString(), "reviewed");
+        int code = post("c1", reviewed);
+        assertTrue(code < 400, "fixture: c1's review save must succeed, got " + code);
+        int violations = violations().size();
+
+        j.buildAndAssertSuccess(pipe);
+
+        assertTrue(entryExists("bob"), "after the review a Jenkinsfile widening is kept");
+        assertEquals(violations, violations().size(), "no GRANT_VIOLATION after the review");
+    }
+
+    /**
+     * T-02-65 (D-58a, items no grant touched): a second job that no grant ever covered or changed
+     * gets a script giving bob Job/Configure (set by the administrator); the build's entry is kept.
+     */
+    @Test
+    public void t_02_65_itemNoGrantTouchedKeepsAJenkinsfileWidening() throws Exception {
+        grantBob();
+        WorkflowJob free = j.jenkins.createProject(WorkflowJob.class, "free");
+        free.setDefinition(new CpsFlowDefinition(entryFor("user", "bob"), true));
+        int violations = violations().size();
+        j.buildAndAssertSuccess(free);
+
+        AuthorizationMatrixProperty amp = free.getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp != null && amp.getGrantedPermissionEntries().values().stream()
+                .anyMatch(s -> s.stream().anyMatch(pe -> "bob".equals(pe.getSid()))),
+                "on an item no grant touched a Jenkinsfile widening is kept");
+        assertEquals(violations, violations().size(), "no GRANT_VIOLATION on an item no grant touched");
     }
 
     /**
@@ -229,11 +424,60 @@ public class AuthorizationEntryGuardTest {
         return wc.getPage(req).getWebResponse().getStatusCode();
     }
 
+    private static final String NON_INHERITING =
+            "<inheritanceStrategy class=\"org.jenkinsci.plugins.matrixauth.inheritance.NonInheritingStrategy\"/>";
+    private static final String INHERITING =
+            "<inheritanceStrategy class=\"org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy\"/>";
+
     private static String propertyXml(String user) {
+        return propertyXml("Inherit", user);
+    }
+
+    /** An authorization property giving {@code user} Job/Configure, inheriting ("Inherit") or not ("NonInherit"). */
+    private static String propertyXml(String inheritance, String user) {
         return "<hudson.security.AuthorizationMatrixProperty>"
-                + "<inheritanceStrategy class=\"org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy\"/>"
+                + ("NonInherit".equals(inheritance) ? NON_INHERITING : INHERITING)
                 + "<permission>USER:hudson.model.Item.Configure:" + user + "</permission>"
                 + "</hudson.security.AuthorizationMatrixProperty>";
+    }
+
+    /** Before any grant: the administrator's nonInheriting property naming only admin (D-58a baseline). */
+    private void baselineNonInheriting() throws Exception {
+        String xml = current().getConfigFile().asString();
+        // admin configures; bob (the requester), a1 (the approver) and c1 keep Job/Read, so the grant fixture still sees the job
+        String property = propertyXml("NonInherit", "admin").replace("</hudson.security.AuthorizationMatrixProperty>",
+                "<permission>USER:hudson.model.Item.Read:bob</permission>"
+                        + "<permission>USER:hudson.model.Item.Read:a1</permission>"
+                        + "<permission>USER:hudson.model.Item.Read:c1</permission>"
+                        + "</hudson.security.AuthorizationMatrixProperty>");
+        String with = xml.replace("<properties/>", "<properties>" + property + "</properties>");
+        assertFalse(with.equals(xml), "fixture: the job config must have an empty <properties/>: " + xml);
+        current().updateByXml((javax.xml.transform.Source) new javax.xml.transform.stream.StreamSource(
+                new java.io.StringReader(with)));
+        AuthorizationMatrixProperty amp = current().getProperty(AuthorizationMatrixProperty.class);
+        assertTrue(amp != null && amp.getInheritanceStrategy() instanceof NonInheritingStrategy,
+                "fixture: the baseline property must be nonInheriting");
+    }
+
+    /** A save of the job's config.xml by a script (SYSTEM, not an HTTP request). */
+    private void saveAsScript(String xml) throws Exception {
+        try (hudson.security.ACLContext ignored = hudson.security.ACL.as2(hudson.security.ACL.SYSTEM2)) {
+            current().updateByXml((javax.xml.transform.Source) new javax.xml.transform.stream.StreamSource(
+                    new java.io.StringReader(xml)));
+        } catch (RuntimeException | java.io.IOException refused) {
+            // the guard may refuse the save outright; the assertions read the result either way
+        }
+    }
+
+    /** Sets the job description in a config.xml text, whatever form the element has. */
+    private static String withDescription(String xml, String text) {
+        if (xml.contains("<description/>")) {
+            return xml.replace("<description/>", "<description>" + text + "</description>");
+        }
+        if (xml.matches("(?s).*<description>.*?</description>.*")) {
+            return xml.replaceFirst("(?s)<description>.*?</description>", "<description>" + text + "</description>");
+        }
+        return xml.replaceFirst("(<flow-definition[^>]*>)", "$1<description>" + text + "</description>");
     }
 
     private WorkflowJob current() {
