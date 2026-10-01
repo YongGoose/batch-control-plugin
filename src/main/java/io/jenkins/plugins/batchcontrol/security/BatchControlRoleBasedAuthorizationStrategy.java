@@ -174,10 +174,17 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
             return parent != null ? parent : RoleBasedAuthorizationStrategy.DESCRIPTOR;
         }
 
+        /*
+         * Jenkins Security Scan alerts 31-36: the three role-page checks below serve role-strategy's
+         * Manage Roles and Assign Roles pages, so they need what role-strategy requires to open those
+         * pages (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
+         * implies them). The check is inline in each method so the scanner can see it.
+         */
         /** Assign Roles: renders each user or group row's name (role-strategy tableAssign.js). */
         @RequirePOST
         public FormValidation doCheckName(@QueryParameter String value) {
-            checkRolePagePermission();
+            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
+                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
             return parent().doCheckName(value);
         }
 
@@ -187,7 +194,8 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          */
         @RequirePOST
         public FormValidation doCheckPattern(@QueryParameter String value) {
-            checkRolePagePermission();
+            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
+                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
             try {
                 Pattern.compile(value == null ? "" : value);
             } catch (PatternSyntaxException e) {
@@ -199,19 +207,9 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         /** Role and template names: warns about leading or trailing whitespace. */
         @RequirePOST
         public FormValidation doCheckForWhitespace(@QueryParameter String value) {
-            checkRolePagePermission();
-            return parent().doCheckForWhitespace(value);
-        }
-
-        /**
-         * Jenkins Security Scan alerts 31-33: these checks serve role-strategy's Manage Roles and
-         * Assign Roles pages, so they need what role-strategy requires to open those pages
-         * (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
-         * implies them).
-         */
-        private static void checkRolePagePermission() {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
                     RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
+            return parent().doCheckForWhitespace(value);
         }
 
         /** Jelly: the permission groups shown for a role type. */

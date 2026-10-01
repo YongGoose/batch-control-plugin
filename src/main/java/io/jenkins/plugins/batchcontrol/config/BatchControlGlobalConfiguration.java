@@ -803,64 +803,92 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         return approversValidation(value, runControlEnabled || changeControlEnabled);
     }
 
-    /** The form's inline checks answer only a user who may save the form. */
-    private static boolean mayCheck() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
-    }
+    /*
+     * The form's inline checks below answer only a user who may save the form (BatchControl/Manage);
+     * anyone else gets an empty OK. The permission test is inline in each method so the Jenkins
+     * Security Scan (jenkins/no-permission-check) can see it.
+     */
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckPendingTimeoutHours(@QueryParameter String value) {
-        return mayCheck() ? toValidation(positiveError(value, LABEL_PENDING)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(positiveError(value, LABEL_PENDING));
     }
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckApprovedRunTimeoutMinutes(@QueryParameter String value) {
-        return mayCheck() ? toValidation(positiveError(value, LABEL_APPROVED_RUN)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(positiveError(value, LABEL_APPROVED_RUN));
     }
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckMaxGrantMinutes(@QueryParameter String value) {
-        return mayCheck() ? toValidation(positiveError(value, LABEL_MAX_GRANT)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(positiveError(value, LABEL_MAX_GRANT));
     }
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckRetentionMonths(@QueryParameter String value) {
-        return mayCheck() ? toValidation(positiveError(value, LABEL_RETENTION)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(positiveError(value, LABEL_RETENTION));
     }
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckNotifyBeforeExpiryMinutes(@QueryParameter String value) {
-        return mayCheck() ? toValidation(positiveError(value, LABEL_NOTIFY)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(positiveError(value, LABEL_NOTIFY));
     }
 
     /** Stapler form validation (read-only); re-run when the maximum changes. */
     @POST
     public FormValidation doCheckGrantDurationOptionsText(@QueryParameter String value,
                                                           @QueryParameter String maxGrantMinutes) {
-        return mayCheck() ? toValidation(durationOptionsError(value, maxGrantMinutes)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(durationOptionsError(value, maxGrantMinutes));
     }
 
     /** Stapler form validation (read-only). */
     @POST
     public FormValidation doCheckIncidentResultsText(@QueryParameter String value) {
-        return mayCheck() ? toValidation(incidentResultsError(value)) : FormValidation.ok();
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
+        return toValidation(incidentResultsError(value));
     }
 
     /** Stapler form validation of the field named by its SPEC key (read-only). */
     @POST
     public FormValidation doCheckGrantDurationOptions(@QueryParameter String value,
                                                       @QueryParameter String maxGrantMinutes) {
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
         return doCheckGrantDurationOptionsText(value, maxGrantMinutes);
     }
 
     /** Stapler form validation of the field named by its SPEC key (read-only). */
     @POST
     public FormValidation doCheckIncidentResults(@QueryParameter String value) {
+        if (!Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
+            return FormValidation.ok();
+        }
         return doCheckIncidentResultsText(value);
     }
 
