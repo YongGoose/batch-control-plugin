@@ -181,6 +181,8 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          * implies them). The check is inline in each method so the scanner can see it.
          */
         /** Assign Roles: renders each user or group row's name (role-strategy tableAssign.js). */
+        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
+        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
         @RequirePOST
         public FormValidation doCheckName(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
@@ -192,6 +194,8 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          * Manage Roles: validates an item or agent role pattern. Re-implemented rather than
          * delegated because the parent's method is restricted to role-strategy itself.
          */
+        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
+        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
         @RequirePOST
         public FormValidation doCheckPattern(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
@@ -205,6 +209,8 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         }
 
         /** Role and template names: warns about leading or trailing whitespace. */
+        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
+        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
         @RequirePOST
         public FormValidation doCheckForWhitespace(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
