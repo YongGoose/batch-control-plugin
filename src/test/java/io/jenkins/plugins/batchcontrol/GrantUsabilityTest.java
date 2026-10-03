@@ -33,7 +33,6 @@ import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.htmlunit.html.DomElement;
-import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
@@ -133,13 +132,28 @@ public class GrantUsabilityTest {
         DomElement entry = expiredEntry(expired, "win-job");
         assertNotNull(entry, "the permission screen must show the expired window (D-33: history of expired windows): "
                 + excerpt(expired.asNormalizedText()));
-        List<HtmlAnchor> again = UsabilityFixtures.anchorsCaptioned(expired, Pattern.compile("(?i)(again|re-?request|renew)"));
-        assertFalse(again.isEmpty(), "the permission screen must offer a re-request link (D-33): " + excerpt(expired.asNormalizedText()));
-        Page form = UsabilityFixtures.get(j, UsabilityFixtures.clientNoJs(j, "u1"),
-                expired.getFullyQualifiedUrl(again.get(0).getHrefAttribute()).toExternalForm().substring(j.getURL().toExternalForm().length()));
-        assertEquals(200, form.getWebResponse().getStatusCode(), "the re-request link must open");
+        // D-66 (note 248): the re-request entry may be a link or a dialog opener; its target is read
+        // from href or a data-* URL attribute, and must render the grant request form.
+        String target = null;
+        for (DomElement e : expired.getElementById("main-panel").getHtmlElementDescendants()) {
+            if (!("a".equals(e.getTagName()) || "button".equals(e.getTagName()))
+                    || !Pattern.compile("(?i)(again|re-?request|renew)").matcher(e.asNormalizedText()).find()) {
+                continue;
+            }
+            for (org.htmlunit.html.DomAttr attr : e.getAttributesMap().values()) {
+                if (("href".equals(attr.getName()) || attr.getName().startsWith("data-")) && attr.getValue().contains("/")) {
+                    target = expired.getFullyQualifiedUrl(attr.getValue()).toExternalForm();
+                }
+            }
+            if (target != null) {
+                break;
+            }
+        }
+        assertNotNull(target, "the permission screen must offer a re-request entry (D-33): " + excerpt(expired.asNormalizedText()));
+        Page form = UsabilityFixtures.get(j, UsabilityFixtures.clientNoJs(j, "u1"), target.substring(j.getURL().toExternalForm().length()));
+        assertEquals(200, form.getWebResponse().getStatusCode(), "the re-request entry must open: " + target);
         assertTrue(form instanceof HtmlPage && !UsabilityFixtures.formsEndingWith((HtmlPage) form, "batch-control/grants/create").isEmpty(),
-                "the re-request link must lead to the grant request form");
+                "the re-request entry must lead to the grant request form");
     }
 
     /**
@@ -278,11 +292,12 @@ public class GrantUsabilityTest {
         Pattern expired = Pattern.compile("(?i)\\bexpired\\b");
         DomElement best = null;
         for (DomElement element : main.getHtmlElementDescendants()) {
-            String text = element.getTextContent();
+            // normalized text separates table cells; raw text content glued "Expired" to its neighbours (note 248)
+            String text = element.asNormalizedText();
             if (text == null || !text.contains(scope) || !expired.matcher(text).find()) {
                 continue;
             }
-            if (best == null || text.length() < best.getTextContent().length()) {
+            if (best == null || text.length() < best.asNormalizedText().length()) {
                 best = element;
             }
         }

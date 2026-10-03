@@ -62,7 +62,9 @@ public class GrantFormPlacementTest {
 
     /**
      * T-UI-26 (FD-08): with several of u1's grant requests listed, u1 opens the prefilled grant
-     * form of {@code fd8-job} (the job page's entry). The form comes before the first list table.
+     * form of {@code fd8-job} (the job page's entry, {@code grants/new} since D-66). The form comes
+     * before the first list table, if the page has one; the grants page itself carries no form but
+     * the request entry {@code [data-batch-control-request=grant]} (D-66, note 248).
      * A submission longer than maxGrantMinutes (240) is refused, and the refusal's message
      * ("240") and the re-shown form also come before the first list table.
      */
@@ -74,7 +76,15 @@ public class GrantFormPlacementTest {
             submitGrantOk(j, "u1", "JOB", "fd8-other-" + i, Arrays.asList("CONFIGURE"), 30, "maintenance " + i, null, "a1");
         }
 
-        HtmlPage prefilled = UsabilityFixtures.htmlPage(j, "u1", "batch-control/grants/?scopeType=JOB&scopeFullName=fd8-job");
+        // D-66 (note 248): the grants page carries no request form; its request entry
+        // ([data-batch-control-request=grant]) opens the form, which lives on grants/new.
+        HtmlPage list = UsabilityFixtures.htmlPage(j, "u1", "batch-control/grants/");
+        assertTrue(UsabilityFixtures.formsEndingWith(list, "batch-control/grants/create").isEmpty(),
+                "D-66: the grants page must not carry the request form itself; forms: " + UsabilityFixtures.formActions(list));
+        assertFalse(list.querySelectorAll("[data-batch-control-request=grant]").isEmpty(),
+                "D-66: the grants page must offer the grant request entry [data-batch-control-request=grant]");
+
+        HtmlPage prefilled = UsabilityFixtures.htmlPage(j, "u1", "batch-control/grants/new?scopeType=JOB&scopeFullName=fd8-job");
         assertFormBeforeLists("the prefilled form", prefilled);
 
         JenkinsRule.WebClient wc = UsabilityFixtures.clientNoJs(j, "u1");
@@ -106,11 +116,12 @@ public class GrantFormPlacementTest {
                 + UsabilityFixtures.formActions(page));
         String main = mainText(page);
         int firstTable = firstTableOffset(page, main);
-        assertTrue(firstTable >= 0, "fixture: " + what + " must list the user's requests in a table: " + excerpt(main));
+        // D-66 (note 248): the request form now opens on its own (a dialog's content), without the
+        // lists, so a list table is no longer a fixture premise; if one is there, the form precedes it.
         String formText = forms.get(0).asNormalizedText();
         String head = formText.length() > 40 ? formText.substring(0, 40) : formText;
         int form = main.indexOf(head);
-        assertTrue(form >= 0 && form < firstTable, what + ": the grant request form must come before the lists (form at "
+        assertTrue(form >= 0 && (firstTable < 0 || form < firstTable), what + ": the grant request form must come before the lists (form at "
                 + form + ", first list at " + firstTable + ")");
     }
 

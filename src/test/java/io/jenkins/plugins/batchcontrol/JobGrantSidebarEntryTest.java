@@ -154,9 +154,9 @@ public class JobGrantSidebarEntryTest {
         assertNotNull(entry, "a RequestGrant holder without Item/Configure must see the entry");
         assertTrue(j.contextPath.length() > 1, "premise: JenkinsRule serves under a non-root context path ("
                 + j.contextPath + "), so a link that drops it cannot resolve correctly by accident");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=batch-x",
-                resolved(entry), "the entry must resolve to the grant screen under the context path, with the JOB scope"
-                        + " and this job's full name (raw href " + entry.getHrefAttribute() + ")");
+        // D-66 (note 248): the form moved from the grants list page to grants/new.
+        assertGrantFormUrl(resolved(entry), "scopeFullName=batch-x", "the entry must resolve to the grant request form"
+                + " under the context path, with the JOB scope and this job's full name (raw href " + entry.getHrefAttribute() + ")");
         assertFollowsToForm(entry, "batch-x");
     }
 
@@ -230,7 +230,7 @@ public class JobGrantSidebarEntryTest {
      */
     @Test
     public void t_ui_13_grantScreenPrefillsTheScopeAndChecksConfigure() throws Exception {
-        HtmlPage page = grantScreen("g1", "scopeType=JOB&scopeFullName=batch-x");
+        HtmlPage page = newForm("g1", "scopeType=JOB&scopeFullName=batch-x");
         assertEquals(200, page.getWebResponse().getStatusCode());
 
         HtmlInput scope = scopeField(page);
@@ -242,9 +242,10 @@ public class JobGrantSidebarEntryTest {
         // Falsifiability guard: without the ?scopeFullName= parameter the same form is blank and
         // CONFIGURE is unchecked, so the two assertions above measure the prefill and not a
         // form that is always filled in.
-        HtmlPage bare = grantScreen("g1", "");
-        assertEquals("", scopeField(bare).getValue(), "guard: opening the grant screen directly must leave the scope field empty");
-        assertFalse(configureCheckbox(bare).isChecked(), "guard: opening the grant screen directly must leave CONFIGURE unchecked");
+        // D-66 (note 248): the form lives on grants/new; the bare grants page no longer carries it.
+        HtmlPage bare = newForm("g1", "");
+        assertEquals("", scopeField(bare).getValue(), "guard: opening the grant form without a scope must leave the scope field empty");
+        assertFalse(configureCheckbox(bare).isChecked(), "guard: opening the grant form without a scope must leave CONFIGURE unchecked");
     }
 
     /**
@@ -257,7 +258,7 @@ public class JobGrantSidebarEntryTest {
     @Test
     public void t_ui_14_prefillNeverReflectsTheQueryValue() throws Exception {
         String payload = "<img src=x onerror=1>";
-        HtmlPage page = grantScreen("g1", "scopeType=JOB&scopeFullName=" + urlEncode(payload));
+        HtmlPage page = newForm("g1", "scopeType=JOB&scopeFullName=" + urlEncode(payload));
         assertEquals(200, page.getWebResponse().getStatusCode(), "an unresolvable scope name must not break the screen");
 
         assertEquals("", scopeField(page).getValue(), "an unresolvable name must leave the field empty rather than echoing the input");
@@ -275,7 +276,7 @@ public class JobGrantSidebarEntryTest {
 
         // Falsifiability guard: a resolvable name IS echoed, so the absence above is about this
         // input and not about a form that never renders a prefill at all.
-        assertEquals("batch-x", scopeField(grantScreen("g1", "scopeFullName=batch-x")).getValue(), "guard: a real job name must still reach the field");
+        assertEquals("batch-x", scopeField(newForm("g1", "scopeFullName=batch-x")).getValue(), "guard: a real job name must still reach the field");
     }
 
     /**
@@ -288,10 +289,9 @@ public class JobGrantSidebarEntryTest {
 
         HtmlAnchor entry = entryOn("g1", nested);
         assertNotNull(entry, "the entry must appear on a job inside a folder too");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=team%2Fj",
-                resolved(entry), "the '/' of the full name must be URL-encoded, or the sidebar entry is dropped"
-                        + " by core's action-URL parsing; the link must resolve under the context path (raw href "
-                        + entry.getHrefAttribute() + ")");
+        assertGrantFormUrl(resolved(entry), "scopeFullName=team%2Fj", "the '/' of the full name must be URL-encoded, or the"
+                + " sidebar entry is dropped by core's action-URL parsing; the link must resolve under the context path (raw href "
+                + entry.getHrefAttribute() + ")");
         assertFollowsToForm(entry, "team/j");
 
         // two folders deep, under JenkinsRule's non-root context path: the job-relative link must
@@ -303,9 +303,8 @@ public class JobGrantSidebarEntryTest {
         assertEquals("ops/nightly/k", deep.getFullName(), "fixture");
         HtmlAnchor deepEntry = entryOn("g1", deep);
         assertNotNull(deepEntry, "the entry must appear on a job two folders deep");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=ops%2Fnightly%2Fk",
-                resolved(deepEntry), "the entry on a job two folders deep must resolve to the grant screen under the"
-                        + " context path (raw href " + deepEntry.getHrefAttribute() + ")");
+        assertGrantFormUrl(resolved(deepEntry), "scopeFullName=ops%2Fnightly%2Fk", "the entry on a job two folders deep must"
+                + " resolve to the grant request form under the context path (raw href " + deepEntry.getHrefAttribute() + ")");
         assertFollowsToForm(deepEntry, "ops/nightly/k");
     }
 
@@ -317,6 +316,11 @@ public class JobGrantSidebarEntryTest {
      */
     private static String resolved(HtmlAnchor anchor) throws Exception {
         return anchor.getHtmlPageOrNull().getFullyQualifiedUrl(anchor.getHrefAttribute()).toURI().normalize().toString();
+    }
+
+    /** {@code url} is the grant request form {@code <context>/batch-control/grants/new} with exactly {@code query} (D-66). */
+    private void assertGrantFormUrl(String url, String query, String message) throws Exception {
+        assertEquals(j.getURL() + "batch-control/grants/new?" + query, url, message);
     }
 
     /** Follows the entry the way a browser would; the form must come back about {@code fullName}. */
@@ -351,11 +355,12 @@ public class JobGrantSidebarEntryTest {
                 .getPage(job).getWebResponse().getContentAsString();
     }
 
-    private HtmlPage grantScreen(String userId, String query) throws Exception {
-        String url = "batch-control/grants/" + (query.isEmpty() ? "" : "?" + query);
+    private HtmlPage newForm(String userId, String query) throws Exception {
+        String url = "batch-control/grants/new" + (query.isEmpty() ? "" : "?" + query);
         return (HtmlPage) j.createWebClient().withThrowExceptionOnFailingStatusCode(false)
                 .login(userId).getPage(new WebRequest(new URL(j.getURL(), url), HttpMethod.GET));
     }
+
 
     /** The selected scope type: a select's selected option, a checked radio, or a plain input's value. */
     private static String scopeTypeValue(HtmlPage page) {
