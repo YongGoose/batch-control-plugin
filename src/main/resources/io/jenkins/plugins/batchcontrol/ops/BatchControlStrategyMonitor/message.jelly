@@ -40,8 +40,8 @@
   <l:adminMonitor severity="warning" controls="${controls}">
     <j:if test="${it.strategyUnsupported}">
       <j:if test="${it.perItemWidening}">
+        <!-- e2e-06 DEF-04: no icon of its own, the alert already shows the monitor's icon. -->
         <div class="jenkins-!-warning-color" style="margin-bottom: 0.5rem;">
-          <l:icon src="symbol-warning-outline plugin-ionicons-api" class="icon-sm"/>
           <strong>Before you install:</strong> converting from the installed global matrix
           strategy makes per-item authorization properties effective. Any per-item authorization
           property already present on a folder, job or agent will start granting the permissions
@@ -123,10 +123,14 @@
                     </j:forEach>
                   </ul>
                 </j:if>
-                <form method="post" action="${rootURL}/${it.url}/markReviewed" style="display: inline; margin-left: 0.5rem;">
-                  <input type="hidden" name="item" value="${name}"/>
-                  <button type="submit" class="jenkins-button jenkins-button--tertiary">Mark as reviewed</button>
-                </form>
+                <!-- e2e-06 DEF-04: not a form, core floats every form in a monitor body to the
+                     right edge. core's l:confirmationLink POSTs (crumb added by core's script)
+                     with the item as the single query parameter doMarkReviewed reads. -->
+                <l:confirmationLink href="${rootURL}/${it.url}/markReviewed?item=${h.urlEncode(name)}" post="true"
+                                    class="jenkins-button jenkins-button--tertiary jenkins-!-margin-left-1"
+                                    title="Mark ${name} as reviewed?"
+                                    message="Changes that widen its authorization are no longer undone."
+                                    okText="Mark as reviewed">Mark as reviewed</l:confirmationLink>
               </j:when>
               <j:otherwise><code>${name}</code></j:otherwise>
             </j:choose>
