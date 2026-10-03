@@ -43,11 +43,11 @@
          run with -DforkCount=4 there (CONTRIBUTING.md, "Commands", #91). 1C stays the
          default because the CI runners are small (4 cores on ubuntu-latest). -->
     <forkCount>1C</forkCount>
-    <!-- D-35f: 918 is the minimum supported role-strategy (see the dependency below).
+    <!-- D-35g: 927 is the minimum supported role-strategy (see the dependency below).
          A property only so that the scheduled role-strategy-latest workflow (#77) can
          test against the newest release with -Drole-strategy.version=...; keep the
          default at the minimum. -->
-    <role-strategy.version>918.v91e5468d8db_2</role-strategy.version>
+    <role-strategy.version>927.v9cf5527c4085</role-strategy.version>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
@@ -125,11 +125,20 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>role-strategy</artifactId>
-      <!-- D-35f: 918 is the minimum supported role-strategy. Older releases
-           (including the BOM's 898) replace the Batch Control variant on a
-           Manage Roles save. Overrides the BOM version on purpose. -->
+      <!-- D-35g: 927 is the minimum supported role-strategy (redesigned Assign Roles
+           page). Releases before 918 (including the BOM's 898) replace the Batch Control
+           variant on a Manage Roles save (D-35f). Overrides the BOM version on purpose. -->
       <version>${role-strategy.version}</version>
       <optional>true</optional>
+    </dependency>
+    <dependency>
+      <!-- D-35g: @SuppressRestrictedWarnings, so the Batch Control role strategy's
+           descriptor can forward to role-strategy's restricted descriptor methods.
+           Compile-time only; same version as the parent's access-modifier-checker. -->
+      <groupId>org.kohsuke</groupId>
+      <artifactId>access-modifier-suppressions</artifactId>
+      <version>${access-modifier-checker.version}</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>io.jenkins</groupId>

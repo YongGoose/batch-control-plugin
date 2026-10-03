@@ -1,9 +1,6 @@
 package io.jenkins.plugins.batchcontrol.security;
 
-import com.michelin.cio.hudson.plugins.rolestrategy.AuthorizationType;
-import com.michelin.cio.hudson.plugins.rolestrategy.PermissionEntry;
 import com.michelin.cio.hudson.plugins.rolestrategy.PermissionTemplate;
-import com.michelin.cio.hudson.plugins.rolestrategy.Role;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleBasedAuthorizationStrategy;
 import com.michelin.cio.hudson.plugins.rolestrategy.RoleMap;
 import com.synopsys.arc.jenkins.plugins.rolestrategy.RoleType;
@@ -12,7 +9,6 @@ import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
-import hudson.PluginManager;
 import hudson.model.AbstractItem;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
@@ -22,23 +18,19 @@ import hudson.security.ACL;
 import hudson.security.AuthorizationStrategy;
 import hudson.security.Permission;
 import hudson.security.PermissionGroup;
-import hudson.security.PermissionScope;
 import hudson.util.FormValidation;
 import io.jenkins.plugins.batchcontrol.Messages;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.accmod.restrictions.suppressions.SuppressRestrictedWarnings;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -56,7 +48,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * carries no grant scope anyway (S-13). With no active grant, or while change control is off, the
  * strategy behaves exactly like its parent.
  *
- * <p>D-35f: role-strategy 918 or later is required (pinned in the pom). From that version on, the
+ * <p>D-35f, D-35g: role-strategy 927 or later is required (pinned in the pom). Since 918, the
  * Manage Roles, Assign Roles and permission template pages edit the installed strategy in place,
  * so every save keeps this class; the reset to a plain {@link RoleBasedAuthorizationStrategy} that
  * older versions' Manage Roles save performed (D-35a, PoC-5 row 6) no longer happens. Installing a
@@ -131,14 +123,13 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
      * an admin role for the current user when coming from another strategy) and copies the
      * result into this class.
      *
-     * <p>e2e-03 DEF-20: role-strategy's Manage Roles, Assign Roles and permission template pages
-     * address the installed strategy's descriptor ({@code it.strategy.descriptor} in Jelly and
-     * {@code /descriptor/<class>/check*} from JavaScript). Every such method of the parent's
-     * descriptor is therefore exposed here, so the pages behave exactly as under the plain
-     * strategy. Methods role-strategy restricts, or removes in its UI rework (PR #766:
-     * {@code checkName} replaced by {@code checkSidName}), are re-implemented
-     * ({@link RoleSidChecks}) instead of delegated. The web methods keep the parent's {@code @RequirePOST}; they
-     * only validate or render and the parent performs its own permission checks.
+     * <p>e2e-03 DEF-20, D-35g: role-strategy's Manage Roles and Assign Roles pages address the
+     * installed strategy's descriptor ({@code /descriptor/<class>/checkPattern} and
+     * {@code /checkSidName}). Those endpoints and the parent descriptor's role-page members are
+     * forwarded to role-strategy's own descriptor, so behaviour is identical to the plain
+     * strategy. The parent restricts most of them; {@code access-modifier-suppressions} allows
+     * the forwarding calls. The web methods keep {@code @RequirePOST} and an inline permission
+     * check; the parent performs its own checks as well.
      */
     @Extension(optional = true)
     @Symbol("batchControlRoleBased")
@@ -182,116 +173,50 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
          * Jenkins Security Scan alerts 31-36: the role-page checks below serve role-strategy's
          * Manage Roles and Assign Roles pages, so they need what role-strategy requires to open those
          * pages (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
-         * implies them). The check is inline in each method so the scanner can see it.
+         * implies them). The check is inline in each method so the scanner can see it; the parent's
+         * method then applies its own checks.
          */
-        /** Assign Roles: renders each user or group row's name (role-strategy tableAssign.js). */
-        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
-        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
-        @RequirePOST
-        public FormValidation doCheckName(@QueryParameter String value) {
-            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
-                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            // Re-implemented (RoleSidChecks): role-strategy PR #766 removes the parent's method.
-            return RoleSidChecks.checkName(value);
-        }
 
         /**
-         * Assign Roles (redesigned page, role-strategy PR #766): resolves the sid typed in the add
-         * dialog as a user or group ({@code type} {@code USER} or {@code GROUP}). Re-implemented
-         * because the method does not exist in the parent's descriptor of role-strategy 918.
+         * Assign Roles (role-strategy 927 {@code index.jelly}): resolves the sid typed in the add
+         * dialog as a user or group ({@code type} {@code USER} or {@code GROUP}).
          */
         // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
         @SuppressWarnings("lgtm[jenkins/no-permission-check]")
+        @SuppressRestrictedWarnings(RoleBasedAuthorizationStrategy.DescriptorImpl.class)
         @RequirePOST
         public FormValidation doCheckSidName(@QueryParameter String value, @QueryParameter String type) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
                     RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            return RoleSidChecks.checkSidName(value, type);
+            return parent().doCheckSidName(value, type);
         }
 
-        /**
-         * Manage Roles: validates an item or agent role pattern. Re-implemented rather than
-         * delegated because the parent's method is restricted to role-strategy itself.
-         */
+        /** Manage Roles (role-strategy 927 {@code manage-roles.jelly}): validates a role pattern. */
         // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
         @SuppressWarnings("lgtm[jenkins/no-permission-check]")
+        @SuppressRestrictedWarnings(RoleBasedAuthorizationStrategy.DescriptorImpl.class)
         @RequirePOST
         public FormValidation doCheckPattern(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
                     RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            try {
-                Pattern.compile(value == null ? "" : value);
-            } catch (PatternSyntaxException e) {
-                return FormValidation.error(e.getMessage());
-            }
-            return FormValidation.ok();
+            return parent().doCheckPattern(value);
         }
 
-        /** Role and template names: warns about leading or trailing whitespace. */
-        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
-        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
-        @RequirePOST
-        public FormValidation doCheckForWhitespace(@QueryParameter String value) {
-            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
-                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            return parent().doCheckForWhitespace(value);
-        }
-
-        /** Jelly: the permission groups shown for a role type. */
+        /** The permission groups shown for a role type. */
         public List<PermissionGroup> getGroups(@NonNull String type) {
             return parent().getGroups(type);
         }
 
-        /**
-         * Jelly: whether a permission is shown for a role type (the parent's rule: no dangerous
-         * permission among the global ones, the scope must fit item and agent roles).
-         */
-        @SuppressWarnings("deprecation") // Jenkins.RUN_SCRIPTS is one of the suppressed permissions
+        /** Whether a permission is shown for a role type. */
+        @SuppressRestrictedWarnings(RoleBasedAuthorizationStrategy.DescriptorImpl.class)
         public boolean showPermission(String type, Permission p) {
-            if (p == null || type == null) {
-                return false;
-            }
-            switch (type) {
-                case GLOBAL:
-                    return !(p == Jenkins.RUN_SCRIPTS || p == PluginManager.CONFIGURE_UPDATECENTER
-                            || p == PluginManager.UPLOAD_PLUGINS) && p.getEnabled();
-                case PROJECT:
-                    return p.isContainedBy(PermissionScope.ITEM_GROUP) && p.getEnabled();
-                case SLAVE:
-                    return p.isContainedBy(PermissionScope.COMPUTER) && p.getEnabled();
-                default:
-                    return false;
-            }
+            return parent().showPermission(type, p);
         }
 
-        /** Jelly: the space-separated ids of the permissions implying {@code p}. */
+        /** The space-separated ids of the permissions implying {@code p}. */
+        @SuppressRestrictedWarnings(RoleBasedAuthorizationStrategy.DescriptorImpl.class)
         public String impliedByList(Permission p) {
-            List<String> ids = new ArrayList<>();
-            for (Permission q = p == null ? null : p.impliedBy; q != null; q = q.impliedBy) {
-                ids.add(q.getId());
-            }
-            return String.join(" ", ids);
-        }
-
-        /** Jelly: the entry of an assignment row; {@code null} for the template row. */
-        @CheckForNull
-        public PermissionEntry entryFor(String type, String sid) {
-            return type == null ? null : new PermissionEntry(AuthorizationType.valueOf(type), sid);
-        }
-
-        /** Jelly: whether an assignment table holds ambiguous (user-or-group) entries. */
-        public boolean hasAmbiguousEntries(SortedMap<Role, Set<PermissionEntry>> grantedRoles) {
-            if (grantedRoles == null) {
-                return false;
-            }
-            for (Set<PermissionEntry> entries : grantedRoles.values()) {
-                for (PermissionEntry entry : entries) {
-                    if (entry.getType() == AuthorizationType.EITHER) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            return parent().impliedByList(p);
         }
     }
 
