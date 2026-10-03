@@ -125,9 +125,10 @@
                 </j:if>
                 <!-- e2e-06 DEF-04: not a form, core floats every form in a monitor body to the
                      right edge. core's l:confirmationLink POSTs (crumb added by core's script)
-                     with the item as the single query parameter doMarkReviewed reads. -->
+                     with the item as the single query parameter doMarkReviewed reads. A plain
+                     jenkins-button: a tertiary one reads as plain text inside the alert. -->
                 <l:confirmationLink href="${rootURL}/${it.url}/markReviewed?item=${h.urlEncode(name)}" post="true"
-                                    class="jenkins-button jenkins-button--tertiary jenkins-!-margin-left-1"
+                                    class="jenkins-button jenkins-!-margin-left-1"
                                     title="Mark ${name} as reviewed?"
                                     message="Changes that widen its authorization are no longer undone."
                                     okText="Mark as reviewed">Mark as reviewed</l:confirmationLink>
