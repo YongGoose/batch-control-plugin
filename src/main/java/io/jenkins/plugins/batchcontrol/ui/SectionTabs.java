@@ -36,6 +36,9 @@ import org.springframework.security.core.Authentication;
 @Restricted(NoExternalUse.class)
 public final class SectionTabs {
 
+    /** Backlog #86: the page title of the Changes section, its tab's tooltip. */
+    public static final String CHANGES_TITLE = "Change Records";
+
     /** One tab: a section of {@code /batch-control/}. */
     public static final class Tab {
         private final String id;
@@ -68,6 +71,15 @@ public final class SectionTabs {
 
         public String getIconFileName() {
             return iconFileName;
+        }
+
+        /**
+         * Backlog #86: the section's page title, the tab's tooltip when it differs from the short
+         * label ("Changes" opens "Change Records"), or {@code null} when it is the label.
+         */
+        @CheckForNull
+        public String getTitle() {
+            return "changes".equals(id) ? CHANGES_TITLE : null;
         }
 
         /** Count of open items the viewer can act on, or {@code null} when there are none. */

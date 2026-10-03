@@ -178,6 +178,75 @@ public class MoveRefusalPageTest {
         assertTrue(linked, "the refusal page body must link the item " + target + " for a reader; links: " + seen);
     }
 
+    /**
+     * T-SEC-72 (backlog #83): the browser refusal page of T-SEC-63 (u1 lacks Delete on the item,
+     * Create on {@code team} comes from a window) links, in its body, a grant request form
+     * ({@code batch-control/grants/}) pre-filled through {@code scopeFullName=} for what is missing:
+     * the item or its source folder {@code prod}, never the destination {@code team} (Create is not
+     * missing). Following the link as u1 answers 200 with the form's {@code scopeFullName} field
+     * holding the linked value.
+     */
+    @Test
+    public void t_sec_72_refusalPageLinksAPrefilledGrantRequestForm() throws Exception {
+        Item item = prod.getItem(HOSTILE);
+        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, "u1");
+        wc.getOptions().setJavaScriptEnabled(false);
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(item.getUrl() + "move/move"), HttpMethod.POST);
+        request.setAdditionalHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        request.setRequestParameters(List.of(new NameValuePair("destination", "/team")));
+        Page page = wc.getPage(request);
+        assertEquals(403, page.getWebResponse().getStatusCode(), "premise: the move is refused");
+        HtmlPage html = (HtmlPage) page;
+        org.htmlunit.html.DomNode main = html.querySelector("#main-panel");
+        assertNotNull(main, "premise: the standard layout has a main panel");
+
+        List<java.net.URL> forms = new java.util.ArrayList<>();
+        List<String> all = new java.util.ArrayList<>();
+        for (org.htmlunit.html.DomNode n : main.querySelectorAll("a[href]")) {
+            java.net.URL url = html.getFullyQualifiedUrl(((DomElement) n).getAttribute("href"));
+            all.add(url.toString());
+            if (url.getPath().contains("batch-control/grants") && url.getQuery() != null
+                    && url.getQuery().contains("scopeFullName=")) {
+                forms.add(url);
+            }
+        }
+        assertFalse(forms.isEmpty(), "the refusal page must link a pre-filled grant request form (scopeFullName=); links: " + all);
+        String source = prod.getFullName();
+        for (java.net.URL url : forms) {
+            String scope = queryValue(url, "scopeFullName");
+            assertTrue(scope.equals(source) || scope.equals(item.getFullName()),
+                    "a pre-filled form must be for what is missing (Delete on " + item.getFullName() + " or " + source
+                            + "), got scopeFullName=" + scope + " in " + url);
+        }
+
+        java.net.URL first = forms.get(0);
+        JenkinsRule.WebClient follow = ApproverFormFixtures.client(j, "u1");
+        follow.getOptions().setJavaScriptEnabled(false);
+        Page form = follow.getPage(first);
+        assertEquals(200, form.getWebResponse().getStatusCode(), "u1 must be able to open the linked form " + first);
+        HtmlPage formPage = (HtmlPage) form;
+        String expected = queryValue(first, "scopeFullName");
+        boolean prefilled = false;
+        for (org.htmlunit.html.DomNode n : formPage.querySelectorAll("[name=scopeFullName]")) {
+            DomElement e = (DomElement) n;
+            if (expected.equals(e.getAttribute("value")) || expected.equals(e.getTextContent().trim())) {
+                prefilled = true;
+            }
+        }
+        assertTrue(prefilled, "the linked form must carry scopeFullName=" + expected);
+    }
+
+    private static String queryValue(java.net.URL url, String name) {
+        for (String pair : url.getQuery().split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq < 0 ? pair : pair.substring(0, eq);
+            if (key.equals(name)) {
+                return java.net.URLDecoder.decode(eq < 0 ? "" : pair.substring(eq + 1), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        return "";
+    }
+
     private static String decode(String path) {
         return java.net.URLDecoder.decode(path.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8);
     }

@@ -1,7 +1,7 @@
 <?jelly escape-by-default='true'?>
 <!-- SPEC item 6a: the activation approval inbox and the activation requests the viewer may see
      (P-09: requester, designated approvers, Manage). A job name links to the job only for a
-     viewer who holds Item/Read on it. -->
+     viewer who holds Item/Read on it. D-38c: open to every user admitted to the root page. -->
 <j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Activations" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
@@ -42,7 +42,14 @@
       <h2>Activation Requests</h2>
       <j:choose>
         <j:when test="${it.total == 0}">
-          <p>No activation requests.</p>
+          <!-- D-38c (backlog #87): the section opens for everyone admitted to the root, so the
+               empty state says which requests are listed and where one is filed. -->
+          <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-empty="activations">
+            No activation requests you may see. This list shows the activation and hold requests
+            you filed and those you are a designated approver of (all of them for Batch
+            Control/Manage holders). To file one, open the job: its Batch Control notice offers
+            <strong>Request activation</strong> or <strong>request a hold</strong>.
+          </div>
         </j:when>
         <j:otherwise>
           <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">

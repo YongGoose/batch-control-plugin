@@ -340,6 +340,67 @@ public class MoveChangeControlTest {
         assertFalse(monitor.isActivated(), "guard: with change control off the monitor must stay quiet");
     }
 
+    /**
+     * T-09-24 (backlog #84): u1's move of {@code prod/x} into {@code team} is authorised by a FOLDER
+     * {@code prod} [DELETE] window and a FOLDER {@code team} [CREATE] window; the MOVE change record
+     * names both windows (each grant id appears in its grant id or detail) and its grantId is the
+     * CREATE window's. Guard: the administrator's move back leaves a MOVE record naming neither.
+     */
+    @Test
+    public void t_09_24_moveRecordNamesEveryWindowThatAuthorisedIt() throws Exception {
+        String deleteWindow = grantId("u1", "FOLDER", "prod", "DELETE");
+        String createWindow = grantId("u1", "FOLDER", "team", "CREATE");
+        assertFalse(deleteWindow.equals(createWindow), "premise: two distinct windows");
+        List<ChangeRecord> movesBefore = records(ChangeType.MOVE);
+
+        assertSuccess(move("u1", prod.getItem("x"), team), "the move authorised by the two windows");
+        assertMoved("x");
+        List<ChangeRecord> moves = newer(records(ChangeType.MOVE), movesBefore);
+        assertEquals(1, moves.size(), "one MOVE record, got " + moves);
+        ChangeRecord rec = moves.get(0);
+        String named = rec.getGrantId() + " " + rec.getDetail();
+        assertTrue(named.contains(deleteWindow), "the MOVE record must name the DELETE window " + deleteWindow + ": " + describe(rec)
+                + " grantId=" + rec.getGrantId());
+        assertTrue(named.contains(createWindow), "the MOVE record must name the CREATE window " + createWindow + ": " + describe(rec)
+                + " grantId=" + rec.getGrantId());
+        assertEquals(createWindow, rec.getGrantId(), "the MOVE record's grantId is the CREATE window's");
+
+        List<ChangeRecord> beforeAdmin = records(ChangeType.MOVE);
+        assertSuccess(move("admin", team.getItem("x"), prod), "guard: the administrator moves x back");
+        List<ChangeRecord> adminMoves = newer(records(ChangeType.MOVE), beforeAdmin);
+        assertEquals(1, adminMoves.size(), "guard: one MOVE record for the administrator's move");
+        String adminNamed = adminMoves.get(0).getGrantId() + " " + adminMoves.get(0).getDetail();
+        assertFalse(adminNamed.contains(deleteWindow) || adminNamed.contains(createWindow),
+                "guard: a move made without windows names none: " + describe(adminMoves.get(0)));
+    }
+
+    private static List<ChangeRecord> newer(List<ChangeRecord> now, List<ChangeRecord> before) {
+        Set<String> old = new java.util.HashSet<>();
+        before.forEach(r -> old.add(r.getId()));
+        List<ChangeRecord> out = new java.util.ArrayList<>();
+        now.forEach(r -> {
+            if (!old.contains(r.getId())) {
+                out.add(r);
+            }
+        });
+        return out;
+    }
+
+    /** Files and approves a grant and returns the id of the one new active window. */
+    private String grantId(String userId, String scopeType, String scope, String... actions) throws Exception {
+        Set<String> before = new java.util.HashSet<>();
+        GrantService.get().listActive().forEach(g -> before.add(g.getId()));
+        grant(userId, scopeType, scope, null, actions);
+        List<String> fresh = new java.util.ArrayList<>();
+        GrantService.get().listActive().forEach(g -> {
+            if (!before.contains(g.getId())) {
+                fresh.add(g.getId());
+            }
+        });
+        assertEquals(1, fresh.size(), "fixture: exactly one new window, got " + fresh);
+        return fresh.get(0);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** {@code POST <item url>move/move} with {@code destination=/<folder full name>} (folders plugin). */

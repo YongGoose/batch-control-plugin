@@ -42,7 +42,7 @@
               </td>
             </tr>
           </j:if>
-          <tr><th style="text-align: left;">Duration</th><td>${it.request.durationMinutes} minutes</td></tr>
+          <tr><th style="text-align: left;">Duration</th><td>${it.request.durationMinutes} ${it.request.durationMinutes == 1 ? 'minute' : 'minutes'}</td></tr>
           <tr><th style="text-align: left;">Status</th><td>${it.request.status}</td></tr>
           <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
           <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>

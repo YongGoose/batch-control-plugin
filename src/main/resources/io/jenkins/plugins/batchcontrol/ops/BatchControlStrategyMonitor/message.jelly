@@ -97,17 +97,19 @@
     <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
     <j:if test="${!empty(changedItems)}">
       <div class="${gap}">
-        <strong>Batch Control:</strong> these items were changed under a temporary permission
-        window and have not been reviewed. Until one of them is marked as reviewed (below, or by a
-        user with Configure permission and Batch Control/Request on the job's Batch Control
-        page), changes that widen its authorization are undone, whoever saves it. Saving the
-        item does not end this.
+        <strong>Batch Control:</strong> these items were saved or created by a user whose
+        permission came only from a temporary permission window (the window and its holder are
+        named for each item; the item may have been moved or renamed since), and nobody has
+        reviewed them yet. Until an item is marked as reviewed (below, or by a user with
+        Configure permission and Batch Control/Request on the job's Batch Control page), changes
+        that widen its authorization are undone, whoever saves it. Saving the item does not end
+        this.
       </div>
       <!-- D-58b (3): a deliberate review per item (POST, crumb added to every POST form by
            Jenkins; BatchControlStrategyMonitor#doMarkReviewed checks Administer). -->
       <div class="jenkins-!-margin-top-2">
-        Check what was changed under the permission window (see
-        <a href="${rootURL}/batch-control/changes/">Change Records</a>) and the Pipeline script
+        Check what was changed under the permission window (Batch Control
+        <a href="${rootURL}/batch-control/changes/">Changes</a> tab) and the Pipeline script
         first, then mark the item as reviewed.
       </div>
       <ul>
@@ -117,6 +119,14 @@
             <j:choose>
               <j:when test="${changedItem != null}">
                 <a href="${rootURL}/${changedItem.url}configure"><code>${name}</code></a>
+                <!-- Backlog #86: name the window that recorded the change (Administer-only page). -->
+                <j:set var="changedBy" value="${bcRoot.changedUnderGrant(name)}"/>
+                <j:if test="${changedBy != null}">
+                  <span class="jenkins-!-margin-left-1" data-batch-control-changed-by="${changedBy.grantId}">
+                    changed by ${changedBy.user} under permission window ${changedBy.grantId}
+                    for ${changedBy.scopeFullName}
+                  </span>
+                </j:if>
                 <j:set var="itemRuns" value="${bcRoot.markedRuns(name)}"/>
                 <j:if test="${!empty(itemRuns)}">
                   <div>These runs were replayed under a temporary permission window; only an administrator can re-run them.</div>
@@ -138,7 +148,7 @@
                 <l:confirmationLink href="${rootURL}/${it.url}/markReviewed?item=${h.urlEncode(name)}" post="true"
                                     class="jenkins-button jenkins-!-margin-left-1"
                                     title="Mark ${name} as reviewed?"
-                                    message="Changes that widen its authorization are no longer undone."
+                                    message="It is no longer listed here. Changes that widen its authorization are no longer undone, unless a folder above it or an active permission window still guards it."
                                     okText="Mark as reviewed">Mark as reviewed</l:confirmationLink>
               </j:when>
               <j:otherwise><code>${name}</code></j:otherwise>

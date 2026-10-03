@@ -898,7 +898,7 @@ public final class GrantService {
             throw new IllegalStateException("Grant " + grantId + " is already revoked.");
         }
         String caller = Jenkins.getAuthentication2().getName();
-        revokeOne(grant, caller, "revoked");
+        revokeOne(grant, caller, null, "revoked");
         return grant;
     }
 
@@ -961,7 +961,9 @@ public final class GrantService {
                 continue;
             }
             closed++;
-            revokeOne(grant, caller, "revoked because change control was switched off ("
+            // #85: the record and the grant say why, not just who.
+            revokeOne(grant, caller, Grant.REVOKED_CHANGE_CONTROL_OFF, "revoked: "
+                    + Grant.REVOKED_CHANGE_CONTROL_OFF + " by '" + caller + "' ("
                     + closed + " of " + total + " active permission windows closed)");
         }
         int closedCount = closed;
@@ -975,8 +977,8 @@ public final class GrantService {
      * the {@code GRANT_REVOKE} record. The single revocation write path, so a per-grant revocation
      * and a switch-off mass revocation cannot drift apart in what they persist or record.
      */
-    private void revokeOne(Grant grant, String caller, String detail) {
-        grant.markRevoked(BatchClock.now(), caller);
+    private void revokeOne(Grant grant, String caller, @CheckForNull String reason, String detail) {
+        grant.markRevoked(BatchClock.now(), caller, reason);
         store.saveGrant(grant);
         replaceInCache(grant);
         ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REVOKE,
