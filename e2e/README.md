@@ -178,3 +178,16 @@ existing item.
 `-e LD_PRELOAD=/usr/local/lib/libfaketime.so.1 -e "FAKETIME=@2026-10-31 14:56:30" -e FAKETIME_DONT_FAKE_MONOTONIC=1
 -e TZ=UTC` and `-Duser.timezone=Asia/Seoul` in `JAVA_OPTS` (the plugin clock is the JVM default zone), no volume for
 JENKINS_HOME, and remove it with `docker rm -f -v`. With `@` each process starts at that time and the clock runs on.
+
+## e2e-08 driver (`r8/`)
+
+Round E2E-3 (targeted, 2026-10-03). `r8/lib.py` is `r7/lib.py` with screenshots in
+`screenshots/run-8/` and logs in `r8/out/`. `arrange.py` adds `opsreq` (Overall/Read globally;
+BatchControl/Request + Item/Read only on folder `ops/`), `mover1`, and the one-minute timer jobs
+`ops/cron-a`, `prod/mv-job`, `prod/mvf/inner-job`, `prod/adm-job`, `prod/admf/adm-inner` (timer not
+blocked); `arrange_side.py` adds `side/job-b` where `opsreq` has Item/Read only. `activate.py <job>...`
+activates jobs through the real ACTIVATE request flow over REST (requester submits, approver-1
+approves). Scenarios: `d38b.py` (D-38b), `move.py` + `mvstate.py` (D-59a), `rebuild.py` /
+`rebuild2.py` (rebuild plugin and the new job page menu), `monitor.py` (Mark as reviewed),
+`smoke.py`. Run under `compose.prefix.yml`; re-run `arrange.py` after a restart (JCasC drops the
+added matrix entries).
