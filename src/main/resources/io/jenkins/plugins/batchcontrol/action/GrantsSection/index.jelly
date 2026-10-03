@@ -140,7 +140,7 @@
           <p>No grant requests.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table jenkins-table--small">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>ID</th>
@@ -168,11 +168,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of grant requests">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="${base}?page=${it.page - 1}&amp;activePage=${it.activePage}&amp;pastPage=${it.pastPage}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} requests)</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'request' : 'requests'})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="${base}?page=${it.page + 1}&amp;activePage=${it.activePage}&amp;pastPage=${it.pastPage}">Older</a>
             </j:if>
@@ -189,7 +189,7 @@
           <p>No active grants.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table jenkins-table--small">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>ID</th>
@@ -229,11 +229,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of active grants">
             <j:if test="${it.hasActivePrevious}">
               <a class="jenkins-button" href="${base}?activePage=${it.activePage - 1}&amp;page=${it.page}&amp;pastPage=${it.pastPage}">Newer</a>
             </j:if>
-            <span>Page ${it.activePage} (${it.activeTotal} active grants)</span>
+            <span>Page ${it.activePage} (${it.activeTotal} ${it.activeTotal == 1 ? 'active grant' : 'active grants'})</span>
             <j:if test="${it.hasActiveNext}">
               <a class="jenkins-button" href="${base}?activePage=${it.activePage + 1}&amp;page=${it.page}&amp;pastPage=${it.pastPage}">Older</a>
             </j:if>
@@ -250,7 +250,7 @@
           <p>No ended grants.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table jenkins-table--small">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>ID</th>
@@ -284,11 +284,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of ended grants">
             <j:if test="${it.hasPastPrevious}">
               <a class="jenkins-button" href="${base}?pastPage=${it.pastPage - 1}&amp;page=${it.page}&amp;activePage=${it.activePage}">Newer</a>
             </j:if>
-            <span>Page ${it.pastPage} (${it.pastTotal} ended grants)</span>
+            <span>Page ${it.pastPage} (${it.pastTotal} ${it.pastTotal == 1 ? 'ended grant' : 'ended grants'})</span>
             <j:if test="${it.hasPastNext}">
               <a class="jenkins-button" href="${base}?pastPage=${it.pastPage + 1}&amp;page=${it.page}&amp;activePage=${it.activePage}">Older</a>
             </j:if>

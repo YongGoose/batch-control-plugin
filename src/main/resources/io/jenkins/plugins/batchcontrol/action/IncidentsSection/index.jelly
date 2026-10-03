@@ -40,7 +40,7 @@
           <p>No incidents in ${it.monthValue}.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table jenkins-table--small">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>Incident</th>
@@ -71,11 +71,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of incidents">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page - 1}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} incidents in ${it.monthValue})</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'incident' : 'incidents'} in ${it.monthValue})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="?month=${it.monthValue}&amp;page=${it.page + 1}">Older</a>
             </j:if>

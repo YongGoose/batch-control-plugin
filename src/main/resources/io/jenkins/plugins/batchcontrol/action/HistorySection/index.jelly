@@ -256,11 +256,11 @@
               </table>
             </j:otherwise>
           </j:choose>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of history records">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page - 1}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} matching records)</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'matching record' : 'matching records'})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page + 1}">Older</a>
             </j:if>

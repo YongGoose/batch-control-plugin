@@ -103,7 +103,7 @@ public final class SectionTabs {
                     grantBadge(me, approver)));
         }
         if (links.isHistory()) {
-            tabs.add(new Tab("changes", "changes/", "Change Records", "symbol-document-text-outline plugin-ionicons-api", null));
+            tabs.add(new Tab("changes", "changes/", "Changes", "symbol-document-text-outline plugin-ionicons-api", null));
             tabs.add(new Tab("dashboard", "dashboard/", "Dashboard", "symbol-speedometer-outline plugin-ionicons-api", null));
             tabs.add(new Tab("incidents", "incidents/", "Incidents", "symbol-warning-outline plugin-ionicons-api", null));
             tabs.add(new Tab("history", "history/", "History", "symbol-search-outline plugin-ionicons-api", null));
