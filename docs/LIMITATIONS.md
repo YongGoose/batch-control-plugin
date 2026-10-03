@@ -588,6 +588,16 @@ code does on purpose.
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
 
+46. **A `config.xml` that still names the removed generic wrapper stops
+    Jenkins at boot.** The class
+    `io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy`
+    no longer exists, and Jenkins core treats the authorization strategy as
+    critical, so a controller whose `$JENKINS_HOME/config.xml` still names it
+    does not start. Replace the `<authorizationStrategy>` element by hand or
+    set the strategy with JCasC. No released version of the plugin ever
+    contained that class, so only development and test instances can be
+    affected (D-35e).
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting
