@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
   <l:layout title="History" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="History"/>
@@ -10,8 +10,10 @@
         status match exactly. Dates are inclusive.
       </p>
 
-      <!-- Filter form: a plain GET form; filtering never changes state. -->
-      <form method="get" action="." style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end;">
+      <!-- Filter form: a plain GET form; filtering never changes state. no-json and the getForm
+           adjunct keep core's crumb and json fields out of the URL (e2e-12 DEF-07). -->
+      <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.getForm"/>
+      <form method="get" action="." class="no-json" data-batch-control-get-form="true" style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end;">
         <input type="hidden" name="kind" value="${it.kind}"/>
         <!-- e2e-04 FD-11: a refused date keeps what the user entered (as text: a date input
              would blank a value it cannot parse) with the message right below the field. -->
