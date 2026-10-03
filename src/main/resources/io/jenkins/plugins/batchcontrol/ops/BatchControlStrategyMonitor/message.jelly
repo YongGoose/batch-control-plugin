@@ -41,7 +41,7 @@
     <j:if test="${it.strategyUnsupported}">
       <j:if test="${it.perItemWidening}">
         <div class="jenkins-!-warning-color" style="margin-bottom: 0.5rem;">
-          <l:icon src="symbol-warning-outline" class="icon-sm"/>
+          <l:icon src="symbol-warning-outline plugin-ionicons-api" class="icon-sm"/>
           <strong>Before you install:</strong> converting from the installed global matrix
           strategy makes per-item authorization properties effective. Any per-item authorization
           property already present on a folder, job or agent will start granting the permissions
