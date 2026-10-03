@@ -46,9 +46,10 @@
             <th style="text-align: left;">Requester</th>
             <td>
               ${it.request.requester}
-              <!-- D-38a: approving such a request also authorises the run; constant text only. -->
+              <!-- D-38a: approving such a request also authorises the run; constant text only
+                   (RunRequestService.REQUESTER_LACKS_BUILD_NOTICE, escaped by default). -->
               <j:if test="${it.requesterLacksBuild}">
-                <div class="jenkins-!-warning-color" role="status">The requester does not have Build permission on this job.</div>
+                <div class="jenkins-!-warning-color" role="status">${it.requesterLacksBuildNotice}</div>
               </j:if>
             </td>
           </tr>

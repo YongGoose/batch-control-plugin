@@ -105,6 +105,11 @@ public class RequestItem implements ModelObject {
         return io.jenkins.plugins.batchcontrol.ui.RequesterPermission.lacksBuild(getRequest());
     }
 
+    /** D-38a: the frozen sentence shown when {@link #isRequesterLacksBuild()} holds. */
+    public String getRequesterLacksBuildNotice() {
+        return io.jenkins.plugins.batchcontrol.ui.RequesterPermission.notice();
+    }
+
     /** Job URL relative to the Jenkins root if the job exists and the user may see it, else null. */
     @CheckForNull
     public String getJobUrl() {
