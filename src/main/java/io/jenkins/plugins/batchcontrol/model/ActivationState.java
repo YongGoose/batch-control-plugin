@@ -139,9 +139,4 @@ public final class ActivationState {
     public String getItemIdentity() {
         return itemIdentity;
     }
-
-    /** Whether this state came from the one-time upgrade seeding. */
-    public boolean isSeededByUpgrade() {
-        return activated && UPGRADE.equals(activatedBy) && requestId == null;
-    }
 }

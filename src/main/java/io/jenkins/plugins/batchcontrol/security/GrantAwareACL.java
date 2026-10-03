@@ -64,8 +64,6 @@ final class GrantAwareACL extends ACL {
 
     private static final Logger LOGGER = Logger.getLogger(GrantAwareACL.class.getName());
 
-    private static final GrantAwareACL DENY_ALL = new GrantAwareACL(null, (String) null);
-
     /** Depth of {@link #withoutGrants} calls on this thread; grants confer nothing while positive. */
     private static final ThreadLocal<Integer> SUSPENDED = new ThreadLocal<>();
 
@@ -98,11 +96,6 @@ final class GrantAwareACL extends ACL {
         this.delegate = delegate;
         this.itemFullName = itemFullName;
         this.itemRootDir = itemRootDir;
-    }
-
-    /** The deny-all-but-SYSTEM ACL used when no parent ACL is available. */
-    static GrantAwareACL denyAll() {
-        return DENY_ALL;
     }
 
     /**

@@ -325,17 +325,6 @@ public final class ActivationService {
         return forJob;
     }
 
-    /** Every stored request of one job, in creation order. */
-    public List<ActivationRequest> listForJob(String jobFullName) {
-        List<ActivationRequest> forJob = new ArrayList<>();
-        for (ActivationRequest request : store.listActivationRequests()) {
-            if (request.getJobFullName().equals(jobFullName)) {
-                forJob.add(request);
-            }
-        }
-        return forJob;
-    }
-
     // ---------------------------------------------------------------- creation (SPEC 6a)
 
     /** Job form of {@link #create(Item, ActivationRequest.Action, String, List)}. */
@@ -777,11 +766,6 @@ public final class ActivationService {
         } finally {
             lock.unlock();
         }
-    }
-
-    /** Job form of {@link #onItemCreated(Item)}. */
-    public void onJobCreated(Job<?, ?> job) {
-        onItemCreated(job);
     }
 
     // ---------------------------------------------------------------- upgrade seeding (SPEC 6a)
