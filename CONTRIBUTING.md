@@ -35,6 +35,21 @@ mvn hpi:run                                # local Jenkins at http://localhost:8
 mvn -ntp clean package -DskipTests         # target/batch-control.hpi
 ```
 
+Surefire runs one JVM per test class, `forkCount` of them at a time, and the
+default is `1C` (one per CPU core). Each fork starts its own Jenkins, so on a
+machine with many cores and comparatively little memory, or in a Docker
+container with a memory limit, `1C` can run out of memory: the symptom is a
+test that dies with "Jenkins process terminated prematurely" or a crashed fork,
+and that passes when run alone. Cap the forks for such runs:
+
+```sh
+mvn -ntp clean verify -DforkCount=4        # bounded parallelism for local and Docker runs
+```
+
+Budget roughly 1 GB of free memory per fork. The default stays `1C` because the
+CI runners are small (GitHub's `ubuntu-latest` has 4 cores, so `1C` already
+means 4 forks there) and a fixed number would slow the CI agents that have more.
+
 On Windows, Git Bash with an explicit environment is what the project has been
 built with:
 

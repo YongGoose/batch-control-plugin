@@ -38,7 +38,10 @@
     <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
     <!-- Parallelize surefire across whole test classes (reuseForks stays as the parent
          POM defines, i.e. false: a fresh JVM per test class); this only widens how many
-         of those per-class forks run concurrently. -->
+         of those per-class forks run concurrently. Each fork starts a Jenkins, so 1C
+         can run out of memory on a many-core machine or in a memory-limited container;
+         run with -DforkCount=4 there (CONTRIBUTING.md, "Commands", #91). 1C stays the
+         default because the CI runners are small (4 cores on ubuntu-latest). -->
     <forkCount>1C</forkCount>
     <!-- D-35f: 918 is the minimum supported role-strategy (see the dependency below).
          A property only so that the scheduled role-strategy-latest workflow (#77) can
