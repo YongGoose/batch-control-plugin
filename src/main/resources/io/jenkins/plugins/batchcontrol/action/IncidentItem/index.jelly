@@ -2,7 +2,7 @@
 <!-- e2e-03 DEF-09: a refused acknowledge, resolve, comment or rerun comes back to this page
      (ui.FormErrors) with the message next to the field or above the form and the input kept;
      form targets are absolute because the refusal is rendered at the POST URL. DEF-12: the rerun
-     form is offered only to a user who can submit it (Request + Job/Build on the job). -->
+     form is offered only to a user who can submit it (Request + Job/Read on the job, D-38a). -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Incident ${it.id}" type="one-column" permissions="${it.viewPermissions}">
@@ -179,7 +179,7 @@
         <h2>Request Rerun</h2>
         <!-- e2e-04 DD-06: the rerun's parameters are fixed and its reason is generated, as the
              README says; UX-19: the ordinary run request form is linked for this viewer, who may
-             use it (isCanRerun is the same Request + Item/Read + Item/Build test). -->
+             use it (isCanRerun is the same Request + Item/Read test, D-38a). -->
         <p class="jenkins-description">
           Creates a run request for this job, linked to this incident. It uses the original
           parameters, which cannot be changed here, and a reason generated from the incident; you
@@ -225,20 +225,20 @@
       <j:if test="${!it.canRerun and it.jobAvailable}">
         <h2>Request Rerun</h2>
         <!-- e2e-04 FD-10: the rerun is submitted from this page, which needs Batch Control/
-             ViewHistory as well, so a user with only Request and Job/Build cannot do it. Name the
+             ViewHistory as well, so a user with only Request and Job/Read cannot do it. Name the
              whole permission set, and the fallback that such a user can reach. -->
         <p class="jenkins-description">
           A rerun is a run request for this job with the original parameters, linked to this
           incident. You may not submit one. It can be requested from this page by a user who can
           open this page (<b>Batch Control/ViewHistory</b>) and also holds
-          <b>Batch Control/Request</b> and <b>Job/Build</b> on the job, or by a Jenkins
+          <b>Batch Control/Request</b> and <b>Job/Read</b> on the job, or by a Jenkins
           administrator; ask one of them.
         </p>
         <!-- e2e-04 UX-19: this viewer may not submit run requests for the job, so the run request
              form is not linked (it would answer 404 or refuse); the job page is, and its sidebar
              carries the Request Run entry for users who may use it. -->
         <p class="jenkins-description">
-          A user with Batch Control/Request and Job/Build can instead submit an ordinary run
+          A user with Batch Control/Request and Job/Read can instead submit an ordinary run
           request from the Request Run entry on the page of
           <a href="${rootURL}/${it.jobUrl}">${it.incident.jobFullName}</a>; that request is not
           linked to this incident.

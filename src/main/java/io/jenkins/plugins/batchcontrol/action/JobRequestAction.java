@@ -29,7 +29,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
 import jenkins.model.Jenkins;
+import jenkins.model.menu.Group;
+import jenkins.model.menu.Semantic;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
@@ -69,30 +72,40 @@ public class JobRequestAction implements Action, StaplerProxy {
         return job;
     }
 
+    /**
+     * The job, under the name core's {@code l:job-subpage} reads ({@code it.object}), so the
+     * request form renders as a sub-page of the job in both the classic and the new job page.
+     */
+    public Job<?, ?> getObject() {
+        return job;
+    }
+
     // ---------------------------------------------------------------- Action
 
     @Override
     @CheckForNull
     public String getIconFileName() {
-        // e2e-03 DEF-12: the entry is offered only to a user who can submit the form, which
-        // also needs Job/Build on the job (D-38). The URL space stays for Request holders
-        // because the activation form lives under it; the form page explains the missing
-        // permission to anyone who opens it without Job/Build.
+        // e2e-03 DEF-12: the entry is offered only to a user who can submit the form
+        // (BatchControl/Request and Item/Read on the job; Item/Build is not needed, D-38a).
         if (!isActive() || !isCanRequestRun()) {
             return null;
         }
         return "symbol-paper-plane-outline plugin-ionicons-api";
     }
 
-    /** Whether the current user may use this action at all ({@code BatchControl/Request}). */
-    private static boolean canRequest() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+    /**
+     * Whether the current user may use this action at all: {@code BatchControl/Request} on this
+     * job, so a Request assigned on the job or a folder above it counts (D-38a).
+     */
+    private boolean canRequest() {
+        return job.hasPermission(BatchControlPermissions.REQUEST);
     }
 
     /**
      * Whether the current user may submit a run request for this job: {@code BatchControl/Request}
-     * plus {@code Item/Build} on the job (D-38, #24), the checks {@link RunRequestService#create}
-     * makes. View gating only; {@link #doSubmit} and the service check for real.
+     * and {@code Item/Read} on the job (D-38a; {@code Item/Build} is not required), the checks
+     * {@link RunRequestService#create} makes. View gating only; {@link #doSubmit} and the service
+     * check for real.
      */
     public boolean isCanRequestRun() {
         return RunRequestService.get().canRequest(job);
@@ -106,6 +119,23 @@ public class JobRequestAction implements Action, StaplerProxy {
     @Override
     public String getDisplayName() {
         return RequestRunUiDecorator.REQUEST_RUN_LABEL;
+    }
+
+    /**
+     * Hosting review 2026-10-02: on the new job page the run request is the job's build button,
+     * so it sits first in the app bar rather than in the overflow menu. Only where the entry is
+     * shown at all ({@link #getIconFileName()}); core's own {@code BuildJobAction} is in the same
+     * group and reads {@link RequestRunUiDecorator#BLOCKED_BUILD_LABEL} on a controlled job.
+     */
+    @Override
+    public Group getGroup() {
+        return Group.FIRST_IN_APP_BAR;
+    }
+
+    /** Rendered as a build action (the build colour) on the new job page; see {@link #getGroup()}. */
+    @Override
+    public Semantic getSemantic() {
+        return Semantic.BUILD;
     }
 
     /**
@@ -164,7 +194,9 @@ public class JobRequestAction implements Action, StaplerProxy {
         List<ParameterDefinition> definitions = property.getParameterDefinitions();
         Object submitted = getFormErrors().getAttachment();
         if (!(submitted instanceof List)) {
-            return definitions;
+            // D-60: a refused build submission redirects here with its values as p.<name>.
+            return RequestRunPrefill.apply(definitions,
+                    org.kohsuke.stapler.Stapler.getCurrentRequest2());
         }
         Map<String, ParameterValue> byName = new LinkedHashMap<>();
         for (Object value : (List<?>) submitted) {
@@ -186,6 +218,13 @@ public class JobRequestAction implements Action, StaplerProxy {
             refilled.add(shown == null ? definition : shown);
         }
         return refilled;
+    }
+
+    /** D-60: whether the form shows values carried from a refused build submission. */
+    public boolean isPrefilled() {
+        ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
+        return property != null && RequestRunPrefill.isPrefilled(property.getParameterDefinitions(),
+                org.kohsuke.stapler.Stapler.getCurrentRequest2());
     }
 
     /** The refusal of the last submission on this request, or an empty one (DEF-09). */
@@ -269,10 +308,9 @@ public class JobRequestAction implements Action, StaplerProxy {
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
         job.checkPermission(Item.READ);
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        // D-38: the requester needs Job/Build. The service checks it too; checking it here first
-        // keeps the answer a 403 whatever else is wrong with the submission.
-        job.checkPermission(Item.BUILD);
+        // D-38a: Request is checked on the requested job (assigned there, on a folder or globally).
+        job.checkPermission(BatchControlPermissions.REQUEST);
+        // D-38a: Item/Build is not required to request a run; the approval decides.
 
         // The rendered form posts a json blob (f:form) plus the raw fields; a script may post
         // the raw fields only. Both carry the same contract: reason, repeated approvers (D-37).

@@ -4,6 +4,7 @@ import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -241,6 +242,19 @@ public final class FileStore implements Store {
     }
 
     @Override
+    public boolean hasRunRequestBy(String userId) {
+        if (userId == null) {
+            return false;
+        }
+        for (EntityIndex.RunEntry entry : index().runRequests.values()) {
+            if (Approvers.sameUser(userId, entry.summary().requester())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public List<RequestSummary> listRunRequestSummaries() {
         List<RequestSummary> summaries = new ArrayList<>();
         for (EntityIndex.RunEntry entry : index().runRequests.values()) {
@@ -329,6 +343,19 @@ public final class FileStore implements Store {
     @Override
     public List<ActivationRequest> listActivationRequests() {
         return listXmlEntities(activationRequestDir(), ActivationRequest.class, "activation request");
+    }
+
+    @Override
+    public boolean hasActivationRequestBy(String userId) {
+        if (userId == null) {
+            return false;
+        }
+        for (EntityIndex.GrantRequestEntry entry : index().activationRequests.values()) {
+            if (Approvers.sameUser(userId, entry.requester())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

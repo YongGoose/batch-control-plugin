@@ -44,7 +44,14 @@ run"이 설정되어 있으면, 그 잡을 실행하려는 사람은 파라미�
 상시 권한을 가진 사람에게 창을 강제하지도 않습니다. 그런 상시 권한 보유자를 찾아 알려 주는 것이
 "상시 변경 권한" 모니터의 역할입니다. 삭제만 예외입니다. 변경 통제가 켜져 있는 동안에는 상시
 권한으로 삭제가 허용되는 사용자라도 활성 `DELETE` 창이 있어야 잡을 삭제할 수 있고, 거부되지 않는
-것은 관리자뿐입니다. 승인을 받으면 자기 계정으로 작업하며, 평소의 Jenkins 안전장치는 모두 그대로
+것은 관리자뿐입니다. 폴더 사이의 항목 이동(folders 플러그인의 `Item/Move`)은 여기서 삭제하고
+저기서 생성하는 것으로 취급합니다. 변경 통제가 켜져 있는 동안 `Overall/Administer`가 없는
+사용자는 그 항목의 `Item/Delete`와 대상 폴더의 `Item/Create`를 둘 다 가진 경우에만(각각 상시
+권한이든 활성 권한 창이든) 항목을 옮길 수 있고, `CREATE` 창의 이름 제한은 옮겨지는 항목의 이름에
+적용됩니다. 거부된 이동은 아무것도 바꾸지 않고, 사용자에게 이유를 알리며, `GRANT_VIOLATION`으로
+기록됩니다. 실행 통제도 켜져 있으면 관리자가 아닌 사용자가 옮긴 잡은 새로 만든 잡처럼 활성화되지
+않은 잠긴 상태로 도착하고 `HELD`로 기록되므로, 다시 무인 실행되려면 새 활성화가 필요합니다. 이
+규칙은 folders 플러그인의 Move 동작(UI와 REST)에 적용됩니다. 승인을 받으면 자기 계정으로 작업하며, 평소의 Jenkins 안전장치는 모두 그대로
 적용됩니다. 결재자가 결정하는 것은 **누가 무엇을 얼마 동안 바꿀 수 있는지**입니다. 변경 내용
 자체를 승인하는 것이 아닙니다. 결재 시점에는 그 변경이 아직 존재하지도 않고 결재자에게 보이지도
 않습니다. 실제로 무엇이 바뀌었는지는 나중에 변경 기록과 그 diff가 답합니다. 만료는 권한
@@ -98,7 +105,7 @@ Batch Control이 컴파일된 버전 이상이어야 하며, Jenkins가 플러�
 | 선택 플러그인 | 최소 버전 |
 |---|---|
 | `matrix-auth` | 3.3 |
-| `role-strategy` | 898.vc050ed2424ca_ |
+| `role-strategy` | 918.v91e5468d8db_2 |
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
@@ -158,7 +165,7 @@ mvn hpi:run         # http://localhost:8080/jenkins 에 로컬 Jenkins
 `BatchControl/Approve` 보유 여부를 다시 검사합니다.
 
 **변경 통제를 끄는 것은 기능 자체를 끊는 스위치이고, 그 방식이 단호합니다.** 스위치가 꺼져 있는
-동안에는 어떤 권한 창도 아무 권한을 부여하지 않으므로, 모든 권한 판정이 delegate 전략 단독의
+동안에는 어떤 권한 창도 아무 권한을 부여하지 않으므로, 모든 권한 판정이 원본 전략 단독의
 판정이 됩니다. 플러그인을 설치하기 전과 같습니다. 그리고 스위치를 끄는 순간 그때 열려 있던 모든
 권한 창이 **회수**되며, 창마다 회수 기록 하나가 남고 스위치를 뒤집은 계정이 그 기록에 적힙니다.
 변경 작업을 하던 중이던 사람은 경고도 없이 마무리할 권한을 잃고, 되돌릴 방법은 새로 요청하는 것
@@ -171,43 +178,62 @@ Grants 화면도 닫힙니다. 그래서 변경 통제를 다시 켤 때 뒤늦�
 History 와 Change Records 는 실제로 존재했던 창과 그 아래에서 이루어진 변경을 스위치 상태와
 무관하게 계속 보여 줍니다.
 
-### 2. 래핑 권한 전략을 고른다
+### 2. Batch Control 권한 전략을 고른다
 
 이 단계를 밟기 전까지 변경 통제는 아무 일도 하지 않습니다. 가장 놓치기 쉬운 단계이기도
 합니다. 권한 창이 승인되는데도 효력이 전혀 없는 상태가 됩니다.
 
-**Manage Jenkins → Security → Authorization**에서 **Batch Control (wrapping)**을 고르고,
-실제로 쓰는 전략(예를 들어 Project-based Matrix Authorization)을 그 delegate로 지정합니다.
-기존 매트릭스 설정은 delegate 안에 그대로 남습니다. 래퍼는 승인된 창이 열려 있는 동안 그 창의
-행위(`Item/Create`, `Item/Configure`, `Item/Delete` 중 승인된 것)를 그 창의 범위에만 더해 주고
-나머지 판단은 손대지 않고 넘기므로, 활성 창이 없을 때는 delegate 단독과 똑같이 동작합니다.
+**Manage Jenkins → Security → Authorization**에서 matrix-auth를 쓰면(또는 쓰려면) **Batch
+Control: Project-based Matrix Authorization Strategy**를, role-strategy(918 이상)를 쓰면
+**Batch Control: Role-Based Strategy**를 고릅니다. 각각은 해당 원본 전략의 하위 클래스이므로
+폴더·잡·에이전트 권한 속성과 역할 할당이 원본 전략에서와 똑같이 설정 가능하고 유효합니다. 이미
+원본 전략을 쓰고 있다면 먼저 변경 통제를 켜십시오. **Manage Jenkins**에 관리 모니터가 나타나고,
+그 **Install the Batch Control variant** 버튼이 기존 설정을 모든 항목을 유지한 채 해당 변형으로
+한 번에 옮겨 줍니다. Jenkins 내장 전역 "Matrix-based security"를 쓰고 있다면, 권한 창에는
+*프로젝트* 매트릭스 변형이 필요하고, 변환하는 순간 잡·폴더·에이전트에 이미 저장된 모든 항목별
+권한 속성이 유효해진다는 점에 주의하십시오. 먼저 검토하십시오. 선택된 변형은 승인된 창이 열려
+있는 동안 그 창의 행위(`Item/Create`, `Item/Configure`, `Item/Delete` 중 승인된 것)를 그 창의
+범위에만 더해 주고 나머지 판단은 손대지 않고 넘기므로, 활성 창이 없을 때는 원본 전략과 똑같이
+동작합니다.
 권한 판정은 Jenkins 자신이 하는 방식대로 `impliedBy` 사슬을 따라가며 이루어지므로, 창은 승인된
 행위가 함의하는 권한들까지 함께 답합니다. 이 프로젝트가 기준으로 삼는 플러그인 구성에서
 `CONFIGURE` 창은 `Item/ExtendedRead`, `Credentials/UseItem`, `Run/Replay`도 함께 부여합니다.
-창을 승인하기 전에 알아 둘 만한 사실입니다([제약](#제약) 절). 변경 통제가 켜져 있는데 이 전략이
-선택되지 않았으면 관리 모니터가 경고합니다. 실행 통제와 기록에는 이 전략이 필요하지 않습니다.
-권한 창이 권한을 부여하려면 이 전략이 선택되어 있고 **동시에** 변경 통제가 켜져 있어야 합니다.
-
-> **delegate 없이 래핑 전략을 저장하지 마십시오.** 닫힌 쪽으로 실패해서 관리자를 포함한
-> 모든 사람의 모든 권한을 거부하며, 되돌리는 유일한 방법은 디스크의
-> `$JENKINS_HOME/config.xml`을 직접 편집하는 것입니다.
+창을 승인하기 전에 알아 둘 만한 사실입니다([제약](#제약) 절). 변경 통제가 켜져 있는데 두 변형
+중 어느 것도 선택되지 않았으면(예를 들어 Security 페이지에서 원본 전략을 고른 경우) 관리 모니터가
+경고하고 한 번의 클릭으로 다시 설치하게 해 줍니다. role-strategy 918 이상에서는 **Manage Roles**나
+**Assign Roles**를 저장해도 Batch Control 변형이 유지됩니다. 그 이전 버전은 그렇지 않았기 때문에
+918이 최소 버전입니다. 실행 통제와 기록에는 이 전략이 필요하지 않습니다. 권한 창이 권한을
+부여하려면 변형이 선택되어 있고 **동시에** 변경 통제가 켜져 있어야 합니다.
 
 ### 3. 권한을 할당한다
 
 | 권한 | 허용하는 것 |
 |---|---|
-| `BatchControl/Request` | 승인 보호된 잡에 대한 실행 요청 생성 |
+| `BatchControl/Request` | 승인 보호된 잡에 대한 실행 요청 생성(그 잡의 `Item/Read` 필요, `Item/Build`는 필요 없음) |
 | `BatchControl/Approve` | 실행 요청과 권한 창 요청의 승인 또는 반려 |
 | `BatchControl/RequestGrant` | 임시 변경 권한 요청 |
 | `BatchControl/ViewHistory` | 이력 화면, 대시보드, CSV 내보내기 조회 |
 | `BatchControl/Manage` | **Batch Control → Configuration**에서 전역 설정 관리, 권한 창 회수 |
 
 `Manage`는 `Overall/Administer`가 함의하고 나머지 넷을 함의하므로, 관리자는 모든 검사를
-통과합니다. 요청자에게는 보통 `Overall/Read`, `Item/Read`, `Item/Build`, `Request`,
+통과합니다. 요청자에게는 보통 `Overall/Read`, `Item/Read`, `Request`,
 `RequestGrant`를 주고 `Item/Configure`는 의도적으로 주지 않습니다. `CONFIGURE` 권한 창이
 바로 그것을 대신하기 때문입니다. 결재자에게는 보통 `Approve`와 `ViewHistory`를 주고
 `Request`는 주지 않습니다. `ViewHistory`는 이름보다 넓다는 점에 주의하십시오.
 [제약](#제약) 절을 보십시오.
+
+실행을 요청하는 데는 `BatchControl/Request`와 그 잡의 `Item/Read`만 필요하고 `Item/Build`는
+필요 없습니다. 실행 통제가 켜져 있는 동안 승인이 필요한 잡에서는 직접 실행 경로가 모두 거부되고
+승인된 실행은 플러그인이 큐에 넣으므로, `Item/Build`는 그 자체로 아무것도 허용하지 않으며 누가
+요청할 수 있는지는 `Request`가 정합니다. **승인이 필요한 잡에는 `Build` 대신 `Request`를
+부여하십시오.** 승인이 필요 없는 잡과, 실행 통제가 꺼진 인스턴스에서는 Jenkins 자신의 Build
+의미가 그대로 적용되므로 `Item/Build`를 유지합니다. 스스로는 잡을 시작할 수 없는 사람의 실행도
+승인으로 인가될 수 있으므로, 요청자가 그 잡의 `Item/Build`를 갖고 있지 않으면 요청 상세 화면과
+결재자 알림에 그 사실이 표시됩니다. Build 보유자만 요청할 수 있게 하려면 `Request`를 그들에게만
+할당하십시오. `Item/Build`가 없는 요청자가 스크립트로 잡의 `/build` 엔드포인트에 POST하면, 코어가
+Batch Control의 게이트보다 먼저 Build를 검사하므로 Jenkins 자신의 403("missing the Job/Build
+permission")을 받습니다. 이런 사용자는 build 엔드포인트가 아니라 **Request Run**이나 서비스 API로
+실행을 요청합니다.
 
 ### 4. 잡을 설정한다
 
@@ -254,8 +280,8 @@ Dashboard**는 인스턴스 전체의 모든 빌드를 원인(`USER`, `TIMER`, `
 수 있습니다. 재실행 요청은 실패한 빌드의 원래 파라미터를 그대로 싣습니다. 파라미터는 고정되어
 있어 고칠 수 없습니다. 재실행 양식에는 결재자 체크박스만 있고, 사유는 인시던트에서 자동으로
 만들어지므로 입력할 수 없습니다. 제출하려면 다른 실행 요청과 마찬가지로
-`BatchControl/Request`와 그 잡의 `Item/Read`, `Item/Build`가 필요하고, Incidents 화면 자체에는
-`BatchControl/ViewHistory`가 필요하므로 네 가지가 모두 있어야 합니다. 상태는 `OPEN`에서 `ACKNOWLEDGED`, `RESOLVED`로 한
+`BatchControl/Request`와 그 잡의 `Item/Read`가 필요하고(`Item/Build`는 필요 없음), Incidents
+화면 자체에는 `BatchControl/ViewHistory`가 필요하므로 세 가지가 모두 있어야 합니다. 상태는 `OPEN`에서 `ACKNOWLEDGED`, `RESOLVED`로 한
 방향으로만 흐르고, 전이마다 사용자와 시각과 코멘트가 남습니다. **History**는 실행, 오류 건,
 변경 기록, 요청을 기간·잡·사용자·결과·상태로 걸러 보여 주고, 각각을 CSV로 내보내며(공백을 제외한
 첫 글자가 `=`, `+`, `-`, `@`인 셀은 스프레드시트가 수식으로 계산하지 않도록 앞에 따옴표를
@@ -305,12 +331,20 @@ to approve their own requests*가 꺼져 있지 않다면), 두 통제를 끄고
 바꿀 수 있고, 이름 변경은 그 창과 함께 기록됩니다. 이름 제한이 있는 `CREATE` 창에서는 그 창으로
 만든 것의 이름 변경이 제한에 맞는 이름으로만 허용됩니다.
 
-**적시(JIT) 변경 통제는 matrix 계열 권한 전략에서만 동작합니다.** **Role-Based Authorization
-Strategy**를 쓰고 있다면 실행 통제와 기록만 동작하고 권한 창은 동작하지 않습니다. Role
-Strategy를 감싸면 권한 판단 자체는 올바르게 남지만 Role Strategy의 역할 관리 화면이 깨지므로
-지원하지 않으며, Role Strategy가 쓰이는 중이면 관리 모니터가 그렇다고 알립니다. 래핑 전략을
-delegate 없이 저장하는 쪽이 더 나쁩니다. 관리자를 포함해 모두가 잠기고, 디스크의
-`$JENKINS_HOME/config.xml`을 직접 편집하는 것 말고는 복구할 방법이 없습니다.
+**권한 창은 Batch Control의 두 권한 전략 변형에서만 동작합니다.** **Batch Control: Project-based
+Matrix Authorization Strategy**와 **Batch Control: Role-Based Strategy**입니다. 다른 전략을
+고르면 실행 통제와 기록만 동작하고, 관리 모니터가 그렇다고 알립니다. role-strategy는 918 이상이어야
+합니다. 그 이전 버전은 **Manage Roles** 저장 시 변형을 원본 전략으로 바꿔 버리므로 Batch Control은
+918을 최소 버전으로 선언하며, 918에서는 **Manage Roles**와 **Assign Roles** 저장이 변형을
+유지합니다. role-strategy의 화면은 업스트림에서 계속 개편되고 있으므로 회귀 테스트가 이 연동을
+지키고, 연동을 깨는 role-strategy 릴리스는 Batch Control 빌드를 실패시킵니다.
+
+**전역 매트릭스 전략에서 변환하면 항목별 권한이 켜집니다.** Jenkins 내장 전역 "Matrix-based
+security"는 잡·폴더·에이전트에 저장된 권한 속성을 무시합니다. **Batch Control: Project-based
+Matrix Authorization Strategy**로 변환하면 오래된 것을 포함해 그 속성이 모두 유효해지고, 항목의
+`Item/Configure`를 가진 사람은 그 항목의 권한을 고칠 수 있게 됩니다. 변환은 Manage Jenkins의 관리
+모니터에 있는 **Install the Batch Control variant** 버튼으로만 하는 명시적인 단계이며, 모니터도
+같은 내용을 알립니다. 먼저 항목별 속성을 검토하십시오.
 
 **큐 진입에서 거부된 보호 잡은 자신을 호출한 잡을 실패시킵니다.** Pipeline `build` 스텝이
 게이트에 걸리면 상위 잡이 `FAILURE`로 끝납니다. `wait: false`여도 그렇습니다. 이것은 Jenkins의
@@ -356,8 +390,7 @@ AuditFlow는 검색 가능한 저장소와 내보내기를 더합니다. 그중 
 
 이번 릴리스에는 의도적으로 넣지 않았습니다. 요청·결정·임박한 만료·실패에 대한 알림, REST API와
 전역 설정의 JCasC 지원과 Audit Log 플러그인으로의 승인 이벤트 내보내기, 단일 결재자를 넘어서는
-다단계 승인 체인, 그리고 Role-Based Authorization Strategy용 적시 변경 통제(래핑 전략과는 다른
-메커니즘이 필요합니다).
+다단계 승인 체인.
 
 ## 기여
 

@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -156,7 +155,8 @@ public class JobActivationForm implements ModelObject {
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request on this item (assigned here, on a folder above it or globally).
+        item.checkPermission(BatchControlPermissions.REQUEST);
         item.checkPermission(Item.READ);
 
         // The rendered form posts the raw fields plus a json blob (f:form); a script may post the

@@ -7,13 +7,11 @@ import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.util.ArrayList;
 import java.util.List;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -119,13 +117,14 @@ public class JobActivationNoticeAction implements Action {
 
     /** Whether the viewer may open the activation request form ({@code BatchControl/Request}). */
     public boolean isCanRequest() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request (and Item/Read) on this job, the service's predicate.
+        return ActivationService.get().canRequest(job);
     }
 
     /**
      * Whether the viewer may submit a run request for this job, so the run request form is
-     * linked (e2e-03 DEF-12): {@code BatchControl/Request} and {@code Item/Build} on the job
-     * (D-38), the same predicate as the sidebar entry.
+     * linked (e2e-03 DEF-12): {@code BatchControl/Request} and {@code Item/Read} on the job
+     * (D-38a), the same predicate as the sidebar entry.
      */
     public boolean isCanRequestRun() {
         return new JobRequestAction(job).isCanRequestRun();

@@ -11,7 +11,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -62,7 +61,7 @@ public class SelfGrantRevertedFailure extends Failure {
     @CheckForNull
     public String getReviewPageUrl() {
         Item item = Visibility.findVisibleItem(itemFullName);
-        if (!(item instanceof Job) || !Jenkins.get().hasPermission(BatchControlPermissions.REQUEST)) {
+        if (!(item instanceof Job) || !item.hasPermission(BatchControlPermissions.REQUEST)) {
             return null;
         }
         return item.getUrl() + "batch-control/";

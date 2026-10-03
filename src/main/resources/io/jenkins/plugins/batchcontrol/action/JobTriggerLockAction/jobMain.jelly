@@ -4,9 +4,12 @@
      control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches),
      whether or not the job requires approval for manual runs (DEF-15).
      Only constant text and switch names are rendered; no script. -->
-<j:jelly xmlns:j="jelly:core">
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <!-- New job page: the notices sit in the Overview's "Legacy" card, where the classic page's
+       top margin only adds empty space, so it is dropped there. -->
+  <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
   <j:if test="${!empty(it.blockingSwitches)}">
-    <div class="jenkins-alert jenkins-alert-warning" role="status" style="margin-top: 1rem;">
+    <div class="jenkins-alert jenkins-alert-warning" role="status" style="${newJobPage ? null : 'margin-top: 1rem;'}">
       <strong>Batch Control: unattended triggers of this job are blocked</strong>
       <ul style="margin: 0.5rem 0;">
         <j:if test="${it.timerBlocked}">

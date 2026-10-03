@@ -7,11 +7,13 @@
 structs
 ionicons-api
 cloudbees-folder
-# matrix-auth: "Batch Control: Matrix-based security" extends
+# matrix-auth: "Batch Control: Project-based Matrix Authorization Strategy" extends
 # ProjectMatrixAuthorizationStrategy, so it is only offered with matrix-auth.
 matrix-auth
 # role-strategy: "Batch Control: Role-Based Strategy" (role profile, B8-R*).
-role-strategy
+# Pinned to the minimum supported release (D-35f): 918 edits the installed
+# strategy in place on Manage Roles; older releases replace it.
+role-strategy:918.v91e5468d8db_2
 mailer
 # configuration-as-code: the environment is configured by e2e/casc/jenkins.yaml
 # (E-08) and the permission-name export check (A-07, B19).

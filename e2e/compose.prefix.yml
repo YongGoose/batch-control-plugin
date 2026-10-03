@@ -1,0 +1,22 @@
+# Overlay: Jenkins under the context path /jenkins and the new job page
+# experiment on for every user (e2e-06, hosting review 2026-10-03).
+#
+#   docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build
+#
+# Jenkins is then at http://localhost:${BC_PORT:-8080}/jenkins/. Back to the
+# root context with `docker compose up -d jenkins`.
+services:
+  jenkins:
+    environment:
+      JENKINS_OPTS: "--prefix=/jenkins"
+      BC_JENKINS_URL: "http://localhost:${BC_PORT:-8080}/jenkins/"
+      JAVA_OPTS: >-
+        -Djenkins.install.runSetupWizard=false
+        -Xmx1536m
+        -Dhudson.model.DownloadService.noSignatureCheck=true
+        -Duser.timezone=${TZ:-Asia/Seoul}
+        -Duser.language=en
+        -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true
+        -Dnew-job-page.flag.defaultValue=true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/jenkins/login"]

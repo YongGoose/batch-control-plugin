@@ -39,9 +39,13 @@ public class BatchControlPermissions {
     public static final Permission MANAGE = new Permission(GROUP, "Manage",
             Messages._BatchControlPermissions_ManageDescription(), Jenkins.ADMINISTER, PermissionScope.JENKINS);
 
-    /** Create run requests. */
+    /**
+     * Create run requests. D-38a: assignable per job or folder as well as globally (scope ITEM),
+     * since it alone decides who may ask for a run; run requests check it on the requested job.
+     */
     public static final Permission REQUEST = new Permission(GROUP, "Request",
-            Messages._BatchControlPermissions_RequestDescription(), MANAGE, PermissionScope.JENKINS);
+            Messages._BatchControlPermissions_RequestDescription(), MANAGE, true,
+            new PermissionScope[] {PermissionScope.JENKINS, PermissionScope.ITEM});
 
     /** Approve or reject requests. */
     public static final Permission APPROVE = new Permission(GROUP, "Approve",

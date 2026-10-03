@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.queue;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.cli.CLICommand;
 import hudson.model.Action;
@@ -7,6 +8,8 @@ import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Failure;
 import hudson.model.Job;
+import hudson.model.ParameterValue;
+import hudson.model.ParametersAction;
 import hudson.model.Queue;
 import hudson.security.ACL;
 import hudson.triggers.SCMTrigger;
@@ -500,7 +503,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                                             + (source.isEmpty() ? "" : " build #" + source) + " by '" + user
                                             + "' - a re-run does not reuse an earlier approval; submit a new run request");
                         }
-                        throw refusal(job, causes);
+                        // D-60: a re-run carries its source build's values, not a new submission;
+                        // its refusal page does not pre-fill the request form.
+                        throw refusal(job, causes, own == null ? submittedValues(actions) : null);
                     }
                 }
             }
@@ -890,10 +895,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     /**
      * The refusal of a user-originated run (e2e-03 DEF-02). Inside an HTTP request it is the
      * {@link ApprovalRequiredFailure} page, which links the request form only for users who may
-     * open it; for the CLI an {@link IllegalStateException} (e2e-03 DEF-14); elsewhere (scripts)
+     * open it, pre-filled with {@code submitted} (D-60); for the CLI an {@link IllegalStateException} (e2e-03 DEF-14); elsewhere (scripts)
      * the plain {@link Failure} with the same message as before.
      */
-    private static RuntimeException refusal(Job<?, ?> job, List<Cause> causes) {
+    private static RuntimeException refusal(Job<?, ?> job, List<Cause> causes,
+                                            @CheckForNull List<ParameterValue> submitted) {
         String message = approvalRequiredMessage(job);
         // e2e-03 DEF-14: the CLI prints an IllegalStateException as one "ERROR: <message>" line
         // with exit code 4; any other exception type is reported as an unexpected failure with a
@@ -903,7 +909,22 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             return new IllegalStateException(message);
         }
         return Stapler.getCurrentRequest2() != null
-                ? new ApprovalRequiredFailure(job, message) : new Failure(message);
+                ? new ApprovalRequiredFailure(job, message, submitted) : new Failure(message);
+    }
+
+    /**
+     * D-60: the parameter values of the refused submission (its {@link ParametersAction}s), or an
+     * empty list. Handed unfiltered to {@link ApprovalRequiredFailure}, which keeps only the values
+     * the request form may carry (never sensitive ones); nothing else receives them.
+     */
+    private static List<ParameterValue> submittedValues(List<Action> actions) {
+        List<ParameterValue> values = new ArrayList<>();
+        for (Action action : actions) {
+            if (action instanceof ParametersAction) {
+                values.addAll(((ParametersAction) action).getParameters());
+            }
+        }
+        return values;
     }
 
     /** The plain-text refusal of a build-token submission (e2e re-audit DEF-33/34). */

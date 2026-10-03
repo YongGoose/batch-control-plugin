@@ -9,7 +9,6 @@ import hudson.model.Failure;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
-import hudson.security.AuthorizationStrategy;
 import hudson.slaves.DumbSlave;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -21,7 +20,6 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collections;
-import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.rolestrategy.RoleBasedProjectNamingStrategy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,8 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * SPEC item 2, D-35a (#30): with the Batch Control role-strategy strategy installed, Manage
  * Roles, item and agent roles, pattern-based Create and the role naming strategy work; a grant
- * is layered over the role ACL; and the documented limitation (a Manage Roles save reinstalls
- * the plain class) fails safe and is detected by the {@code batch-control-strategy} monitor.
+ * is layered over the role ACL; and a plain role strategy installed on the security page fails
+ * safe and is detected by the {@code batch-control-strategy} monitor (D-35f).
  * Matrix rows T-02-13 (PoC-5 row 3), T-02-14 (row 4), T-02-15 (row 5), T-02-16 (row 9 on
  * role-strategy) and T-02-17 (row 6).
  *
@@ -169,14 +167,16 @@ public class RoleStrategyTest {
     }
 
     /**
-     * T-02-17 (PoC-5 row 6, D-35a known limitation): a save on role-strategy's Manage Roles page
-     * installs the plain RoleBasedAuthorizationStrategy. It fails safe (an open grant stops
-     * conferring) and, with change control on, the {@code batch-control-strategy} monitor
-     * activates. Guards: the monitor is quiet while the subclass is installed, and quiet with
-     * change control off.
+     * T-02-17 (rewritten by D-35f; was the D-35a "Manage Roles save reinstalls the plain class"
+     * limitation, which role-strategy 918 no longer has): an administrator can still install the
+     * plain RoleBasedAuthorizationStrategy on the global security page. That fails safe (an open
+     * grant stops conferring) and, with change control on, the {@code batch-control-strategy}
+     * monitor activates, offers to install the Batch Control strategy, and no longer names Manage
+     * Roles as the cause. Guards: the monitor is quiet while the subclass is installed, and quiet
+     * with change control off. The Manage Roles save paths themselves are T-02-88..95.
      */
     @Test
-    public void t_02_17_manageRolesSaveFailsSafeAndMonitorShows() throws Exception {
+    public void t_02_17_plainRoleStrategyFromSecurityPageFailsSafeAndMonitorShows() throws Exception {
         install();
         BatchControlGlobalConfiguration cfg = StrategyFixtures.changeControlOn();
         AdministrativeMonitor monitor = StrategyFixtures.strategyMonitor();
@@ -186,18 +186,35 @@ public class RoleStrategyTest {
         assertTrue(has(q, "carol", Item.CONFIGURE), "premise: the grant confers under the subclass");
         assertFalse(monitor.isActivated(), "guard: the monitor must be quiet while the Batch Control role strategy is installed");
 
-        // What RoleBasedAuthorizationStrategy.DescriptorImpl#doRolesSubmit does: newInstance + setAuthorizationStrategy.
-        JSONObject form = new JSONObject();
-        form.put(RoleBasedAuthorizationStrategy.GLOBAL, new JSONObject().element("data", new JSONObject()
-                .element("admin", new JSONObject().element("hudson.model.Hudson.Administer", true))));
-        AuthorizationStrategy next = RoleBasedAuthorizationStrategy.DESCRIPTOR.newInstance((org.kohsuke.stapler.StaplerRequest2) null, form);
-        j.jenkins.setAuthorizationStrategy(next);
+        // The global security page installs whatever strategy the administrator picked.
+        j.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy(StrategyFixtures.roles(), Collections.emptySet()));
 
         assertSame(RoleBasedAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),
-                "premise (documented limitation): the Manage Roles save installs the plain class");
+                "premise: the plain role strategy is installed");
         assertFalse(has(q, "carol", Item.CONFIGURE), "fail-safe: an open grant must stop conferring under the plain class");
         assertTrue(monitor.isActivated(),
                 "with change control on and the plain role strategy installed, the batch-control-strategy monitor must show");
+
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.getOptions().setJavaScriptEnabled(false);
+        wc.login("admin");
+        org.htmlunit.html.HtmlPage manage = wc.goTo("manage/");
+        org.htmlunit.html.DomNode message = null;
+        for (org.htmlunit.html.HtmlForm form : manage.getForms()) {
+            if (form.getActionAttribute().contains("administrativeMonitor/" + StrategyFixtures.MONITOR_ID + "/")) {
+                message = form;
+                break;
+            }
+        }
+        assertNotNull(message, "the monitor must offer to install the matching Batch Control strategy (SPEC 8, D-35a)");
+        org.htmlunit.html.DomNode alert = message;
+        while (alert != null && !(alert instanceof org.htmlunit.html.HtmlElement
+                && ((org.htmlunit.html.HtmlElement) alert).getAttribute("class").contains("alert"))) {
+            alert = alert.getParentNode();
+        }
+        String text = (alert != null ? alert : message.getParentNode()).asNormalizedText();
+        assertFalse(text.contains("Manage Roles"),
+                "D-35f: the monitor's text must no longer name role-strategy's Manage Roles page as the cause, got: " + text);
 
         cfg.setChangeControlEnabled(false);
         cfg.save();
