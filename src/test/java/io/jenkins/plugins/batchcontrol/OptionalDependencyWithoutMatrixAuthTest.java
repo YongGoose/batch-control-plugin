@@ -42,14 +42,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * security-05 S-03, matrix row T-02-43: a real Jenkins started WITHOUT matrix-auth. Jenkins
  * boots, the Batch Control role strategy works (item role and a grant), the {@code /manage}
- * page with the batch-control-strategy monitor renders, and a legacy wrapper around a role
- * strategy loads, both through {@code Jenkins.reload()} and through a real restart.
+ * page with the batch-control-strategy monitor renders, and the Batch Control role strategy is
+ * loaded from config.xml, both through {@code Jenkins.reload()} and through a real restart. (The
+ * legacy wrapper config.xml this row used to load was removed with its conversion by D-35e.)
  *
  * <p>This class deliberately references no matrix-auth type (not even through
- * {@link StrategyFixtures}): its code is loaded into the JVM that lacks the plugin. The legacy
- * XML fixture is {@link LegacyWrapperXml}, which uses only core and JDK types.
+ * {@link StrategyFixtures}): its code is loaded into the JVM that lacks the plugin.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-35a/D-35d and docs/reports/security-05.md
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-35a/D-35d/D-35e and docs/reports/security-05.md
  * only (no src/main knowledge).
  */
 public class OptionalDependencyWithoutMatrixAuthTest {
@@ -57,16 +57,16 @@ public class OptionalDependencyWithoutMatrixAuthTest {
     @RegisterExtension
     final RealJenkinsExtension rr = new RealJenkinsExtension().omitPlugins("matrix-auth");
 
-    /** T-02-43: without matrix-auth the role path, the monitor page and the legacy upgrade all work. */
+    /** T-02-43: without matrix-auth the role path, the monitor page and a reload and a restart all work. */
     @Test
     public void t_02_43_withoutMatrixAuthRolePathWorks() throws Throwable {
-        rr.then(OptionalDependencyWithoutMatrixAuthTest::bootAndUpgrade);
+        rr.then(OptionalDependencyWithoutMatrixAuthTest::bootAndReload);
         // The fixture pins the restart to the port the first boot was given, which was released
         // when that JVM stopped; under parallel surefire forks another process can take it in
         // between and the restart fails with "Failed to start Jetty". Ask for a fresh ephemeral
         // port instead: the restart still reuses the same JENKINS_HOME, which is what it measures.
         rr.withPort(0);
-        rr.then(OptionalDependencyWithoutMatrixAuthTest::legacyWrapperSurvivesRestart);
+        rr.then(OptionalDependencyWithoutMatrixAuthTest::strategySurvivesRestart);
     }
 
     private static Map<String, RoleMap> roles() {
@@ -87,16 +87,15 @@ public class OptionalDependencyWithoutMatrixAuthTest {
         return m;
     }
 
-    private static void bootAndUpgrade(JenkinsRule r) throws Throwable {
+    private static void bootAndReload(JenkinsRule r) throws Throwable {
         assertTrue(Jenkins.get().getPlugin("matrix-auth") == null, "premise: matrix-auth must not be installed");
         r.jenkins.setSecurityRealm(privateRealm()); // the real Jenkins JVM has no JenkinsRule$DummySecurityRealm
-        r.jenkins.setAuthorizationStrategy(new RoleBasedAuthorizationStrategy(roles(), Collections.emptySet()));
+        r.jenkins.setAuthorizationStrategy(new BatchControlRoleBasedAuthorizationStrategy(roles(), Collections.emptySet()));
         r.jenkins.save();
-        LegacyWrapperXml.write(r.jenkins);
         r.jenkins.reload();
 
         assertSame(BatchControlRoleBasedAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
-                "without matrix-auth the legacy role wrapper must still load as the Batch Control role strategy");
+                "without matrix-auth the Batch Control role strategy must load from config.xml");
         assertTrue(has(r.createFreeStyleProject("team-a"), "bob", Item.CONFIGURE), "item roles must work without matrix-auth");
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
@@ -123,13 +122,11 @@ public class OptionalDependencyWithoutMatrixAuthTest {
         assertEquals(200, manage.getWebResponse().getStatusCode(), "/manage must render without matrix-auth");
         assertFalse(manage.getWebResponse().getContentAsString().contains("NoClassDefFoundError"),
                 "/manage must not show a NoClassDefFoundError");
-
-        LegacyWrapperXml.write(r.jenkins);
     }
 
-    private static void legacyWrapperSurvivesRestart(JenkinsRule r) throws Throwable {
+    private static void strategySurvivesRestart(JenkinsRule r) throws Throwable {
         assertSame(BatchControlRoleBasedAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
-                "Jenkins must boot from a legacy wrapper config.xml without matrix-auth");
+                "Jenkins must boot with the Batch Control role strategy without matrix-auth");
         assertTrue(has(r.jenkins.getItemByFullName("team-a"), "bob", Item.CONFIGURE), "roles must be kept through the boot");
     }
 

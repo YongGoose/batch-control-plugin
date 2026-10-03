@@ -308,8 +308,8 @@ public class SecurityRegressionTest {
 
     // T-SEC-13 (S-11, self-nesting wrapper rejected at construction) was retired by D-35a: the
     // delegating wrapper is withdrawn and can no longer be constructed, only loaded from a saved
-    // config.xml. The nesting case now lives at load time as T-02-29
-    // (StrategyUpgradeTest#t_02_29_nestedLegacyWrapperLoadsAsSingleSubclass). Matrix note 51.
+    // config.xml. Its load-time successor T-02-29 was withdrawn too when D-35e removed the
+    // wrapper class and its load conversion. Matrix notes 51 and 183.
 
     /**
      * T-SEC-14 (S-05): the configure-without-grant monitor answers consistently on

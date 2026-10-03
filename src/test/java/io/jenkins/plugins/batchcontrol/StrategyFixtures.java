@@ -64,7 +64,6 @@ final class StrategyFixtures {
     static final Instant T0 = Instant.parse("2026-09-20T00:00:00Z");
     static final int WINDOW_MINUTES = 30;
     static final String MONITOR_ID = "batch-control-strategy";
-    static final String LEGACY_WRAPPER = "io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy";
 
     private StrategyFixtures() {
     }
