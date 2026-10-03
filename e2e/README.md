@@ -234,3 +234,16 @@ approves). Scenarios: `d38b.py` (D-38b), `move.py` + `mvstate.py` (D-59a), `rebu
 `rebuild2.py` (rebuild plugin and the new job page menu), `monitor.py` (Mark as reviewed),
 `smoke.py`. Run under `compose.prefix.yml`; re-run `arrange.py` after a restart (JCasC drops the
 added matrix entries).
+
+## e2e-13 driver (`r13/`)
+
+role-strategy 927 forwarding check (D-35g, 2026-10-04). `r13/lib.py` loads `r6/lib.py` with base URL
+`http://localhost:8080` (plain `docker-compose.yml`, override with `BC_BASE`), screenshots in
+`screenshots/run-13/` and logs in `r13/out/`. `PY=<venv python> r13/run_all.sh` starts a fresh
+JENKINS_HOME under the separate compose project `bc-e2e13` (the shared `batch-control-e2e` volume is
+left alone) and runs, in order: `setup.py` (applies `casc/profile-role.yaml`), `manage_roles.py`
+(Add Role dialog, pattern check), `assign_roles.py` (Add User or Group dialog, sid check, assign,
+unassign, remove), `grant_overlay.py` (CONFIGURE window on `team/app-1` over role-strategy roles,
+Manage Roles save during the window, revoke) and `endpoints.py` (forwarded bodies against
+role-strategy's own descriptor, 403/405 refusals). `reset_nobc.py` clears `nobc`'s assignments to
+re-run `assign_roles.py` alone. Stop with `docker compose -p bc-e2e13 down -v`.

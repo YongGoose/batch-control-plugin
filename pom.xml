@@ -47,11 +47,11 @@
          run with -DforkCount=4 there (CONTRIBUTING.md, "Commands", #91). 1C stays the
          default because the CI runners are small (4 cores on ubuntu-latest). -->
     <forkCount>1C</forkCount>
-    <!-- D-35f: 918 is the minimum supported role-strategy (see the dependency below).
+    <!-- D-35g: 927 is the minimum supported role-strategy (see the dependency below).
          A property only so that the scheduled role-strategy-latest workflow (#77) can
          test against the newest release with -Drole-strategy.version=...; keep the
          default at the minimum. -->
-    <role-strategy.version>918.v91e5468d8db_2</role-strategy.version>
+    <role-strategy.version>927.v9cf5527c4085</role-strategy.version>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
@@ -129,11 +129,21 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>role-strategy</artifactId>
-      <!-- D-35f: 918 is the minimum supported role-strategy. Older releases
-           (including the BOM's 898) replace the Batch Control variant on a
-           Manage Roles save. Overrides the BOM version on purpose. -->
+      <!-- D-35g: 927 is the minimum supported role-strategy (redesigned Assign Roles
+           page); the Batch Control descriptor forwards to its descriptor methods. The BOM
+           still manages 898, which also replaced the variant on a Manage Roles save (D-35f).
+           Overrides the BOM version on purpose. -->
       <version>${role-strategy.version}</version>
       <optional>true</optional>
+    </dependency>
+    <dependency>
+      <!-- D-35g: @SuppressRestrictedWarnings, so the Batch Control role strategy's
+           descriptor can forward to role-strategy's restricted descriptor methods.
+           Compile-time only; same version as the parent's access-modifier-checker. -->
+      <groupId>org.kohsuke</groupId>
+      <artifactId>access-modifier-suppressions</artifactId>
+      <version>${access-modifier-checker.version}</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>io.jenkins</groupId>
@@ -220,8 +230,8 @@
   <build>
     <plugins>
       <plugin>
-        <!-- T-02-122 (#78, D-35f): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898
-             next to batch-control and expects the refusal. The old hpi is copied as a plain
+        <!-- T-02-122 (#78, D-35g): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898,
+             older than the 927 minimum, next to batch-control and expects the refusal. The old hpi is copied as a plain
              file into the test output directory (old-plugins/role-strategy.hpi); it is not a
              dependency, so it is not on the test classpath, not in the hpi's manifest and not
              seen by the enforcer or hpi.strictBundledArtifacts. -->

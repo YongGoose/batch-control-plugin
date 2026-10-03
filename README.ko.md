@@ -106,7 +106,7 @@ Batch Control이 컴파일된 버전 이상이어야 하며, Jenkins가 플러�
 | 선택 플러그인 | 최소 버전 |
 |---|---|
 | `matrix-auth` | 3.3 |
-| `role-strategy` | 918.v91e5468d8db_2 |
+| `role-strategy` | 927.v9cf5527c4085 |
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
@@ -185,7 +185,7 @@ History 와 Change Records 는 실제로 존재했던 창과 그 아래에서 �
 합니다. 권한 창이 승인되는데도 효력이 전혀 없는 상태가 됩니다.
 
 **Manage Jenkins → Security → Authorization**에서 matrix-auth를 쓰면(또는 쓰려면) **Batch
-Control: Project-based Matrix Authorization Strategy**를, role-strategy(918 이상)를 쓰면
+Control: Project-based Matrix Authorization Strategy**를, role-strategy(927 이상)를 쓰면
 **Batch Control: Role-Based Strategy**를 고릅니다. 각각은 해당 원본 전략의 하위 클래스이므로
 폴더·잡·에이전트 권한 속성과 역할 할당이 원본 전략에서와 똑같이 설정 가능하고 유효합니다. 이미
 원본 전략을 쓰고 있다면 먼저 변경 통제를 켜십시오. **Manage Jenkins**에 관리 모니터가 나타나고,
@@ -201,9 +201,8 @@ Control: Project-based Matrix Authorization Strategy**를, role-strategy(918 이
 `CONFIGURE` 창은 `Item/ExtendedRead`, `Credentials/UseItem`, `Run/Replay`도 함께 부여합니다.
 창을 승인하기 전에 알아 둘 만한 사실입니다([제약](#제약) 절). 변경 통제가 켜져 있는데 두 변형
 중 어느 것도 선택되지 않았으면(예를 들어 Security 페이지에서 원본 전략을 고른 경우) 관리 모니터가
-경고하고 한 번의 클릭으로 다시 설치하게 해 줍니다. role-strategy 918 이상에서는 **Manage Roles**나
-**Assign Roles**를 저장해도 Batch Control 변형이 유지됩니다. 그 이전 버전은 그렇지 않았기 때문에
-918이 최소 버전입니다. 실행 통제와 기록에는 이 전략이 필요하지 않습니다. 권한 창이 권한을
+경고하고 한 번의 클릭으로 다시 설치하게 해 줍니다. 최소 버전인 role-strategy 927 이상에서는 **Manage Roles**나
+새로 설계된 **Assign Roles**를 저장해도 Batch Control 변형이 유지됩니다. 실행 통제와 기록에는 이 전략이 필요하지 않습니다. 권한 창이 권한을
 부여하려면 변형이 선택되어 있고 **동시에** 변경 통제가 켜져 있어야 합니다.
 
 ### 3. 권한을 할당한다
@@ -335,11 +334,11 @@ to approve their own requests*가 꺼져 있지 않다면), 두 통제를 끄고
 
 **권한 창은 Batch Control의 두 권한 전략 변형에서만 동작합니다.** **Batch Control: Project-based
 Matrix Authorization Strategy**와 **Batch Control: Role-Based Strategy**입니다. 다른 전략을
-고르면 실행 통제와 기록만 동작하고, 관리 모니터가 그렇다고 알립니다. role-strategy는 918 이상이어야
-합니다. 그 이전 버전은 **Manage Roles** 저장 시 변형을 원본 전략으로 바꿔 버리므로 Batch Control은
-918을 최소 버전으로 선언하며, 918에서는 **Manage Roles**와 **Assign Roles** 저장이 변형을
-유지합니다. role-strategy의 화면은 업스트림에서 계속 개편되고 있으므로 회귀 테스트가 이 연동을
-지키고, 연동을 깨는 role-strategy 릴리스는 Batch Control 빌드를 실패시킵니다.
+고르면 실행 통제와 기록만 동작하고, 관리 모니터가 그렇다고 알립니다. role-strategy는
+**Assign Roles** 화면이 새로 설계된 927 이상이어야 하며, 927에서는 **Manage Roles**와
+**Assign Roles** 저장이 변형을 유지합니다. 변형의 디스크립터는 role-strategy의 디스크립터
+메서드를 복사하지 않고 그대로 호출하므로 검증이 원본 전략과 똑같이 동작하고, 회귀 테스트가 계속
+이 연동을 지켜 연동을 깨는 이후 role-strategy 릴리스는 Batch Control 빌드를 실패시킵니다.
 
 **전역 매트릭스 전략에서 변환하면 항목별 권한이 켜집니다.** Jenkins 내장 전역 "Matrix-based
 security"는 잡·폴더·에이전트에 저장된 권한 속성을 무시합니다. **Batch Control: Project-based

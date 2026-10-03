@@ -37,16 +37,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * D-35f(a): for forward compatibility with role-strategy PR #766 (which removes the parent
  * descriptor's {@code doCheckName} and adds {@code doCheckSidName(value, type)}), the Batch Control
- * role strategy's descriptor answers {@code checkSidName} and {@code checkName} itself. Matrix rows
- * T-02-100..106 (note 193); the role-admin-without-SystemRead row is
+ * role strategy's descriptor answers {@code checkSidName} (since D-35g by forwarding to
+ * role-strategy 927's own). Matrix rows T-02-100..105 (note 193); T-02-106 ({@code checkName}) is
+ * withdrawn by D-35g because role-strategy 927 has no {@code checkName} (note 236); the role-admin-without-SystemRead row is
  * {@link RoleSidValidationRoleAdminTest} (T-02-107).
  *
  * <p>Contract (coordinator brief from D-35f(a)): POST with crumb only; Overall/Read alone is 403;
  * empty value ok; type other than USER/GROUP is the error "Invalid type"; {@code authenticated}
  * GROUP and {@code anonymous} USER are internal markers; an existing user is ok and named; an
  * unknown sid is not reported as found (role-strategy strikes it through); HTML-special characters
- * in value, type and a user's full name are escaped. {@code checkName} keeps role-strategy 918's
- * behaviour ({@code [TYPE:sid]}; no type prefix is an error).
+ * in value, type and a user's full name are escaped.
  *
  * <p>Security realm: a private realm with real accounts, so "unknown" is decidable (the test
  * harness's dummy realm accepts every name). Written from docs/DECISIONS.md D-35f and the brief
@@ -174,27 +174,6 @@ public class RoleSidValidationTest {
         assertTrue(carol.contains("&lt;i&gt;Carol"), "the user's full name must be shown escaped: " + excerpt(carol));
     }
 
-    /**
-     * T-02-106: checkName keeps role-strategy 918's behaviour: {@code [USER:alice]} ok and named,
-     * {@code [GROUP:x]} not found (not an error), {@code [alice]} the error "No type prefix", HTML in
-     * the value escaped; Overall/Read alone 403 (guard: admin 200).
-     */
-    @Test
-    public void t_02_106_checkNameKeeps918Behaviour() throws Exception {
-        String user = body(name("admin", "[USER:alice]"));
-        assertTrue(user.contains("Alice Liddell") && !ERROR.matcher(user).find(), "[USER:alice] must be ok and named: " + excerpt(user));
-        String group = body(name("admin", "[GROUP:x]"));
-        assertTrue((NOT_FOUND.matcher(group).find() || group.contains("not-found")) && !ERROR.matcher(group).find(),
-                "[GROUP:x] must be reported as not found, not as an error: " + excerpt(group));
-        String noPrefix = body(name("admin", "[alice]"));
-        assertTrue(ERROR.matcher(noPrefix).find() && noPrefix.contains("No type prefix"),
-                "a value without a type prefix must be the error \"No type prefix\": " + excerpt(noPrefix));
-        String xss = body(name("admin", "[USER:" + XSS + "]"));
-        assertFalse(xss.contains(XSS), "checkName must escape the sid: " + excerpt(xss));
-        WebResponse refused = name("reader", "[USER:alice]");
-        assertEquals(403, refused.getStatusCode(), "checkName must answer 403 to Overall/Read alone");
-    }
-
     // ---------------------------------------------------------------- helpers
 
     private JenkinsRule.WebClient client(String user) throws Exception {
@@ -217,10 +196,6 @@ public class RoleSidValidationTest {
         params.add(new NameValuePair("value", value));
         params.add(new NameValuePair("type", type));
         return post(user, "checkSidName", params);
-    }
-
-    private WebResponse name(String user, String value) throws Exception {
-        return post(user, "checkName", List.of(new NameValuePair("value", value)));
     }
 
     private static String body(WebResponse r) {

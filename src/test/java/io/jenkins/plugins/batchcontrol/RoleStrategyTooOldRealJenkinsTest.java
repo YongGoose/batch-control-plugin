@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * #78, D-35f, LIMITATIONS 9 (matrix note 224, T-02-122): a real Jenkins with role-strategy 898
- * (older than the declared optional minimum 918) does not load Batch Control and says why; Jenkins
+ * (older than the declared optional minimum 927, D-35g) does not load Batch Control and says why; Jenkins
  * itself still boots and role-strategy 898 is active.
  *
  * <p>The 898 plugin is read from the test class path at {@value #OLD_HPI}. The build must put it
@@ -71,7 +71,7 @@ public class RoleStrategyTooOldRealJenkinsTest {
             reason = String.valueOf(failed.cause) + " " + failed.getExceptionString();
         }
         assertTrue(reason.toLowerCase(Locale.ROOT).contains("role"), "the refusal must name role-strategy: " + reason);
-        assertTrue(reason.contains("918"), "the refusal must name the required version 918: " + reason);
+        assertTrue(reason.contains("927"), "the refusal must name the required version 927 (D-35g): " + reason);
         System.out.println("T-02-122 refusal of batch-control: " + reason.lines().limit(3).toList());
         // nothing of Batch Control may be loaded
         assertTrue(Jenkins.get().getPluginManager().getPlugins().stream()
