@@ -14,7 +14,6 @@ import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -23,34 +22,32 @@ import java.util.Map;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
-import org.kohsuke.stapler.StaplerRequest2;
-import org.kohsuke.stapler.StaplerResponse2;
 
 /**
- * The run record dashboard at {@code /batch-control/dashboard/} (SPEC item 10): every build of
- * every job with cause, user, parameters, result, duration, who aborted it, and — for
+ * The run record dashboard at {@code /batch-control/dashboard/} (SPEC item 10): the most recent
+ * builds of every job with cause, user, parameters, result, duration, who aborted it, and — for
  * APPROVED_REQUEST builds — a link to the originating run request.
  *
- * <p>Default view: the last {@value #DEFAULT_DAYS} days, newest first, pages of
- * {@value #PAGE_SIZE} ({@code ?page=N}). The window can be widened with {@code ?days=N}
- * (validated, capped at {@value #MAX_DAYS}). Requires {@code ViewHistory} for the whole subtree
- * ({@link #getTarget()}); records are read-only, so PUT/DELETE/PATCH are 405 ({@code HttpVerbs}).
+ * <p>D-67 (hosting review round 3): at most the {@value #LIMIT} most recent runs, newest first,
+ * with a link to History for the rest; no look-back window and no paging. The read is bounded by
+ * {@value #SCAN} records whatever the store holds, newest bucket first. Requires
+ * {@code ViewHistory} for the whole subtree ({@link #getTarget()}); records are read-only, so
+ * PUT/DELETE/PATCH are 405 ({@code HttpVerbs}).
  */
 @Restricted(NoExternalUse.class)
 public class DashboardSection implements ModelObject, StaplerProxy {
 
-    /** Page size for the run record list. */
-    public static final int PAGE_SIZE = Paging.PAGE_SIZE;
+    /** Most runs the dashboard lists (D-67). */
+    public static final int LIMIT = Paging.PAGE_SIZE;
 
-    /** Default look-back window in days (SPEC item 10). */
-    public static final int DEFAULT_DAYS = 7;
+    /**
+     * Records read at most, newest appended first. A bucket is ordered by completion, the list by
+     * start time, so a little more than {@link #LIMIT} is read to pick the most recently started.
+     */
+    public static final int SCAN = 10 * LIMIT;
 
-    /** Upper bound for {@code ?days=}; larger or invalid values fall back to the default. */
-    public static final int MAX_DAYS = 365;
-
-    /** Lazily computed, per-request cached page of the selected window. */
+    /** Lazily computed, per-request cached read. */
     private RecordPage<RunRecord> page;
 
     @Override
@@ -77,76 +74,24 @@ public class DashboardSection implements ModelObject, StaplerProxy {
         return new SectionAccess();
     }
 
-    // ---------------------------------------------------------------- window selection
+    // ---------------------------------------------------------------- data (used from Jelly)
 
-    /** The look-back window from {@code ?days=}; default on absence, garbage or out-of-range. */
-    public int getDays() {
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        if (req != null) {
-            String raw = req.getParameter("days");
-            if (raw != null && !raw.trim().isEmpty()) {
-                try {
-                    int days = Integer.parseInt(raw.trim());
-                    if (days >= 1 && days <= MAX_DAYS) {
-                        return days;
-                    }
-                } catch (NumberFormatException ignored) {
-                    // Fall through to the default.
-                }
-            }
-        }
-        return DEFAULT_DAYS;
-    }
-
-    // ---------------------------------------------------------------- paging (used from Jelly)
-
-    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
-    public int getPage() {
-        return Paging.currentPage();
-    }
-
-    /** The run records shown on the current page, newest first. */
-    public List<RunRecord> getPageItems() {
+    /** The most recent runs, newest first, at most {@link #LIMIT}. */
+    public List<RunRecord> getItems() {
         return page().getItems();
     }
 
-    /** Matching records read (a lower bound when {@link #isTruncated()}). */
-    public int getTotal() {
-        return page().getMatched();
-    }
-
-    /** Whether the per-request record cap stopped the read (#13): ask to narrow the window. */
-    public boolean isTruncated() {
-        return page().isTruncated();
+    /** Most runs listed, for the page text. */
+    public int getLimit() {
+        return LIMIT;
     }
 
     /**
-     * Over-long lines (over 1 MiB) skipped while reading this page (security-11 N-02); the CSV
-     * export skips the same lines, so the screen says so rather than look complete.
+     * Over-long lines (over 1 MiB) skipped while reading (security-11 N-02); the CSV export
+     * skips the same lines, so the screen says so rather than look complete.
      */
     public int getOversized() {
         return page().getOversized();
-    }
-
-    public boolean isHasPrevious() {
-        return Paging.hasPrevious(getPage());
-    }
-
-    public boolean isHasNext() {
-        return page().isHasNext();
-    }
-
-    /**
-     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
-     * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
-     * Only ISO dates and constant names go into it, so no encoding is needed.
-     */
-    public String getCsvUrl() {
-        java.time.ZoneId zone = BatchClock.clock().getZone();
-        java.time.LocalDate to = java.time.LocalDate.now(BatchClock.clock());
-        java.time.LocalDate from = BatchClock.now().minus(Duration.ofDays(getDays()))
-                .atZone(zone).toLocalDate();
-        return "../history/runs.csv?from=" + from + "&to=" + to;
     }
 
     // ---------------------------------------------------------------- Jelly helpers
@@ -176,18 +121,16 @@ public class DashboardSection implements ModelObject, StaplerProxy {
 
     private RecordPage<RunRecord> page() {
         if (page == null) {
-            Instant cutoff = BatchClock.now().minus(Duration.ofDays(getDays()));
-            YearMonth last = YearMonth.now(BatchClock.clock());
-            YearMonth first = YearMonth.from(cutoff.atZone(BatchClock.clock().getZone()));
+            Instant now = BatchClock.now();
+            YearMonth current = YearMonth.now(BatchClock.clock());
             List<YearMonth> months = new ArrayList<>();
-            for (YearMonth m = first; !m.isAfter(last); m = m.plusMonths(1)) {
-                months.add(m);
+            for (YearMonth m : Store.get().listStoredMonths()) {
+                if (!m.isAfter(current)) {
+                    months.add(m);
+                }
             }
-            // Bounded read (#13): newest first, stops at the record cap.
-            // Only records inside the window count toward the cap (S-03).
-            page = Store.get().pageRunRecords(months, new Period(cutoff, null),
-                    r -> !r.getStartedAt().isBefore(cutoff),
-                    Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
+            // Bounded read (#13, D-67): newest bucket first, stops after SCAN records.
+            page = Store.get().pageRunRecords(months, new Period(null, now), r -> true, 0, LIMIT, SCAN);
         }
         return page;
     }
