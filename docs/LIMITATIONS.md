@@ -559,6 +559,15 @@ code does on purpose.
     the job is the approval notice on the job page and its **Request Run**
     link.
 
+45. **With the `rebuild` plugin installed, the new job page's "More actions"
+    menu fails on a job that has no builds.** The rebuild plugin's **Rebuild
+    Last** entry has no URL on such a job, and core's "More actions" menu on
+    the new job page throws a JavaScript `TypeError` on it, so none of the
+    menu's plugin entries, Batch Control's included, can be reached from
+    that menu on that job (seen in E2E-1). This is a defect in the rebuild
+    plugin, not in Batch Control. Workarounds: use the entries in the app
+    bar or the classic job page, or disable the rebuild plugin.
+
 ## Records from earlier releases and strategy changes
 
 42. **Approved runs recorded by an earlier release have no user.** A run
