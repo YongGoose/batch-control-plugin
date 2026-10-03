@@ -205,7 +205,7 @@
                           <j:when test="${requestLinks and links.request(q.id)}">
                             <bc:idLink href="${rootURL}/batch-control/requests/${q.id}/" value="${q.id}"/>
                           </j:when>
-                          <j:otherwise><bc:idLink id="${q.id}"/></j:otherwise>
+                          <j:otherwise><bc:idLink value="${q.id}"/></j:otherwise>
                         </j:choose>
                       </td>
                       <td>${q.jobFullName}</td>
@@ -249,7 +249,7 @@
                           <j:when test="${r.runRequestId != null and requestLinks and links.request(r.runRequestId)}">
                             <bc:idLink href="${rootURL}/batch-control/requests/${r.runRequestId}/" value="${r.runRequestId}"/>
                           </j:when>
-                          <j:otherwise><bc:idLink id="${r.runRequestId}"/></j:otherwise>
+                          <j:otherwise><bc:idLink value="${r.runRequestId}"/></j:otherwise>
                         </j:choose>
                       </td>
                     </tr>

@@ -101,7 +101,7 @@
                   <td style="white-space: nowrap;">
                     <j:choose>
                       <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
-                      <j:otherwise><bc:idLink id="${r.id}"/></j:otherwise>
+                      <j:otherwise><bc:idLink value="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${g.user}</td>
@@ -158,7 +158,7 @@
                   <td style="white-space: nowrap;">
                     <j:choose>
                       <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
-                      <j:otherwise><bc:idLink id="${r.id}"/></j:otherwise>
+                      <j:otherwise><bc:idLink value="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${r.user}</td>

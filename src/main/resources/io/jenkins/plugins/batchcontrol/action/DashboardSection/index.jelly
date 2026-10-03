@@ -66,7 +66,7 @@
                       <j:when test="${r.runRequestId != null and requestLinks and links.request(r.runRequestId)}">
                         <bc:idLink href="${rootURL}/batch-control/requests/${r.runRequestId}/" value="${r.runRequestId}"/>
                       </j:when>
-                      <j:otherwise><bc:idLink id="${r.runRequestId}"/></j:otherwise>
+                      <j:otherwise><bc:idLink value="${r.runRequestId}"/></j:otherwise>
                     </j:choose>
                   </td>
                 </tr>
