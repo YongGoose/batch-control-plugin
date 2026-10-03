@@ -63,7 +63,10 @@ public class StoreLocaleIndependenceTest {
     static final String[] LOCALES = {"ar-EG", "hi-IN-u-nu-deva"};
 
     private static final String MONTH_FILE = "[0-9]{4}-[0-9]{2}\\.jsonl";
+    /** Change record ids keep the timestamp form (ARCHITECTURE 5). */
     private static final String ID = "[0-9]{8}-[0-9]{6}-[A-Za-z0-9]{6}";
+    /** Requests and windows get canonical UUIDs (D-68). */
+    private static final String UUID_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
     private JenkinsRule j;
     private Locale savedDefault;
@@ -126,7 +129,7 @@ public class StoreLocaleIndependenceTest {
             RunRequest request = RunRequest.create(jobName, new LinkedHashMap<>(), "locale probe", "u1", "admin");
             FileStore.get().saveRunRequest(request);
 
-            assertTrue(request.getId().matches(ID), "under " + tag + " a request id must use ASCII digits: " + request.getId());
+            assertTrue(request.getId().matches(UUID_ID), "under " + tag + " a request id must be a canonical ASCII UUID (D-68): " + request.getId());
             List<ChangeRecord> creates = FileStore.get().listChangeRecords(now).stream()
                     .filter(rec -> rec.getType() == ChangeType.CREATE && jobName.equals(rec.getTarget()))
                     .collect(Collectors.toList());
@@ -199,7 +202,9 @@ public class StoreLocaleIndependenceTest {
         BatchClock.setForTest(Clock.fixed(at, ZoneOffset.UTC));
 
         RunRequest request = RunRequest.create("zone-job", new LinkedHashMap<>(), "zone probe", "u1", "admin");
-        assertTrue(request.getId().startsWith("20260930-200000-"), "the id must carry the plugin clock's local time: " + request.getId());
+        // D-68: the id is a UUID; the time lives in the stored createdAt, taken from the plugin clock
+        assertTrue(request.getId().matches(UUID_ID), "a request id must be a canonical UUID (D-68): " + request.getId());
+        assertEquals(at, request.getCreatedAt(), "createdAt must be the plugin clock's instant");
 
         FileStore.get().appendRunRecord(new RunRecord("zone-job#1", "zone-job", 1,
                 CauseType.USER, "SUCCESS", at, 10L));
