@@ -1,15 +1,21 @@
 package io.jenkins.plugins.batchcontrol.action;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.ModelObject;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -32,9 +38,9 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 
 /**
- * One grant request at {@code /batch-control/grants/<id>/}: detail view plus the four
+ * One grant request at {@code /batch-control/grants/<id>/}: detail view plus the five
  * state-changing POST endpoints ({@code approve}, {@code reject}, {@code cancel},
- * {@code changeApprover}).
+ * {@code changeApprover} and, for its open window, {@code revoke} — R4-12).
  *
  * <p>Every endpoint is {@code @RequirePOST} (GET never changes state) and performs its permission
  * check before delegating; all business rules (approver eligibility, comment requirements,
@@ -45,6 +51,12 @@ import org.springframework.security.core.Authentication;
 public class GrantRequestItem implements ModelObject {
 
     private final GrantRequest request;
+
+    /** Per-rendering cache of {@link #getGrant()}. */
+    @CheckForNull
+    private Grant grant;
+
+    private boolean grantLoaded;
 
     GrantRequestItem(GrantRequest request) {
         this.request = request;
@@ -120,6 +132,58 @@ public class GrantRequestItem implements ModelObject {
     public boolean isCanCancel() {
         return isPending()
                 && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
+    }
+
+    // ---------------------------------------------------------------- the window (R4-12)
+
+    /**
+     * The permission window of this request once approved (it carries the request's id), or
+     * {@code null}. Read once per rendering.
+     */
+    @CheckForNull
+    public Grant getGrant() {
+        if (!grantLoaded) {
+            grant = request.getStatus() == RequestStatus.APPROVED ? Store.get().loadGrant(request.getId()) : null;
+            grantLoaded = true;
+        }
+        return grant;
+    }
+
+    /** Whether the window is open now. */
+    public boolean isWindowOpen() {
+        Grant g = getGrant();
+        return g != null && g.isActiveAt(BatchClock.now());
+    }
+
+    /**
+     * R4-12: view gating for the Revoke button of this page, the rule of the Grants list's
+     * Revoke ({@code BatchControl/Manage}); {@link #doRevoke} and the service re-check.
+     */
+    public boolean isCanRevoke() {
+        return isWindowOpen() && Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
+    }
+
+    /** Jelly helper: how much of the window is left. */
+    public String remaining(@CheckForNull Instant expiresAt) {
+        return Dates.until(expiresAt);
+    }
+
+    /**
+     * How a window ended, in words: "Expired", "Revoked by admin", or for a revocation by the
+     * change control switch "Revoked (change control turned off) by admin" (#85).
+     */
+    public static String endedLabel(Grant grant) {
+        if (grant.getRevokedAt() != null) {
+            // #85 (D-63): a mass revocation by the change control switch says so.
+            String why = grant.getRevokedReason() == null ? "" : " (" + grant.getRevokedReason() + ")";
+            return grant.getRevokedBy() == null ? "Revoked" + why : "Revoked" + why + " by " + grant.getRevokedBy();
+        }
+        return "Expired";
+    }
+
+    /** Jelly form of {@link #endedLabel(Grant)}. */
+    public String endedLabelOf(Grant grant) {
+        return endedLabel(grant);
     }
 
     // ---------------------------------------------------------------- SYSTEM builds (D-50a)
@@ -216,6 +280,18 @@ public class GrantRequestItem implements ModelObject {
         }
         call(req, rsp, errors, () -> GrantRequestService.get().changeApprovers(request.getId(), approvers),
                 "approver", "approvers");
+    }
+
+    /**
+     * POST {@code revoke} — R4-12: revokes this request's open window from its own page, with the
+     * permission rule of the Grants list's Revoke ({@code BatchControl/Manage}, SPEC item 8). The
+     * service re-checks and refuses an unknown or already revoked window; a refusal is shown on
+     * this page. Redirects back to this page.
+     */
+    @RequirePOST
+    public void doRevoke(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
+        Jenkins.get().checkPermission(BatchControlPermissions.MANAGE);
+        call(req, rsp, new FormErrors("revoke"), () -> GrantService.get().revoke(request.getId()));
     }
 
     // ---------------------------------------------------------------- helpers

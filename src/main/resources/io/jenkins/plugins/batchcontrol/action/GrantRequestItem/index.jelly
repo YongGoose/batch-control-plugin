@@ -66,6 +66,41 @@
         </tbody>
       </table>
 
+      <!-- R4-12: the window of an approved request, with Revoke for a holder of Batch
+           Control/Manage (the rule of the Grants list's Revoke; GrantRequestItem#doRevoke and the
+           service re-check). A refused revoke is shown above the window. -->
+      <j:set var="window" value="${it.grant}"/>
+      <j:if test="${window != null}">
+        <h2>Permission Window</h2>
+        <bc:formError errors="${it.formErrors('revoke')}"/>
+        <table class="jenkins-table jenkins-table--small" data-batch-control-window="${it.windowOpen ? 'open' : 'ended'}">
+          <tbody>
+            <tr><th style="text-align: left; width: 12rem;">Holder</th><td>${window.user}</td></tr>
+            <tr><th style="text-align: left;">Granted</th><td>${it.format(window.grantedAt)}</td></tr>
+            <tr><th style="text-align: left;">Expires</th><td>${it.format(window.expiresAt)}</td></tr>
+            <tr>
+              <th style="text-align: left;">State</th>
+              <td>
+                <j:choose>
+                  <j:when test="${it.windowOpen}">Open, ${it.remaining(window.expiresAt)} left</j:when>
+                  <j:otherwise>${it.endedLabelOf(window)}</j:otherwise>
+                </j:choose>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <j:if test="${it.canRevoke}">
+          <p>
+            <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true"
+                                href="${rootURL}/batch-control/grants/${it.id}/revoke" post="true"
+                                title="Revoke this grant?" okText="Revoke"
+                                message="The user immediately loses the granted permissions. This cannot be undone.">
+              Revoke
+            </l:confirmationLink>
+          </p>
+        </j:if>
+      </j:if>
+
       <h2>Reason</h2>
       <p style="white-space: pre-wrap;">${it.request.reason}</p>
 
