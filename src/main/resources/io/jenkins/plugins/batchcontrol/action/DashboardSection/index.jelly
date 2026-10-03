@@ -64,9 +64,9 @@
                     <!-- Linked only for a user who may open this request (SPEC item 2, DEF-11). -->
                     <j:choose>
                       <j:when test="${r.runRequestId != null and requestLinks and links.request(r.runRequestId)}">
-                        <a href="${rootURL}/batch-control/requests/${r.runRequestId}/">${r.runRequestId}</a>
+                        <bc:idLink href="${rootURL}/batch-control/requests/${r.runRequestId}/" value="${r.runRequestId}"/>
                       </j:when>
-                      <j:otherwise>${r.runRequestId}</j:otherwise>
+                      <j:otherwise><bc:idLink id="${r.runRequestId}"/></j:otherwise>
                     </j:choose>
                   </td>
                 </tr>

@@ -11,7 +11,9 @@
      "app-build-tabs" container of design-library buttons, tertiary unless current, with l:icon
      and l:badge. Core's CSS makes the current tab inert (pointer-events: none); on a detail page
      (a request, an incident, the monthly summary) the highlighted tab is a way back to its list,
-     so it stays clickable there. -->
+     so it stays clickable there.
+     e2e-11 (as e2e-06 UX-8): eight tabs with three badges must fit one row at 1280 px, so the
+     buttons are a little tighter than core's default padding. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <st:documentation>
     The Batch Control tab bar.
@@ -32,7 +34,7 @@
       <j:set var="onTabPage" value="${current and (bcPath == tabUrl or bcPath == tabIndexUrl)}"/>
       <a href="${tabUrl}"
          class="jenkins-button ${current ? '' : 'jenkins-button--tertiary'}"
-         style="${current and !onTabPage ? 'pointer-events: auto;' : null}"
+         style="padding-inline: 0.75rem;${current and !onTabPage ? ' pointer-events: auto;' : ''}"
          aria-current="${current ? (onTabPage ? 'page' : 'location') : null}" data-batch-control-tab="${tab.id}"
          title="${tab.title}">
         <l:icon src="${tab.iconFileName}"/>

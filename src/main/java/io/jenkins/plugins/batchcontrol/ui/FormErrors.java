@@ -147,16 +147,26 @@ public final class FormErrors {
      */
     public void render(StaplerRequest2 req, StaplerResponse2 rsp, Object it)
             throws IOException, ServletException {
+        render(req, rsp, it, "index.jelly");
+    }
+
+    /**
+     * As {@link #render(StaplerRequest2, StaplerResponse2, Object)}, to the view {@code view} of
+     * {@code it}: D-66, a form submitted from a dialog is answered with the dialog's own view, so
+     * core's dialog replaces its form with the refused one (messages shown, input kept).
+     */
+    public void render(StaplerRequest2 req, StaplerResponse2 rsp, Object it, String view)
+            throws IOException, ServletException {
         req.setAttribute(ATTRIBUTE, this);
-        RequestDispatcher view = req.getView(it, "index.jelly");
+        RequestDispatcher dispatcher = req.getView(it, view);
         rsp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-        if (view == null) {
+        if (dispatcher == null) {
             // No view to return to: a plain-text refusal still says why.
             rsp.setContentType("text/plain;charset=UTF-8");
             rsp.getWriter().println(message != null ? message : String.join("\n", fields.values()));
             return;
         }
-        view.forward(req, rsp);
+        dispatcher.forward(req, rsp);
     }
 
     /** The refusal of form {@code form} on this request, or an empty one. Never {@code null}. */

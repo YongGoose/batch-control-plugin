@@ -1,0 +1,11 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: the classic sidebar entry of this action (core's t:actions includes action.jelly in
+     place of its own link) opens the request form in a dialog. Shown under the same condition as
+     the default entry: the action has an icon for this user. -->
+<j:jelly xmlns:j="jelly:core" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
+  <j:set var="bcIcon" value="${action.iconFileName}"/>
+  <j:if test="${bcIcon != null}">
+    <bc:dialogTask icon="${bcIcon}" title="${action.displayName}" href="${h.getActionUrl(it.url, action)}"
+                   dialogUrl="${rootURL}/${action.dialogUrl}"/>
+  </j:if>
+</j:jelly>

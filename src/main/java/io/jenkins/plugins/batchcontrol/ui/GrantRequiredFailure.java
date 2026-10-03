@@ -51,6 +51,8 @@ public class GrantRequiredFailure extends Failure {
     public GrantRequiredFailure(Item item, GrantAction action, String change) {
         super(message(item, action, change, canRequestGrants()));
         this.itemFullName = item.getFullName();
+        // D-65: a folder is suggested as FOLDER, not FOLDER_ONLY: deleting a folder takes its
+        // nested folders with it, which a folder-only window does not reach.
         this.scopeType = item instanceof Job ? "JOB" : "FOLDER";
         this.action = action.name();
         this.canRequest = canRequestGrants();
@@ -68,7 +70,7 @@ public class GrantRequiredFailure extends Failure {
         String head = "Change control: " + change + " '" + item.getFullName()
                 + "' needs an approved " + window + " permission window, and you do not hold one. ";
         if (canRequest) {
-            return head + "Request one under Batch Control > Grants (New Grant Request, action "
+            return head + "Request one under Batch Control > Grants (Request Change Permission, action "
                     + window + ") and try again once it is approved.";
         }
         return head + "You may not request permission windows yourself: ask a Jenkins "

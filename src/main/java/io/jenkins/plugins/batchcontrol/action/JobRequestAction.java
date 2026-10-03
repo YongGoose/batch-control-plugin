@@ -20,6 +20,7 @@ import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
+import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import jakarta.servlet.ServletException;
@@ -33,6 +34,8 @@ import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
 import jenkins.model.Jenkins;
 import jenkins.model.menu.Group;
 import jenkins.model.menu.Semantic;
+import jenkins.model.menu.event.DialogEvent;
+import jenkins.model.menu.event.Event;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
@@ -146,6 +149,32 @@ public class JobRequestAction implements Action {
     @CheckForNull
     public String getUrlName() {
         return canRequest() ? "batch-control" : null;
+    }
+
+    /**
+     * D-66: root-relative URL of the dialog form ({@code dialog.jelly}), which the classic sidebar
+     * entry ({@code action.jelly}) opens in core's dialog.
+     */
+    public String getDialogUrl() {
+        return job.getUrl() + "batch-control/dialog";
+    }
+
+    /**
+     * D-66: on the new job page the entry opens the request form in core's dialog, as core's own
+     * "Build with Parameters" does ({@link DialogEvent}); relative to the job's URL. The full page
+     * stays for the refused direct build (D-60) and direct links.
+     */
+    @Override
+    public Event getEvent() {
+        return DialogEvent.of("batch-control/dialog");
+    }
+
+    /**
+     * D-66: the check of the dialog view ({@code dialog.jelly}, rendered without a layout): the
+     * permission of {@link #getViewPermissions()}, on the job.
+     */
+    public void checkDialogPermission() {
+        job.checkPermission(BatchControlPermissions.REQUEST);
     }
 
     /** Permissions for the request form's {@code l:layout}. */
@@ -335,7 +364,8 @@ public class JobRequestAction implements Action {
                         "parameter", "parameters");
             }
         }
-        errors.attach(submitted).render(req, rsp, this);
+        // D-66: a refusal is shown where the form was, in the dialog or on this page.
+        errors.attach(submitted).render(req, rsp, this, Dialogs.refusalView(req, "index.jelly"));
     }
 
     /**

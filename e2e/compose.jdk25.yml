@@ -1,0 +1,13 @@
+# Overlay: the same e2e image on the Java 25 core image (hosting review round 3, R4-1;
+# e2e-11). Use together with compose.prefix.yml:
+#
+#   docker compose -f docker-compose.yml -f compose.prefix.yml -f compose.jdk25.yml up -d --build
+#
+# It builds a separate image tag; JENKINS_HOME is the same named volume, so run
+# scripts/reset.sh (or `down -v`) first for a fresh home.
+services:
+  jenkins:
+    build:
+      args:
+        JENKINS_TAG: 2.568.3-lts-jdk25
+    image: batch-control-e2e-jenkins:2.568.3-jdk25

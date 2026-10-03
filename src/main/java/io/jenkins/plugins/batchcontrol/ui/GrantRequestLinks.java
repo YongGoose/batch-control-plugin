@@ -11,7 +11,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Links to the new grant request form on the Grants screen, prefilled for one item and one
- * action (U-01 convention: {@code ?scopeType=&scopeFullName=&actions=#new-grant-request}).
+ * action (U-01 convention: {@code new?scopeType=&scopeFullName=&actions=}, D-66).
  * Used by refusal pages (a change or a move that needs a permission window, backlog #83).
  *
  * <p>Read-only. The item is resolved as the viewer, so an item the viewer cannot see yields no
@@ -48,6 +48,9 @@ public final class GrantRequestLinks {
         if (parsed == null || item == null) {
             return null;
         }
+        // D-65: a folder is suggested as FOLDER (the folder and everything below it), which covers
+        // every change these refusals are about, nested folders included; the form also offers
+        // FOLDER_ONLY, the narrower window, which does not reach into nested folders.
         String type;
         if (item instanceof Job) {
             type = "JOB";
@@ -60,7 +63,8 @@ public final class GrantRequestLinks {
     }
 
     static String url(String scopeType, String fullName, String action) {
-        return "batch-control/grants/?scopeType=" + scopeType + "&scopeFullName="
-                + Util.rawEncode(fullName) + "&actions=" + action + "#new-grant-request";
+        // D-66: the form page (the Grants list no longer carries the form).
+        return "batch-control/grants/new?scopeType=" + scopeType + "&scopeFullName="
+                + Util.rawEncode(fullName) + "&actions=" + action;
     }
 }

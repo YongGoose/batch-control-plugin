@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
   <l:layout title="Change Records" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Change Records"/>
@@ -9,8 +9,10 @@
         Records are read-only.
       </p>
 
-      <!-- Month selector: a plain GET form; changing the month never changes state. -->
-      <form method="get" action="." class="jenkins-buttons-row" style="margin-bottom: 1rem;">
+      <!-- Month selector: a plain GET form; changing the month never changes state. no-json and
+           the getForm adjunct keep core's crumb and json fields out of the URL (e2e-12 DEF-07). -->
+      <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.getForm"/>
+      <form method="get" action="." class="jenkins-buttons-row no-json" data-batch-control-get-form="true" style="margin-bottom: 1rem;">
         <a class="jenkins-button" href="?month=${it.previousMonth}">&#171; ${it.previousMonth}</a>
         <input type="month" name="month" value="${it.monthValue}" class="jenkins-input" style="width: auto;"/>
         <button type="submit" class="jenkins-button">Show</button>
@@ -64,7 +66,7 @@
                     <j:choose>
                       <!-- Linked only for a user who may open the Grants screen (SPEC item 2). -->
                       <j:when test="${r.grantId != null and grantLinks and links.grant(r.grantId)}">
-                        <a href="${rootURL}/batch-control/grants/${r.grantId}/">${r.grantId}</a>
+                        <bc:idLink href="${rootURL}/batch-control/grants/${r.grantId}/" value="${r.grantId}"/>
                       </j:when>
                       <j:when test="${r.grantId != null}">${r.grantId}</j:when>
                       <j:otherwise>

@@ -11,7 +11,8 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Attaches {@link FolderCreateWindowAction} to every folder (e2e-03 DEF-19). Attached
+ * Attaches {@link FolderCreateWindowAction} (e2e-03 DEF-19) and {@link FolderGrantRequestAction}
+ * (R4-14) to every folder. Attached
  * unconditionally, like {@link JobRequestActionFactory}; the action decides what it shows.
  */
 @Extension
@@ -27,6 +28,7 @@ public class FolderCreateWindowActionFactory extends TransientActionFactory<Abst
     @NonNull
     @Override
     public Collection<? extends Action> createFor(@NonNull AbstractFolder target) {
-        return List.of(new FolderCreateWindowAction((AbstractFolder<?>) target));
+        AbstractFolder<?> folder = (AbstractFolder<?>) target;
+        return List.of(new FolderCreateWindowAction(folder), new FolderGrantRequestAction(folder));
     }
 }
