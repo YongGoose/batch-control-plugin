@@ -307,15 +307,14 @@ public class RequestItem implements ModelObject {
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
     public boolean isCanCancel() {
-        return isPending()
-                && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
+        // D-38b: the service's predicate (requester with Request on the job, or Manage).
+        return isPending() && RunRequestService.get().canCancel(request);
     }
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
-        // D-38b: Request on the request's job (or a folder above it, or Jenkins).
-        return isPending() && isOwnedByCurrentUser()
-                && RequestScope.of(request.getJobFullName()).hasPermission(BatchControlPermissions.REQUEST);
+        // D-38b: the service's predicate (requester with Request on the job).
+        return isPending() && RunRequestService.get().canChangeApprovers(request);
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)

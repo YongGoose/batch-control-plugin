@@ -6,7 +6,6 @@ import hudson.model.Action;
 import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -81,9 +80,9 @@ public class ComputedFolderActivationAction implements Action, StaplerProxy {
         return folder.hasPermission(Item.READ) && JobActivationNoticeAction.isRunControlEnabled();
     }
 
-    /** D-38b: Request on this folder (assigned here, on a folder above it or globally). */
+    /** D-38b: Request (and Item/Read) on this folder, the service's predicate. */
     public boolean isCanRequest() {
-        return folder.hasPermission(BatchControlPermissions.REQUEST);
+        return ActivationService.get().canRequest(folder);
     }
 
     public boolean isActivated() {

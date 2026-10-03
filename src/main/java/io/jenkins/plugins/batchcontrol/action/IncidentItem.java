@@ -230,9 +230,9 @@ public class IncidentItem implements ModelObject {
             job.checkPermission(Item.READ);
             job.checkPermission(BatchControlPermissions.REQUEST);
             // D-38a: Item/Build is not required to request a rerun; the approval decides.
-        } else {
-            Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
         }
+        // D-38b: no Jenkins-level Request fallback when the job is gone; the service refuses a
+        // rerun of a job that no longer exists with its own message.
         FormErrors errors = new FormErrors("rerun");
         List<String> approvers = List.of();
         try {

@@ -7,7 +7,6 @@ import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
@@ -118,8 +117,8 @@ public class JobActivationNoticeAction implements Action {
 
     /** Whether the viewer may open the activation request form ({@code BatchControl/Request}). */
     public boolean isCanRequest() {
-        // D-38b: Request on this job (assigned here, on a folder above it or globally).
-        return job.hasPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request (and Item/Read) on this job, the service's predicate.
+        return ActivationService.get().canRequest(job);
     }
 
     /**
