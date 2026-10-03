@@ -134,8 +134,10 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
      * <p>e2e-03 DEF-20: role-strategy's Manage Roles, Assign Roles and permission template pages
      * address the installed strategy's descriptor ({@code it.strategy.descriptor} in Jelly and
      * {@code /descriptor/<class>/check*} from JavaScript). Every such method of the parent's
-     * descriptor is therefore exposed here and delegates to it, so the pages behave exactly as
-     * under the plain strategy. The web methods keep the parent's {@code @RequirePOST}; they
+     * descriptor is therefore exposed here, so the pages behave exactly as under the plain
+     * strategy. Methods role-strategy restricts, or removes in its UI rework (PR #766:
+     * {@code checkName} replaced by {@code checkSidName}), are re-implemented
+     * ({@link RoleSidChecks}) instead of delegated. The web methods keep the parent's {@code @RequirePOST}; they
      * only validate or render and the parent performs its own permission checks.
      */
     @Extension(optional = true)
@@ -177,7 +179,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         }
 
         /*
-         * Jenkins Security Scan alerts 31-36: the three role-page checks below serve role-strategy's
+         * Jenkins Security Scan alerts 31-36: the role-page checks below serve role-strategy's
          * Manage Roles and Assign Roles pages, so they need what role-strategy requires to open those
          * pages (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
          * implies them). The check is inline in each method so the scanner can see it.
@@ -189,7 +191,22 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         public FormValidation doCheckName(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
                     RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            return parent().doCheckName(value);
+            // Re-implemented (RoleSidChecks): role-strategy PR #766 removes the parent's method.
+            return RoleSidChecks.checkName(value);
+        }
+
+        /**
+         * Assign Roles (redesigned page, role-strategy PR #766): resolves the sid typed in the add
+         * dialog as a user or group ({@code type} {@code USER} or {@code GROUP}). Re-implemented
+         * because the method does not exist in the parent's descriptor of role-strategy 918.
+         */
+        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
+        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
+        @RequirePOST
+        public FormValidation doCheckSidName(@QueryParameter String value, @QueryParameter String type) {
+            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
+                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
+            return RoleSidChecks.checkSidName(value, type);
         }
 
         /**
