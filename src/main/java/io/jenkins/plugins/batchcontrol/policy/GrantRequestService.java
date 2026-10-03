@@ -102,7 +102,7 @@ public final class GrantRequestService {
      * <p>Rules: at least one action; duration in {@code (0, maxGrantMinutes]}; non-empty reason
      * of at most {@value #MAX_REASON_LENGTH} characters; the approver must be on the global
      * list and must not be the requester (admin exception per the self-approval policy); the
-     * scope target must exist (a job for JOB scope, a folder for FOLDER scope).
+     * scope target must exist (a job for JOB scope, a folder for FOLDER and FOLDER_ONLY scope).
      */
     public GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
                                String reason, String approver) {

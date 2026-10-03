@@ -113,7 +113,8 @@ final class MoveGuard {
         }
         // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
-        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE);
+        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE,
+                item instanceof ItemGroup);
         Grant createWindow = destName.isEmpty() ? null
                 : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
         List<String> windows = new ArrayList<>();

@@ -55,17 +55,20 @@ public class CreatedItemGrantListener extends ItemListener {
         }
         String user = auth.getName();
         String fullName = item.getFullName();
-        if (GrantService.get().findActiveGrants(user, fullName, GrantAction.CREATE).isEmpty()) {
+        ItemGroup<? extends Item> parent = item.getParent();
+        // Create lookups take the group the item was created in (D-65: a FOLDER_ONLY window
+        // confers Create in its folder only).
+        String group = fullName.lastIndexOf('/') < 0 ? "" : fullName.substring(0, fullName.lastIndexOf('/'));
+        if (GrantService.get().findActiveGrants(user, group, GrantAction.CREATE).isEmpty()) {
             return;
         }
-        ItemGroup<? extends Item> parent = item.getParent();
         if (parent instanceof AccessControlled
                 && GrantLayer.hasPermissionWithoutGrants((AccessControlled) parent, auth, Item.CREATE)) {
             // The holder could create here without the grant: matrix-auth's native behaviour
             // (a permanent creator entry) is not Batch Control's to change.
             return;
         }
-        if (GrantService.get().findActiveCreateGrant(user, fullName, item.getName()) == null) {
+        if (GrantService.get().findActiveCreateGrant(user, group, item.getName()) == null) {
             // D-40 defence in depth: the grant layer refuses a restricted Create before the item
             // exists (security.GrantAwareACL), so reaching this means the item came in through a
             // path that check did not see. It is not deleted here (that would take a SYSTEM
