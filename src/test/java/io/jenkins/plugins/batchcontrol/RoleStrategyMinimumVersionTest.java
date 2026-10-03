@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * #78, D-35f (matrix notes 223-224, T-02-120/121): Batch Control declares role-strategy 918 as the
+ * #78, D-35f, D-35g (matrix notes 223-224, 236, T-02-120/121): Batch Control declares role-strategy 927 as the
  * minimum of an <em>optional</em> dependency, which is what makes Jenkins refuse to load it next to
  * an older role-strategy (LIMITATIONS 9).
  *
@@ -23,19 +23,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ({@code the.hpl} on the test class path, written by maven-hpi-plugin from the same POM data as the
  * {@code .hpi} manifest) and T-02-121 asserts that the running Jenkins parsed it into the plugin's
  * optional dependency. The minimum is compared, not pinned to one string, because the scheduled
- * role-strategy-latest build (#77) raises {@code role-strategy.version}; a minimum below 918 must
- * fail. What Jenkins does with an older role-strategy is T-02-122 (RoleStrategyTooOldRealJenkinsTest).
+ * role-strategy-latest build (#77) raises {@code role-strategy.version}; a minimum below 927 must
+ * fail (D-35g raised it from 918). What Jenkins does with an older role-strategy is T-02-122 (RoleStrategyTooOldRealJenkinsTest).
  *
  * <p>Written from issue #78, D-35f, LIMITATIONS 9 and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class RoleStrategyMinimumVersionTest {
 
-    static final VersionNumber MINIMUM = new VersionNumber("918.v91e5468d8db_2");
+    static final VersionNumber MINIMUM = new VersionNumber("927.v9cf5527c4085");
 
-    /** T-02-120: the generated manifest declares role-strategy, optional, at 918 or newer. */
+    /** T-02-120: the generated manifest declares role-strategy, optional, at 927 or newer (D-35g). */
     @Test
-    public void t_02_120_manifestDeclaresOptionalRoleStrategyAtLeast918(JenkinsRule j) throws Exception {
+    public void t_02_120_manifestDeclaresOptionalRoleStrategyAtLeast927(JenkinsRule j) throws Exception {
         URL hpl = getClass().getClassLoader().getResource("the.hpl");
         assertNotNull(hpl, "premise: maven-hpi-plugin's test manifest the.hpl is on the test class path");
         Manifest mf;
@@ -57,9 +57,11 @@ public class RoleStrategyMinimumVersionTest {
         assertTrue(entry.endsWith(";resolution:=optional"), "role-strategy must stay optional: " + entry);
         String version = entry.substring("role-strategy:".length(), entry.indexOf(';'));
         assertTrue(new VersionNumber(version).isNewerThanOrEqualTo(MINIMUM),
-                "the declared minimum must be 918.v91e5468d8db_2 or newer, was " + version);
+                "the declared minimum must be 927.v9cf5527c4085 or newer (D-35g), was " + version);
         assertTrue(new VersionNumber("898.vc050ed2424ca_").isOlderThan(new VersionNumber(version)),
                 "guard: the BOM's 898 must be below the declared minimum");
+        assertTrue(new VersionNumber("918.v91e5468d8db_2").isOlderThan(new VersionNumber(version)),
+                "guard: 918, the previous minimum, must be below the declared minimum (D-35g)");
     }
 
     /** T-02-121: the running Jenkins knows role-strategy as an optional dependency with that minimum. */
@@ -73,6 +75,6 @@ public class RoleStrategyMinimumVersionTest {
         assertTrue(self.getMandatoryDependencies().stream().noneMatch(d -> "role-strategy".equals(d.shortName)),
                 "role-strategy must not be a mandatory dependency");
         assertTrue(new VersionNumber(dep.version).isNewerThanOrEqualTo(MINIMUM),
-                "the optional dependency's minimum must be 918 or newer, was " + dep.version);
+                "the optional dependency's minimum must be 927 or newer (D-35g), was " + dep.version);
     }
 }

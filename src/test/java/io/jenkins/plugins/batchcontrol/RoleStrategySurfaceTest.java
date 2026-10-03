@@ -41,7 +41,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import jenkins.model.Jenkins;
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
@@ -63,7 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * D-35f (role-strategy 918 is the minimum supported version) and SPEC item 2 ("With the Batch
+ * D-35f, D-35g (role-strategy 927 is the minimum supported version) and SPEC item 2 ("With the Batch
  * Control role-strategy strategy installed, Manage Roles ... work"). Matrix rows T-02-88..99
  * (note 190).
  *
@@ -199,27 +198,27 @@ public class RoleStrategySurfaceTest {
                 () -> assertTrue(has(team(), "carol", Item.CONFIGURE), "assignUserRole must give carol the team role"));
     }
 
-    /** T-02-94: the Assign Roles save keeps the class; the posted assignment replaces the old one. */
+    /**
+     * T-02-94 (rewritten by D-35g, note 236): role-strategy 927's Assign Roles page saves through the
+     * strategy endpoints {@code assignRole}, {@code unassignUserRole}, {@code deleteUser} and
+     * {@code deleteSid} (918's {@code manage/role-strategy/assignSubmit} is gone). The sequence keeps
+     * the class; carol gains the team role and bob loses it.
+     */
     @Test
     public void t_02_94_assignRolesSaveKeepsBatchControlClass() throws Exception {
-        savePath("Assign Roles save (assignSubmit)",
+        savePath("Assign Roles endpoints (assignRole, unassignUserRole, deleteUser, deleteSid)",
                 () -> {
                     assertTrue(has(team(), "bob", Item.CONFIGURE), "premise: bob holds the team role");
-                    JSONObject json = new JSONObject();
-                    json.put(RoleBasedAuthorizationStrategy.GLOBAL, new JSONArray()
-                            .element(assignment("admin", "admin"))
-                            .element(assignment("bob", "reader", "requester"))
-                            .element(assignment("carol", "reader", "requester"))
-                            .element(assignment("a1", "reader", "approver"))
-                            .element(assignment("m1", "reader", "manager")));
-                    json.put(RoleBasedAuthorizationStrategy.PROJECT, new JSONArray().element(assignment("carol", "team")));
-                    json.put(RoleBasedAuthorizationStrategy.SLAVE, new JSONArray());
-                    // RoleStrategyConfig#doAssignSubmit reads the assignment from "rolesMapping".
-                    submit("assignSubmit", new JSONObject().element("rolesMapping", json));
+                    assertFalse(has(team(), "carol", Item.CONFIGURE), "premise: carol holds no team role");
+                    String type = RoleBasedAuthorizationStrategy.PROJECT;
+                    rest("assignRole", "type", type, "roleName", "team", "sid", "carol");
+                    rest("unassignUserRole", "type", type, "roleName", "team", "user", "bob");
+                    rest("deleteUser", "type", type, "user", "bob");
+                    rest("deleteSid", "type", type, "sid", "bob");
                 },
                 () -> {
-                    assertTrue(has(team(), "carol", Item.CONFIGURE), "the Assign Roles save must give carol the team role");
-                    assertFalse(has(team(), "bob", Item.CONFIGURE), "the Assign Roles save must take the team role from bob");
+                    assertTrue(has(team(), "carol", Item.CONFIGURE), "the Assign Roles endpoints must give carol the team role");
+                    assertFalse(has(team(), "bob", Item.CONFIGURE), "the Assign Roles endpoints must take the team role from bob");
                 });
     }
 
@@ -303,20 +302,24 @@ public class RoleStrategySurfaceTest {
     }
 
     /**
-     * T-02-98: the scanner is not blind. On role-strategy 918 it must find the descriptor members
-     * {@code entryFor} and {@code hasAmbiguousEntries} and the descriptor URL {@code checkPattern},
-     * which the Manage/Assign Roles pages are known to use, so an empty or broken scan cannot make
+     * T-02-98: the scanner is not blind. On role-strategy 927 it must find the descriptor member
+     * {@code clazz} and the descriptor URLs {@code checkPattern} and {@code checkSidName}
+     * ({@code data-check-pattern-url}, {@code data-check-sid-name-url}), which the Manage/Assign Roles
+     * pages are known to use (918's {@code entryFor}/{@code hasAmbiguousEntries} are gone, D-35g,
+     * note 236), so an empty or broken scan cannot make
      * T-02-96/97 pass.
      */
     @Test
     public void t_02_98_scannerFindsKnownDescriptorMembers() throws Exception {
         Scan scan = scanRoleStrategyViews();
-        for (String known : new String[] {"entryFor", "hasAmbiguousEntries"}) {
+        for (String known : new String[] {"clazz"}) {
             assertTrue(scan.members.containsKey(known), "the scan of role-strategy " + version()
                     + " must find the descriptor member '" + known + "', found " + scan.members.keySet() + " (D-35f)");
         }
-        assertTrue(scan.urlMethods.containsKey("checkPattern"), "the scan of role-strategy " + version()
-                + " must find the descriptor URL 'checkPattern', found " + scan.urlMethods.keySet() + " (D-35f)");
+        for (String known : new String[] {"checkPattern", "checkSidName"}) {
+            assertTrue(scan.urlMethods.containsKey(known), "the scan of role-strategy " + version()
+                    + " must find the descriptor URL '" + known + "', found " + scan.urlMethods.keySet() + " (D-35g)");
+        }
         assertTrue(scan.files > 0, "the scan must have read role-strategy's Jelly files");
     }
 
@@ -341,7 +344,7 @@ public class RoleStrategySurfaceTest {
         assertTrue(manage.contains("data-check-pattern-url=\"" + contextPath + "/descriptor/" + VARIANT + "/checkPattern\""),
                 "the Manage Roles page must point its check-pattern URL at the Batch Control descriptor: " + excerpt(manage));
         assertFalse(manage.contains("/descriptor/" + PLAIN + "/"), "the Manage Roles page must not name role-strategy's descriptor");
-        String assign = page(""); // role-strategy 918: Assign Roles is the RoleStrategyConfig index page
+        String assign = page(""); // Assign Roles is the RoleStrategyConfig index page (918 and 927)
         assertTrue(assign.contains("/descriptor/" + VARIANT),
                 "the Assign Roles page must point its descriptor URL at the Batch Control descriptor: " + excerpt(assign));
         page("permission-templates");
@@ -412,10 +415,6 @@ public class RoleStrategySurfaceTest {
                 List.of(new NameValuePair("json", json.toString())));
         assertTrue(r.getStatusCode() < 400, "fixture: " + method + " must succeed for the administrator, got HTTP "
                 + r.getStatusCode() + ": " + excerpt(r.getContentAsString()));
-    }
-
-    private static JSONObject assignment(String user, String... roles) {
-        return new JSONObject().element("type", "USER").element("name", user).element("roles", JSONArray.fromObject(roles));
     }
 
     private String page(String name) throws Exception {
