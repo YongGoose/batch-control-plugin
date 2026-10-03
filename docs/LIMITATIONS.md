@@ -559,14 +559,29 @@ code does on purpose.
     the job is the approval notice on the job page and its **Request Run**
     link.
 
-45. **With the `rebuild` plugin installed, the new job page's "More actions"
-    menu fails on a job that has no builds.** The rebuild plugin's **Rebuild
-    Last** entry has no URL on such a job, and core's "More actions" menu on
-    the new job page throws a JavaScript `TypeError` on it, so none of the
-    menu's plugin entries, Batch Control's included, can be reached from
-    that menu on that job (seen in E2E-1). This is a defect in the rebuild
-    plugin, not in Batch Control. Workarounds: use the entries in the app
-    bar or the classic job page, or disable the rebuild plugin.
+## Records from earlier releases and strategy changes
+
+42. **Approved runs recorded by an earlier release have no user.** A run
+    record written before this release for a build started by an approved
+    request carries no user, so the user filter on History does not find it;
+    it can still be found by job or period. From this release on, such a run
+    carries the requester as its user, and the request id is kept as before.
+    Existing records are not rewritten.
+43. **Only Batch Control's own strategy actions write a `STRATEGY_CHANGE`
+    record.** Installing a Batch Control authorization strategy with the
+    administrative monitor's button, or reverting it with **Revert to the
+    plain strategy**, is recorded. Changing the authorization strategy
+    directly on **Manage Jenkins → Security** writes no Batch Control record,
+    so that change is not in the Batch Control history.
+
+## The new job page and pre-filled requests
+
+45. **With the rebuild plugin installed and the new job page enabled, the
+    "More actions" menu of a job that has no completed build fails to open**
+    (rebuild's **Rebuild Last** has no URL then). This affects every job,
+    controlled or not, until it has a completed build. On approval-required
+    jobs the menu offers **Rebuild** and **Rebuild Last**; running them is
+    refused and recorded like any direct run.
 
 47. **On the new job page, core's build button comes first and green, and
     Request Run second.** Core always places its own build button in the
@@ -593,21 +608,6 @@ code does on purpose.
     while a later, shorter one may still fit. The form always opens; a field
     whose value was not carried starts at its default and has to be entered
     again.
-
-## Records from earlier releases and strategy changes
-
-42. **Approved runs recorded by an earlier release have no user.** A run
-    record written before this release for a build started by an approved
-    request carries no user, so the user filter on History does not find it;
-    it can still be found by job or period. From this release on, such a run
-    carries the requester as its user, and the request id is kept as before.
-    Existing records are not rewritten.
-43. **Only Batch Control's own strategy actions write a `STRATEGY_CHANGE`
-    record.** Installing a Batch Control authorization strategy with the
-    administrative monitor's button, or reverting it with **Revert to the
-    plain strategy**, is recorded. Changing the authorization strategy
-    directly on **Manage Jenkins → Security** writes no Batch Control record,
-    so that change is not in the Batch Control history.
 
 ## Out of scope by design
 
