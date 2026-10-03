@@ -140,6 +140,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-02-105 | 2 (D-35f(a)) | integration | P0 | Batch Control role strategy, private realm (admin, reader with Overall/Read only, alice "Alice Liddell", carol `<i>Carol & Co</i>`) | admin POSTs `<img src=x onerror=alert(1)>` as USER and GROUP; carol USER | the value and the full name appear escaped only (note 193) | RoleSidValidationTest |
 | T-02-106 | 2 (D-35f(a)) | integration | P1 | Batch Control role strategy, private realm (admin, reader with Overall/Read only, alice "Alice Liddell", carol `<i>Carol & Co</i>`) | admin POSTs `checkName` `[USER:alice]`, `[GROUP:x]`, `[alice]`, `[USER:<img ...>]`; reader POSTs `[USER:alice]` | 918 behaviour: ok and named / not found / error "No type prefix" / escaped; reader 403 (note 193) | RoleSidValidationTest |
 | T-02-107 | 2 (D-35f(a)) | integration | P1 | `RealJenkinsExtension` with `useItemAndAgentRoles=true`; roleadmin holds Overall/Read and ItemRoles but not SystemRead | roleadmin and admin POST `checkSidName` ghost USER | roleadmin: ghost echoed, no "not found", no error (no realm lookup); guard: admin gets "not found" (note 193) | RoleSidValidationRoleAdminTest |
+| T-02-108 | 8 (D-35d, spec-review M-1) | integration | P1 | change control on, build authenticator configured, matrix-auth's `GlobalMatrixAuthorizationStrategy` installed | admin opens `/manage` | the `batch-control-strategy` monitor's message contains "per-item"; its install action (`.../migrate`) is a confirmation link whose `data-message` repeats the per-item warning (note 201) | StrategyMonitorPerItemTest |
+| T-02-109 | 8 (D-35d, spec-review M-1) | integration | P1 | as T-02-108 with the plain `ProjectMatrixAuthorizationStrategy` | admin opens `/manage` | the monitor offers the install action and says nothing about per-item properties (guard, note 201) | StrategyMonitorPerItemTest |
+| T-02-110 | 2 (D-35e/D-35f checklist) | integration | P2 | plugin installed | read the matrix variant's descriptor; admin opens `manage/configureSecurity/` | display name and security page entry are "Batch Control: Project-based Matrix Authorization Strategy" (note 201) | StrategyMonitorPerItemTest |
 | T-03-01 | 3 | integration | P0 | approvers=[a1], 요청자 u1 | u1이 결재자 u2 지정 | 요청 생성 거부 | RunRequestServiceTest |
 | T-03-02 | 3 | integration | P0 | 요청자 u1 | u1이 결재자 u1 지정 | 거부 (관리자 아님) | RunRequestServiceTest |
 | T-03-03 | 3 | integration | P0 | approvers=[a1], a1 지정 PENDING 요청, 이후 a1의 Approve 권한 회수 | a1이 승인 시도 | 결재 거부 (목록 등재 + 권한 보유 둘 다 필요) | RunRequestServiceTest |
@@ -965,6 +968,8 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 193. **D-35f(a) sid validation rows (T-02-100..107).** The Batch Control role strategy descriptor answers `checkSidName` (role-strategy PR #766) and `checkName` (918) itself. A private security realm with real accounts is used because the test harness dummy realm accepts every name, so "unknown" could not be checked. T-02-107 needs its own JVM: role-strategy enables its ItemRoles/AgentRoles permissions only through a system property read once when the class loads. Run against 122bafe (before the descriptor answered `checkSidName`), 6 of the 7 rows in RoleSidValidationTest failed; T-02-106 passed there as intended, because it pins the unchanged 918 `checkName` behaviour.
 
+201. **Global matrix per-item warning and the matrix variant's name (T-02-108..110).** SPEC 8 says the warning comes "before its install action". Core's administrative-monitor markup puts the controls container first in the DOM and shows it beside the message, so DOM order cannot express that. The rows therefore assert that the warning is in the message text shown with the button, and that the confirmation question repeats it. A first version asserted DOM order and failed on correct markup; it was the assertion that was wrong, not the product.
+
 
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
@@ -1029,3 +1034,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **dependency-01 rows, note 182**: +4 rows, all integration, P0: T-02-84/85/86 (M-3 absence boots), T-02-87 (M-2 upstream-name canary). Totals: P0 +4; T-02 +4.
 - **D-35e/D-35f rows, note 190**: +12 rows, all integration: T-02-88..98 (P0), T-02-99 (P1); 5 rows withdrawn (T-02-26..29, T-02-36; tests deleted, rows kept as withdrawn); T-02-17, T-02-42, T-02-43 rewritten. Totals: P0 +11, P1 +1; T-02 +12.
 - **D-35f(a) rows, note 193**: +8 rows, all integration: T-02-100/101/105 (P0), T-02-102/103/104/106/107 (P1). Totals: P0 +3, P1 +5; T-02 +8.
+- **Per-item warning and display name rows, note 201**: +3 rows, integration: T-02-108/109 (P1), T-02-110 (P2). Totals: P1 +2, P2 +1; T-02 +3.
