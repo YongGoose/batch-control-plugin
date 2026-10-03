@@ -9,7 +9,7 @@
     <l:main-panel>
       <l:app-bar title="Move not allowed"/>
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
-        <p style="margin-bottom: 0;">${it.message}</p>
+        <div>${it.message}</div>
         <j:if test="${it.itemUrl != null}">
           <div class="jenkins-!-margin-top-2"><a href="${rootURL}/${it.itemUrl}">${it.itemFullName}</a></div>
         </j:if>
