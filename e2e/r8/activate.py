@@ -7,7 +7,7 @@ def path(full):
     return "".join(f"/job/{p}" for p in full.split("/"))
 
 def activate(full, user="requester", action="ACTIVATE"):
-    r = api(user, path(full) + "/batch-control/activation/submit", "POST",
+    r = api(user, path(full) + "/batch-control-activation/submit", "POST",
             data=[("action", action), ("reason", f"e2e-08 {action} {full}"), ("approvers", "approver-1")])
     m = re.search(r"activations/([^/]+)/", r.headers.get("Location", ""))
     out = {"job": full, "submit": r.status_code, "location": r.headers.get("Location")}

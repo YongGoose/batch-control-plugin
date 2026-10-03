@@ -78,7 +78,7 @@ if (step === 'unicode-job') {
   const id = (r.page.url().match(/requests\/([^/]+)/) || [])[1];
   log(S + '-04 unicode request', id, flat(await text(r.page)).slice(0, 300));
   await shot(r.page, r.page.locator('#main-panel table').first(), `${S}-04-unicode-request`);
-  await r.page.goto(`${BASE}/job/${encodeURIComponent(name)}/batch-control/activation`);
+  await r.page.goto(`${BASE}/job/${encodeURIComponent(name)}/batch-control-activation`);
   await r.page.fill('textarea[name="reason"]', 'unicode activation');
   await r.page.locator('input[name="approvers"][value="approver-1"]').check({ force: true });
   await Promise.all([r.page.waitForLoadState('load'), r.page.locator('#main-panel form button[name="Submit"]').first().click()]);

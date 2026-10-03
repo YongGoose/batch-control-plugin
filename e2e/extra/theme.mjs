@@ -110,7 +110,7 @@ function screens(user, ids) {
     ['job-page', '/job/fresh-daily/'],
     ['job-new-locked', '/job/fresh-secret/'],
     ['run-form', '/job/fresh-daily/batch-control/'],
-    ['activation-form', '/job/fresh-daily/batch-control/activation'],
+    ['activation-form', '/job/fresh-daily/batch-control-activation'],
   ];
   if (user === 'admin') {
     return [...common,

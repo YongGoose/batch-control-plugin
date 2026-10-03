@@ -5,7 +5,7 @@
      shown while run control is on to viewers holding Item/Read. No script. -->
 <j:jelly xmlns:j="jelly:core">
   <j:if test="${it.shown}">
-    <j:set var="formUrl" value="${rootURL}/${it.folder.url}batch-control/activation"/>
+    <j:set var="formUrl" value="${rootURL}/${it.folder.url}batch-control-activation/"/>
     <j:set var="carrier" value="${it.carrier}"/>
     <j:choose>
       <j:when test="${carrier != null}">

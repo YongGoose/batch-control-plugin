@@ -11,7 +11,7 @@ for (const u of ['requester', 'reqonly', 'manager', 'approver-1', 'nobc', 'audit
   const link = await page.locator('.jenkins-alert a:has-text("Request activation")').count();
   vis[u] = { status: r.status(), notice: texts.map((t) => t.slice(0, 60)), link };
   if (['nobc', 'approver-1'].includes(u)) await shot(page, n.last(), `E-10-0-${u}-notice-no-link`);
-  const f = await page.goto(`${BASE}/job/${J}/batch-control/activation`);
+  const f = await page.goto(`${BASE}/job/${J}/batch-control-activation`);
   vis[u].form = f.status();
   await context.close();
 }

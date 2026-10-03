@@ -4,7 +4,7 @@ const branches = async () => ((await api('admin', '/job/team-mb/api/json?tree=jo
 const fmt = (bs) => JSON.stringify(bs.map((b) => `${b.name}: ${b.builds.map((x) => '#' + x.number + ' ' + x.result).join(',') || 'no builds'}`));
 async function request(action, reason) {
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/job/team-mb/batch-control/activation`);
+  await rq.page.goto(`${BASE}/job/team-mb/batch-control-activation`);
   await rq.page.fill('textarea[name="reason"]', reason);
   await rq.page.locator('input[name="approvers"][value="approver-1"] + label').click();
   await Promise.all([rq.page.waitForNavigation(), rq.page.locator('button:has-text("Submit Request")').click()]);

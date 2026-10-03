@@ -39,7 +39,6 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
-import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
@@ -57,7 +56,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * holders, so {@code /job/<name>/batch-control/} and every URL beneath it answer 404.
  */
 @Restricted(NoExternalUse.class)
-public class JobRequestAction implements Action, StaplerProxy {
+public class JobRequestAction implements Action {
 
     /** {@link FormErrors} name of the request form. */
     static final String FORM = "request";
@@ -136,23 +135,6 @@ public class JobRequestAction implements Action, StaplerProxy {
     @Override
     public Semantic getSemantic() {
         return Semantic.BUILD;
-    }
-
-    /**
-     * e2e re-audit DEF-06/DEF-28: the activation form lies beneath this action's URL
-     * ({@code <job>/batch-control/activation}), but it is not a run request, so its breadcrumbs
-     * must read {@code <job> > Activation} and no crumb may open the run request form. Core's
-     * breadcrumb bar lists every request ancestor that is a {@link hudson.model.ModelObject};
-     * a {@link StaplerProxy} is replaced by its target before it becomes an ancestor. For the
-     * activation URLs this action therefore hands the rest of the request to a
-     * {@link JobActivationRoute}, which is no model object and gives no crumb; every other URL
-     * is served by this action itself. The permission to reach this action at all
-     * ({@link #getUrlName()}) was decided before this is called, and
-     * {@link JobActivationForm#doSubmit} checks its own permissions.
-     */
-    @Override
-    public Object getTarget() {
-        return JobActivationRoute.isActivationRequest() ? new JobActivationRoute(job) : this;
     }
 
     /**

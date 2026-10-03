@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Screen contract used (note 96): the state is recognised by wording, case-insensitively —
  * "not activated" or "on hold" for a job that is not in service, "activated" without either of
- * those for one that is — and the request link by its target {@code batch-control/activation}.
+ * those for one that is — and the request link by its target {@code batch-control-activation/}.
  * Both directions are asserted on the same job so a notice that is always shown cannot pass.
  *
  * <p>Written from docs/SPEC.md items 6a and 13 and docs/DECISIONS.md D-36/D-39 only (no src/main
@@ -109,7 +109,7 @@ public class ActivationScreenTest {
         assertTrue(lower.contains("activated"), "the activated job's page must say it is activated");
         assertFalse(lower.contains("not activated"), "the activated job's page must not say 'not activated'");
         assertFalse(lower.contains("on hold"), "the activated job's page must not say 'on hold'");
-        assertTrue(activated.contains("batch-control/activation"), "the page must link to the activation form");
+        assertTrue(activated.contains("batch-control-activation"), "the page must link to the activation form");
 
         String hold = submitActivationOk(j, "u1", job, "HOLD", "pause", "a1");
         assertSuccess(decideActivation(j, "a1", hold, "approve", "ok"), "fixture: hold approval");
@@ -234,6 +234,6 @@ public class ActivationScreenTest {
         String lower = page.toLowerCase(Locale.ROOT);
         assertTrue(lower.contains("not activated") || lower.contains("on hold"),
                 "the page of " + what + " must say it is not activated or on hold");
-        assertTrue(page.contains("batch-control/activation"), "the page of " + what + " must link to the activation form");
+        assertTrue(page.contains("batch-control-activation"), "the page of " + what + " must link to the activation form");
     }
 }

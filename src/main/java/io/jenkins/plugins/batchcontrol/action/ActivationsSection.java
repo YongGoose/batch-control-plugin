@@ -7,7 +7,6 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
@@ -92,10 +91,8 @@ public class ActivationsSection implements ModelObject, StaplerProxy {
      * Bounded by the pending timeout, so it is not paged.
      */
     public List<ActivationRequest> getAwaitingDecision() {
-        if (!Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)) {
-            return List.of();
-        }
-        return ActivationService.get().listPendingFor(Jenkins.getAuthentication2().getName());
+        // #76: the same predicate as the Activations tab badge (ActivationService#countPendingFor)
+        return ActivationService.get().listAwaitingDecision(Jenkins.getAuthentication2());
     }
 
     public int getPage() {

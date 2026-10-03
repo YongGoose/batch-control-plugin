@@ -8,7 +8,7 @@ await page.fill('textarea[name="reason"]', 'verify: pending run request left to 
 await page.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
 await Promise.all([page.waitForLoadState('load'), page.click('button[name="Submit"]')]);
 ids.run = page.url().match(/requests\/([^/]+)/)[1];
-await page.goto(`${BASE}/job/fresh-secret/batch-control/activation`);
+await page.goto(`${BASE}/job/fresh-secret/batch-control-activation`);
 await page.fill('textarea[name="reason"]', 'verify: activation left to expire');
 await page.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
 await Promise.all([page.waitForLoadState('load'), page.locator('#main-panel form button[name="Submit"]').first().click()]);

@@ -44,6 +44,6 @@ public class JobRequestActionFactory extends TransientActionFactory<Job> {
     @Override
     public Collection<? extends Action> createFor(@NonNull Job target) {
         return List.of(new JobRequestAction(target), new JobGrantRequestAction(target),
-                new JobTriggerLockAction(target), new JobActivationNoticeAction(target));
+                new JobTriggerLockAction(target), new JobActivationNoticeAction(target), new JobActivationForm(target));
     }
 }

@@ -38,7 +38,7 @@ async function approveAs(user, url, comment = 'ok') {
 }
 async function activate(jobName, reason) {
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/job/${jobName}/batch-control/activation`);
+  await rq.page.goto(`${BASE}/job/${jobName}/batch-control-activation`);
   await rq.page.fill('textarea[name="reason"]', reason);
   await rq.page.locator('input[name="approvers"][value="approver-1"] + label').click();
   await Promise.all([rq.page.waitForNavigation({ waitUntil: 'load' }), rq.page.locator('button:has-text("Submit Request")').click()]);
@@ -141,7 +141,7 @@ rows['PR-03'] = async () => {
   await ad.context.close();
   // put the (already activated) target on hold through the HOLD request flow
   const rh = await login('requester');
-  await rh.page.goto(`${BASE}/job/${dst}/batch-control/activation`);
+  await rh.page.goto(`${BASE}/job/${dst}/batch-control-activation`);
   if (await rh.page.getByText('Request a Hold', { exact: false }).count()) {
     await rh.page.fill('textarea[name="reason"]', 'Hold before the unattended-path check (E-03).');
     await rh.page.locator('input[name="approvers"][value="approver-1"] + label').click();

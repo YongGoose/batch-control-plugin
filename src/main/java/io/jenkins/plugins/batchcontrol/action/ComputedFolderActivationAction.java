@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.StaplerProxy;
 
 /**
  * Activation on a computed folder (multibranch project, organization folder), which carries the
@@ -23,15 +22,15 @@ import org.kohsuke.stapler.StaplerProxy;
  *   <li>{@code summary.jelly} shows the folder's state (activated / not activated / on hold) on
  *       the folder page to {@code Item/Read} holders while run control is on, with a link to the
  *       request form for a {@code BatchControl/Request} holder.</li>
- *   <li>{@code <folder>/batch-control/activation} is the request form ({@link JobActivationForm}).
- *       Without {@code BatchControl/Request} {@link #getUrlName()} is {@code null}, so the whole
- *       {@code <folder>/batch-control/} space answers 404 (SPEC item 2, as on a job).</li>
+ *   <li>{@code <folder>/batch-control-activation/} is the request form, a separate action
+ *       ({@link JobActivationForm}, D-64) that is absent (404) without {@code BatchControl/Request}
+ *       (SPEC item 2, as on a job).</li>
  * </ul>
  *
  * <p>No sidebar entry; the action never changes state itself.
  */
 @Restricted(NoExternalUse.class)
-public class ComputedFolderActivationAction implements Action, StaplerProxy {
+public class ComputedFolderActivationAction implements Action {
 
     private final ComputedFolder<?> folder;
 
@@ -54,23 +53,15 @@ public class ComputedFolderActivationAction implements Action, StaplerProxy {
         return "Activation";
     }
 
-    /** {@code null} without {@code BatchControl/Request}: the URL space is absent (404). */
+    /**
+     * No URL of its own: the summary is rendered on the folder page, and the activation request
+     * form is its own action, {@link JobActivationForm} at {@code <folder>/batch-control-activation/}
+     * (D-64).
+     */
     @Override
     @CheckForNull
     public String getUrlName() {
-        return isCanRequest() ? "batch-control" : null;
-    }
-
-    /**
-     * Stapler: {@code <folder>/batch-control/activation} is served by a {@link JobActivationRoute},
-     * which is no model object, so the form's breadcrumbs read {@code <folder> > Activation} as on
-     * a job (e2e re-audit DEF-06). This action itself would otherwise add a second "Activation"
-     * crumb. Reaching this action at all needs {@code BatchControl/Request} ({@link #getUrlName()});
-     * the submission re-checks its permissions.
-     */
-    @Override
-    public Object getTarget() {
-        return JobActivationRoute.isActivationRequest() ? new JobActivationRoute(folder) : this;
+        return null;
     }
 
     // ---------------------------------------------------------------- summary (Jelly)

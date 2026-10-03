@@ -7,7 +7,7 @@ const rq = await login('requester');
 const rUrl = await requestRun(rq.page, '/job/batch-pipeline/', { reason: `Verify C-03 ${T}`, approvers: ['approver-1'] });
 const gUrl = (await requestGrant(rq.page, { type: 'JOB', scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Verify C-03 ${T} grant` })).url;
 const aUrl = (await requestGrant(rq.page, { type: 'JOB', scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Verify C-03 ${T} active` })).url; await decide(aUrl, 'approve', 'ok');
-await rq.page.goto(`${BASE}/job/b10-ui/batch-control/activation`);
+await rq.page.goto(`${BASE}/job/b10-ui/batch-control-activation`);
 await rq.page.fill('textarea[name="reason"]', `Verify C-03 ${T} activation`); await rq.page.locator('input[name="approvers"][value="approver-1"] + label').click();
 await Promise.all([rq.page.waitForNavigation(), rq.page.locator('button:has-text("Submit Request")').click()]); const actUrl = rq.page.url();
 const inc = (await api('admin', '/batch-control/history/incidents.csv')).text.split('\n').slice(1).find((l) => /,OPEN,/.test(l)).split(',')[0];
@@ -15,7 +15,7 @@ const inc = (await api('admin', '/batch-control/history/incidents.csv')).text.sp
 const collect = async (user, urls) => { const c = await login(user); const out = []; for (const u of urls) { await c.page.goto(u); out.push(...await c.page.locator('form[method="post" i], form[method="POST"]').evaluateAll((fs) => fs.map((f) => f.getAttribute('action')).filter(Boolean)).then((xs) => xs.map((x) => new URL(x, u).pathname))); } await c.context.close(); return out; };
 const acts = new Set([
   ...await collect('approver-1', [rUrl, gUrl, actUrl, `${BASE}/batch-control/incidents/${inc}/`]),
-  ...await collect('requester', [rUrl, gUrl, `${BASE}/job/batch-pipeline/batch-control/`, `${BASE}/job/b10-ui/batch-control/activation`, `${BASE}/batch-control/grants/`]),
+  ...await collect('requester', [rUrl, gUrl, `${BASE}/job/batch-pipeline/batch-control/`, `${BASE}/job/b10-ui/batch-control-activation`, `${BASE}/batch-control/grants/`]),
   ...await collect('manager', [`${BASE}/batch-control/grants/`]),
   ...await collect('admin', [`${BASE}/batch-control/incidents/${inc}/`, `${BASE}/manage/configure`]),
 ]);

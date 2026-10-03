@@ -1,0 +1,14 @@
+<?jelly escape-by-default='true'?>
+<!-- #72: the Batch Control notices as a card of core's new job page Overview (JobNoticesWidget is
+     only contributed there). Same views, text and permission rules as the classic page
+     (notices.jelly of each action); no card when neither notice has anything to say. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <j:if test="${it.shown}">
+    <l:card id="batch-control-notices" title="Batch Control">
+      <div>
+        <st:include it="${it.triggerLock}" page="notices.jelly"/>
+        <st:include it="${it.activationNotice}" page="notices.jelly"/>
+      </div>
+    </l:card>
+  </j:if>
+</j:jelly>

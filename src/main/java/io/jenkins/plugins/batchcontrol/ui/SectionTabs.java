@@ -2,13 +2,10 @@ package io.jenkins.plugins.batchcontrol.ui;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
-import io.jenkins.plugins.batchcontrol.model.Approvers;
-import io.jenkins.plugins.batchcontrol.model.GrantRequest;
-import io.jenkins.plugins.batchcontrol.model.RequestStatus;
-import io.jenkins.plugins.batchcontrol.model.RunRequest;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
-import io.jenkins.plugins.batchcontrol.store.Store;
+import io.jenkins.plugins.batchcontrol.model.PendingCount;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
+import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
+import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -16,6 +13,7 @@ import jenkins.management.Badge;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.springframework.security.core.Authentication;
 
 /**
  * The tabs of the Batch Control page (hosting review 2026-10-02, PR6): one entry per section the
@@ -24,9 +22,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * never disagree. Visibility is exactly {@link SectionAccess}'s link predicates, which are the
  * permission sets of the section gates.
  *
- * <p>Badges count the open items the viewer can act on, read from the open-request indexes of
- * the store ({@link Store#listOpenRunRequests()}, {@link Store#listOpenGrantRequests()},
- * {@link Store#listOpenActivationRequests()}), never from the full history:
+ * <p>Badges count the open items the viewer can act on, from each service's
+ * {@code countPendingFor} (#76: the one count the sections also use, read from the open-request
+ * indexes, never from the full history):
  * <ul>
  *   <li>a holder of {@code BatchControl/Approve}: PENDING requests on which they are a designated
  *       approver ("awaiting your decision", warning colour);</li>
@@ -100,19 +98,18 @@ public final class SectionTabs {
         SectionAccess links = new SectionAccess();
         List<Tab> tabs = new ArrayList<>();
         tabs.add(new Tab("overview", "", "Overview", "symbol-home-outline plugin-ionicons-api", null));
-        String me = Jenkins.getAuthentication2().getName();
-        boolean approver = Jenkins.get().hasPermission(BatchControlPermissions.APPROVE);
+        Authentication me = Jenkins.getAuthentication2();
         if (links.isRequests()) {
             tabs.add(new Tab("requests", "requests/", "Run Requests", "symbol-list-outline plugin-ionicons-api",
-                    runRequestBadge(me, approver)));
+                    badge(RunRequestService.get().countPendingFor(me), "run request")));
         }
         if (links.isActivations()) {
             tabs.add(new Tab("activations", "activations/", "Activations", "symbol-power-outline plugin-ionicons-api",
-                    activationBadge(me, approver)));
+                    badge(ActivationService.get().countPendingFor(me), "activation or hold request")));
         }
         if (links.isGrants()) {
             tabs.add(new Tab("grants", "grants/", "Grants", "symbol-key-outline plugin-ionicons-api",
-                    grantBadge(me, approver)));
+                    badge(GrantRequestService.get().countPendingFor(me), "grant request")));
         }
         if (links.isHistory()) {
             tabs.add(new Tab("changes", "changes/", "Changes", "symbol-document-text-outline plugin-ionicons-api", null));
@@ -124,54 +121,8 @@ public final class SectionTabs {
     }
 
     @CheckForNull
-    private static Badge runRequestBadge(String me, boolean approver) {
-        int decide = 0;
-        int mine = 0;
-        for (RunRequest r : Store.get().listOpenRunRequests()) {
-            if (r.getStatus() != RequestStatus.PENDING) {
-                continue; // the index also holds APPROVED requests waiting to run
-            }
-            if (approver && r.isDesignatedApprover(me)) {
-                decide++;
-            } else if (Approvers.sameUser(me, r.getRequester())) {
-                mine++;
-            }
-        }
-        return badge(decide, mine, "run request");
-    }
-
-    @CheckForNull
-    private static Badge grantBadge(String me, boolean approver) {
-        int decide = 0;
-        int mine = 0;
-        for (GrantRequest r : Store.get().listOpenGrantRequests()) {
-            if (r.getStatus() != RequestStatus.PENDING) {
-                continue;
-            }
-            if (approver && r.isDesignatedApprover(me)) {
-                decide++;
-            } else if (Approvers.sameUser(me, r.getRequester())) {
-                mine++;
-            }
-        }
-        return badge(decide, mine, "grant request");
-    }
-
-    @CheckForNull
-    private static Badge activationBadge(String me, boolean approver) {
-        int decide = 0;
-        int mine = 0;
-        for (ActivationRequest r : Store.get().listOpenActivationRequests()) {
-            if (r.getStatus() != RequestStatus.PENDING) {
-                continue;
-            }
-            if (approver && r.isDesignatedApprover(me)) {
-                decide++;
-            } else if (Approvers.sameUser(me, r.getRequester())) {
-                mine++;
-            }
-        }
-        return badge(decide, mine, "activation or hold request");
+    private static Badge badge(PendingCount count, String noun) {
+        return badge(count.getAwaitingDecision(), count.getOwn(), noun);
     }
 
     /**

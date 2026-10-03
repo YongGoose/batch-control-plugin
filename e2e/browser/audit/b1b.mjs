@@ -23,7 +23,7 @@ if (on('B1-07')) {
   await setGlobal(ad.page, { approversText: '' });
   const rq = await login('requester');
   const res = {};
-  for (const [k, p] of [['run', '/job/batch-daily/batch-control/'], ['grants', '/batch-control/grants/'], ['activation', '/job/batch-daily/batch-control/activation']]) {
+  for (const [k, p] of [['run', '/job/batch-daily/batch-control/'], ['grants', '/batch-control/grants/'], ['activation', '/job/batch-daily/batch-control-activation']]) {
     await rq.page.goto(BASE + p);
     const w = (await rq.page.locator('#main-panel .jenkins-alert').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ')).find((x) => /approver/i.test(x)) || '';
     const submit = await rq.page.locator('#main-panel button:has-text("Submit Request"), #main-panel button:has-text("Request Grant")').count();
