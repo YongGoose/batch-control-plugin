@@ -21,6 +21,7 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
+import io.jenkins.plugins.batchcontrol.ui.RequestScope;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -312,8 +313,9 @@ public class RequestItem implements ModelObject {
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
+        // D-38b: Request on the request's job (or a folder above it, or Jenkins).
         return isPending() && isOwnedByCurrentUser()
-                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+                && RequestScope.of(request.getJobFullName()).hasPermission(BatchControlPermissions.REQUEST);
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)
@@ -321,7 +323,7 @@ public class RequestItem implements ModelObject {
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
-        return SectionAccess.requests();
+        return SectionAccess.viewPermissions(SectionAccess.requests(), SectionAccess.canOpenRequests());
     }
 
     /** Link predicates: a link to another screen is rendered only if the user may open it. */
@@ -373,7 +375,8 @@ public class RequestItem implements ModelObject {
     @RequirePOST
     public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request is checked on the request's job; the service enforces requester-only.
+        RequestScope.of(request.getJobFullName()).checkPermission(BatchControlPermissions.REQUEST);
         FormErrors errors = new FormErrors("changeApprover");
         List<String> approvers;
         try {

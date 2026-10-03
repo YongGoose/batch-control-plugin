@@ -17,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.RequestScope;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
@@ -72,7 +73,7 @@ public class ActivationItem implements ModelObject {
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
-        return SectionAccess.activations();
+        return SectionAccess.viewPermissions(SectionAccess.activations(), SectionAccess.canOpenActivations());
     }
 
     /** Jelly helper: human-readable timestamp. */
@@ -122,8 +123,9 @@ public class ActivationItem implements ModelObject {
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
+        // D-38b: Request on the request's job (or a folder above it, or Jenkins).
         return isPending() && isOwnedByCurrentUser()
-                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+                && RequestScope.of(request.getJobFullName()).hasPermission(BatchControlPermissions.REQUEST);
     }
 
     /** Approver candidates for the change-approver form (global list ∩ job restriction). */
@@ -163,10 +165,14 @@ public class ActivationItem implements ModelObject {
                 "comment", "comment");
     }
 
-    /** POST {@code cancel}; Request or Manage, and the service enforces requester-or-Manage. */
+    /**
+     * POST {@code cancel}; Request on the request's item (D-38b) or Manage, and the service
+     * enforces requester-or-Manage.
+     */
     @RequirePOST
     public void doCancel(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
-        Jenkins.get().checkAnyPermission(BatchControlPermissions.REQUEST, BatchControlPermissions.MANAGE);
+        RequestScope.of(request.getJobFullName()).checkAnyPermission(BatchControlPermissions.REQUEST,
+                BatchControlPermissions.MANAGE);
         call(req, rsp, new FormErrors("cancel"), () -> ActivationService.get().cancel(request.getId()));
     }
 
@@ -174,7 +180,8 @@ public class ActivationItem implements ModelObject {
     @RequirePOST
     public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request is checked on the request's job; the service enforces requester-only.
+        RequestScope.of(request.getJobFullName()).checkPermission(BatchControlPermissions.REQUEST);
         FormErrors errors = new FormErrors("changeApprover");
         List<String> approvers;
         try {

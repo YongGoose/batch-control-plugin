@@ -13,7 +13,6 @@ import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.util.ArrayList;
 import java.util.List;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -119,7 +118,8 @@ public class JobActivationNoticeAction implements Action {
 
     /** Whether the viewer may open the activation request form ({@code BatchControl/Request}). */
     public boolean isCanRequest() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request on this job (assigned here, on a folder above it or globally).
+        return job.hasPermission(BatchControlPermissions.REQUEST);
     }
 
     /**

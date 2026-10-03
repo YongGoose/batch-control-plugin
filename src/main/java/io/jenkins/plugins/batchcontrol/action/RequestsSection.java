@@ -42,8 +42,12 @@ public class RequestsSection implements ModelObject, StaplerProxy {
     @Override
     public Object getTarget() {
         // Gate the entire /batch-control/requests/** subtree (list, details, POST endpoints go
-        // through their own additional checks in RequestItem).
-        Jenkins.get().checkAnyPermission(SectionAccess.requests());
+        // through their own additional checks in RequestItem). D-38b: a user with run requests
+        // of their own is admitted too (Request held only on some jobs or folders); rows and
+        // detail pages stay limited by Visibility.canSeeRunRequest.
+        if (!SectionAccess.canOpenRequests()) {
+            Jenkins.get().checkAnyPermission(SectionAccess.requests());
+        }
         HttpVerbs.refuseUnsupported();
         return this;
     }
@@ -56,7 +60,7 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
-        return SectionAccess.requests();
+        return SectionAccess.viewPermissions(SectionAccess.requests(), SectionAccess.canOpenRequests());
     }
 
     /** Link predicates: a link to another screen is rendered only if the user may open it. */

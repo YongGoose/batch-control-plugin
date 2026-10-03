@@ -12,7 +12,6 @@ import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.util.ArrayList;
 import java.util.List;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerProxy;
@@ -82,8 +81,9 @@ public class ComputedFolderActivationAction implements Action, StaplerProxy {
         return folder.hasPermission(Item.READ) && JobActivationNoticeAction.isRunControlEnabled();
     }
 
+    /** D-38b: Request on this folder (assigned here, on a folder above it or globally). */
     public boolean isCanRequest() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        return folder.hasPermission(BatchControlPermissions.REQUEST);
     }
 
     public boolean isActivated() {
