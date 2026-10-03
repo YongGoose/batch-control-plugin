@@ -61,7 +61,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - Acceptance: the job's own approver list (`jobApprovers`) in force at decision time applies to the deciding approver, and it applies when the designation is changed even if the requester has since lost `Item/Read` on the job (the job is resolved as SYSTEM for this check after the caller's permission checks). User ids are compared with Jenkins' configured user id strategy, not by plain string equality. (#23)
 - 수용 기준: 요청자 본인을 결재자로 지정할 수 없다(관리자 자가 결재 허용 시 관리자 예외).
 - 수용 기준: 결재자 변경 시 요청 이력에 (이전 결재자, 새 결재자, 변경자, 시각)이 남는다.
-- Acceptance: the requester designates one or more approvers (form field `approvers`, one user id per entry). Every designated approver must pass the checks above, and the requester may not be among them (administrator exception as above). Any one of them may approve or reject; the first decision closes the request and the record names who decided (`decidedBy`). Changing the designation edits the set and is recorded as (previous set, new set, changed by, time). A request stored before this change, with a single `approver`, loads as a one-element set, and the model keeps `getApprover()` returning the first member for compatibility (there is no REST/JSON view yet; item 14). (D-37)
+- Acceptance: the requester designates one or more approvers (form field `approvers`, one user id per entry). Every designated approver must pass the checks above, and the requester may not be among them (administrator exception as above). Any one of them may approve or reject; the first decision closes the request and the record names who decided (`decidedBy`). Changing the designation edits the set and is recorded as (previous set, new set, changed by, time). (D-37, D-69)
 - 수용 기준(D-37로 집합에 적용): 그 요청의 지정 결재자만 결재할 수 있다. 결재자 목록에 등재된 다른 사용자나 관리자도 대신 결재할 수 없다. 지정 결재자가 부재일 때는 결재 전까지 요청자가 결재자를 변경해 처리한다. (D-29)
 
 **4. 이력 저장소**
@@ -162,6 +162,10 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - Implementation: Batch Control variants of the matrix-auth and role-strategy strategies that layer active grants over the parent's ACLs, chosen on the global security page or installed by the monitor's migration button. The withdrawn generic wrapper is not supported: the plugin was never released, so no saved configuration needs converting. (D-35a, D-35e)
 - Acceptance: when the installed strategy is matrix-auth's global matrix strategy and change control is on, the `batch-control-strategy` monitor shows, before its install action, a warning that converting makes per-item authorization properties effective, and the install action asks for confirmation repeating it. (D-35d, hosting review)
 - Acceptance: while change control is on, moving an item (folders plugin Item/Move) by a user without Overall/Administer is allowed only if the user holds Item/Delete on the item and Item/Create on the destination, each native or from an active grant; a CREATE grant's name restriction is matched against the moved item's name, and the installed project naming strategy must accept the moved name in the destination (D-59b). A refused move changes nothing, answers with a plain message naming what is missing and is recorded as GRANT_VIOLATION; the refusal page links the item for a user who may read it. With change control off moves behave as in Jenkins. (D-59, D-59a)
+- Acceptance: a permission window's scope is a job (JOB), a folder with everything below it (FOLDER), or a folder and only its direct items (FOLDER_ONLY: the folder itself and items whose parent is that folder, not items in nested folders). Stored windows without the new type load unchanged. (D-65)
+- Acceptance: requesting a permission window (from the Batch Control grants page, a job page or a folder page) and requesting a run (the Request Run action) open a dialog on the current page; submitting it creates the request and leads to its detail page. The grants, run requests and activations pages list pending requests first, then active and ended items, each row linking to its detail page; the request form is not the first thing on the grants page. A permission window can be revoked from its own detail page as well as from the list. A refused direct build still leads to the pre-filled Request Run page (D-60). (D-66)
+- Acceptance: the Batch Control overview shows pending counts only as tab badges (no separate banner or count table). The run dashboard shows at most the 50 most recent runs and points to History and the CSV export for the rest. (D-67)
+- Acceptance: new requests and windows get UUID identifiers; identifiers stored in the earlier format still load and resolve. (D-68)
 
 **9. 변경 자동 기록**
 생성·수정·삭제·이름변경·이동은 경로와 무관하게 누가·언제·무엇을 바꿨는지 자동으로 기록됩니다.
@@ -235,7 +239,7 @@ RunRequest        id, jobFullName, parameters(Map), reason, requester, approvers
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED|EXECUTED|INVALIDATED),
                   createdAt, decidedAt, decisionComment, selfApproved,
                   approverChanges[{from[],to[],by,at}], incidentId?, executedRunId?
-GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGURE|DELETE],
+GrantRequest      id, scope{type: JOB|FOLDER|FOLDER_ONLY, fullName}, actions[CREATE|CONFIGURE|DELETE],
                   durationMinutes, reason, requester, approvers[], decidedBy?, createNamePattern?,
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment,
                   approverChanges[{from[],to[],by,at}]
