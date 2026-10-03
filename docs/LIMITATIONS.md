@@ -98,6 +98,15 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
+46. **A `config.xml` that still names the removed generic wrapper stops
+    Jenkins at boot.** The class
+    `io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy`
+    no longer exists, and Jenkins core treats the authorization strategy as
+    critical, so a controller whose `$JENKINS_HOME/config.xml` still names it
+    does not start. Replace the `<authorizationStrategy>` element by hand or
+    set the strategy with JCasC. No released version of the plugin ever
+    contained that class, so only development and test instances can be
+    affected (D-35e).
 
 ## Automation and generated jobs
 
@@ -587,16 +596,6 @@ code does on purpose.
     plain strategy**, is recorded. Changing the authorization strategy
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
-
-46. **A `config.xml` that still names the removed generic wrapper stops
-    Jenkins at boot.** The class
-    `io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy`
-    no longer exists, and Jenkins core treats the authorization strategy as
-    critical, so a controller whose `$JENKINS_HOME/config.xml` still names it
-    does not start. Replace the `<authorizationStrategy>` element by hand or
-    set the strategy with JCasC. No released version of the plugin ever
-    contained that class, so only development and test instances can be
-    affected (D-35e).
 
 ## Out of scope by design
 
