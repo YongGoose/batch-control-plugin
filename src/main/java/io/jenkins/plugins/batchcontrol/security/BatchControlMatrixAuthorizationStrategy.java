@@ -94,8 +94,8 @@ public class BatchControlMatrixAuthorizationStrategy extends ProjectMatrixAuthor
     }
 
     /**
-     * The Batch Control strategy with every global entry of a matrix-auth strategy (migration and
-     * the withdrawn wrapper's load conversion). Per-item properties live on the items and need
+     * The Batch Control strategy with every global entry of a matrix-auth strategy (the migration
+     * action). Per-item properties live on the items and need
      * nothing. Declared with a core parameter type so {@link MatrixStrategies} can call it without
      * loading matrix-auth classes first.
      */

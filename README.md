@@ -186,7 +186,7 @@ Batch Control is compiled against, which Jenkins enforces when loading plugins:
 | Optional plugin | Minimum version |
 |---|---|
 | `matrix-auth` | 3.3 |
-| `role-strategy` | 898.vc050ed2424ca_ |
+| `role-strategy` | 918.v91e5468d8db_2 |
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
@@ -287,8 +287,9 @@ Change control does nothing until this is done, and it is the step most easily
 missed: windows get approved and then have no effect at all.
 
 Under **Manage Jenkins → Security → Authorization**, choose **Batch Control:
-Matrix-based security** if you use (or want) Project-based Matrix Authorization,
-or **Batch Control: Role-Based Strategy** if you use role-strategy. Each is a
+Project-based Matrix Authorization Strategy** if you use (or want) matrix-auth,
+or **Batch Control: Role-Based Strategy** if you use role-strategy (918 or
+newer). Each is a
 drop-in variant of the corresponding upstream strategy: matrix, folder and agent
 authorization properties, and role assignments, all stay configurable and
 effective exactly as they are on the plain strategy. Already running the plain
@@ -296,7 +297,11 @@ strategy? Turn change control on first; an administrative monitor then appears
 on **Manage Jenkins** saying that grants confer nothing, with an **Install the
 Batch Control variant** button that converts your existing configuration into
 the matching variant in one click, with every entry kept. There is no such
-button on the Security page. To go back, use **Revert to the plain strategy**
+button on the Security page. If you run Jenkins' built-in global
+"Matrix-based security", note that grants need the *project*-matrix variant,
+and converting makes every per-item authorization property already saved on
+jobs, folders and agents effective from that moment; review them first
+([Limitations](#limitations)). To go back, use **Revert to the plain strategy**
 in the Batch Control section of **Manage Jenkins → System**, shown while a
 variant is installed. While an approved window is open, the selected variant
 *adds* that window's actions, `Item/Create`, `Item/Configure` or `Item/Delete`,
@@ -308,12 +313,11 @@ action: on the plugin set this project is built against, a `CONFIGURE` window
 additionally confers `Item/ExtendedRead`, `Credentials/UseItem` and
 `Run/Replay`, which is worth knowing before approving one
 ([Limitations](#limitations)). An administrative monitor warns if change control
-is on without one of these two variants installed. In the end-to-end tests,
-run against role-strategy 918, saving **Manage Roles** or **Assign Roles** keeps
-the Batch Control variant in place (the unit tests run against the plugin BOM's
-role-strategy 898), so grants keep conferring; the monitor's one-click
-reinstall stays available as a safety net in case a different role-strategy
-release swaps the variant out another way. Run control and recording do not
+is on without one of these two variants installed, for example after a plain
+strategy is selected on the Security page, and offers the one-click reinstall.
+On role-strategy 918 and newer, saving **Manage Roles** or **Assign Roles**
+keeps the Batch Control variant in place, so grants keep conferring; older
+role-strategy releases did not, which is why 918 is the minimum. Run control and recording do not
 need any of this. A window confers its permissions only when a Batch Control
 variant is selected *and* change control is on.
 
@@ -546,26 +550,27 @@ can take that long to appear or clear; replacing the authenticators through the
 security configuration updates it at once.
 
 **Grants work through Batch Control's own strategy variants.** Selecting
-**Batch Control: Matrix-based security** or **Batch Control: Role-Based
-Strategy** keeps that plugin's own per-item configuration (folder, job and
+**Batch Control: Project-based Matrix Authorization Strategy** or **Batch
+Control: Role-Based Strategy** keeps that plugin's own per-item configuration (folder, job and
 agent authorization properties, item and agent roles) configurable and
 effective, since each variant is a subclass of the corresponding upstream
 strategy. Selecting any other strategy gets you run control and recording only,
-and an administrative monitor says so. In the end-to-end tests, run against
-role-strategy 918, its own **Manage Roles** and **Assign Roles** saves keep the
-Batch Control variant in place (the unit tests run against the plugin BOM's
-role-strategy 898), so grants keep conferring; the administrative monitor's one-click
-reinstall remains available as a safety net should a different role-strategy
-release swap the variant out another way.
+and an administrative monitor says so. role-strategy must be 918 or newer:
+older releases replace the variant with the plain strategy on a **Manage
+Roles** save, so Batch Control declares 918 as its minimum, and on 918 the
+**Manage Roles** and **Assign Roles** saves keep the variant. role-strategy's
+pages are still being reworked upstream, so a regression test guards this
+integration and a breaking role-strategy release fails Batch Control's build.
 
-**A legacy wrapper around the global matrix strategy is unwrapped, not
-converted, on upgrade.** Converting it directly would make every stale
-per-item authorization property effective at once, so upgrading from an
-older release leaves the plain global matrix strategy installed instead.
-Moving to **Batch Control: Matrix-based security** afterwards is a separate,
-explicit step, with the administrative monitor's **Install the Batch Control
-variant** button on Manage Jenkins, which says plainly that per-item
-properties become effective from that point.
+**Converting from the global matrix strategy turns on per-item permissions.**
+Grants need the project-matrix variant. Jenkins' built-in global
+"Matrix-based security" ignores the authorization properties saved on jobs,
+folders and agents; once you convert to **Batch Control: Project-based Matrix
+Authorization Strategy**, every one of them is effective, stale ones included,
+and anyone with `Item/Configure` on an item can edit its permissions. The
+conversion is an explicit step, with the administrative monitor's **Install
+the Batch Control variant** button on Manage Jenkins, which says the same.
+Review the per-item properties first.
 
 **A protected job refused at queue entry fails its caller.** A Pipeline `build`
 step that hits the gate ends the upstream job as `FAILURE`, even with

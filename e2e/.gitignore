@@ -13,3 +13,7 @@ extra/node_modules
 *.jpg
 *.jpeg
 *.tmp.mjs
+r6/out/
+r6/__pycache__/
+r7/__pycache__/
+r8/__pycache__/
