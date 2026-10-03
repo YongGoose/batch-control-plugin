@@ -148,6 +148,18 @@ final class GrantAwareACL extends ACL {
         // the items the holder created.
         ACL parent = delegate;
         boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
+        if (allowed && MoveGuard.isMovePermission(permission) && itemFullName != null && !suspended()
+                && a.getName().equals(Jenkins.getAuthentication2().getName())) {
+            // D-59: the folders plugin checks Item/Move on the item first in move/move, and then
+            // drops the request without a word when the destination is not offered to the user (a
+            // name-restricted Create grant, or no Create at all). The whole move is decided here,
+            // as the same user, so a refusal is recorded and explained; ChangeControlledRelocation-
+            // Handler takes the same decision again right before the move.
+            MoveRefusal refusal = MoveGuard.checkCurrentRequest(itemFullName);
+            if (refusal != null) {
+                throw refusal;
+            }
+        }
         if (!allowed && decision.refusedName != null) {
             if (decision.recordable) {
                 decision.recordRefusal(a.getName());
