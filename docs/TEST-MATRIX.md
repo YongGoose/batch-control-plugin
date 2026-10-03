@@ -457,6 +457,15 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-08-64 | 8 (D-50b) (security-22 S-22-01) | integration | P1 | Global default running builds as `svc`, who holds Overall/Read, Job/Read and root-level Job/Configure in the strategy without a grant; a pending CONFIGURE request by bob | the same GETs | "SYSTEM" on both pages (note 165) | SystemBuildWarningTest |
 | T-08-65 | 8 usability (#89) | integration | P1 | change control on; u1 (RequestGrant) | u1 POSTs `grants/create` with redirects followed | one grant request stored; lands on `batch-control/grants/<id>/` with 200 showing the id, not on the Grants list (note 213) | GrantWebTest |
 | T-08-66 | 8, 1 (D-63, #85) | integration | P1 | change control on; u1 holds two windows; admin revokes one (guard) | admin turns change control off on the global form; turns it back on and opens `batch-control/grants/` | the ordinary revoke's GRANT_REVOKE detail lacks "change control turned off"; the switch's record has it; the grants screen lists the closed window with "change control turned off" (note 214) | SwitchSaveFailureTest |
+| T-08-100 | 8 (D-65) | integration | P0 | change control on, Batch Control matrix strategy; `ops/a`, `ops/sub/b`; u1 (Read, RequestGrant) | u1's FOLDER_ONLY CONFIGURE window on `ops` (form `scopeType=FOLDER_ONLY`) approved; u1 checks/saves | Configure on `ops`, `ops/a`, `ops/sub` (a direct item); `ops/a` config.xml 200. `ops/sub/b`: no Configure, config.xml 403, unchanged (note 233) | FolderOnlyScopeTest |
+| T-08-101 | 8 (D-65) | integration | P0 | same | FOLDER CONFIGURE window on `ops` | `ops/sub/b` and `ops/a` config.xml 200 (guard for T-08-100) (note 233) | FolderOnlyScopeTest |
+| T-08-102 | 8 (D-65) | integration | P0 | same | FOLDER_ONLY CREATE window on `ops`; u1 POSTs `createItem` in `ops`, `ops/sub`, root | `ops/made-here` created; `ops/sub` and root 4xx, nothing created (note 233) | FolderOnlyScopeTest |
+| T-08-103 | 8 (D-65, D-40) | integration | P0 | same | FOLDER_ONLY CREATE window on `ops` with `createNamePattern`=`/nightly-[a-z]+/`; create `nightly-sales`, `daily-sales` in `ops`, `nightly-deep` in `ops/sub` | first created; the other two 4xx, nothing created (note 233) | FolderOnlyScopeTest |
+| T-08-104 | 8 (D-65) | integration | P1 | same | FOLDER_ONLY request on the job `ops/a` via the form and the service | form 4xx, service throws, no request stored. Guard: FOLDER_ONLY on `ops` stored (note 233) | FolderOnlyScopeTest |
+| T-08-105 | 8 (D-65) | integration | P1 | same | form POST with `scopeType=FOLDER_ONLY`, `scopeFullName=ops`; a1 approves | request and window scope type FOLDER_ONLY, full name `ops` (note 233) | FolderOnlyScopeTest |
+| T-08-106 | 8 (D-65) | integration | P0 | u1 FOLDER and u2 FOLDER_ONLY CONFIGURE windows on `ops`; the FOLDER window's file does not name FOLDER_ONLY (premise) | restart | both active with their types; u1 still configures `ops/sub/b`; u2 configures `ops/a` but not `ops/sub/b` (note 233) | FolderOnlyScopeRestartTest |
+| T-08-107 | 8 (D-65 owner ruling) | integration | P0 | as T-08-100 | FOLDER_ONLY DELETE window on `ops`; u1 POSTs `doDelete` on `ops/sub`, `ops/sub/b`, `ops/a` | `ops/sub` (nested folder) and `ops/sub/b`: no Delete, 4xx, still exist; `ops/a` deleted (note 233) | FolderOnlyScopeTest |
+| T-08-108 | 8 (D-65) | integration | P1 | same | FOLDER DELETE window on `ops`; u1 deletes `ops/sub` | deleted (guard for T-08-107) (note 233) | FolderOnlyScopeTest |
 | T-09-01 | 9 | integration | P0 | 잡 X | UI로 설정 변경 | ChangeRecord(CONFIGURE, diff 포함) | ChangeRecordTest |
 | T-09-02 | 9 | integration | P0 | 잡 X | POST config.xml | ChangeRecord(CONFIGURE) — the job is idle here; a change made *while a build is running* (in-flight run unaffected, next run changed) is not covered: T-OS-09 | ChangeRecordTest |
 | T-09-03 | 9 | integration | P0 | 잡 X, 활성 Grant g1 | 설정 변경 | ChangeRecord.grantId == g1 | ChangeRecordTest |
@@ -1115,6 +1124,8 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 222. **Ids.** T-UI-70..77 and T-02-120 are taken out of sequence so that parallel backlog worktrees, which add rows from T-UI-56 and T-02-111 upward, do not collide.
 
+233. **FOLDER_ONLY scope (T-08-100..108, D-65).** Written from SPEC 8 and D-65 with the owner's rulings: CREATE only directly in the folder, DELETE on direct jobs but not on a nested folder, CONFIGURE of a nested folder itself allowed (it is an item whose parent is the folder). Configure/Delete are asserted both as the item's ACL answer and, for jobs, as the HTTP result (config.xml, `doDelete`). Each FOLDER_ONLY row has a FOLDER guard so it cannot pass because windows never confer. The grants form's FOLDER_ONLY option (rendering) is not asserted; T-08-105 asserts the POST binding.
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -1200,3 +1211,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **Backlog #83-#89 rows, notes 212-217**: +6 rows, integration: T-05-40 (P0), T-08-65/66, T-09-24, T-SEC-72 (P1), T-UI-56 (P2). Totals: P0 +1, P1 +4, P2 +1; T-05 +1, T-08 +2, T-09 +1, T-SEC +1, T-UI +1.
 - **Backlog #74/#75 rows, notes 210-211**: +6 rows, integration: T-SEC-70/71 (P0), T-05-37/38/39 (P1), T-05-36 (P2). Totals: P0 +2, P1 +3, P2 +1; T-SEC +2, T-05 +4.
 - **D-59b rows, notes 218-219**: +3 rows, integration, P0: T-SEC-73/74/75. Totals: P0 +3; T-SEC +3.
+- **R4 D-65 rows, note 233**: +9 rows, integration: T-08-100/101/102/103/106/107 (P0), T-08-104/105/108 (P1). Totals: P0 +6, P1 +3; T-08 +9.
