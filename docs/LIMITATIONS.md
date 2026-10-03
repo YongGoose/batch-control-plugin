@@ -568,6 +568,15 @@ code does on purpose.
     plugin, not in Batch Control. Workarounds: use the entries in the app
     bar or the classic job page, or disable the rebuild plugin.
 
+47. **On the new job page, core's build button comes first and green, and
+    Request Run second.** Core always places its own build button in the
+    first app-bar group with the build role and colours it green; plugins
+    cannot reorder or recolour it. On a job that requires approval Batch
+    Control relabels it **Direct Build (needs approval)**, so **Request Run**
+    appears after it, also green. For a user who may request a run, both lead
+    to the same Request Run form, with any submitted parameter values filled
+    in (D-60). Accepted by the owner (E2E-1 DEF-02).
+
 ## Records from earlier releases and strategy changes
 
 42. **Approved runs recorded by an earlier release have no user.** A run
