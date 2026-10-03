@@ -140,4 +140,45 @@ public class MoveRefusalPageTest {
         assertEquals(1, violations.size(), "the refused move is recorded once as GRANT_VIOLATION, got " + violations);
         assertEquals("u1", violations.get(0).getUser(), "the GRANT_VIOLATION names u1");
     }
+
+    /**
+     * T-SEC-64 (SPEC 8 D-59 line: "the refusal page links the item for a user who may read it"):
+     * the browser refusal page of T-SEC-63 carries an anchor to the item's own page, which u1 may
+     * read. A user who cannot read the item cannot reach its move endpoint at all (core answers
+     * 404 before the move), so the negative half has no page to inspect (note 200).
+     */
+    @Test
+    public void t_sec_64_refusalPageLinksTheItemForAReader() throws Exception {
+        Item item = prod.getItem(HOSTILE);
+        assertTrue(item.getACL().hasPermission2(hudson.model.User.getById("u1", true).impersonate2(), Item.READ),
+                "premise: u1 may read the item");
+        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, "u1");
+        wc.getOptions().setJavaScriptEnabled(false);
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(item.getUrl() + "move/move"), HttpMethod.POST);
+        request.setAdditionalHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        request.setRequestParameters(List.of(new NameValuePair("destination", "/team")));
+        Page page = wc.getPage(request);
+        assertEquals(403, page.getWebResponse().getStatusCode(), "premise: the move is refused");
+        assertTrue(page instanceof HtmlPage, "premise: a browser gets an HTML page");
+        HtmlPage html = (HtmlPage) page;
+        String target = decode(new java.net.URL(j.getURL(), item.getUrl()).getPath());
+        List<String> seen = new java.util.ArrayList<>();
+        boolean linked = false;
+        // only the page body: the breadcrumb bar may link the item for unrelated reasons
+        org.htmlunit.html.DomNode main = html.querySelector("#main-panel");
+        assertNotNull(main, "premise: the standard layout has a main panel");
+        for (org.htmlunit.html.DomNode n : main.querySelectorAll("a[href]")) {
+            String href = ((DomElement) n).getAttribute("href");
+            String path = decode(html.getFullyQualifiedUrl(href).getPath());
+            seen.add(path);
+            if (path.equals(target) || path.equals(target.replaceAll("/$", ""))) {
+                linked = true;
+            }
+        }
+        assertTrue(linked, "the refusal page body must link the item " + target + " for a reader; links: " + seen);
+    }
+
+    private static String decode(String path) {
+        return java.net.URLDecoder.decode(path.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8);
+    }
 }
