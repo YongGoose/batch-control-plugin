@@ -229,7 +229,7 @@
                 <artifactItem>
                   <groupId>org.jenkins-ci.plugins</groupId>
                   <artifactId>role-strategy</artifactId>
-                  <version>898.vc050ed2424ca_</version>
+                  <version>918.v91e5468d8db_2</version>
                   <type>hpi</type>
                   <outputDirectory>${project.build.testOutputDirectory}/old-plugins</outputDirectory>
                   <destFileName>role-strategy.hpi</destFileName>
