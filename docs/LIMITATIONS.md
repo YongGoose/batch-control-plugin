@@ -574,6 +574,21 @@ code does on purpose.
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
 
+## Moving items
+
+44. **While change control is on, moving an item needs `Item/Delete` on it.**
+    A move is treated as deleting the item at the source and creating it at
+    the destination, so a user without `Overall/Administer` needs `Item/Delete`
+    on the item and `Item/Create` on the destination, each standing or from an
+    active window (D-59). The cost: a non-administrator who holds `Item/Move`
+    and `Item/Create` standing but not `Item/Delete` can no longer move items
+    while change control is on, although plain Jenkins would let them. Give
+    such a user a `DELETE` window on the item for the move. The refused move changes nothing and is recorded as a
+    `GRANT_VIOLATION`. A user who holds `Item/Delete` on two jobs can still
+    swap them by moving them in and out of a job-scoped window's name; such a
+    user could already delete and recreate them. With change control off,
+    moves behave exactly as in Jenkins.
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting

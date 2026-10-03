@@ -53,7 +53,14 @@ takes anything away and it imposes nothing on someone who holds the permission
 standing, which is what the "standing change permissions" monitor is for. Deleting
 is the one exception: while change control is on, deleting a job needs an active
 `DELETE` window even from a user whose standing permissions would allow it, and
-only administrators are not vetoed. Once
+only administrators are not vetoed. Moving an item between folders (the folders
+plugin's `Item/Move`) is treated as deleting it here and creating it there: while
+change control is on, a user without `Overall/Administer` can move an item only
+if they hold `Item/Delete` on the item and `Item/Create` at the destination, each
+either standing or from an active window, and a `CREATE` window's name
+restriction is matched against the moved item's name. A refused move changes
+nothing, tells the user why and is recorded as a `GRANT_VIOLATION`; the cost is
+in [Limitations](docs/LIMITATIONS.md#moving-items). Once
 it is approved they do the work under their own account, with every usual Jenkins
 safeguard still in place. What the approver decides is *who* may change *what*, and
 *for how long*; it is not an approval of the change itself, which does not exist
