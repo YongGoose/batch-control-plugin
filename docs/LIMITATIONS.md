@@ -627,6 +627,41 @@ code does on purpose.
     within the parent folder, and scripts need `Overall/Administer`, which
     is exempt anyway.
 
+## The new job page and pre-filled requests
+
+45. **With the rebuild plugin installed and the new job page enabled, the
+    "More actions" menu of a freestyle-type job that has no completed build
+    fails to open**, because rebuild's **Rebuild Last** entry has no URL on
+    such a job. This affects every such job, controlled or not, until it has
+    a completed build; Pipeline jobs without builds open the menu normally.
+    On approval-required jobs the menu offers only **Rebuild Last** (the
+    rebuild plugin's **Rebuild** is hidden, see item 41); running it is
+    refused and recorded like any direct run.
+47. **On the new job page, core's build button comes first and green, and
+    Request Run second.** Core always places its own build button in the
+    first app-bar group with the build role and colours it green; plugins
+    cannot reorder or recolour it. On a job that requires approval Batch
+    Control relabels it **Direct Build (needs approval)**, so **Request Run**
+    appears after it, also green. For a user who may request a run, both lead
+    to the same Request Run form, with any submitted parameter values filled
+    in (D-60). Accepted by the owner (E2E-1 DEF-02).
+48. **Pre-filled parameter values travel in the URL.** When a refused build
+    submission leads to the Request Run form with the submitted values filled
+    in (D-60), the values of non-sensitive parameters are carried in the
+    redirect URL's query string. From there they can reach the browser
+    history, reverse-proxy and servlet container access logs, and the
+    `Referer` header of the next request. Password and other sensitive
+    parameters are never carried. Anything typed into a plain string or text
+    parameter is not sensitive in Jenkins' sense, so do not put secrets in
+    such parameters. Long values are not carried. A value is carried only if
+    it is at most 2,000 characters long, and the redirect's URL-encoded query
+    (including the `?`, the `&` separators and each `p.<name>=` prefix) is
+    capped at 4,000 characters: values are added in the order the parameters
+    are defined, and one that would push the query over the cap is left out,
+    while a later, shorter one may still fit. The form always opens; a field
+    whose value was not carried starts at its default and has to be entered
+    again.
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting
