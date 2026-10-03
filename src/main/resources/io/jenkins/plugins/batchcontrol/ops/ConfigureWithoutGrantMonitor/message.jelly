@@ -22,7 +22,7 @@
              ("User" or "Group"), its sid as written in the strategy and every permission found,
              so a group entry reads exactly like a user entry. -->
         <strong>Batch Control:</strong> change control is enabled, but the entries below hold
-        Item Create/Configure/Delete directly from the authorization strategy, outside the
+        Item Create/Configure/Delete/Move directly from the authorization strategy, outside the
         just-in-time grant flow. Changes made through them bypass grant control and are only
         recorded in the audit history.
         <table class="jenkins-table jenkins-table--small" style="margin: 0.5rem 0; width: auto;">

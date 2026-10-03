@@ -147,11 +147,24 @@ public class ItemChangeListener extends ItemListener {
         if (!(item instanceof Job)) {
             return;
         }
-        Job<?, ?> job = (Job<?, ?>) item;
+        applyActivationLock((Job<?, ?>) item, "New job", "creating the job has not put it into service");
+    }
+
+    /**
+     * Applies the D-34 lock to {@code job} exactly as for a newly created job ({@code approvalRequired},
+     * {@code blockTimer} and {@code blockUpstream} on, {@code allowedUpstreamJobs} emptied,
+     * {@code jobApprovers} kept), unless it is a computed child (D-32) or already locked. Used for
+     * creation and for a job moved under change control (D-59a). The caller decides whether the
+     * switches call for it. A failure is logged, never thrown.
+     *
+     * @param what    how the log line names the job, for example {@code "New job"}
+     * @param outcome the end of the log line, saying what the lock means here
+     */
+    public static void applyActivationLock(Job<?, ?> job, String what, String outcome) {
         String fullName = job.getFullName();
         if (isComputedChild(job)) {
             LOGGER.fine(() -> "Job '" + fullName + "' is a computed child of '"
-                    + job.getParent().getFullName() + "'; the new-job activation lock does "
+                    + job.getParent().getFullName() + "'; the activation lock does "
                     + "not apply to it. Its runs are still recorded.");
             return;
         }
@@ -184,12 +197,10 @@ public class ItemChangeListener extends ItemListener {
                 }
                 throw e;
             }
-            LOGGER.info(() -> "New job '" + fullName + "' starts locked while run control is on: "
-                    + "approvalRequired, blockTimer and blockUpstream are all on, so creating the "
-                    + "job has not put it into service");
+            LOGGER.info(() -> what + " '" + fullName + "' starts locked while run control is on: "
+                    + "approvalRequired, blockTimer and blockUpstream are all on, so " + outcome);
         } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to apply the new-job activation lock to the "
-                    + "newly created job '" + fullName + "'", e);
+            LOGGER.log(Level.WARNING, "Failed to apply the activation lock to the job '" + fullName + "'", e);
         } finally {
             ChangeRecording.endSuppression(previouslySuppressed);
         }

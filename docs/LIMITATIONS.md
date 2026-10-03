@@ -597,6 +597,36 @@ code does on purpose.
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
 
+## Moving items
+
+44. **While change control is on, moving an item needs `Item/Delete` on it.**
+    A move is treated as deleting the item at the source and creating it at
+    the destination, so a user without `Overall/Administer` needs `Item/Delete`
+    on the item and `Item/Create` on the destination, each standing or from an
+    active window (D-59). The cost: a non-administrator who holds `Item/Move`
+    and `Item/Create` standing but not `Item/Delete` can no longer move items
+    while change control is on, although plain Jenkins would let them. A
+    `DELETE` window on the item lets such a user move it, but the move then
+    costs what a delete and recreate would: while run control is also on, a
+    job moved by a non-administrator is no longer activated, gets the same
+    lock as a newly created job and is recorded as `HELD` naming the move, so
+    it does not run unattended until a new activation request is approved
+    (D-59a). Administrators' moves keep the job's state. The refused move
+    changes nothing and is recorded as a `GRANT_VIOLATION`. A user who holds
+    `Item/Delete` on two jobs can still swap them by moving them in and out
+    of a job-scoped window's name; such a user could already delete and
+    recreate them, and with run control on the swapped jobs arrive locked
+    and not activated, as recreated ones would. With change control off,
+    moves behave exactly as in Jenkins.
+
+    The rule governs the folders plugin's Move action, in the UI and over
+    REST, which use the same endpoint. Jenkins core offers no way to veto a
+    move, so a move made by another plugin that calls `Items.move` directly,
+    or by a third-party relocation handler ordered before Batch Control's,
+    is outside it. Core itself has no CLI move command, its renames stay
+    within the parent folder, and scripts need `Overall/Administer`, which
+    is exempt anyway.
+
 ## Out of scope by design
 
 Bypass by `Overall/Administer`; detecting edits made directly on disk; restarting

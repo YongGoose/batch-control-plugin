@@ -14,6 +14,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,7 +37,7 @@ import org.springframework.security.core.userdetails.UserDetails;
  * Warns administrators when change control cannot actually control changes (SPEC item 8):
  * change control is on, but either the global authorization strategy is not a Batch Control
  * strategy (so grants can never apply, D-35a), or some known non-admin user holds
- * Item/Configure, Item/Create or Item/Delete directly from the strategy — a standing change
+ * Item/Configure, Item/Create, Item/Delete or Item/Move (D-59) directly from the strategy — a standing change
  * permission that bypasses the JIT grant process.
  *
  * <p>The scan uses the strategy's root ACL, which carries no grant scope (S-13), so what it finds
@@ -72,6 +73,9 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
 
     private static final Permission[] CHANGE_PERMISSIONS =
             {Item.CONFIGURE, Item.CREATE, Item.DELETE};
+
+    /** D-59: the folders plugin's Item/Move ({@code RelocationAction.RELOCATE}, not API there). */
+    private static final String MOVE_PERMISSION_ID = "hudson.model.Item.Move";
 
     /** Principal of the group probe: never a real account, so only group entries apply to it. */
     private static final String GROUP_PROBE_PRINCIPAL = "batch-control:group-probe";
@@ -320,7 +324,12 @@ public class ConfigureWithoutGrantMonitor extends AdministrativeMonitor {
     /** The change permissions {@code auth} holds on the root ACL, minus those in {@code except}. */
     private static List<String> heldPermissions(ACL rootAcl, Authentication auth, List<String> except) {
         List<String> held = new ArrayList<>();
-        for (Permission permission : CHANGE_PERMISSIONS) {
+        List<Permission> permissions = new ArrayList<>(Arrays.asList(CHANGE_PERMISSIONS));
+        Permission move = Permission.fromId(MOVE_PERMISSION_ID);
+        if (move != null) {
+            permissions.add(move);
+        }
+        for (Permission permission : permissions) {
             String name = permission.group.title + "/" + permission.name;
             if (!except.contains(name) && rootAcl.hasPermission2(auth, permission)) {
                 held.add(name);
