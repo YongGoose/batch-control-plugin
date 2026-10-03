@@ -219,7 +219,7 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
     /**
      * D-58b (3): "Mark as reviewed" for one listed item. Administrators only; the item and
      * everything below it leave the "changed under a grant" state and a GUARD_REVIEWED record is
-     * written, then the confirmation view ({@code reviewed}) is shown. Answers 404 for an item that
+     * written, then the confirmation page ({@code batch-control/reviewed}) is shown. Answers 404 for an item that
      * does not exist.
      */
     @RequirePOST
@@ -237,9 +237,9 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
             return HttpResponses.notFound(); // S-29-09: no stack trace, no reflected name
         }
         grants.markReviewed(target);
-        // #86: land on the confirmation view (reviewed.jelly, Administer only). The name comes
+        // #86: land on the confirmation page (<root>/batch-control/reviewed, Administer only). The name comes
         // from the resolved item, not the raw parameter, and is URL-encoded.
-        return HttpResponses.redirectTo("reviewed?item="
+        return HttpResponses.redirectViaContextPath("batch-control/reviewed?item="
                 + java.net.URLEncoder.encode(target.getFullName(), java.nio.charset.StandardCharsets.UTF_8));
     }
 
