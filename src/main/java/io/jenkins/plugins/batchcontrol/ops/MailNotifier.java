@@ -108,6 +108,10 @@ public class MailNotifier extends BatchControlNotifier {
             text.append(oneLine(detail)).append('\n');
         }
         text.append("Requester: ").append(nullToEmpty(n.getRequester())).append('\n');
+        // D-38a: fixed sentences from the plugin (never user input), each on its own line.
+        for (String notice : n.getNotices()) {
+            text.append(oneLine(notice)).append('\n');
+        }
         // security-08 S-08: the link comes before the free-text reason, and every reason line is
         // quoted, so a multi-line reason cannot pose as another field (such as a forged link).
         if (n.getUrl() != null) {

@@ -11,6 +11,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -93,9 +94,16 @@ public final class NotificationDispatcher {
     public static void run(NotificationEvent event, RunRequest request) {
         try {
             List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
+            // D-38a: the approver is told when the requester lacks Item/Build, so approving also
+            // authorises a run the requester could not start. Evaluated here, on the caller's
+            // thread, not on the delivery thread.
+            List<String> notices = (event == NotificationEvent.REQUEST_CREATED
+                    || event == NotificationEvent.APPROVERS_CHANGED)
+                    && RunRequestService.get().requesterLacksBuild(request)
+                    ? List.of(RunRequestService.REQUESTER_LACKS_BUILD_NOTICE) : null;
             dispatch(event, new Notification(Notification.KIND_RUN, request.getId(),
                     request.getJobFullName(), request.getRequester(), request.getReason(), recipients,
-                    url("batch-control/requests/" + request.getId() + "/")));
+                    url("batch-control/requests/" + request.getId() + "/"), null, null, notices));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of run request "
                     + request.getId(), e);
