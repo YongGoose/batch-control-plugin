@@ -159,7 +159,7 @@
                      window state goes below the status, and the reason column takes the rest. -->
                 <tr>
                   <td style="white-space: nowrap;"><a href="${base}${r.id}/">${r.id}</a></td>
-                  <td>${r.scope.type}: ${r.scope.fullName}</td>
+                  <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
                   <td>${it.join(r.actions)}</td>
                   <td style="white-space: nowrap;">${r.durationMinutes} min</td>
                   <td>${r.reason}</td>
@@ -217,15 +217,15 @@
               <j:forEach var="g" items="${it.activePageItems}">
                 <tr>
                   <td style="white-space: nowrap;">${g.id}</td>
-                  <td>${g.user}</td>
-                  <td>${g.scope.type}: ${g.scope.fullName}</td>
+                  <td style="white-space: nowrap;">${g.user}</td>
+                  <td style="white-space: nowrap;">${g.scope.type}: ${g.scope.fullName}</td>
                   <td>${it.join(g.actions)}</td>
                   <td><code>${it.createNameLabel(g)}</code></td>
-                  <td>${it.format(g.grantedAt)}</td>
-                  <td>${it.format(g.expiresAt)}</td>
-                  <td>${it.remaining(g.expiresAt)}</td>
+                  <td style="white-space: nowrap;">${it.format(g.grantedAt)}</td>
+                  <td style="white-space: nowrap;">${it.format(g.expiresAt)}</td>
+                  <td style="white-space: nowrap;">${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
-                    <td>
+                    <td style="white-space: nowrap;">
                       <l:confirmationLink class="jenkins-button jenkins-button--tertiary jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
                                           title="Revoke this grant?" okText="Revoke"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
@@ -252,6 +252,9 @@
       <!-- DEF-18 (SPEC item 8, D-33): the history of ended windows, with a re-request link that
            opens the form above prefilled from the ended grant (resolved from the store, the
            caller's own grants only; never echoed from the query string). -->
+      <!-- Backlog #89 (owner UX decision): the grant tables stay compact at 1280 px like the
+           requests table; short cells (ID, user, scope, dates, controls) do not wrap, only the
+           free-text columns (new job names, how it ended) do. -->
       <h2>Ended Grants</h2>
       <j:choose>
         <j:when test="${it.pastTotal == 0}">
@@ -276,14 +279,14 @@
               <j:forEach var="g" items="${it.pastPageItems}">
                 <tr>
                   <td style="white-space: nowrap;">${g.id}</td>
-                  <td>${g.user}</td>
-                  <td>${g.scope.type}: ${g.scope.fullName}</td>
+                  <td style="white-space: nowrap;">${g.user}</td>
+                  <td style="white-space: nowrap;">${g.scope.type}: ${g.scope.fullName}</td>
                   <td>${it.join(g.actions)}</td>
                   <td><code>${it.createNameLabel(g)}</code></td>
-                  <td>${it.format(g.grantedAt)}</td>
-                  <td>${it.format(it.endedAt(g))}</td>
+                  <td style="white-space: nowrap;">${it.format(g.grantedAt)}</td>
+                  <td style="white-space: nowrap;">${it.format(it.endedAt(g))}</td>
                   <td>${it.endedLabel(g)}</td>
-                  <td>
+                  <td style="white-space: nowrap;">
                     <j:if test="${it.isCanRenew(g)}">
                       <a href="${base}?from=${g.id}#new-grant-request">Request again</a>
                     </j:if>
