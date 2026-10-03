@@ -466,6 +466,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-08-106 | 8 (D-65) | integration | P0 | u1 FOLDER and u2 FOLDER_ONLY CONFIGURE windows on `ops`; the FOLDER window's file does not name FOLDER_ONLY (premise) | restart | both active with their types; u1 still configures `ops/sub/b`; u2 configures `ops/a` but not `ops/sub/b` (note 233) | FolderOnlyScopeRestartTest |
 | T-08-107 | 8 (D-65 owner ruling) | integration | P0 | as T-08-100 | FOLDER_ONLY DELETE window on `ops`; u1 POSTs `doDelete` on `ops/sub`, `ops/sub/b`, `ops/a` | `ops/sub` (nested folder) and `ops/sub/b`: no Delete, 4xx, still exist; `ops/a` deleted (note 233) | FolderOnlyScopeTest |
 | T-08-108 | 8 (D-65) | integration | P1 | same | FOLDER DELETE window on `ops`; u1 deletes `ops/sub` | deleted (guard for T-08-107) (note 233) | FolderOnlyScopeTest |
+| T-08-109 | 8 (D-65 ruling) | integration | P0 | as T-08-100 | FOLDER_ONLY DELETE window on `ops`; u1 POSTs `doDelete` on `ops`, then on `ops/a` | `ops`: no Delete, 4xx, `ops` and `ops/a` exist. Guard: `ops/a` deleted (note 233) | FolderOnlyScopeTest |
+| T-08-110 | 8 (D-65 ruling) | integration | P0 | as T-08-100 plus multibranch `ops/mb` | FOLDER_ONLY DELETE window on `ops`; delete `ops/mb`; then a FOLDER DELETE window on `ops`; delete again | first: no Delete, 4xx, still exists. Guard: under the FOLDER window deleted (note 233) | FolderOnlyScopeTest |
+| T-08-111 | 8 (D-65 ruling, D-59) | integration | P0 | as T-08-100 plus folder `dest`; u1 holds native Item/Move; u1 FOLDER_ONLY DELETE on `ops` and FOLDER CREATE on `dest` | u1 POSTs `move/move` for `ops/sub` to `/dest`, then for `ops/a` | `ops/sub` move 4xx, `ops/sub` and `ops/sub/b` in place, nothing in `dest`. Guard: `ops/a` moved to `dest/a` (note 233) | FolderOnlyScopeTest |
 | T-09-01 | 9 | integration | P0 | 잡 X | UI로 설정 변경 | ChangeRecord(CONFIGURE, diff 포함) | ChangeRecordTest |
 | T-09-02 | 9 | integration | P0 | 잡 X | POST config.xml | ChangeRecord(CONFIGURE) — the job is idle here; a change made *while a build is running* (in-flight run unaffected, next run changed) is not covered: T-OS-09 | ChangeRecordTest |
 | T-09-03 | 9 | integration | P0 | 잡 X, 활성 Grant g1 | 설정 변경 | ChangeRecord.grantId == g1 | ChangeRecordTest |
@@ -1124,7 +1127,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 222. **Ids.** T-UI-70..77 and T-02-120 are taken out of sequence so that parallel backlog worktrees, which add rows from T-UI-56 and T-02-111 upward, do not collide.
 
-233. **FOLDER_ONLY scope (T-08-100..108, D-65).** Written from SPEC 8 and D-65 with the owner's rulings: CREATE only directly in the folder, DELETE on direct jobs but not on a nested folder, CONFIGURE of a nested folder itself allowed (it is an item whose parent is the folder). Configure/Delete are asserted both as the item's ACL answer and, for jobs, as the HTTP result (config.xml, `doDelete`). Each FOLDER_ONLY row has a FOLDER guard so it cannot pass because windows never confer. The grants form's FOLDER_ONLY option (rendering) is not asserted; T-08-105 asserts the POST binding.
+233. **FOLDER_ONLY scope (T-08-100..108, D-65).** Written from SPEC 8 and D-65 with the owner's rulings: CREATE only directly in the folder, DELETE only on direct non-folder items (not on a nested folder, a multibranch project in the folder or the folder itself; a move of a nested folder out is therefore refused, T-08-109..111), CONFIGURE of a nested folder itself allowed (it is an item whose parent is the folder). Configure/Delete are asserted both as the item's ACL answer and, for jobs, as the HTTP result (config.xml, `doDelete`). Each FOLDER_ONLY row has a FOLDER guard so it cannot pass because windows never confer. The grants form's FOLDER_ONLY option (rendering) is not asserted; T-08-105 asserts the POST binding.
 
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
@@ -1211,4 +1214,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **Backlog #83-#89 rows, notes 212-217**: +6 rows, integration: T-05-40 (P0), T-08-65/66, T-09-24, T-SEC-72 (P1), T-UI-56 (P2). Totals: P0 +1, P1 +4, P2 +1; T-05 +1, T-08 +2, T-09 +1, T-SEC +1, T-UI +1.
 - **Backlog #74/#75 rows, notes 210-211**: +6 rows, integration: T-SEC-70/71 (P0), T-05-37/38/39 (P1), T-05-36 (P2). Totals: P0 +2, P1 +3, P2 +1; T-SEC +2, T-05 +4.
 - **D-59b rows, notes 218-219**: +3 rows, integration, P0: T-SEC-73/74/75. Totals: P0 +3; T-SEC +3.
-- **R4 D-65 rows, note 233**: +9 rows, integration: T-08-100/101/102/103/106/107 (P0), T-08-104/105/108 (P1). Totals: P0 +6, P1 +3; T-08 +9.
+- **R4 D-65 rows, note 233**: +12 rows, integration: T-08-100/101/102/103/106/107/109/110/111 (P0), T-08-104/105/108 (P1). Totals: P0 +9, P1 +3; T-08 +12.

@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
+import com.cloudbees.hudson.plugins.folder.relocate.RelocationAction;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
@@ -24,7 +25,9 @@ import jenkins.model.Jenkins;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
+import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -47,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * SPEC item 8 (D-65): a FOLDER_ONLY permission window covers the folder itself and the items
  * whose parent is that folder, not items in nested folders; a FOLDER window still covers
- * everything below. Matrix rows T-08-100 .. T-08-105, T-08-107, T-08-108 (note 233); the restart row T-08-106 is
+ * everything below. Matrix rows T-08-100 .. T-08-105, T-08-107 .. T-08-111 (note 233); the restart row T-08-106 is
  * in {@link FolderOnlyScopeRestartTest}.
  *
  * <p>Layout: folder {@code ops} with job {@code ops/a} and nested folder {@code ops/sub} holding
@@ -83,6 +86,8 @@ public class FolderOnlyScopeTest {
         }
         strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
         strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
+        // native Item/Move (folders plugin) so that T-08-111 measures the Delete/Create checks of a move
+        strategy.add(RelocationAction.RELOCATE, PermissionEntry.user("u1"));
         j.jenkins.setAuthorizationStrategy(strategy);
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
@@ -247,7 +252,73 @@ public class FolderOnlyScopeTest {
         assertNull(j.jenkins.getItemByFullName("ops/sub"), "ops/sub must be deleted");
     }
 
+    /**
+     * T-08-109 (D-65 ruling): a FOLDER_ONLY DELETE window on {@code ops} does not let u1 delete
+     * {@code ops} itself. Guard: the direct job {@code ops/a} is deletable under the same window.
+     */
+    @Test
+    public void t_08_109_folderOnlyDeleteRefusesTheFolderItself() throws Exception {
+        openWindow("FOLDER_ONLY", "ops", List.of("DELETE"), null);
+
+        assertFalse(can("u1", ops, Item.DELETE), "Delete must not apply to the window's folder itself");
+        int self = postDelete("u1", ops);
+        assertTrue(self >= 400 && self < 500, "deleting ops must be refused, got HTTP " + self);
+        assertNotNull(j.jenkins.getItemByFullName("ops"), "ops must still exist");
+        assertNotNull(j.jenkins.getItemByFullName("ops/a"), "ops/a must still exist");
+
+        int direct = postDelete("u1", a);
+        assertTrue(direct < 400, "guard: deleting ops/a must succeed, got HTTP " + direct);
+        assertNull(j.jenkins.getItemByFullName("ops/a"));
+    }
+
+    /**
+     * T-08-110 (D-65 ruling): a multibranch project directly in {@code ops} is an item group, so a
+     * FOLDER_ONLY DELETE window does not delete it. Guard: a FOLDER DELETE window does.
+     */
+    @Test
+    public void t_08_110_folderOnlyDeleteRefusesADirectMultibranchProject() throws Exception {
+        WorkflowMultiBranchProject mb = ops.createProject(WorkflowMultiBranchProject.class, "mb");
+        openWindow("FOLDER_ONLY", "ops", List.of("DELETE"), null);
+
+        assertFalse(can("u1", mb, Item.DELETE), "Delete must not apply to a multibranch project under FOLDER_ONLY");
+        int refused = postDelete("u1", mb);
+        assertTrue(refused >= 400 && refused < 500, "deleting ops/mb must be refused, got HTTP " + refused);
+        assertNotNull(j.jenkins.getItemByFullName("ops/mb"), "ops/mb must still exist");
+
+        openWindow("FOLDER", "ops", List.of("DELETE"), null);
+        int allowed = postDelete("u1", mb);
+        assertTrue(allowed < 400, "guard: a FOLDER window covers deleting ops/mb, got HTTP " + allowed);
+        assertNull(j.jenkins.getItemByFullName("ops/mb"));
+    }
+
+    /**
+     * T-08-111 (D-65 ruling, D-59): a move needs Delete, so with a FOLDER_ONLY DELETE window on
+     * {@code ops} and a FOLDER CREATE window on {@code dest}, moving the nested folder
+     * {@code ops/sub} to {@code dest} is refused. Guard: moving the job {@code ops/a} there succeeds.
+     */
+    @Test
+    public void t_08_111_folderOnlyDeleteRefusesMovingANestedFolderOut() throws Exception {
+        Folder dest = j.jenkins.createProject(Folder.class, "dest");
+        openWindow("FOLDER_ONLY", "ops", List.of("DELETE"), null);
+        openWindow("FOLDER", "dest", List.of("CREATE"), null);
+
+        assertClientError(move("u1", sub, dest), "u1 moving the nested folder ops/sub out");
+        assertNotNull(j.jenkins.getItemByFullName("ops/sub"), "ops/sub must stay in place");
+        assertNotNull(j.jenkins.getItemByFullName("ops/sub/b"), "ops/sub/b must stay in place");
+        assertNull(j.jenkins.getItemByFullName("dest/sub"), "nothing may arrive in dest");
+
+        assertSuccess(move("u1", a, dest), "guard: u1 moving the job ops/a to dest");
+        assertNotNull(j.jenkins.getItemByFullName("dest/a"), "ops/a must arrive in dest");
+        assertNull(j.jenkins.getItemByFullName("ops/a"));
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** {@code POST <item url>move/move} with {@code destination=/<folder>} (folders plugin). */
+    private WebResponse move(String userId, Item item, Folder destination) throws Exception {
+        return ApproverFormFixtures.post(j, userId, item.getUrl() + "move/move",
+                List.of(new NameValuePair("destination", "/" + destination.getFullName())));
+    }
 
     private int postDelete(String userId, Item item) throws Exception {
         JenkinsRule.WebClient wc = client(j, userId);
