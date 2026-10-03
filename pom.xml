@@ -207,6 +207,41 @@
     </dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <plugin>
+        <!-- T-02-122 (#78, D-35f): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898
+             next to batch-control and expects the refusal. The old hpi is copied as a plain
+             file into the test output directory (old-plugins/role-strategy.hpi); it is not a
+             dependency, so it is not on the test classpath, not in the hpi's manifest and not
+             seen by the enforcer or hpi.strictBundledArtifacts. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-old-role-strategy</id>
+            <phase>process-test-resources</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jenkins-ci.plugins</groupId>
+                  <artifactId>role-strategy</artifactId>
+                  <version>898.vc050ed2424ca_</version>
+                  <type>hpi</type>
+                  <outputDirectory>${project.build.testOutputDirectory}/old-plugins</outputDirectory>
+                  <destFileName>role-strategy.hpi</destFileName>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
   <repositories>
     <repository>
       <id>repo.jenkins-ci.org</id>
