@@ -55,8 +55,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 6, D-60 (P-03): a refused build submission with parameters on an approval-required
  * job leads a user who may request to the job's Request Run form with the submitted values filled
  * in, sensitive values excepted; nothing is queued or stored until the requester submits the
- * form; the refusal does not fall back to the classic build form. Matrix rows T-06-89 .. T-06-96
- * (note 185).
+ * form; the refusal does not fall back to the classic build form. Matrix rows T-06-89 .. T-06-97
+ * (notes 185, 197).
  *
  * <p>Frozen contract: the refusal answers {@code 303} to {@code <job>/batch-control/} carrying the
  * values as {@code p.<NAME>=<value>}; {@code GET <job>/batch-control/?p.<NAME>=<value>} pre-fills
@@ -318,6 +318,63 @@ public class RefusedBuildPrefillTest {
         assertNothingQueuedOrStored(before);
     }
 
+    /**
+     * T-06-97 (security-33 S-33-03): the redirect query is capped at 4000 encoded characters,
+     * filled in parameter-definition order, skipping a value that would exceed the cap. With three
+     * 1500-character string values (A, B, C, each within the 2000 per-value bound) and a short D,
+     * the Location carries A and B, not C (it would pass 4000), and still D; the Location's query
+     * is at most 4000 characters; the Request Run form opens with A, B and D filled in and C at its
+     * default. Nothing is stored or queued.
+     */
+    @Test
+    public void t_06_97_redirectQueryIsCappedAndSkipsOnlyTheValueThatDoesNotFit() throws Exception {
+        FreeStyleProject wide = j.createFreeStyleProject("prefill-wide");
+        BatchControlJobProperty property = new BatchControlJobProperty(true);
+        property.setBlockTimer(false);
+        property.setBlockUpstream(false);
+        setBatchControl(wide, property);
+        BatchControlFixtures.activate(wide);
+        wide.addProperty(new ParametersDefinitionProperty(
+                new StringParameterDefinition("A", "a-default", "first"),
+                new StringParameterDefinition("B", "b-default", "second"),
+                new StringParameterDefinition("C", "c-default", "third"),
+                new StringParameterDefinition("D", "d-default", "fourth")));
+        String a = "a".repeat(1500);
+        String b = "b".repeat(1500);
+        String c = "c".repeat(1500);
+        Set<String> before = ApproverFormFixtures.runRequestIds();
+
+        JenkinsRule.WebClient wc = jsClient("u1");
+        HtmlForm form = coreParametersForm(wc, wide);
+        setValue(form, "A", a);
+        setValue(form, "B", b);
+        setValue(form, "C", c);
+        setValue(form, "D", "short-d");
+        wc.getOptions().setRedirectEnabled(false);
+        Page answer = j.submit(form);
+
+        assertEquals(303, answer.getWebResponse().getStatusCode(), "the requester's refusal redirects");
+        String location = answer.getWebResponse().getResponseHeaderValue("Location");
+        assertNotNull(location);
+        URL target = new URL(answer.getUrl(), location);
+        assertEquals(new URL(j.getURL(), wide.getUrl() + "batch-control/").getPath(), target.getPath());
+        assertTrue(target.getQuery().length() + 1 <= 4000, "the query (with its '?') must be at most 4000 characters, was "
+                + (target.getQuery().length() + 1));
+        Map<String, String> query = query(target);
+        assertEquals(a, query.get("p.A"), "the first 1500-character value fits and must be carried");
+        assertEquals(b, query.get("p.B"), "the second 1500-character value still fits and must be carried");
+        assertFalse(query.containsKey("p.C"), "the third would pass 4000 characters and must be skipped");
+        assertEquals("short-d", query.get("p.D"), "a later value that still fits must be carried");
+        assertNothingQueuedOrStored(before, wide);
+
+        HtmlForm requestForm = requestRunForm(page("u1", target.toExternalForm()), wide);
+        assertEquals(a, valueOf(requestForm, "A"));
+        assertEquals(b, valueOf(requestForm, "B"));
+        assertEquals("c-default", valueOf(requestForm, "C"), "the skipped value leaves the default");
+        assertEquals("short-d", valueOf(requestForm, "D"));
+        assertNothingQueuedOrStored(before, wide);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private JenkinsRule.WebClient jsClient(String userId) throws Exception {
@@ -328,7 +385,11 @@ public class RefusedBuildPrefillTest {
 
     /** Core's parameters form ("Build with Parameters"), opened with GET build. */
     private HtmlForm coreParametersForm(JenkinsRule.WebClient wc) throws Exception {
-        HtmlPage formPage = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), job.getUrl() + "build?delay=0sec"),
+        return coreParametersForm(wc, job);
+    }
+
+    private HtmlForm coreParametersForm(JenkinsRule.WebClient wc, FreeStyleProject target) throws Exception {
+        HtmlPage formPage = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), target.getUrl() + "build?delay=0sec"),
                 HttpMethod.GET));
         int code = formPage.getWebResponse().getStatusCode();
         assertTrue(code == 200 || code == 405, "fixture: the parameters form must open, got " + code);
@@ -355,7 +416,11 @@ public class RefusedBuildPrefillTest {
     }
 
     private HtmlForm requestRunForm(HtmlPage page) throws Exception {
-        HtmlForm form = UsabilityFixtures.formsEndingWith(page, job.getUrl() + "batch-control/submit").stream()
+        return requestRunForm(page, job);
+    }
+
+    private HtmlForm requestRunForm(HtmlPage page, FreeStyleProject target) throws Exception {
+        HtmlForm form = UsabilityFixtures.formsEndingWith(page, target.getUrl() + "batch-control/submit").stream()
                 .findFirst().orElse(null);
         assertNotNull(form, "the page must carry the Request Run form; forms: " + UsabilityFixtures.formActions(page));
         return form;
@@ -443,11 +508,15 @@ public class RefusedBuildPrefillTest {
     }
 
     private void assertNothingQueuedOrStored(Set<String> before) throws Exception {
+        assertNothingQueuedOrStored(before, job);
+    }
+
+    private void assertNothingQueuedOrStored(Set<String> before, FreeStyleProject target) throws Exception {
         j.waitUntilNoActivity();
         assertEquals(before, ApproverFormFixtures.runRequestIds(), "no run request may be stored before the form is submitted");
         assertTrue(j.jenkins.getQueue().isEmpty(), "the queue must be empty");
-        assertEquals(1, job.getNextBuildNumber(), "no build number may have been consumed");
-        assertTrue(job.getBuilds().isEmpty(), "no build may exist");
+        assertEquals(1, target.getNextBuildNumber(), "no build number may have been consumed");
+        assertTrue(target.getBuilds().isEmpty(), "no build may exist");
     }
 
     private static String excerpt(String text) {
