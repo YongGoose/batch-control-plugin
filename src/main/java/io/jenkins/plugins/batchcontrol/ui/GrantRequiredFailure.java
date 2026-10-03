@@ -1,7 +1,6 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import hudson.Util;
 import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.Job;
@@ -96,8 +95,7 @@ public class GrantRequiredFailure extends Failure {
      * screen resolves the name again as the viewer, so nothing here is echoed unchecked.
      */
     public String getRequestUrl() {
-        return "batch-control/grants/?scopeType=" + scopeType + "&scopeFullName="
-                + Util.rawEncode(itemFullName) + "&actions=" + action + "#new-grant-request";
+        return GrantRequestLinks.url(scopeType, itemFullName, action);
     }
 
     /** The item as the viewer sees it, or {@code null}. */

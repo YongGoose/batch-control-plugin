@@ -27,6 +27,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class Grant {
 
+    /** #85 (P-15): the revocation reason of the windows closed by turning change control off. */
+    public static final String REVOKED_CHANGE_CONTROL_OFF = "change control turned off";
+
     private final String id;
     private final String grantRequestId;
     private final String user;
@@ -36,6 +39,12 @@ public final class Grant {
     private final long expiresAtMillis;
     private Long revokedAtMillis;
     private String revokedBy;
+    /**
+     * #85: why the grant was revoked when it was not an individual revocation, for example
+     * {@link #REVOKED_CHANGE_CONTROL_OFF}; {@code null} for an individual revocation by a Manage
+     * holder and in grant files written before #85 (an optional field, no new file format).
+     */
+    private String revokedReason;
     /**
      * D-35c: full names of the items this grant's holder created inside the scope during the
      * window, using the grant's Create. While the grant is active the holder also holds Item/Read
@@ -162,6 +171,11 @@ public final class Grant {
         return revokedBy;
     }
 
+    /** The revocation reason of a mass revocation (#85), or {@code null}; see {@link #REVOKED_CHANGE_CONTROL_OFF}. */
+    public String getRevokedReason() {
+        return revokedReason;
+    }
+
     /**
      * Whether the grant confers its permissions at the given instant: not yet expired
      * (strictly before {@code expiresAt} — the first check at or past the expiry instant is
@@ -249,7 +263,13 @@ public final class Grant {
 
     /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */
     public void markRevoked(Instant revokedAt, String revokedBy) {
+        markRevoked(revokedAt, revokedBy, null);
+    }
+
+    /** As {@link #markRevoked(Instant, String)}, recording why (#85); only {@code security.GrantService} calls this. */
+    public void markRevoked(Instant revokedAt, String revokedBy, String reason) {
         this.revokedAtMillis = Objects.requireNonNull(revokedAt, "revokedAt").toEpochMilli();
         this.revokedBy = revokedBy;
+        this.revokedReason = reason;
     }
 }

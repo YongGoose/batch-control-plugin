@@ -111,7 +111,23 @@ final class MoveGuard {
                     + "the name '" + item.getName() + "' is outside the name restriction '"
                     + restricting.getCreateNamePattern() + "' of grant " + restricting.getId();
         }
-        record(user, item, destName, reason, restricting);
+        // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
+        // column does not read "no grant" while a window existed.
+        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE);
+        Grant createWindow = destName.isEmpty() ? null
+                : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
+        List<String> windows = new ArrayList<>();
+        if (deleteWindow != null) {
+            windows.add("Delete on '" + item.getFullName() + "' from grant " + deleteWindow.getId());
+        }
+        if (createWindow != null) {
+            windows.add("Create in " + describe(destName) + " from grant " + createWindow.getId());
+        }
+        if (!windows.isEmpty()) {
+            reason = reason + "; active permission windows: " + String.join(", ", windows);
+        }
+        Grant linked = restricting != null ? restricting : createWindow != null ? createWindow : deleteWindow;
+        record(user, item, destName, reason, linked);
         // E2E-1 UX-2: a permission window has one scope, so a move across folders usually needs
         // two windows. The message names each missing part and what to request for it.
         String deletePart = "Delete on '" + item.getFullName() + "'";
@@ -159,7 +175,7 @@ final class MoveGuard {
                     .append(toRequest.get(0)).append(" and another for ").append(toRequest.get(1));
         }
         message.append(toRequest.isEmpty() ? "." : ", or ask an administrator.");
-        return new MoveRefusal(message.toString(), item.getFullName());
+        return new MoveRefusal(message.toString(), item.getFullName(), destName, !delete, !create);
     }
 
     /**
@@ -322,14 +338,14 @@ final class MoveGuard {
     }
 
     private static void record(String user, Item item, String destName, String reason,
-                               @CheckForNull Grant restricting) {
+                               @CheckForNull Grant linked) {
         String target = item.getFullName();
         boolean written;
         try {
             written = BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
                     NewItemName.MOVE_OPERATION + " " + target + " " + destName, target, user,
                     "Refused to move '" + target + "' to " + describe(destName) + " for '" + user + "': " + reason,
-                    restricting == null ? null : restricting.getId());
+                    linked == null ? null : linked.getId());
         } catch (RuntimeException e) {
             // The refusal stands whatever happens to the record.
             LOGGER.log(Level.WARNING, "Could not record the refused move of '" + target + "'", e);

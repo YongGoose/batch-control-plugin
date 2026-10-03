@@ -49,7 +49,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 전역 옵션 `allowAdminSelfApproval` 기본값 true. false면 관리자도 직무 분리 적용.
 - Acceptance: the permission names used by JCasC and scripts are `BatchControl/<Name>`, independent of the display title of the group. (D-41)
 - Acceptance: a user who holds none of the Batch Control permissions does not see the Batch Control root action in the navigation, and `/batch-control/` and every URL beneath it answer 404 to them. A user who holds at least one Batch Control permission but not the one a section needs still gets 403 from that section. A link inside the Batch Control screens is shown only to a user who may open its target. (hosting review, #31)
-- Acceptance: `BatchControl/Request` is checked on the job for every job-specific use — submitting, viewing, cancelling and re-designating a run request, and requesting an activation or hold. A user who holds Request only on some jobs or folders reaches the Batch Control root page and the run requests and activations sections, sees there only requests they may see, and after submitting lands on their request's page (never a 404 or 403). Deciding whether such a user may open the sections does not scan all items. (D-38b)
+- Acceptance: `BatchControl/Request` is checked on the job for every job-specific use — submitting, viewing, cancelling and re-designating a run request, and requesting an activation or hold. A user who holds Request only on some jobs or folders reaches the Batch Control root page and the run requests section once they have requests of their own, and the activations section whenever they reach the root page (D-38c), sees there only requests they may see, and after submitting lands on their request's page (never a 404 or 403). Deciding whether such a user may open the sections does not scan all items. (D-38b)
 - Acceptance: the Batch Control pages navigate with a tab bar under the app bar instead of a side panel; each tab is shown only to a user who may open its section; a tab shows a badge with the number of pending requests awaiting the viewer's decision (designated approver) or, for others, the viewer's own pending requests; the breadcrumb of the root action offers the same sections as a context menu. Existing URLs are unchanged. (D-61)
 - Acceptance: the per-job request action (`/job/<name>/batch-control/`) is absent, not merely refused, for a user who may not use it: it is not listed on the job page, and its URL and every URL beneath it (for example `submit`) answer 404. (hosting review, #31)
 
@@ -240,7 +240,7 @@ GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGUR
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment,
                   approverChanges[{from[],to[],by,at}]
 Grant             id, grantRequestId, user, scope, actions, grantedAt, expiresAt,
-                  revokedAt?, revokedBy?
+                  revokedAt?, revokedBy?, revokedReason? (D-63)
 RunRecord         runId(jobFullName#number), jobFullName, number, causeType, user?,
                   parameters, result, startedAt, durationMs, abortedBy?, runRequestId?
 Incident          id, runId, jobFullName, result, status(OPEN|ACKNOWLEDGED|RESOLVED),

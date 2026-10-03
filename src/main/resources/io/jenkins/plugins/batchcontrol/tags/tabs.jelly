@@ -7,7 +7,8 @@
      BatchControlRootAction, so a tab is shown only when its section can be opened.
      Labels and badge texts are constants or numbers; everything is escaped by default.
      e2e-06 UX-8: with every section the bar must fit one line at 1280 px, so the labels are short
-     ("Changes") and the buttons a little tighter than core's default padding. -->
+     ("Changes") and the buttons a little tighter than core's default padding. Backlog #86: a tab
+     whose page title differs ("Changes" opens "Change Records") carries the title as tooltip. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <st:documentation>
     The Batch Control tab bar.
@@ -25,7 +26,8 @@
       <j:set var="current" value="${tab.id == attrs.active}"/>
       <a href="${rootURL}/batch-control/${tab.urlName}"
          class="jenkins-button ${current ? '' : 'jenkins-button--tertiary'}" style="padding-inline: 0.75rem;"
-         aria-current="${current ? 'page' : null}" data-batch-control-tab="${tab.id}">
+         aria-current="${current ? 'page' : null}" data-batch-control-tab="${tab.id}"
+         title="${tab.title}">
         <l:icon src="${tab.iconFileName}" class="icon-sm"/>
         ${tab.displayName}
         <l:badge badge="${tab.badge}"/>

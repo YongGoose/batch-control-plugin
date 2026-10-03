@@ -8,6 +8,9 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.GrantRequestLinks;
+import io.jenkins.plugins.batchcontrol.ui.GuardInfo;
+import io.jenkins.plugins.batchcontrol.ui.OverviewCounts;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.SectionTabs;
@@ -192,5 +195,51 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
      */
     public List<ReplayedRuns.Row> markedRuns(String itemFullName) {
         return ReplayedRuns.of(itemFullName == null ? null : Jenkins.get().getItemByFullName(itemFullName));
+    }
+
+    /**
+     * Backlog #83, for refusal pages outside this action (reached through
+     * {@code app.getExtensionList}, since {@code j:invokeStatic} cannot load plugin classes):
+     * whether the viewer may open the Grants screen and submit a grant request. Not a Stapler
+     * route (an {@code is} getter of a boolean is never dispatched to).
+     */
+    public boolean isCanRequestGrants() {
+        return GrantRequestLinks.canRequest();
+    }
+
+    /**
+     * Backlog #83: root-relative URL of the new grant request form prefilled for the item and the
+     * action, or {@code null} when the viewer cannot see the item or it cannot carry a window.
+     * Not a Stapler route (no {@code get}/{@code do} prefix).
+     */
+    @CheckForNull
+    public String grantRequestUrl(String fullName, String action) {
+        return GrantRequestLinks.url(fullName, action);
+    }
+
+    /**
+     * Backlog #86, for the batch-control-strategy monitor's view: the permission window that
+     * recorded a change to the item (or a folder above it), or {@code null}. Not a Stapler route.
+     */
+    @CheckForNull
+    public GuardInfo.Changed changedUnderGrant(String itemFullName) {
+        return GuardInfo.changedUnder(itemFullName);
+    }
+
+    /**
+     * Backlog #86, for the monitor's {@code reviewed} view: what still guards the item after it
+     * was marked as reviewed, or {@code null} when that is not true now. Not a Stapler route.
+     */
+    @CheckForNull
+    public GuardInfo.Outcome reviewOutcome(String itemFullName) {
+        return GuardInfo.reviewed(itemFullName);
+    }
+
+    /**
+     * Backlog #88: per-section totals for the overview, for Batch Control/Manage holders only
+     * (empty otherwise). Not a Stapler route (no {@code get}/{@code do} prefix).
+     */
+    public List<OverviewCounts.Row> overviewCounts() {
+        return OverviewCounts.current();
     }
 }
