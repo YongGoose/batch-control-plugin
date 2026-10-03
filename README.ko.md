@@ -96,7 +96,8 @@ triggers`와 `Block upstream triggers`가 그 역할을 하고, 뒤쪽 항목에
 
 ## 요구 사항
 
-Jenkins 2.568.3 이상(플러그인이 컴파일되는 기준선), 그리고 `cloudbees-folder`.
+Jenkins 2.568.3 이상(플러그인이 컴파일되는 기준선), 그리고 필수 플러그인 `cloudbees-folder`,
+`ionicons-api`, `caffeine-api`.
 의존성은 플러그인 관리자가 알아서 해결합니다.
 
 아래 플러그인과의 연동은 선택 사항이라 없어도 Batch Control은 로드됩니다. 다만 설치되어 있다면

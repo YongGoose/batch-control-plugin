@@ -72,9 +72,7 @@ final class EntityIndex {
         if (revoked != null && revoked.isBefore(ended)) {
             ended = revoked;
         }
-        // Grants created before grantRequestId existed share the request's id (GrantRequestService).
-        String requestId = grant.getGrantRequestId() != null ? grant.getGrantRequestId() : grant.getId();
-        grants.put(grant.getId(), new GrantEntry(grant.getId(), requestId, ended));
+        grants.put(grant.getId(), new GrantEntry(grant.getId(), grant.getGrantRequestId(), ended));
     }
 
     static boolean isOpen(GrantRequestEntry entry) {
