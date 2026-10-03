@@ -242,12 +242,14 @@ public class RunControlUsabilityTest {
     }
 
     /**
-     * T-05-19 (DEF-12): a requester without Item/Build (D-38: can never submit a run request) is
-     * not offered Request Run on the job page, the run request form, or the incident's rerun form;
-     * a requester with Item/Build is offered all three (control).
+     * T-05-19 (DEF-12, rewritten for D-38a): a requester holding Request and Item/Read but no
+     * Item/Build can submit a run request (D-38a), so on an approval-required job they are offered
+     * Request Run on the job page, the run request form and the incident's rerun form (with
+     * ViewHistory), like a Build holder (u1, control). Guard: a reader without Request is offered
+     * none of them.
      */
     @Test
-    public void t_05_19_requestRunIsNotOfferedWithoutItemBuild() throws Exception {
+    public void t_05_19_requestRunIsOfferedWithoutItemBuild() throws Exception {
         FreeStyleProject failing = uncontrolled(j.createFreeStyleProject("offer-rerun"));
         failing.getBuildersList().add(new FailureBuilder());
         BatchControlFixtures.activateAsAdmin(failing);
@@ -259,33 +261,28 @@ public class RunControlUsabilityTest {
                 .list(java.time.YearMonth.now(io.jenkins.plugins.batchcontrol.store.BatchClock.clock())).stream()
                 .filter(i -> "offer-rerun#1".equals(i.getRunId())).findFirst().orElse(null);
         assertNotNull(incident, "fixture: the FAILURE must have opened an incident");
+        assertFalse(failing.getACL().hasPermission2(hudson.model.User.getById("nb", true).impersonate2(), Item.BUILD),
+                "premise: nb holds no Item/Build on the job");
         String submit = failing.getUrl() + "batch-control/submit";
         String rerun = "batch-control/incidents/" + incident.getId() + "/rerun";
 
-        // control: the Build holder is offered everything
-        HtmlPage wbJob = UsabilityFixtures.htmlPage(j, "u1", failing.getUrl());
-        assertFalse(UsabilityFixtures.anchorsCaptioned(wbJob, Pattern.compile("Request Run")).isEmpty(),
-                "control: u1 (Item/Build) is offered Request Run");
-        assertFalse(UsabilityFixtures.formsEndingWith(UsabilityFixtures.htmlPage(j, "u1", failing.getUrl() + "batch-control/"), submit).isEmpty(),
-                "control: u1 is offered the run request form");
-        assertFalse(UsabilityFixtures.formsEndingWith(UsabilityFixtures.htmlPage(j, "u1", "batch-control/incidents/" + incident.getId() + "/"),
-                rerun).isEmpty(), "control: u1 is offered the rerun form");
-
-        HtmlPage nbJob = UsabilityFixtures.htmlPage(j, "nb", failing.getUrl());
-        assertTrue(UsabilityFixtures.anchorsCaptioned(nbJob, Pattern.compile("Request Run")).isEmpty(),
-                "a requester without Item/Build must not be offered Request Run (the submission is always refused, D-38)");
-        assertFalse(UsabilityFixtures.hasLinkTo(j, nbJob, failing.getUrl() + "batch-control"),
-                "no link to the run request screen may be offered to a requester without Item/Build");
-        Page nbForm = UsabilityFixtures.get(j, UsabilityFixtures.clientNoJs(j, "nb"), failing.getUrl() + "batch-control/");
-        if (nbForm instanceof HtmlPage && nbForm.getWebResponse().getStatusCode() == 200) {
-            assertTrue(UsabilityFixtures.formsEndingWith((HtmlPage) nbForm, submit).isEmpty(),
-                    "the run request form must not be offered to a requester without Item/Build; forms: "
-                            + UsabilityFixtures.formActions((HtmlPage) nbForm));
+        for (String userId : new String[] {"u1", "nb"}) {
+            HtmlPage jobPage = UsabilityFixtures.htmlPage(j, userId, failing.getUrl());
+            assertFalse(UsabilityFixtures.anchorsCaptioned(jobPage, Pattern.compile("Request Run")).isEmpty(),
+                    userId + " (Request + Item/Read) must be offered Request Run on an approval-required job");
+            assertFalse(UsabilityFixtures.formsEndingWith(UsabilityFixtures.htmlPage(j, userId, failing.getUrl() + "batch-control/"),
+                    submit).isEmpty(), userId + " must be offered the run request form");
+            assertFalse(UsabilityFixtures.formsEndingWith(UsabilityFixtures.htmlPage(j, userId,
+                    "batch-control/incidents/" + incident.getId() + "/"), rerun).isEmpty(), userId + " must be offered the rerun form");
         }
-        HtmlPage nbIncident = UsabilityFixtures.htmlPage(j, "nb", "batch-control/incidents/" + incident.getId() + "/");
-        assertEquals(200, nbIncident.getWebResponse().getStatusCode(), "fixture: nb (ViewHistory) reads the incident");
-        assertTrue(UsabilityFixtures.formsEndingWith(nbIncident, rerun).isEmpty(),
-                "the rerun form must not be offered to a requester without Item/Build; forms: " + UsabilityFixtures.formActions(nbIncident));
+
+        // guard: a reader without BatchControl/Request is offered none of it
+        HtmlPage readerJob = UsabilityFixtures.htmlPage(j, "reader", failing.getUrl());
+        assertEquals(200, readerJob.getWebResponse().getStatusCode(), "fixture: reader opens the job page");
+        assertTrue(UsabilityFixtures.anchorsCaptioned(readerJob, Pattern.compile("Request Run")).isEmpty(),
+                "a reader without BatchControl/Request must not be offered Request Run");
+        assertFalse(UsabilityFixtures.hasLinkTo(j, readerJob, failing.getUrl() + "batch-control"),
+                "no link to the run request screen may be offered to a reader without BatchControl/Request");
     }
 
     // ---------------------------------------------------------------- helpers

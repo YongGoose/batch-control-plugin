@@ -402,8 +402,8 @@ public class DiscoverOnlyRequestScreenTest {
                 + "/following-sibling::table[1]/tbody/tr").size(), "the transition history must hold the opening transition");
 
         // Coordinator ruling (e2e-03 part 2, SPEC section 6 usability line and DEF-12 / T-05-19):
-        // b holds no Item/Read or Item/Build on secret-j, so a rerun request of it can never be
-        // submitted (D-38) and the rerun form must not be offered at all. This replaces the former
+        // b holds no Item/Read on secret-j, so a rerun request of it can never be submitted
+        // (D-38a still requires Item/Read) and the rerun form must not be offered at all. This replaces the former
         // expectation that the rerun form's approver dropdown renders for b; the S-16 symptom (a
         // blank screen) is still covered by the field assertions above.
         List<String> rerunForms = page.getForms().stream()
