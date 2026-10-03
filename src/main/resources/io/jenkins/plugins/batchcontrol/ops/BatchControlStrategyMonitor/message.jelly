@@ -108,9 +108,9 @@
       <!-- D-58b (3): a deliberate review per item (POST, crumb added to every POST form by
            Jenkins; BatchControlStrategyMonitor#doMarkReviewed checks Administer). -->
       <div class="jenkins-!-margin-top-2">
-        Check what was changed under the permission window (see
-        <a href="${rootURL}/batch-control/changes/">Change Records</a>, the Changes tab of Batch
-        Control) and the Pipeline script first, then mark the item as reviewed.
+        Check what was changed under the permission window (Batch Control
+        <a href="${rootURL}/batch-control/changes/">Changes</a> tab) and the Pipeline script
+        first, then mark the item as reviewed.
       </div>
       <ul>
         <j:forEach var="name" items="${changedItems}">

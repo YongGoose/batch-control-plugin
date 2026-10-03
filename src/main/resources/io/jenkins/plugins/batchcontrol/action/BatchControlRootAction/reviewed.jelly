@@ -1,0 +1,54 @@
+<?jelly escape-by-default='true'?>
+<!-- Backlog #86 (D-58b (3)): the confirmation after "Mark as reviewed" on the strategy monitor,
+     GET /batch-control/reviewed?item=<full name> (the monitor's reviewed URL forwards here, so the
+     breadcrumb reads Batch Control > Marked as reviewed rather than the monitor's name, e2e-09
+     DEF-03). The layout asks for Administer, as the monitor does. The item parameter is
+     resolved, never echoed: BatchControlRootAction#reviewOutcome answers null unless the item
+     exists for the viewer and is no longer listed as changed, so the page states only what is
+     true now, including what still guards the item (a changed folder above it or an active
+     permission window). Names are escaped by default. No script; breadcrumbs lead back. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Marked as reviewed" type="one-column" permission="${app.ADMINISTER}">
+    <l:breadcrumb title="Marked as reviewed"/>
+    <l:main-panel>
+      <l:app-bar title="Marked as reviewed"/>
+      <j:set var="outcome" value="${it.reviewOutcome(request2.getParameter('item'))}"/>
+      <j:choose>
+        <j:when test="${outcome == null}">
+          <div class="jenkins-alert jenkins-alert-info" role="status">
+            Nothing to confirm: the item does not exist or is still listed as changed under a
+            permission window. The list is under Manage Jenkins.
+          </div>
+        </j:when>
+        <j:otherwise>
+          <div class="jenkins-alert jenkins-alert-success" role="status" data-batch-control-reviewed="true">
+            <a href="${rootURL}/${outcome.itemUrl}">${outcome.itemFullName}</a> was marked as
+            reviewed and is no longer listed as changed under a permission window.
+          </div>
+          <j:choose>
+            <j:when test="${outcome.changedFolder != null}">
+              <div class="jenkins-alert jenkins-alert-warning" role="status" data-batch-control-still-guarded="folder">
+                It is still guarded: the folder <strong>${outcome.changedFolder}</strong> above it is
+                listed as changed under a permission window, so changes that widen its authorization
+                are still undone until that folder is marked as reviewed.
+              </div>
+            </j:when>
+            <j:when test="${outcome.activeWindow != null}">
+              <div class="jenkins-alert jenkins-alert-warning" role="status" data-batch-control-still-guarded="window">
+                It is still guarded while permission window
+                <strong>${outcome.activeWindow.grantId}</strong> of ${outcome.activeWindow.user}
+                (for ${outcome.activeWindow.scopeFullName}) is active, so changes that widen its
+                authorization are still undone until that window ends.
+              </div>
+            </j:when>
+            <j:otherwise>
+              <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-still-guarded="none">
+                Nothing guards it any more: changes that widen its authorization are kept.
+              </div>
+            </j:otherwise>
+          </j:choose>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

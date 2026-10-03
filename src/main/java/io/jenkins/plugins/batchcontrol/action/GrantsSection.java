@@ -391,6 +391,17 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     /**
+     * e2e-09 DEF-01 (#89): a timestamp as its date and its time-with-zone, for the grant tables,
+     * which render each part unbroken so that a narrow window breaks a cell only between them
+     * (never inside a date) and the page does not scroll sideways at 1280 px. Empty for null.
+     */
+    public List<String> formatParts(Instant instant) {
+        String text = Dates.format(instant);
+        int space = text.indexOf(' ');
+        return space < 0 ? List.of(text) : List.of(text.substring(0, space), text.substring(space + 1));
+    }
+
+    /**
      * Jelly helper: how much of a grant window is left ({@code 12 min 30 sec}), so the user does
      * not have to subtract the absolute expiry time from the current time (UX-11).
      *
