@@ -3,11 +3,15 @@ package io.jenkins.plugins.batchcontrol.security;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
+import hudson.model.Items;
+import hudson.model.Job;
 import hudson.security.ACL;
 import hudson.security.AccessControlled;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.listener.ItemChangeListener;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -140,6 +144,57 @@ final class MoveGuard {
     }
 
     /**
+     * D-59a: whether a move by the current user, once completed, puts the moved jobs back to the
+     * state of a new job: run control and change control on, and the user is neither SYSTEM nor
+     * holds Overall/Administer.
+     */
+    static boolean moveStartsOver() {
+        BatchControlGlobalConfiguration config = BatchControlGlobalConfiguration.get();
+        if (!config.isChangeControlEnabled() || !config.isRunControlEnabled()) {
+            return false;
+        }
+        return !ACL.SYSTEM2.equals(Jenkins.getAuthentication2()) && !Jenkins.get().hasPermission(Jenkins.ADMINISTER);
+    }
+
+    /**
+     * D-59a (SPEC 6a): {@code moved}, just moved from {@code oldFullName} by {@code mover}, and
+     * every job or computed folder inside it start over like newly created ones: no longer
+     * activated, a {@code HELD} record naming the move, and for a job the D-34 lock (computed
+     * children are exempt, D-32/D-46). Never throws: the move has already happened.
+     */
+    static void startOver(Item moved, String oldFullName, String mover) {
+        String newFullName = moved.getFullName();
+        List<Item> affected = new ArrayList<>();
+        affected.add(moved);
+        if (moved instanceof ItemGroup) {
+            // ACL.SYSTEM2 (as the enumerating authentication only, no context switch): every job
+            // inside the moved folder must start over, including those the mover cannot read, or
+            // a hidden job would keep running unattended. The mover's move was already allowed by
+            // MoveGuard#check (Delete on the folder, Create on the destination) before the move.
+            for (Item descendant : Items.allItems2(ACL.SYSTEM2, (ItemGroup<?>) moved, Item.class)) {
+                if (descendant != moved) {
+                    affected.add(descendant);
+                }
+            }
+        }
+        for (Item item : affected) {
+            String to = item.getFullName();
+            String from = oldFullName + to.substring(newFullName.length());
+            try {
+                if (!ActivationService.get().holdAfterMove(item, from, mover)) {
+                    continue;
+                }
+                if (item instanceof Job) {
+                    ItemChangeListener.applyActivationLock((Job<?, ?>) item, "Moved job",
+                            "moving the job by '" + mover + "' has taken it out of service");
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, e, () -> "Could not put the moved job '" + to + "' on hold");
+            }
+        }
+    }
+
+    /**
      * The check of the current request when it is a POST to {@code <item>/move/move} for the item
      * {@code itemFullName}: the refusal, or {@code null} when the request is not such a move, the
      * destination is not one the folders plugin could move to, or the move is allowed. Called by
@@ -222,16 +277,20 @@ final class MoveGuard {
     private static void record(String user, Item item, String destName, String reason,
                                @CheckForNull Grant restricting) {
         String target = item.getFullName();
+        boolean written;
         try {
-            BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
+            written = BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
                     NewItemName.MOVE_OPERATION + " " + target + " " + destName, target, user,
                     "Refused to move '" + target + "' to " + describe(destName) + " for '" + user + "': " + reason,
                     restricting == null ? null : restricting.getId());
         } catch (RuntimeException e) {
             // The refusal stands whatever happens to the record.
             LOGGER.log(Level.WARNING, "Could not record the refused move of '" + target + "'", e);
+            written = true; // no record: the refusal must at least reach the log
         }
-        LOGGER.info(() -> "Refused to move '" + target + "' to " + describe(destName) + " for '" + user
-                + "': " + reason);
+        // security-33 S-33-04: INFO only when a new record was written; a coalesced repeat is FINE,
+        // so repeated attempts cannot flood the controller log.
+        LOGGER.log(written ? Level.INFO : Level.FINE, () -> "Refused to move '" + target + "' to "
+                + describe(destName) + " for '" + user + "': " + reason);
     }
 }

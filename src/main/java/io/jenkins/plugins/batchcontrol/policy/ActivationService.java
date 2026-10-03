@@ -600,6 +600,51 @@ public final class ActivationService {
     }
 
     /**
+     * D-59a (SPEC 6a): {@code item} was moved from {@code oldFullName} by {@code mover}, a user
+     * without Overall/Administer, while run control and change control were on. It starts over
+     * like a newly created item: it is no longer activated, and a {@link ChangeType#HELD} record
+     * naming the move and the mover is written. Called after the move completed (the state has
+     * already followed the item through {@link #relocate}). A computed child carries no activation
+     * of its own (D-46) and is skipped; a computed folder, which carries its children's, is held.
+     * The D-34 configuration lock is applied by the caller. The caller checks the switches.
+     *
+     * @return whether the item was handled (a job or computed folder that is not a computed child)
+     */
+    public boolean holdAfterMove(Item item, String oldFullName, String mover) {
+        Objects.requireNonNull(item, "item");
+        if (!isSubject(item)) {
+            return false;
+        }
+        String fullName = item.getFullName();
+        lock.lock();
+        try {
+            Instant now = BatchClock.now();
+            ActivationState existing = store.loadActivationState(fullName);
+            boolean wasActivated = existing != null && existing.isActivated();
+            ActivationState state = existing == null
+                    ? ActivationState.notActivated(fullName, ItemIdentity.of(item.getRootDir())).heldBy(mover, now, null)
+                    : existing.heldBy(mover, now, null);
+            saveState(state);
+            store.appendChangeRecord(ChangeRecord.create(ChangeType.HELD, fullName, mover,
+                    moveHoldDetail(oldFullName, fullName, mover, wasActivated, item instanceof Job)));
+            LOGGER.info(() -> "Job '" + fullName + "' moved from '" + oldFullName + "' by '" + mover
+                    + "' under change control: no longer activated (D-59a)");
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** The detail of the {@link ChangeType#HELD} record of {@link #holdAfterMove}. */
+    static String moveHoldDetail(String oldFullName, String newFullName, String mover, boolean wasActivated,
+                                 boolean job) {
+        return "Put on hold by a move: moved from '" + oldFullName + "' to '" + newFullName + "' by '" + mover
+                + "' while change control is on; " + (wasActivated ? "it is no longer activated" : "it stays not activated")
+                + (job ? " and starts locked like a new job (approvalRequired, blockTimer and blockUpstream on, no"
+                        + " allowed upstream jobs)" : "");
+    }
+
+    /**
      * A job was deleted: its activation is removed and its PENDING requests end
      * INVALIDATED, so a later job of the same name starts not activated and cannot be activated by
      * a request that was about another job. For a deleted folder the same applies to everything
