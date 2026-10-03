@@ -86,11 +86,13 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
      * the configuration page for a {@code BatchControl/Manage} holder. Read-only; empty for a
      * user without any Batch Control permission (who gets 404 before reaching it anyway).
      */
+    // Read-only: served by GET to core's breadcrumb context-menu script; lists only sections the caller may open.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     @Override
     public ContextMenu doContextMenu(StaplerRequest2 request, StaplerResponse2 response) {
         ContextMenu menu = new ContextMenu();
-        if (!isVisible()) {
-            return menu;
+        if (!Jenkins.get().hasAnyPermission(SectionAccess.anyPermission())) {
+            return menu; // no Batch Control permission: nothing to list (the URL is 404 anyway)
         }
         String base = request.getContextPath() + "/" + "batch-control/";
         for (SectionTabs.Tab tab : SectionTabs.current()) {
