@@ -13,7 +13,7 @@
       <j:when test="${it.strategyMissing}">
         <strong>Batch Control:</strong> change control is enabled, but the installed
         authorization strategy is not a Batch Control strategy, so change permission windows
-        (grants) can never apply. Choose "Batch Control: Matrix-based security" or
+        (grants) can never apply. Choose "Batch Control: Project-based Matrix Authorization Strategy" or
         "Batch Control: Role-Based Strategy" under Manage Jenkins, Security. Until then changes
         are only recorded in the audit history.
       </j:when>
