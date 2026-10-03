@@ -50,72 +50,7 @@
           </f:form>
         </div>
       </j:if>
-      <j:choose>
-        <j:when test="${!it.active}">
-          <div class="jenkins-alert jenkins-alert-info">
-            This job does not require run approval, or run control is disabled.
-          </div>
-        </j:when>
-        <j:when test="${!it.canRequestRun}">
-          <div class="jenkins-alert jenkins-alert-warning" role="status">
-            You may not request runs of this job: a run request needs <b>Batch Control/Request</b>
-            and <b>Job/Read</b> on the job. Ask a Jenkins administrator for the permission, or ask
-            a user who has it to request the run.
-          </div>
-        </j:when>
-        <j:when test="${empty(it.approverOptions)}">
-          <div class="jenkins-alert jenkins-alert-warning">
-            No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
-          </div>
-        </j:when>
-        <j:otherwise>
-          <p class="jenkins-description">
-            This job requires an approved run request. Fill in the reason, check one or more
-            approvers and confirm the parameters; the build starts automatically once any one of
-            them approves the request.
-          </p>
-          <j:set var="errors" value="${it.formErrors}"/>
-          <!-- D-60: arrived from a refused build submission with its values (p.<name>). -->
-          <j:if test="${!errors.present and it.prefilled}">
-            <div class="jenkins-alert jenkins-alert-info" role="status">
-              The build was not started: this job only runs through an approved run request. The
-              parameter values you entered are filled in below; enter any password parameters again.
-            </div>
-          </j:if>
-          <bc:formError errors="${errors}"/>
-          <f:form method="post" action="submit" name="batch-control-request">
-            <f:entry title="Reason" description="Why this run is needed (required).">
-              <f:textarea name="reason" value="${errors.value('reason')}"/>
-              <bc:fieldError errors="${errors}" field="reason"/>
-            </f:entry>
-            <!-- D-37: posted as repeated "approvers" fields, one user id per checked box, which
-                 JobRequestAction#doSubmit reads with getParameterValues. A single candidate starts
-                 checked so the common one-approver case needs no extra click. -->
-            <f:entry title="Approvers" description="Any one of the checked approvers may decide."
-                     help="/plugin/batch-control/help/approvers.html">
-              <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
-              <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
-                <div class="jenkins-!-margin-bottom-1">
-                  <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
-                              title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
-                </div>
-              </j:forEach>
-              <bc:fieldError errors="${errors}" field="approvers"/>
-            </f:entry>
-            <j:if test="${!empty(it.parameterDefinitions)}">
-              <f:section title="Parameters"/>
-              <bc:fieldError errors="${errors}" field="parameters"/>
-              <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
-                <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
-                <st:include it="${parameterDefinition}" page="index.jelly"/>
-              </j:forEach>
-            </j:if>
-            <f:bottomButtonBar>
-              <f:submit value="Submit Request"/>
-              <a href="${rootURL}/${it.job.url}" class="jenkins-button">Cancel</a>
-            </f:bottomButtonBar>
-          </f:form>
-        </j:otherwise>
-      </j:choose>
+      <j:set var="bcDialog" value="false"/>
+      <st:include page="_form.jelly"/>
   </l:job-subpage>
 </j:jelly>

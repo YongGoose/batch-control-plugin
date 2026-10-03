@@ -1,0 +1,92 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: the run request form, shared by the Request Run page (index.jelly) and core's dialog
+     (dialog.jelly; bcDialog is true there). Core's dialog shows only the first form of its
+     answer, so every message, including a user who may not submit, is inside the one form.
+     e2e-03 DEF-09: a refused submission (JobRequestAction#doSubmit, ui.FormErrors) comes back
+     with each message next to its field and the reason, approvers and parameter values kept.
+     DEF-12: a user who may not submit is told so (D-38a: Request and Job/Read suffice). D-60: a
+     refused build submission arrives with its values (p.<name>). The action is absolute because
+     a refusal is rendered at .../batch-control/submit. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:f="/lib/form"
+         xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
+  <j:set var="errors" value="${it.formErrors}"/>
+  <j:set var="bcCanSubmit" value="false"/>
+  <f:form method="post" action="${rootURL}/${it.job.url}batch-control/submit" name="batch-control-request">
+    <j:if test="${bcDialog}">
+      <input type="hidden" name="dialog" value="true"/>
+    </j:if>
+    <j:choose>
+      <j:when test="${!it.active}">
+        <div class="jenkins-alert jenkins-alert-info">
+          This job does not require run approval, or run control is disabled.
+        </div>
+      </j:when>
+      <j:when test="${!it.canRequestRun}">
+        <div class="jenkins-alert jenkins-alert-warning" role="status">
+          You may not request runs of this job: a run request needs <b>Batch Control/Request</b>
+          and <b>Job/Read</b> on the job. Ask a Jenkins administrator for the permission, or ask
+          a user who has it to request the run.
+        </div>
+      </j:when>
+      <j:when test="${empty(it.approverOptions)}">
+        <div class="jenkins-alert jenkins-alert-warning">
+          No approvers are configured. Ask an administrator to add approvers in the Batch Control global configuration.
+        </div>
+      </j:when>
+      <j:otherwise>
+        <j:set var="bcCanSubmit" value="true"/>
+        <p class="jenkins-description">
+          This job requires an approved run request. Fill in the reason, check one or more
+          approvers and confirm the parameters; the build starts automatically once any one of
+          them approves the request.
+        </p>
+        <j:if test="${!errors.present and it.prefilled}">
+          <div class="jenkins-alert jenkins-alert-info" role="status">
+            The build was not started: this job only runs through an approved run request. The
+            parameter values you entered are filled in below; enter any password parameters again.
+          </div>
+        </j:if>
+        <bc:formError errors="${errors}"/>
+        <f:entry title="Reason" description="Why this run is needed (required).">
+          <f:textarea name="reason" value="${errors.value('reason')}"/>
+          <bc:fieldError errors="${errors}" field="reason"/>
+        </f:entry>
+        <!-- D-37: posted as repeated "approvers" fields, one user id per checked box. A single
+             candidate starts checked so the common one-approver case needs no extra click. -->
+        <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                 help="/plugin/batch-control/help/approvers.html">
+          <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
+          <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+            <div class="jenkins-!-margin-bottom-1">
+              <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
+                          title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
+            </div>
+          </j:forEach>
+          <bc:fieldError errors="${errors}" field="approvers"/>
+        </f:entry>
+        <j:if test="${!empty(it.parameterDefinitions)}">
+          <f:section title="Parameters"/>
+          <bc:fieldError errors="${errors}" field="parameters"/>
+          <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
+            <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
+            <st:include it="${parameterDefinition}" page="index.jelly"/>
+          </j:forEach>
+        </j:if>
+      </j:otherwise>
+    </j:choose>
+    <f:bottomButtonBar>
+      <j:if test="${bcCanSubmit}">
+        <f:submit value="Submit Request"/>
+      </j:if>
+      <j:choose>
+        <j:when test="${bcDialog}">
+          <!-- Core's dialog closes itself on a button with data-id="cancel". -->
+          <button type="button" class="jenkins-button" data-id="cancel">Cancel</button>
+        </j:when>
+        <j:otherwise>
+          <a href="${rootURL}/${it.job.url}" class="jenkins-button">Cancel</a>
+        </j:otherwise>
+      </j:choose>
+    </f:bottomButtonBar>
+  </f:form>
+</j:jelly>

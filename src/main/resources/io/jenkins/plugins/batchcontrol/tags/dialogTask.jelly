@@ -1,0 +1,16 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: a classic sidebar entry that opens a request form in core's dialog (ui.Dialogs). The
+     link keeps the full request page as its href, so a middle click, the breadcrumb menu and a
+     browser without core's dialog still reach the form. Every value is escaped by default. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <st:documentation>
+    A sidebar task that opens core's dialog on the given URL.
+    <st:attribute name="icon" use="required">Icon of the entry.</st:attribute>
+    <st:attribute name="title" use="required">Caption of the entry.</st:attribute>
+    <st:attribute name="href" use="required">The full page with the same form.</st:attribute>
+    <st:attribute name="dialogUrl" use="required">Absolute URL of the dialog form.</st:attribute>
+  </st:documentation>
+  <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.dialogOpener"/>
+  <l:task icon="${attrs.icon}" title="${attrs.title}" href="${attrs.href}"
+          data-callback="batchControlOpenDialog" data-dialog-url="${attrs.dialogUrl}"/>
+</j:jelly>
