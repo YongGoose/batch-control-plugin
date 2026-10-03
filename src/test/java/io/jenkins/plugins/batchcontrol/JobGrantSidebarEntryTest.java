@@ -142,7 +142,9 @@ public class JobGrantSidebarEntryTest {
 
     /**
      * T-UI-10 (condition 2, positive): a grant-permission holder without {@code Item/Configure}
-     * gets the entry, and it points at the grant screen with this job's scope prefilled.
+     * gets the entry, and it points at the grant screen with this job's scope prefilled. Since
+     * e2e-06 DEF-01 the link carries {@code scopeFullName} only (no {@code &}, which the new job
+     * page's menu escaped) and the form it opens defaults to the JOB scope (note 194).
      */
     @Test
     public void t_ui_10_entryIsPresentAndLinksToThePrefilledGrantScreen() throws Exception {
@@ -152,9 +154,10 @@ public class JobGrantSidebarEntryTest {
         assertNotNull(entry, "a RequestGrant holder without Item/Configure must see the entry");
         assertTrue(j.contextPath.length() > 1, "premise: JenkinsRule serves under a non-root context path ("
                 + j.contextPath + "), so a link that drops it cannot resolve correctly by accident");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=batch-x",
+        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=batch-x",
                 resolved(entry), "the entry must resolve to the grant screen under the context path, with the JOB scope"
                         + " and this job's full name (raw href " + entry.getHrefAttribute() + ")");
+        assertFollowsToForm(entry, "batch-x");
     }
 
     /**
@@ -285,7 +288,7 @@ public class JobGrantSidebarEntryTest {
 
         HtmlAnchor entry = entryOn("g1", nested);
         assertNotNull(entry, "the entry must appear on a job inside a folder too");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=team%2Fj",
+        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=team%2Fj",
                 resolved(entry), "the '/' of the full name must be URL-encoded, or the sidebar entry is dropped"
                         + " by core's action-URL parsing; the link must resolve under the context path (raw href "
                         + entry.getHrefAttribute() + ")");
@@ -300,7 +303,7 @@ public class JobGrantSidebarEntryTest {
         assertEquals("ops/nightly/k", deep.getFullName(), "fixture");
         HtmlAnchor deepEntry = entryOn("g1", deep);
         assertNotNull(deepEntry, "the entry must appear on a job two folders deep");
-        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=ops%2Fnightly%2Fk",
+        assertEquals(j.getURL() + "batch-control/grants/?scopeFullName=ops%2Fnightly%2Fk",
                 resolved(deepEntry), "the entry on a job two folders deep must resolve to the grant screen under the"
                         + " context path (raw href " + deepEntry.getHrefAttribute() + ")");
         assertFollowsToForm(deepEntry, "ops/nightly/k");
@@ -323,6 +326,11 @@ public class JobGrantSidebarEntryTest {
                 .getPage(new WebRequest(new URL(resolved(entry)), HttpMethod.GET));
         assertEquals(200, page.getWebResponse().getStatusCode(), "following the entry for " + fullName + " must answer 200");
         assertEquals(fullName, scopeField(page).getValue(), "the folder path must survive the round trip through the query string");
+        assertEquals("JOB", scopeTypeValue(page), "the form opened from the entry must be pre-filled with the JOB scope"
+                + " (e2e-06 DEF-01: the link carries scopeFullName only and the form defaults to JOB)");
+        String text = page.asNormalizedText();
+        assertTrue(text.contains("Prefilled for") && text.contains(fullName.substring(fullName.lastIndexOf('/') + 1)),
+                "the form must say it is pre-filled for " + fullName + ": " + text.substring(0, Math.min(600, text.length())));
         assertTrue(configureCheckbox(page).isChecked(), "the form for " + fullName + " must start with CONFIGURE checked");
     }
 
@@ -347,6 +355,24 @@ public class JobGrantSidebarEntryTest {
         String url = "batch-control/grants/" + (query.isEmpty() ? "" : "?" + query);
         return (HtmlPage) j.createWebClient().withThrowExceptionOnFailingStatusCode(false)
                 .login(userId).getPage(new WebRequest(new URL(j.getURL(), url), HttpMethod.GET));
+    }
+
+    /** The selected scope type: a select's selected option, a checked radio, or a plain input's value. */
+    private static String scopeTypeValue(HtmlPage page) {
+        for (org.htmlunit.html.DomElement e : page.getElementsByName("scopeType")) {
+            if (e instanceof org.htmlunit.html.HtmlSelect) {
+                List<org.htmlunit.html.HtmlOption> sel = ((org.htmlunit.html.HtmlSelect) e).getSelectedOptions();
+                return sel.isEmpty() ? null : sel.get(0).getValueAttribute();
+            }
+            if (e instanceof org.htmlunit.html.HtmlRadioButtonInput) {
+                if (((org.htmlunit.html.HtmlRadioButtonInput) e).isChecked()) {
+                    return ((HtmlInput) e).getValue();
+                }
+            } else if (e instanceof HtmlInput) {
+                return ((HtmlInput) e).getValue();
+            }
+        }
+        return null;
     }
 
     private static HtmlInput scopeField(HtmlPage page) {
