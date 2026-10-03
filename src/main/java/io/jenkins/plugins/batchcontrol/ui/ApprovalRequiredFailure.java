@@ -2,9 +2,8 @@ package io.jenkins.plugins.batchcontrol.ui;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
-import hudson.model.Item;
 import hudson.model.Job;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
@@ -60,15 +59,13 @@ public class ApprovalRequiredFailure extends Failure {
     }
 
     /**
-     * Whether the page links the request form: the viewer holds {@code BatchControl/Request}
-     * (without it {@code <job>/batch-control/} answers 404), may read the job and holds
-     * {@code Item/Build} on it (without it the submission is refused, D-38).
+     * Whether the page links the request form: the viewer may submit a run request for the job
+     * ({@code BatchControl/Request}, without which {@code <job>/batch-control/} answers 404, and
+     * {@code Item/Read}; {@code Item/Build} is not required, D-38a).
      */
     public boolean isCanRequest() {
         Job<?, ?> job = getJob();
-        // e2e-03 DEF-12: the form is only useful with Job/Build as well (D-38).
-        return job != null && job.hasPermission(Item.READ) && job.hasPermission(Item.BUILD)
-                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        return job != null && RunRequestService.get().canRequest(job);
     }
 
     @Override

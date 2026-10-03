@@ -97,6 +97,14 @@ public class RequestItem implements ModelObject {
         return Dates.format(instant);
     }
 
+    /**
+     * D-38a: whether the detail page states that the requester does not hold {@code Item/Build}
+     * on the job (evaluated for the requester, not the viewer).
+     */
+    public boolean isRequesterLacksBuild() {
+        return io.jenkins.plugins.batchcontrol.ui.RequesterPermission.lacksBuild(getRequest());
+    }
+
     /** Job URL relative to the Jenkins root if the job exists and the user may see it, else null. */
     @CheckForNull
     public String getJobUrl() {

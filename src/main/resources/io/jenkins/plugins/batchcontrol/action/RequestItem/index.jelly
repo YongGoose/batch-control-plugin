@@ -42,7 +42,16 @@
               <j:if test="${it.awaitingExecution and it.jobDisabled}"> (waiting: the job is disabled)</j:if>
             </td>
           </tr>
-          <tr><th style="text-align: left;">Requester</th><td>${it.request.requester}</td></tr>
+          <tr>
+            <th style="text-align: left;">Requester</th>
+            <td>
+              ${it.request.requester}
+              <!-- D-38a: approving such a request also authorises the run; constant text only. -->
+              <j:if test="${it.requesterLacksBuild}">
+                <div class="jenkins-!-warning-color" role="status">The requester does not have Build permission on this job.</div>
+              </j:if>
+            </td>
+          </tr>
           <tr><th style="text-align: left;">Approvers</th><td>${it.join(it.request.approvers)}</td></tr>
           <tr><th style="text-align: left;">Created</th><td>${it.format(it.request.createdAt)}</td></tr>
           <tr><th style="text-align: left;">Decided</th><td>${it.format(it.request.decidedAt)}</td></tr>

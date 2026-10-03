@@ -124,8 +124,8 @@ public class JobActivationNoticeAction implements Action {
 
     /**
      * Whether the viewer may submit a run request for this job, so the run request form is
-     * linked (e2e-03 DEF-12): {@code BatchControl/Request} and {@code Item/Build} on the job
-     * (D-38), the same predicate as the sidebar entry.
+     * linked (e2e-03 DEF-12): {@code BatchControl/Request} and {@code Item/Read} on the job
+     * (D-38a), the same predicate as the sidebar entry.
      */
     public boolean isCanRequestRun() {
         return new JobRequestAction(job).isCanRequestRun();
