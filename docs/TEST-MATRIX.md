@@ -733,6 +733,7 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-UI-103 | 6a, D-66 | integration | P2 | u1's pending ACTIVATE request designating a1; a2 an approver not designated | a1, admin, a2 GET `activations/` | a1's pending row carries `small[data-batch-control-awaiting]`; admin's row does not; a2 has no marked row (note 249) | RequestLayoutTest |
 | T-UI-104 | 2 (#31), 5, 8, D-66 | integration | P1 | as T-UI-98; p0 without Batch Control permissions | u1 GETs `job/batch-x/batch-control/dialog`, p0 the same; g1 and n1 GET `grants/dialog` | u1 200 with the form posting to `batch-control/submit`; p0 404; g1 200 with the form posting to `grants/create`; n1 refused or without that form (note 249) | RequestDialogTest |
 | T-UI-105 | 5, 8, D-66 | integration | P1 | as T-UI-98 | g1 POSTs `grants/create` with `dialog=true` and 9999 minutes; u1 POSTs `<job>/batch-control/submit` with `dialog=true` and no approver; g1 POSTs a valid dialog grant request | the refusals answer 400 and re-render the form (the grant's with "240"), creating nothing; the valid one creates one request and redirects to `grants/<id>` (note 249) | RequestDialogTest |
+| T-UI-106 | 11, 12 (e2e-12 DEF-07) | integration | P2 | run control on; admin; job `fast` | admin (JavaScript on) opens `history/?kind=runs`, types `fast` in Job and clicks **Filter**; opens `changes/` and `incidents/`, sets the month field to `2025-03` and clicks **Show** | each lands (200) on a URL whose query has the filter value (`job=fast`, resp. the month field's name `=2025-03`) and no `Jenkins-Crumb`, `.crumb` or `json` parameter; the result page shows the filter field with the value kept (note 250) | FilterFormCrumbTest |
 
 ## 비고 (전제와 요청 사항)
 
@@ -1169,6 +1170,8 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 249. **D-66 public surface (T-UI-101..105, ui-dev dac5094).** Lists `table[data-batch-control-list=pending|active|ended]` with the paging parameters `pendingPage/activePage/endedPage`, the activations marker `small[data-batch-control-awaiting]`, the fragments `job/<j>/batch-control/dialog` and `grants/dialog`, `dialog=true` submissions (400 re-render, redirect on success), the redirect of the former `grants/?scopeFullName=` link, and `POST grants/<id>/revoke` (T-UI-97). An approved activation may be listed as active rather than ended, so T-UI-96 accepts either for it. SPEC does not say whether an approver who is not designated sees a pending activation, so T-UI-103 only requires that a2 has no marked row. Red on bec34ba: T-UI-95..98, 101..104 and the adapted T-UI-10/13/14/15/26; T-UI-99, 100 and 105 were already green there and are guards.
 
+250. **Filter forms keep the crumb out of the URL (T-UI-106, e2e-12 DEF-07).** No SPEC acceptance line covers the URL of a GET filter form, hence a T-UI row; the crumb in a URL leaks into history, bookmarks, logs and the Referer. The defect comes from core's `hudson-behavior.js`, so the web client runs with JavaScript on (a client without JavaScript could not reproduce it). Forms are found by their submit caption ("Filter", "Show"); the Changes/Incidents month field is found by `type=month` or a name containing "month", and its name is read from the page, not pinned. Each page also has to navigate and keep the value, so a form that drops the filter cannot pass.
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -1259,3 +1262,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **D-66 rows, notes 245-249**: +11 rows, integration: T-UI-97 (P0), T-UI-95/96/98/99/100/104/105 (P1), T-UI-101/102/103 (P2); T-UI-10/13/14/15/26 and T-08-49 adapted to D-66. Totals: P0 +1, P1 +7, P2 +3; T-UI +11.
 - **R4 D-68/D-69/R4-4 rows, notes 230-232**: +7 rows, integration: T-08-93/94/95 (P0), T-08-90/91/92, T-05-90 (P1); T-03-21 withdrawn (P0 -1). Totals: P0 +2, P1 +4; T-08 +6, T-05 +1, T-03 -1.
 - **T-04-08/10 rewritten for D-68, note 234**: no row count change.
+- **e2e-12 DEF-07 row, note 250**: +1 row, integration, P2: T-UI-106. Totals: P2 +1; T-UI +1.
