@@ -26,6 +26,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 
 /**
@@ -225,7 +226,15 @@ final class MoveGuard {
         if (destination.equals("/")) {
             return jenkins;
         }
-        Item group = jenkins.getItemByFullName(destination.substring(1)); // as the user: Read applies
+        Item group;
+        try {
+            group = jenkins.getItemByFullName(destination.substring(1)); // as the user: Read applies
+        } catch (AccessDeniedException e) {
+            // Discover without Read (security-33 S-33-05, #74): step aside exactly as for an
+            // unknown destination, so the folders plugin answers and nothing is recorded; a 403
+            // must not escape from inside a permission check.
+            return null;
+        }
         return group instanceof ItemGroup ? (ItemGroup<?>) group : null;
     }
 
