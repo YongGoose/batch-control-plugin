@@ -25,15 +25,14 @@
       </j:if>
       <j:if test="${it.showMarkReviewed}">
         <div class="jenkins-alert jenkins-alert-warning" role="status">
-          <p>
-            This job was changed under a temporary permission window and has not been reviewed,
-            so changes that widen its authorization are undone. Check what was changed under the
-            permission window (see Change Records) and the Pipeline script first.
-          </p>
+          <!-- Hosting review: no p as the alert's first child (it adds padding on top). -->
+          This job was changed under a temporary permission window and has not been reviewed,
+          so changes that widen its authorization are undone. Check what was changed under the
+          permission window (see Change Records) and the Pipeline script first.
           <!-- D-58c: the runs replayed under a window stay untrusted after the review. -->
           <j:set var="markedRuns" value="${it.markedRuns}"/>
           <j:if test="${!empty(markedRuns)}">
-            <p>These runs were replayed under a temporary permission window; only an administrator can re-run them.</p>
+            <div class="jenkins-!-margin-top-2">These runs were replayed under a temporary permission window; only an administrator can re-run them.</div>
             <ul>
               <j:forEach var="r" items="${markedRuns}">
                 <li>
