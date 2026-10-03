@@ -1,53 +1,41 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:layout title="Batch Control" permissions="${it.viewPermissions}">
+<!-- The Batch Control overview at /batch-control/. Hosting review 2026-10-02 (PR6): the sections
+     are tabs (bc:tabs) instead of a side panel, the same entries as the breadcrumb dropdown
+     (BatchControlRootAction#doContextMenu); each is shown only to a user who may open it (SPEC
+     item 2). The overview lists the open items the viewer can act on as text with the tab
+     badges' counts; no duplicate navigation buttons. -->
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
+  <l:layout title="Batch Control" type="one-column" permissions="${it.viewPermissions}">
     <j:set var="links" value="${it.links}"/>
-    <l:side-panel>
-      <!-- Each entry is shown only to a user who may open it (SPEC item 2): the predicates are the
-           same permission sets the section gates check. The Grants entry also needs change
-           control on, because that subtree closes while the switch is off. -->
-      <l:tasks>
-        <j:if test="${links.requests}">
-          <l:task href="${rootURL}/batch-control/requests/" icon="symbol-list-outline plugin-ionicons-api" title="Run Requests"/>
-        </j:if>
-        <j:if test="${links.activations}">
-          <l:task href="${rootURL}/batch-control/activations/" icon="symbol-power-outline plugin-ionicons-api" title="Activations"/>
-        </j:if>
-        <j:if test="${links.grants}">
-          <l:task href="${rootURL}/batch-control/grants/" icon="symbol-key-outline plugin-ionicons-api" title="Grants"/>
-        </j:if>
-        <j:if test="${links.history}">
-          <l:task href="${rootURL}/batch-control/changes/" icon="symbol-document-text-outline plugin-ionicons-api" title="Change Records"/>
-          <l:task href="${rootURL}/batch-control/dashboard/" icon="symbol-speedometer-outline plugin-ionicons-api" title="Dashboard"/>
-          <l:task href="${rootURL}/batch-control/incidents/" icon="symbol-warning-outline plugin-ionicons-api" title="Incidents"/>
-          <l:task href="${rootURL}/batch-control/history/" icon="symbol-search-outline plugin-ionicons-api" title="History"/>
-        </j:if>
+    <l:main-panel>
+      <l:app-bar title="Batch Control">
         <!-- e2e-03 DEF-10: the configuration page for BatchControl/Manage holders (shown only to
-             them, and only while the page exists). -->
+             them, and only while the page exists). It lives outside /batch-control/, so it is an
+             app-bar control rather than a tab. e2e-06 UX-10: through Manage Jenkins for whoever
+             may open it, so the breadcrumb reads Manage Jenkins > Batch Control; the root URL for
+             a BatchControl/Manage holder without Overall/Manage, who cannot reach /manage/. -->
         <j:set var="configurationLink" value="${it.configurationLink}"/>
         <j:if test="${configurationLink != null}">
-          <!-- e2e-06 UX-10: through Manage Jenkins for whoever may open it, so the breadcrumb reads
-               Manage Jenkins > Batch Control; the root URL for a BatchControl/Manage holder
-               without Overall/Manage, who cannot reach /manage/. -->
-          <l:task href="${rootURL}/${app.hasPermission(app.MANAGE) ? 'manage/' : ''}${configurationLink.urlName}/" icon="symbol-settings-outline plugin-ionicons-api" title="Configuration"/>
+          <a class="jenkins-button" href="${rootURL}/${app.hasPermission(app.MANAGE) ? 'manage/' : ''}${configurationLink.urlName}/">
+            <l:icon src="symbol-settings-outline plugin-ionicons-api"/>
+            Configuration
+          </a>
         </j:if>
-      </l:tasks>
-    </l:side-panel>
-    <l:main-panel>
-      <l:app-bar title="Batch Control"/>
+      </l:app-bar>
+      <bc:tabs active="overview"/>
       <p class="jenkins-description">
-        Run approval and audit history for jobs under batch control. Use the side panel to open
-        a screen.
+        Run approval and audit history for jobs under batch control. Use the tabs to open a screen.
       </p>
-      <j:if test="${links.activations}">
-        <j:set var="pendingActivations" value="${it.pendingActivationCount}"/>
-        <j:if test="${pendingActivations > 0}">
-          <div class="jenkins-alert jenkins-alert-info">
-            ${pendingActivations} activation or hold request(s) are awaiting your decision.
-            <a href="${rootURL}/batch-control/activations/">Open Activations</a>
+      <!-- Hosting review item: open run and grant requests are announced like activations. The
+           counts are the tab badges (ui.SectionTabs): requests awaiting the viewer's decision, or
+           else the viewer's own pending requests. -->
+      <j:forEach var="tab" items="${it.tabs}">
+        <j:if test="${tab.badge != null}">
+          <div class="jenkins-alert jenkins-alert-${tab.badge.severity}" data-batch-control-open="${tab.id}">
+            ${tab.badge.tooltip}: <a href="${rootURL}/batch-control/${tab.urlName}">${tab.displayName}</a>
           </div>
         </j:if>
-      </j:if>
+      </j:forEach>
       <j:if test="${!links.requests and !links.grants and !links.history}">
         <p>
           None of the Batch Control screens is available to you right now. Grant requests can
