@@ -8,6 +8,7 @@
   <l:layout title="Run Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Run Request ${it.id}"/>
+      <bc:tabs active="requests"/>
 
       <!-- DEF-09: a refusal whose form is no longer shown (the request was decided or cancelled
            meanwhile) is reported here, above the current state. -->
@@ -105,7 +106,7 @@
           <p>No parameters.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr><th>Name</th><th>Value</th></tr>
             </thead>
@@ -134,7 +135,7 @@
           <p>This job has no runs yet.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr><th>Build</th><th>Result</th><th>Started</th><th>Duration</th></tr>
             </thead>
@@ -193,7 +194,7 @@
 
       <j:if test="${!empty(it.request.approverChanges)}">
         <h2>Approver Changes</h2>
-        <table class="jenkins-table">
+        <table class="jenkins-table jenkins-table--small">
           <thead>
             <tr><th>From</th><th>To</th><th>Changed by</th><th>At</th></tr>
           </thead>

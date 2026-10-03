@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Change Records" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Change Records"/>
+      <bc:tabs active="changes"/>
       <p class="jenkins-description">
         Automatic audit trail of job creation, configuration, deletion, rename and move events.
         Records are read-only.
@@ -41,7 +42,7 @@
           <p>No change records in ${it.monthValue}.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>Type</th>

@@ -2,10 +2,11 @@
 <!-- SPEC item 6a: the activation approval inbox and the activation requests the viewer may see
      (P-09: requester, designated approvers, Manage). A job name links to the job only for a
      viewer who holds Item/Read on it. -->
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Activations" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Activations"/>
+      <bc:tabs active="activations"/>
       <p class="jenkins-description">
         Activation requests put a job into service for timer and upstream triggers; hold requests
         take it out of service. Both take effect only once a designated approver approves them.
@@ -14,7 +15,7 @@
       <j:set var="inbox" value="${it.awaitingDecision}"/>
       <j:if test="${!empty(inbox)}">
         <h2>Awaiting Your Decision</h2>
-        <table class="jenkins-table">
+        <table class="jenkins-table jenkins-table--small">
           <thead>
             <tr>
               <th>ID</th>
@@ -44,7 +45,7 @@
           <p>No activation requests.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>ID</th>

@@ -1,14 +1,15 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Run Requests" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Run Requests"/>
+      <bc:tabs active="requests"/>
       <j:choose>
         <j:when test="${it.total == 0}">
           <p>No run requests.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>ID</th>

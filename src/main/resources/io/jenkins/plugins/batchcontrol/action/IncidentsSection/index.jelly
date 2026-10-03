@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Incidents" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Incidents"/>
+      <bc:tabs active="incidents"/>
       <p class="jenkins-description">
         Failed and unstable builds are registered automatically as incidents.
         Open an incident to acknowledge, comment or resolve it; a user who may submit run requests for its job can also request a rerun there.
@@ -39,7 +40,7 @@
           <p>No incidents in ${it.monthValue}.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>Incident</th>

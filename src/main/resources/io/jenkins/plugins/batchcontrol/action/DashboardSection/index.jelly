@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Run Dashboard" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Run Dashboard"/>
+      <bc:tabs active="dashboard"/>
       <p class="jenkins-description">
         Every build of every job with cause, user, parameters, result and duration.
         Showing the last ${it.days} day(s), newest first. Secret parameter values are stored masked.
@@ -38,7 +39,7 @@
           <p>No runs recorded in the last ${it.days} day(s).</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>Run</th>

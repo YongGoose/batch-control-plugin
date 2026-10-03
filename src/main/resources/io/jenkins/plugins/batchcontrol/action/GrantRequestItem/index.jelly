@@ -7,6 +7,7 @@
   <l:layout title="Grant Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Grant Request ${it.id}"/>
+      <bc:tabs active="grants"/>
 
       <!-- DEF-09: a refusal whose form is no longer shown (the request was decided or cancelled
            meanwhile) is reported here, above the current state. -->
@@ -70,7 +71,7 @@
 
       <j:if test="${!empty(it.request.approverChanges)}">
         <h2>Approver Changes</h2>
-        <table class="jenkins-table">
+        <table class="jenkins-table jenkins-table--small">
           <thead>
             <tr><th>From</th><th>To</th><th>Changed by</th><th>At</th></tr>
           </thead>

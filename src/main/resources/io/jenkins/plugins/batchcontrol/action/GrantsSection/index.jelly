@@ -8,6 +8,7 @@
   <l:layout title="Grants" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Grants"/>
+      <bc:tabs active="grants"/>
       <j:set var="base" value="${rootURL}/batch-control/grants/"/>
       <p class="jenkins-description">
         Temporary (just-in-time) permission requests for creating, configuring or deleting jobs,
@@ -139,7 +140,7 @@
           <p>No grant requests.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>ID</th>
@@ -188,7 +189,7 @@
           <p>No active grants.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>ID</th>
@@ -217,7 +218,7 @@
                   <td>${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
                     <td>
-                      <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
+                      <l:confirmationLink class="jenkins-button jenkins-button--tertiary jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
                                           title="Revoke this grant?" okText="Revoke"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
                         Revoke
@@ -249,7 +250,7 @@
           <p>No ended grants.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr>
                 <th>ID</th>
