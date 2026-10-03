@@ -8,6 +8,7 @@
   <l:layout title="Incident ${it.id}" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Incident ${it.id}"/>
+      <bc:tabs active="incidents"/>
       <j:set var="base" value="${rootURL}/batch-control/incidents/${it.id}/"/>
       <!-- DEF-09: a refusal whose form is no longer shown (the incident moved on meanwhile) is
            reported here, above the current state. -->
@@ -80,7 +81,7 @@
           <p>No parameters.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr><th>Name</th><th>Value</th></tr>
             </thead>
@@ -97,7 +98,7 @@
       </j:choose>
 
       <h2>History</h2>
-      <table class="jenkins-table">
+      <table class="jenkins-table jenkins-table--small">
         <thead>
           <tr><th>Status</th><th>By</th><th>At</th><th>Comment</th></tr>
         </thead>

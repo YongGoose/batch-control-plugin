@@ -2,10 +2,11 @@
 <!-- SPEC item 6a: the activation approval inbox and the activation requests the viewer may see
      (P-09: requester, designated approvers, Manage). A job name links to the job only for a
      viewer who holds Item/Read on it. -->
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Activations" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Activations"/>
+      <bc:tabs active="activations"/>
       <p class="jenkins-description">
         Activation requests put a job into service for timer and upstream triggers; hold requests
         take it out of service. Both take effect only once a designated approver approves them.
@@ -14,7 +15,7 @@
       <j:set var="inbox" value="${it.awaitingDecision}"/>
       <j:if test="${!empty(inbox)}">
         <h2>Awaiting Your Decision</h2>
-        <table class="jenkins-table">
+        <table class="jenkins-table jenkins-table--small">
           <thead>
             <tr>
               <th>ID</th>
@@ -44,7 +45,7 @@
           <p>No activation requests.</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>ID</th>
@@ -76,11 +77,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of activation requests">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?page=${it.page - 1}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} requests)</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'request' : 'requests'})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="?page=${it.page + 1}">Older</a>
             </j:if>

@@ -3,12 +3,13 @@
      labelled in words (HistorySection#summaryLabel). The JSON at summary?month= keeps the field
      keys for scripts. Read-only; ViewHistory is enforced by HistorySection#getTarget.
      e2e re-audit DEF-28: no "Back to History" link; the breadcrumb bar leads back. -->
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Monthly Summary" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <j:set var="month" value="${it.monthlyMonth}"/>
       <l:app-bar title="Monthly Summary (${month})"/>
-      <table class="jenkins-table" style="max-width: 30rem;">
+      <bc:tabs active="history"/>
+      <table class="jenkins-table jenkins-table--small" style="max-width: 30rem;">
         <tbody>
           <j:forEach var="s" items="${it.monthlySummary.entrySet()}">
             <tr>

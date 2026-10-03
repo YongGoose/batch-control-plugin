@@ -10,10 +10,14 @@ import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.SectionTabs;
 import java.util.List;
 import jenkins.model.Jenkins;
+import jenkins.model.ModelObjectWithContextMenu;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 
 /**
  * Global "Batch Control" page at {@code /batch-control}.
@@ -40,10 +44,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * {@code null}, so it is not listed and {@code /batch-control/} and every URL beneath it answer
  * 404. A user who holds some Batch Control permission but not the one a section needs gets 403
  * from that section's gate.
+ *
+ * <p>Hosting review 2026-10-02 (PR6): the sections are reached through a tab bar
+ * ({@code bc:tabs}, built from {@link SectionTabs}) instead of a side panel, and the action is a
+ * {@link ModelObjectWithContextMenu}, so its breadcrumb offers the same sections as a dropdown
+ * on every subpage.
  */
 @Extension
 @Restricted(NoExternalUse.class)
-public class BatchControlRootAction implements RootAction {
+public class BatchControlRootAction implements RootAction, ModelObjectWithContextMenu {
 
     /** Whether the current user may use this action at all. */
     private static boolean isVisible() {
@@ -73,12 +82,46 @@ public class BatchControlRootAction implements RootAction {
         return isVisible() ? "batch-control" : null;
     }
 
+    /**
+     * The breadcrumb dropdown: the same tabs, in the same order and with the same badges, as the
+     * tab bar ({@link SectionTabs#current()}, permission-filtered by {@link SectionAccess}), plus
+     * the configuration page for a {@code BatchControl/Manage} holder. Read-only; empty for a
+     * user without any Batch Control permission (who gets 404 before reaching it anyway).
+     */
+    // Read-only: served by GET to core's breadcrumb context-menu script; lists only sections the caller may open.
+    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
+    @Override
+    public ContextMenu doContextMenu(StaplerRequest2 request, StaplerResponse2 response) {
+        ContextMenu menu = new ContextMenu();
+        if (!Jenkins.get().hasAnyPermission(SectionAccess.anyPermission())) {
+            return menu; // no Batch Control permission: nothing to list (the URL is 404 anyway)
+        }
+        String base = request.getContextPath() + "/" + "batch-control/";
+        for (SectionTabs.Tab tab : SectionTabs.current()) {
+            String iconXml = new MenuItem().withIconClass(tab.getIconFileName()).getIconXml();
+            menu.add(base + tab.getUrlName(), tab.getIconFileName(), iconXml, tab.getDisplayName(),
+                    false, false, tab.getBadge(), null);
+        }
+        BatchControlConfigurationLink configuration = getConfigurationLink();
+        if (configuration != null) {
+            String icon = "symbol-settings-outline plugin-ionicons-api";
+            menu.add(request.getContextPath() + "/" + configuration.getUrlName() + "/", icon,
+                    new MenuItem().withIconClass(icon).getIconXml(), "Configuration", false, false, null, null);
+        }
+        return menu;
+    }
+
     /** Permissions for the landing page's {@code l:layout}: any Batch Control permission. */
     public Permission[] getViewPermissions() {
         return SectionAccess.viewPermissions(SectionAccess.anyPermission(), SectionAccess.canOpenRoot());
     }
 
-    /** Link predicates for the side panel: each entry is shown only if it can be opened. */
+    /** The tabs the viewer may open, with their open-item badges (overview page). */
+    public List<SectionTabs.Tab> getTabs() {
+        return SectionTabs.current();
+    }
+
+    /** Link predicates of the overview: each entry is shown only if it can be opened. */
     public SectionAccess getLinks() {
         return new SectionAccess();
     }

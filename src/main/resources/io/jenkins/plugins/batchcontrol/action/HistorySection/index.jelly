@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="History" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="History"/>
+      <bc:tabs active="history"/>
       <p class="jenkins-description">
         Filtered audit views of run records, incidents, change records and run requests.
         The job filter matches a substring of the full name; user, result and
@@ -84,7 +85,7 @@
             ${it.filter.toValue} match the filter above. Review whether this was an operator
             retrying or an automation replaying an approval it no longer holds.
           </p>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small">
             <thead>
               <tr><th>Job</th><th>Attempted by</th><th>At</th><th>Detail</th></tr>
             </thead>
@@ -138,7 +139,7 @@
         <j:otherwise>
           <j:choose>
             <j:when test="${it.kind == 'incidents'}">
-              <table class="jenkins-table">
+              <table class="jenkins-table jenkins-table--small">
                 <thead>
                   <tr><th>Incident</th><th>Run</th><th>Job</th><th>Result</th><th>Status</th><th>Created</th></tr>
                 </thead>
@@ -164,7 +165,7 @@
               </table>
             </j:when>
             <j:when test="${it.kind == 'changes'}">
-              <table class="jenkins-table">
+              <table class="jenkins-table jenkins-table--small">
                 <thead>
                   <tr><th>Type</th><th>Target</th><th>User</th><th>At</th><th>Grant</th><th>Detail</th></tr>
                 </thead>
@@ -190,7 +191,7 @@
               </table>
             </j:when>
             <j:when test="${it.kind == 'requests'}">
-              <table class="jenkins-table">
+              <table class="jenkins-table jenkins-table--small">
                 <thead>
                   <tr><th>Request</th><th>Job</th><th>Requester</th><th>Approvers</th><th>Decided by</th><th>Status</th><th>Created</th><th>Decided</th></tr>
                 </thead>
@@ -218,7 +219,7 @@
               </table>
             </j:when>
             <j:otherwise>
-              <table class="jenkins-table">
+              <table class="jenkins-table jenkins-table--small">
                 <thead>
                   <tr><th>Run</th><th>Job</th><th>Cause</th><th>User</th><th>Parameters</th><th>Result</th><th>Started</th><th>Duration</th><th>Aborted by</th><th>Request</th></tr>
                 </thead>
@@ -255,11 +256,11 @@
               </table>
             </j:otherwise>
           </j:choose>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of history records">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page - 1}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} matching records)</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'matching record' : 'matching records'})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="?${it.query(it.kind)}&amp;page=${it.page + 1}">Older</a>
             </j:if>
@@ -284,7 +285,7 @@
       </j:choose>
 
       <h2>Monthly Summary (${it.summaryMonth})</h2>
-      <table class="jenkins-table" style="max-width: 30rem;">
+      <table class="jenkins-table jenkins-table--small" style="max-width: 30rem;">
         <tbody>
           <j:forEach var="s" items="${it.summary.entrySet()}">
             <tr>

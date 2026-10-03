@@ -1,0 +1,35 @@
+<?jelly escape-by-default='true'?>
+<!-- Hosting review 2026-10-02 (PR6): the Batch Control sections as tabs at the top of every
+     Batch Control screen, instead of a side panel. Modelled on core's new build page tab bar
+     (lib/layout/tabs.jelly, which core marks internal): each tab is a design-library button,
+     tertiary unless it is the current section, with an icon and core's l:badge. The entries and
+     badges come from ui.SectionTabs, the same list as the breadcrumb dropdown of
+     BatchControlRootAction, so a tab is shown only when its section can be opened.
+     Labels and badge texts are constants or numbers; everything is escaped by default.
+     e2e-06 UX-8: with every section the bar must fit one line at 1280 px, so the labels are short
+     ("Changes") and the buttons a little tighter than core's default padding. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <st:documentation>
+    The Batch Control tab bar.
+    <st:attribute name="active" use="required">
+      Id of the current section: overview, requests, activations, grants, changes, dashboard,
+      incidents or history.
+    </st:attribute>
+  </st:documentation>
+  <!-- Through the root action, not j:invokeStatic: invokeStatic loads classes with core's class
+       loader and cannot see plugin classes in a real Jenkins (only a flat test classpath). -->
+  <j:set var="bcTabs" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0).tabs}"/>
+  <nav class="jenkins-buttons-row jenkins-!-margin-bottom-3" style="flex-wrap: wrap; gap: 0.25rem;"
+       aria-label="Batch Control sections" data-batch-control-tabs="true">
+    <j:forEach var="tab" items="${bcTabs}">
+      <j:set var="current" value="${tab.id == attrs.active}"/>
+      <a href="${rootURL}/batch-control/${tab.urlName}"
+         class="jenkins-button ${current ? '' : 'jenkins-button--tertiary'}" style="padding-inline: 0.75rem;"
+         aria-current="${current ? 'page' : null}" data-batch-control-tab="${tab.id}">
+        <l:icon src="${tab.iconFileName}" class="icon-sm"/>
+        ${tab.displayName}
+        <l:badge badge="${tab.badge}"/>
+      </a>
+    </j:forEach>
+  </nav>
+</j:jelly>

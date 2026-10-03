@@ -75,8 +75,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @WithJenkins
 public class DiscoverOnlyRequestScreenTest {
 
-    /** The footer of the request list: {@code Page 1 (3 requests)}. */
-    private static final Pattern FOOTER = Pattern.compile("Page\\s+(\\d+)\\s+\\((\\d+)\\s+requests\\)");
+    /** The footer of the request list: {@code Page 1 (3 requests)}, singular for one ({@code 1 request}, E2E-1 UX-9). */
+    private static final Pattern FOOTER = Pattern.compile("Page\\s+(\\d+)\\s+\\((\\d+)\\s+requests?\\)");
 
     /** The explicit branch the detail screen shows instead of an empty region. */
     private static final String NOT_AVAILABLE = "The job is not available";
@@ -180,6 +180,26 @@ public class DiscoverOnlyRequestScreenTest {
         HtmlPage adminPage = (HtmlPage) get(webClient("admin"), "batch-control/requests/");
         assertTrue(requestRowIds(adminPage).contains(foreignOnJ), "an administrator must see the request that is withheld from b");
         assertEquals(4, requestRowIds(adminPage).size(), "an administrator must see all four requests");
+    }
+
+    /**
+     * T-UI-47 (E2E-1 UX-9): a list with exactly one visible row reports it in the singular: the
+     * footer reads {@code 1 request}, never {@code 1 requests}, and its total equals the one row.
+     */
+    @Test
+    public void t_ui_47_oneRowFooterUsesTheSingular() throws Exception {
+        String only = requestAs("u1", jobK, "the only request u1 can see").getId();
+
+        HtmlPage page = (HtmlPage) get(webClient("u1"), "batch-control/requests/");
+        assertEquals(200, page.getWebResponse().getStatusCode());
+        List<String> rowIds = requestRowIds(page);
+        assertEquals(List.of(only), rowIds, "premise: u1 sees exactly its own request");
+        String text = page.asNormalizedText();
+        Matcher footer = FOOTER.matcher(text);
+        assertTrue(footer.find(), "the footer must report a page and a total: " + footerExcerpt(page));
+        assertEquals(1, Integer.parseInt(footer.group(2)), "the footer total must equal the one row");
+        assertTrue(footer.group().endsWith("1 request)"), "one row must be reported in the singular, got " + footer.group());
+        assertFalse(text.contains("1 requests"), "the plural must not be used for one row: " + footerExcerpt(page));
     }
 
     /**

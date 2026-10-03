@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+<j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Run Dashboard" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <l:app-bar title="Run Dashboard"/>
+      <bc:tabs active="dashboard"/>
       <p class="jenkins-description">
         Every build of every job with cause, user, parameters, result and duration.
         Showing the last ${it.days} day(s), newest first. Secret parameter values are stored masked.
@@ -38,7 +39,7 @@
           <p>No runs recorded in the last ${it.days} day(s).</p>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table">
+          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
             <thead>
               <tr>
                 <th>Run</th>
@@ -85,11 +86,11 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row" style="margin-top: 1rem;">
+          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of runs">
             <j:if test="${it.hasPrevious}">
               <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page - 1}">Newer</a>
             </j:if>
-            <span>Page ${it.page} (${it.total} runs in the last ${it.days} day(s))</span>
+            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'run' : 'runs'} in the last ${it.days} ${it.days == 1 ? 'day' : 'days'})</span>
             <j:if test="${it.hasNext}">
               <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page + 1}">Older</a>
             </j:if>
