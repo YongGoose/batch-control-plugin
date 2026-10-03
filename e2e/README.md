@@ -131,6 +131,18 @@ the new job page's "More actions" menu fail to open (core JS `menuItem` throws).
 menu checks disable it: `docker exec batch-control-e2e touch /var/jenkins_home/plugins/rebuild.jpi.disabled`
 and restart; remove the marker afterwards.
 
+## e2e-07 driver (`r7/`, Python)
+
+Round E2E-2 (full regression, 2026-10-03). `r7/lib.py` loads `r6/lib.py` and only moves the
+screenshots to `screenshots/run-7/` and the logs to `r7/out/`. `arrange.py` adds `mover1..3`,
+`folderreq` (BatchControl/Request only on the `team/` folder matrix), `reqhist` (Request +
+ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`, `b_rerun.py`
+(D-38a), `c_run.py`, `c_act.py ACTIVATE|HOLD`, `c_grant.py`, `c_del.py`, `c_misc.py`,
+`c_switch.py`, `c_hist.py`, `e_dark.py`, `s3.py`, `a_ui.py`, `n_newjob.py`, `n_classic.py`,
+`r_role.py` (applies `casc/profile-role.yaml` through the CasC page and back), plus copies of
+`r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
+`arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
+
 ## Older scenario scripts
 
 `scripts/rest-*.sh` (curl with crumb and cookie jar, raw output to `out/`) are
