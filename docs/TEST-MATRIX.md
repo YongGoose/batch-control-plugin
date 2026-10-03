@@ -706,7 +706,12 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-UI-75 | 6a, D-61, #76 | integration | P1 | as T-UI-73, jobs `count-x`, `count-y` | u1 files 2 ACTIVATE requests designating a1; a1 approves one | `ActivationService.countPendingFor` as T-UI-73 (2, then 1); `listAwaitingDecision` has 2 for a1, none for a2 (not designated) and u1 (no Approve); activations-tab badge = `getCount()` (note 221) | PendingCountTest |
 | T-UI-76 | 5, 6a, 8, #76 | integration | P1 | d1 designated on one run, grant and activation request while holding Approve | Approve taken from d1 | before: d1 awaits 1 on each service (guard); after: `getCount()` 0 on each, `listAwaitingDecision` empty; u1's own count unchanged (note 221) | PendingCountTest |
 | T-UI-77 | 2, #76 | integration | P1 | one pending request of each kind designating a1 | `countPendingFor(ANONYMOUS2)` on each service | equals `PendingCount.NONE` (empty, count 0). Guard: a1 awaits 1 (note 221) | PendingCountTest |
-| T-UI-56 | 2 usability (#88) | integration | P2 | run and change control on, nothing pending | admin GETs `batch-control/`; then u1 files one run request designating a1 | in the body (outside the tab bar) each of requests, activations, grants has a link with a count 0 next to it; then requests 1, the others 0 (note 217) | SectionTabsTest |
+| T-UI-56 | 2 usability (#88) | — | — | withdrawn by D-67 (the overview count table was removed); replaced by T-UI-90 (note 240) | — | — | — |
+| T-UI-90 | 2 usability, D-67 (R4-6) | integration | P2 | run and change control on; u1 files 7 run requests and 4 activation requests, g1 files 5 grant requests, all designating a1 | a1 and admin GET `batch-control/` | a1's tabs carry the badges 7 (requests), 5 (grants), 4 (activations) (guard); for a1 and admin the body outside the tab bar has no body link to requests/activations/grants with a number next to it and no text putting 7, 5, 4 or 16 within a few words of a pending/request/approval word (note 240) | SectionTabsTest |
+| T-UI-91 | 10, D-67 (R4-13) | integration | P2 | run control on; plugin clock 2025-09-28T12:00Z; 60 runs of jobs `dashrun-0..59` (one each, ascending in time) in the last day, written as store lines | viewer (ViewHistory) GETs `dashboard/`, follows the body link to History and History's own links (at most 10 pages) | the dashboard shows exactly dashrun-10..59; its body (outside the tab bar) links to History; dashrun-0..9 are listed on the History pages reached from that link (note 240) | DashboardLimitTest |
+| T-UI-92 | 10, D-67 | integration | P2 | as T-UI-91 with 30 runs | viewer GETs `dashboard/` | all 30 runs are shown (guard: the limit is a bound) (note 240) | DashboardLimitTest |
+| T-UI-93 | 5, R4-11 | integration | P2 | run control on; u1's request for `ml-job` approved by a1 and executed (#1) | admin GETs `requests/` and `requests/<id>/` | every body anchor to `job/ml-job/` or `job/ml-job/1/` has class `model-link`; the detail page offers at least one, including the run link; the list is not required to offer one (note 241) | ModelLinkTest |
+| T-UI-94 | 4, 10, R4-11 | integration | P2 | as T-UI-93 | admin GETs `dashboard/` and `history/` | each page links the run, and every job/run anchor has class `model-link` (note 241) | ModelLinkTest |
 
 ## 비고 (전제와 요청 사항)
 
@@ -1115,6 +1120,10 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 222. **Ids.** T-UI-70..77 and T-02-120 are taken out of sequence so that parallel backlog worktrees, which add rows from T-UI-56 and T-02-111 upward, do not collide.
 
+240. **Overview counts and dashboard bound (T-UI-90..92, D-67).** D-67 removed the #88 count table and the pending banner, so T-UI-56 (which demanded the table) is withdrawn rather than loosened and its test method replaced by T-UI-90. T-UI-90 uses distinctive counts (7, 5, 4, total 16) so the banner check cannot match unrelated text, and it keeps the badges as the positive guard. The dashboard rows count a run as shown when its job name is in the visible body text (tab bar, select, datalist, script excluded), so a job filter listing every job does not count. "Links to History for the rest" is read as: the left-out runs are reachable from the dashboard's History link, History's own paging included. Red on bec34ba (banner text "7 run requests are awaiting your decision", no History link from the dashboard).
+
+241. **model-link (T-UI-93/94, R4-11).** A job/run link is a body anchor whose path is exactly the job or the build. On bec34ba the dashboard's run link had no class (red), and the request list offered no job link at all, so the list is checked only for the links it does offer (SPEC does not pin the list's columns, note 27).
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -1200,3 +1209,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **Backlog #83-#89 rows, notes 212-217**: +6 rows, integration: T-05-40 (P0), T-08-65/66, T-09-24, T-SEC-72 (P1), T-UI-56 (P2). Totals: P0 +1, P1 +4, P2 +1; T-05 +1, T-08 +2, T-09 +1, T-SEC +1, T-UI +1.
 - **Backlog #74/#75 rows, notes 210-211**: +6 rows, integration: T-SEC-70/71 (P0), T-05-37/38/39 (P1), T-05-36 (P2). Totals: P0 +2, P1 +3, P2 +1; T-SEC +2, T-05 +4.
 - **D-59b rows, notes 218-219**: +3 rows, integration, P0: T-SEC-73/74/75. Totals: P0 +3; T-SEC +3.
+- **D-67 / R4-11 rows, notes 240-241**: T-UI-56 withdrawn (D-67); +5 rows, integration, P2: T-UI-90..94. Totals: P2 +4 net; T-UI +4 net.
