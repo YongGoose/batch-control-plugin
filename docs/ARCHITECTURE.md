@@ -36,7 +36,7 @@ io.jenkins.plugins.batchcontrol
 ├── model/        RunRequest, GrantRequest, Grant, RunRecord, Incident, ChangeRecord, enums
 ├── store/        Store 인터페이스 + FileStore 구현 (XStream/JSONL), 잠금, 보관 정리
 ├── config/       BatchControlGlobalConfiguration, BatchControlJobProperty
-├── security/     BatchControlPermissions, BatchControlAuthorizationStrategy(위임형), GrantService
+├── security/     BatchControlPermissions, BatchControlMatrixAuthorizationStrategy / BatchControlRoleBasedAuthorizationStrategy (D-35a), GrantService, MoveGuard (D-59)
 ├── policy/       ApprovalPolicy(누가 결재 가능한가), RunRequestService, GrantRequestService (상태 전이의 유일한 진입점)
 ├── queue/        ApprovalQueueDecisionHandler, ApprovedRunAction, ApprovedCause
 ├── listener/     ItemChangeListener, ConfigSnapshotListener, RunRecordListener, DeleteVetoListener
@@ -73,9 +73,9 @@ GrantAwareACL extends ACL            (unchanged logic)
 - Expiry: `hasActiveGrant` checks `expiresAt > now && revokedAt == null`. No timer, nothing written into the other plugin's data.
 - Scope: FOLDER scope matches the folder path prefix, JOB scope the exact full name. CREATE is checked on the folder's ACL, so only FOLDER-scope grants confer it. A Create grant also confers Configure on items its holder created inside the scope during the window (D-35c).
 - Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
-- Upgrade: the legacy `BatchControlAuthorizationStrategy` class stays only as a load-time shim. Its `readResolve` returns the matching subclass (matrix-auth or role-strategy delegate) or the unwrapped delegate otherwise.
+- Upgrade: none. The withdrawn generic wrapper `BatchControlAuthorizationStrategy` is removed without a load-time conversion; the plugin was never released (D-35e).
 - Migration: a security-page action copies a plain matrix-auth or role-strategy configuration into the subclass and back.
-- Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (covers the role-strategy Manage Roles save, which reinstalls the plain class).
+- Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (for example a plain strategy installed on the security page or by JCasC; role-strategy 918+ keeps the subclass on its own saves, D-35f).
 - With no active grant the subclass behaves exactly like its parent.
 - matrix-auth and role-strategy are optional dependencies; each subclass is an `@Extension(optional = true)` in its own class so a missing plugin never breaks class loading.
 
