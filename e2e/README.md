@@ -41,6 +41,7 @@ Other profiles:
 | `casc/profile-role.yaml` | Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-role.yaml`; back with `/var/jenkins_casc/jenkins.yaml` | Batch Control: Role-Based Strategy (B19-03) |
 | `compose.locale-th-utc.yml` | `docker compose -f docker-compose.yml -f compose.locale-th-utc.yml up -d jenkins`; back with `docker compose up -d jenkins` | JVM locale th_TH_TH and zone UTC (B18-02/03) |
 | `compose.ldap.yml` + `casc/profile-ldap.yaml` | `scripts/ldap-up.sh` (renders `out/ldap/bootstrap.ldif` from `ldap/bootstrap.ldif.template` with the `.env` passwords and starts `batch-control-e2e-ldap`), then Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-ldap.yaml`; back with `/var/jenkins_casc/jenkins.yaml` (or a restart), then `scripts/ldap-down.sh` | LDAP realm (ldap plugin) with group entries: `bc-admins`, `bc-requesters`, `bc-approvers`, `bc-configurers`, `bc-auditors`; users `admin`, `lrequester`, `lapprover-1/2`, `lconfigurer`, `lauditor`, `lnobody` with `<id>@ldap.e2e.local` addresses (e2e-05) |
+| `compose.prefix.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build`; back with `docker compose up -d jenkins` | Jenkins under the context path `/jenkins` (`http://localhost:8080/jenkins/`, Jenkins URL set through `BC_JENKINS_URL`) with the new job page experiment on for every user (`-Dnew-job-page.flag.defaultValue=true`; a user can still turn it off on `/me/experiments/`) (e2e-06) |
 
 The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
 import works, the README's permission names are right.
@@ -112,6 +113,36 @@ POSTs from a browser session), `x1b.mjs`/`x1c.mjs` (stale change-approvers form)
 `batch-control-e2e-ldap` themselves, because a new login needs the directory.
 `cd extra && npm install` once.
 
+## e2e-06 driver (`r6/`, Python)
+
+For a machine without Node.js: `r6/lib.py` is `extra/lib.mjs` ported to Python Playwright
+(`python3 -m venv venv && venv/bin/pip install playwright requests`; it drives the installed
+Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
+`screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
+and the `prod/` folder (script console, arrangement only; JCasC drops the accounts' matrix entries
+on the next boot), `grants.py <user> <JOB|FOLDER> <full name> <ACTIONS> [minutes]` requests a
+window over REST and has `approver-1` approve it, `move.py <id> <user> <source> <destination>
+<refused|moved>` drives the folders Move page (D-59), `s2*.py` role-strategy 918 pages, `s3.py`
+global matrix conversion, `s4*.py` new job page, `s5*.py` tab bar and destructive controls,
+`s6.py` regression spot-checks.
+
+The `rebuild` plugin's "Rebuild Last" entry has a null URL on a job without builds, which makes
+the new job page's "More actions" menu fail to open (core JS `menuItem` throws). For new job page
+menu checks disable it: `docker exec batch-control-e2e touch /var/jenkins_home/plugins/rebuild.jpi.disabled`
+and restart; remove the marker afterwards.
+
+## e2e-07 driver (`r7/`, Python)
+
+Round E2E-2 (full regression, 2026-10-03). `r7/lib.py` loads `r6/lib.py` and only moves the
+screenshots to `screenshots/run-7/` and the logs to `r7/out/`. `arrange.py` adds `mover1..3`,
+`folderreq` (BatchControl/Request only on the `team/` folder matrix), `reqhist` (Request +
+ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`, `b_rerun.py`
+(D-38a), `c_run.py`, `c_act.py ACTIVATE|HOLD`, `c_grant.py`, `c_del.py`, `c_misc.py`,
+`c_switch.py`, `c_hist.py`, `e_dark.py`, `s3.py`, `a_ui.py`, `n_newjob.py`, `n_classic.py`,
+`r_role.py` (applies `casc/profile-role.yaml` through the CasC page and back), plus copies of
+`r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
+`arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
+
 ## Older scenario scripts
 
 `scripts/rest-*.sh` (curl with crumb and cookie jar, raw output to `out/`) are
@@ -147,3 +178,16 @@ existing item.
 `-e LD_PRELOAD=/usr/local/lib/libfaketime.so.1 -e "FAKETIME=@2026-10-31 14:56:30" -e FAKETIME_DONT_FAKE_MONOTONIC=1
 -e TZ=UTC` and `-Duser.timezone=Asia/Seoul` in `JAVA_OPTS` (the plugin clock is the JVM default zone), no volume for
 JENKINS_HOME, and remove it with `docker rm -f -v`. With `@` each process starts at that time and the clock runs on.
+
+## e2e-08 driver (`r8/`)
+
+Round E2E-3 (targeted, 2026-10-03). `r8/lib.py` is `r7/lib.py` with screenshots in
+`screenshots/run-8/` and logs in `r8/out/`. `arrange.py` adds `opsreq` (Overall/Read globally;
+BatchControl/Request + Item/Read only on folder `ops/`), `mover1`, and the one-minute timer jobs
+`ops/cron-a`, `prod/mv-job`, `prod/mvf/inner-job`, `prod/adm-job`, `prod/admf/adm-inner` (timer not
+blocked); `arrange_side.py` adds `side/job-b` where `opsreq` has Item/Read only. `activate.py <job>...`
+activates jobs through the real ACTIVATE request flow over REST (requester submits, approver-1
+approves). Scenarios: `d38b.py` (D-38b), `move.py` + `mvstate.py` (D-59a), `rebuild.py` /
+`rebuild2.py` (rebuild plugin and the new job page menu), `monitor.py` (Mark as reviewed),
+`smoke.py`. Run under `compose.prefix.yml`; re-run `arrange.py` after a restart (JCasC drops the
+added matrix entries).
