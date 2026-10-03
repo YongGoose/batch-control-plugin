@@ -47,7 +47,9 @@ public class BatchControlRootAction implements RootAction {
 
     /** Whether the current user may use this action at all. */
     private static boolean isVisible() {
-        return SectionAccess.hasAny(SectionAccess.anyPermission());
+        // D-38b: also for a user whose Request is held only on some jobs or folders and who has
+        // requests of their own to see (an index lookup, no scan of all items).
+        return SectionAccess.canOpenRoot();
     }
 
     @Override
@@ -73,7 +75,7 @@ public class BatchControlRootAction implements RootAction {
 
     /** Permissions for the landing page's {@code l:layout}: any Batch Control permission. */
     public Permission[] getViewPermissions() {
-        return SectionAccess.anyPermission();
+        return SectionAccess.viewPermissions(SectionAccess.anyPermission(), SectionAccess.canOpenRoot());
     }
 
     /** Link predicates for the side panel: each entry is shown only if it can be opened. */

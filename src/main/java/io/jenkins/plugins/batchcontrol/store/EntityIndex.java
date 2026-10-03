@@ -27,8 +27,11 @@ final class EntityIndex {
     record RunEntry(RequestSummary summary, Instant lastActivity) {
     }
 
-    /** A grant request's status and last activity instant. */
-    record GrantRequestEntry(String id, RequestStatus status, Instant lastActivity) {
+    /**
+     * A grant or activation request's status, last activity instant and requester (D-38b: the
+     * requester answers "has this user any request of their own" from memory).
+     */
+    record GrantRequestEntry(String id, RequestStatus status, Instant lastActivity, String requester) {
     }
 
     /** A grant, the grant request it came from, and the instant it stopped conferring anything. */
@@ -53,12 +56,14 @@ final class EntityIndex {
 
     void put(GrantRequest request) {
         grantRequests.put(request.getId(),
-                new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request)));
+                new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request),
+                        request.getRequester()));
     }
 
     void put(ActivationRequest request) {
         activationRequests.put(request.getId(),
-                new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request)));
+                new GrantRequestEntry(request.getId(), request.getStatus(), lastActivity(request),
+                        request.getRequester()));
     }
 
     void put(Grant grant) {

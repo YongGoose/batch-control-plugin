@@ -28,6 +28,7 @@ public final class Notification {
     private final String url;
     private final String action;
     private final List<String> details;
+    private final List<String> notices;
 
     public Notification(String kind, String requestId, String subject, String requester,
                         String reason, List<String> recipients, String url) {
@@ -51,6 +52,18 @@ public final class Notification {
     public Notification(String kind, String requestId, String subject, String requester,
                         String reason, List<String> recipients, String url, String action,
                         List<String> details) {
+        this(kind, requestId, subject, requester, reason, recipients, url, action, details, null);
+    }
+
+    /**
+     * @param notices plain-text sentences the approver must notice (D-38a: the requester does not
+     *                have Build permission on the job); {@code null} for none
+     */
+    public Notification(String kind, String requestId, String subject, String requester,
+                        String reason, List<String> recipients, String url, String action,
+                        List<String> details, List<String> notices) {
+        this.notices = notices == null
+                ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(notices));
         this.details = details == null
                 ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(details));
         this.kind = Objects.requireNonNull(kind, "kind");
@@ -67,6 +80,15 @@ public final class Notification {
     /** {@code ACTIVATE} or {@code HOLD} for an activation request; {@code null} for other kinds. */
     public String getAction() {
         return action;
+    }
+
+    /**
+     * Plain-text sentences the recipient must notice, for example
+     * {@code "The requester does not have Build permission on this job."} (D-38a, run requests,
+     * {@code REQUEST_CREATED} and {@code APPROVERS_CHANGED}); never {@code null}, possibly empty.
+     */
+    public List<String> getNotices() {
+        return notices;
     }
 
     /**

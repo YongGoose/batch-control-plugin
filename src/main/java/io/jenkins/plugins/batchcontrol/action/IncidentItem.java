@@ -123,8 +123,9 @@ public class IncidentItem implements ModelObject {
 
     /**
      * View gating for the rerun form (e2e-03 DEF-12): {@code BatchControl/Request} and
-     * {@code Item/Build} on the incident's job, the permissions a run request needs (D-38).
-     * The endpoint and the service re-check.
+     * {@code Item/Read} on the incident's job, the permissions a run request needs (D-38a;
+     * {@code Item/Build} is not required). A user without {@code BatchControl/Request} is not
+     * offered the form. The endpoint and the service re-check.
      */
     public boolean isCanRerun() {
         return IncidentService.get().canRerun(incident);
@@ -138,8 +139,8 @@ public class IncidentItem implements ModelObject {
     /**
      * e2e-04 UX-19: the job's URL for a viewer who may read it (P-09, {@link #findJob()}), else
      * {@code null}. Its run request form is {@code <url>batch-control/}; the view links that form
-     * only together with {@link #isCanRerun()}, the same Request + Item/Read + Item/Build test the
-     * form itself applies (D-38).
+     * only together with {@link #isCanRerun()}, the same Request + Item/Read test the form itself
+     * applies (D-38a).
      */
     public String getJobUrl() {
         Job<?, ?> job = findJob();
@@ -209,7 +210,9 @@ public class IncidentItem implements ModelObject {
     @RequirePOST
     public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38a / D-57: a rerun is submitted from the Incidents screen (ViewHistory) and needs
+        // BatchControl/Request on the incident's job, checked below once the job is known.
+        Jenkins.get().checkPermission(BatchControlPermissions.VIEW_HISTORY);
         // S-06: mirror JobRequestAction.doSubmit — no run requests for jobs the caller cannot
         // read. The existence lookup runs as SYSTEM2 because the caller-scoped lookup returns
         // null for an existing-but-unreadable job, which would silently skip exactly the check
@@ -225,10 +228,11 @@ public class IncidentItem implements ModelObject {
         }
         if (job != null) {
             job.checkPermission(Item.READ);
-            // D-38: a run request needs Job/Build; the service checks it too. Checking it before
-            // the input keeps the answer a 403 whatever else is wrong with the submission.
-            job.checkPermission(Item.BUILD);
+            job.checkPermission(BatchControlPermissions.REQUEST);
+            // D-38a: Item/Build is not required to request a rerun; the approval decides.
         }
+        // D-38b: no Jenkins-level Request fallback when the job is gone; the service refuses a
+        // rerun of a job that no longer exists with its own message.
         FormErrors errors = new FormErrors("rerun");
         List<String> approvers = List.of();
         try {

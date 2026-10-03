@@ -325,7 +325,7 @@ variant is selected *and* change control is on.
 
 | Permission | What it allows |
 |---|---|
-| `BatchControl/Request` | Create run requests for approval-protected jobs, and activation and hold requests (with `Item/Read` on the job) |
+| `BatchControl/Request` | Create run requests for approval-protected jobs, and activation and hold requests (with `Item/Read` on the job; `Item/Build` is not required) |
 | `BatchControl/Approve` | Approve or reject run, activation, hold and window requests |
 | `BatchControl/RequestGrant` | Request temporary change permissions |
 | `BatchControl/ViewHistory` | View the history screens, dashboards and CSV exports |
@@ -333,10 +333,27 @@ variant is selected *and* change control is on.
 
 `Manage` is implied by `Overall/Administer` and implies the other four, so
 administrators pass every check. A requester typically holds `Overall/Read`,
-`Item/Read`, `Item/Build`, `Request` and `RequestGrant`, and deliberately not
+`Item/Read`, `Request` and `RequestGrant`, and deliberately not
 `Item/Configure`, since that is precisely what a `CONFIGURE` window is for. An
 approver usually gets `Approve` and `ViewHistory` but not `Request`. Note that
 `ViewHistory` is broader than its name suggests; see [Limitations](#limitations).
+
+Requesting a run needs `BatchControl/Request` and `Item/Read` on the job, and
+nothing else: `Item/Build` is not required. On a job that requires approval,
+`Item/Build` confers nothing by itself while run control is on, since every
+direct path is refused and the approved run is queued by the plugin, so
+`Request` alone decides who may ask. **On approval-required jobs, grant
+`Request` instead of `Build`.** Keep `Item/Build` for the jobs that do not
+require approval, and for the whole instance while run control is off, where
+Jenkins' own Build semantics apply unchanged. Because an approval can now
+authorise a run for someone who could not start the job themselves, the request
+detail page and the approver notification say so when the requester lacks
+`Item/Build` on the job, so the approver makes that decision knowingly. If you
+want only Build holders to be able to ask, assign `Request` only to them.
+A requester without `Item/Build` who posts to the job's `/build` endpoint from a
+script gets Jenkins' own 403 ("missing the Job/Build permission"), because core
+checks Build before Batch Control's gate runs; such users request runs through
+**Request Run** or the service API, not the build endpoint.
 
 ### 4. Configure jobs
 
@@ -402,9 +419,9 @@ a rerun request. The rerun request carries the failed build's original parameter
 as they were; they are fixed, not offered for editing. The rerun form has only
 the approver checkboxes: the reason is generated from the incident and cannot be
 typed in. Submitting it needs `BatchControl/Request` plus
-`Item/Read` and `Item/Build` on the job, like any run request, and the Incidents
-screen itself needs `BatchControl/ViewHistory`, so the user needs all four; the
-typical roles in step 3 give that combination only to administrators unless you
+`Item/Read` on the job, like any run request (`Item/Build` is not required), and
+the Incidents screen itself needs `BatchControl/ViewHistory`, so the user needs
+all three; the typical roles in step 3 give that combination only to administrators unless you
 add it. The lifecycle runs `OPEN`
 → `ACKNOWLEDGED` → `RESOLVED`, one way only, each transition carrying a user, a
 timestamp and a comment. **History** filters runs, incidents, change records and

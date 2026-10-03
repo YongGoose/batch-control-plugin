@@ -64,6 +64,12 @@ public interface Store {
      */
     List<RequestSummary> listRunRequestSummaries();
 
+    /**
+     * Whether at least one stored run request, in any status, was filed by {@code userId} (D-38b).
+     * Answered from the in-memory entity index; no request file and no item is read.
+     */
+    boolean hasRunRequestBy(String userId);
+
     /** Writes (or rewrites, on a status transition) the grant request XML atomically. */
     void saveGrantRequest(GrantRequest request);
 
@@ -98,6 +104,12 @@ public interface Store {
 
     /** Loads the PENDING activation requests only, sorted by id, via the entity index (#13). */
     List<ActivationRequest> listOpenActivationRequests();
+
+    /**
+     * Whether at least one stored activation or hold request, in any status, was filed by
+     * {@code userId} (D-38b). Answered from the in-memory entity index.
+     */
+    boolean hasActivationRequestBy(String userId);
 
     /**
      * Writes the activation state of a job atomically to

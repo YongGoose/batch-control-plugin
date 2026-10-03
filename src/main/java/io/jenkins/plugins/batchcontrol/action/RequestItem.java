@@ -21,6 +21,7 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.RunLinks;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
+import io.jenkins.plugins.batchcontrol.ui.RequestScope;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -95,6 +96,19 @@ public class RequestItem implements ModelObject {
     /** Jelly helper: human-readable timestamp. */
     public String format(Instant instant) {
         return Dates.format(instant);
+    }
+
+    /**
+     * D-38a: whether the detail page states that the requester does not hold {@code Item/Build}
+     * on the job (evaluated for the requester, not the viewer).
+     */
+    public boolean isRequesterLacksBuild() {
+        return io.jenkins.plugins.batchcontrol.ui.RequesterPermission.lacksBuild(getRequest());
+    }
+
+    /** D-38a: the frozen sentence shown when {@link #isRequesterLacksBuild()} holds. */
+    public String getRequesterLacksBuildNotice() {
+        return io.jenkins.plugins.batchcontrol.ui.RequesterPermission.notice();
     }
 
     /** Job URL relative to the Jenkins root if the job exists and the user may see it, else null. */
@@ -293,14 +307,14 @@ public class RequestItem implements ModelObject {
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
     public boolean isCanCancel() {
-        return isPending()
-                && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
+        // D-38b: the service's predicate (requester with Request on the job, or Manage).
+        return isPending() && RunRequestService.get().canCancel(request);
     }
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
-        return isPending() && isOwnedByCurrentUser()
-                && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        // D-38b: the service's predicate (requester with Request on the job).
+        return isPending() && RunRequestService.get().canChangeApprovers(request);
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)
@@ -308,7 +322,7 @@ public class RequestItem implements ModelObject {
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
-        return SectionAccess.requests();
+        return SectionAccess.viewPermissions(SectionAccess.requests(), SectionAccess.canOpenRequests());
     }
 
     /** Link predicates: a link to another screen is rendered only if the user may open it. */
@@ -360,7 +374,8 @@ public class RequestItem implements ModelObject {
     @RequirePOST
     public void doChangeApprover(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request is checked on the request's job; the service enforces requester-only.
+        RequestScope.of(request.getJobFullName()).checkPermission(BatchControlPermissions.REQUEST);
         FormErrors errors = new FormErrors("changeApprover");
         List<String> approvers;
         try {

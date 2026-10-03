@@ -18,7 +18,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * {@code summary.jelly} is included by the build page. Every decision is delegated to the job's
  * {@link JobActivationNoticeAction}, so the two notices cannot disagree: shown only to
  * {@code Item/Read} holders while run control is on and the job requires approval; the form is
- * linked only for a viewer holding {@code BatchControl/Request} and {@code Item/Build} (D-38).
+ * linked only for a viewer who may submit a run request ({@code BatchControl/Request} and
+ * {@code Item/Read}, D-38a).
  * It never changes state.
  */
 @Restricted(NoExternalUse.class)
@@ -48,7 +49,7 @@ public class RunApprovalNoticeAction implements Action {
         return notice().isCanRequestRun();
     }
 
-    /** Whether the viewer holds {@code BatchControl/Request} (but perhaps not {@code Item/Build}). */
+    /** Whether the viewer holds {@code BatchControl/Request}. */
     public boolean isCanRequest() {
         return notice().isCanRequest();
     }

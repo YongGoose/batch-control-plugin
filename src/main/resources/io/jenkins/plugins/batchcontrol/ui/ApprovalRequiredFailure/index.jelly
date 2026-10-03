@@ -30,7 +30,7 @@
             <j:otherwise>
               <p style="margin-bottom: 0;">
                 You may not submit run requests for this job (that needs Batch Control/Request and
-                Job/Build on it). Ask a user who may, an approver or a Jenkins administrator to
+                Job/Read on it). Ask a user who may, an approver or a Jenkins administrator to
                 request this run for you.
               </p>
             </j:otherwise>

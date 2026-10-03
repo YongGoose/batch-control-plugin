@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
 <!-- e2e-03 DEF-09: a refused submission comes back to this page (JobRequestAction#doSubmit,
      ui.FormErrors) with each message next to its field and the reason, approvers and parameter
-     values the user entered kept. DEF-12: a user without Job/Build on the job is told why the form
-     is not offered instead of being given a form the server will refuse. -->
+     values the user entered kept. DEF-12: a user who may not submit is told so instead of being
+     given a form the server will refuse (D-38a: Request and Job/Read suffice, Job/Build does not
+     matter). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <!-- Hosting review 2026-10-02: rendered as a job sub-page, so the new job page shows the
@@ -57,9 +58,9 @@
         </j:when>
         <j:when test="${!it.canRequestRun}">
           <div class="jenkins-alert jenkins-alert-warning" role="status">
-            You may not request runs of this job: a run request needs the <b>Job/Build</b>
-            permission on the job in addition to <b>Batch Control/Request</b>. Ask a Jenkins
-            administrator for the permission, or ask a user who has both to request the run.
+            You may not request runs of this job: a run request needs <b>Batch Control/Request</b>
+            and <b>Job/Read</b> on the job. Ask a Jenkins administrator for the permission, or ask
+            a user who has it to request the run.
           </div>
         </j:when>
         <j:when test="${empty(it.approverOptions)}">

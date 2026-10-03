@@ -3,7 +3,8 @@
   directly. The build button, <code>/build</code>, <code>/buildWithParameters</code>, the CLI
   <code>build</code> command, Pipeline Replay, Rebuild and a clicked Retry are all refused unless an
   approved run request is being used; the request form is on this job's sidebar as
-  <b>Request Run</b> for users who hold Batch Control/Request and Job/Build on the job.
+  <b>Request Run</b> for users who hold Batch Control/Request and Job/Read on the job. Job/Build is not needed to
+  request; the approver sees when the requester lacks it.
   <p>
     This box governs <b>manual runs only</b>. Unattended runs — cron (timer), upstream, SCM,
     automatic retries and runs started by scripts — are decided by the job's <b>activation</b>,
