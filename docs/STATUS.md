@@ -13,6 +13,16 @@
 
 ---
 
+## 2026-10-03 — hosting review round 2 (mawinter69, #5338, 2026-10-02): six PRs opened
+- Decisions: D-35e, D-35f, D-35f(a), D-38a, D-38b, D-59, D-59a, D-60, D-61 (PR #64, docs branch).
+- PRs: #65 Move change-controlled (D-59/D-59a, security finding); #66 role-strategy 918 pin, legacy wrapper removed, role-strategy surface guard, #766 forward compatibility; #67 new job page compatibility and pre-filled Request Run (D-60); #68 UI polish; #69 run request without Item/Build, job-level Request (D-38a/D-38b); #70 tabs, badges, context menu (D-61, stacked on #68).
+- Gates (final heads, mvn clean verify): #65 645, #66 645, #67 639, #68 635, #69 642, #70 644 tests, 0 failures, SpotBugs 0; merged integration build 707 tests green.
+- Reviews: security-33 (0 high; MEDIUM fixed as D-59a), spec-review-S5 (BLOCKER fixed as D-38b), final verification PASS WITH NOTES.
+- e2e: e2e-06 (E2E-1), e2e-07 (full regression), e2e-08 (targeted re-check) — all functional items pass.
+- Merge order: #64, #65, #66, #67, #69, #68, #70; expected conflicts in TEST-MATRIX, LIMITATIONS, ApprovalRequiredFailure and the strategy monitor view.
+- Deferred: issues #71-#91 (label backlog).
+- Waiting: mawinter69's re-review on #5338.
+
 ## 2026-09-30 — final e2e check on 30e9252: DEF-39..41 fixed (part 7); #51 merged
 - #51 merged (GitHub `build` passed 620 tests). Code-scanning alerts 31-33 are closed as fixed.
 - The final check on 30e9252 passed: DEF-38 is closed, Mark as reviewed and replay marking work, and FD-14..16 and DD-05/06 are fixed.
