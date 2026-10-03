@@ -30,13 +30,16 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
 /**
  * "Change control is on, but the installed authorization strategy is not a Batch Control
  * strategy" (D-35a, ARCHITECTURE section 4). Grants confer nothing then. This covers an instance
- * that never migrated, a withdrawn wrapper whose delegate had no Batch Control variant, and
- * role-strategy's Manage Roles save, which reinstalls the plain class.
+ * that never migrated and a plain strategy installed on the global security page (or by JCasC).
+ * role-strategy's own pages keep the installed Batch Control class from version 918 on (D-35f),
+ * so they are no longer a cause.
  *
  * <p>It also warns while change control is on and no build authenticator is configured, so builds
  * run as SYSTEM (D-35d (2), {@link #isBuildAuthenticatorMissing()}).
  *
- * <p>{@link #doMigrate()} copies an installed plain matrix-auth matrix (project-based, or global:
+ * <p>{@link #doMigrate()} (the "Install the Batch Control variant" button, POST and
+ * Overall/Administer only) is the only path that converts a plain strategy; nothing converts one
+ * on load (D-35e). It copies an installed plain matrix-auth matrix (project-based, or global:
  * then per-item properties become effective, {@link #isPerItemWidening()}) or role-strategy
  * configuration into the matching Batch Control subclass, keeping every entry; {@link #doRevert()}
  * is the reverse, the uninstall path. Neither touches per-item properties, which live on the

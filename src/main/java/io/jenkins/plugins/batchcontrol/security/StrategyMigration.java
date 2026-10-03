@@ -8,7 +8,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Copies between a plain supported strategy and its Batch Control subclass (D-35a, D-35d): the
- * migration action, its reverse, and the load-time conversion of the withdrawn wrapper.
+ * migration action and its reverse. Both are explicit administrator actions; nothing is converted
+ * when a configuration is loaded (D-35e removed the withdrawn wrapper and its load conversion).
  *
  * <p>matrix-auth and role-strategy are optional, and either or both may be missing (S-03). This
  * class refers to core types only. Strategies are recognised by class name, the plugin is checked
@@ -78,27 +79,6 @@ public final class StrategyMigration {
             return RoleStrategies.copyOf(strategy);
         }
         return null;
-    }
-
-    /**
-     * The load conversion of the withdrawn wrapper's delegate (D-35a as amended by D-35d, SPEC
-     * item 8): a project matrix or role-strategy delegate becomes the matching subclass.
-     * {@code null} for any other strategy, including the global matrix, which is installed
-     * unwrapped because converting it would make per-item properties effective without an
-     * administrator's action.
-     */
-    @CheckForNull
-    static AuthorizationStrategy fromLegacyDelegate(AuthorizationStrategy delegate) {
-        if (isPerItemWidening(delegate)) {
-            return null;
-        }
-        return toBatchControl(delegate);
-    }
-
-    /** An empty Batch Control matrix (denies everyone but SYSTEM), or {@code null} without matrix-auth. */
-    @CheckForNull
-    static AuthorizationStrategy emptyMatrix() {
-        return pluginActive(MATRIX_AUTH_PLUGIN) ? MatrixStrategies.empty() : null;
     }
 
     /**

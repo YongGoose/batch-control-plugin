@@ -6,10 +6,16 @@
      matter). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
-  <l:layout title="Request Run - ${it.job.fullDisplayName}" permissions="${it.viewPermissions}">
-    <st:include page="sidepanel.jelly" it="${it.job}"/>
-    <l:main-panel>
-      <l:app-bar title="Request Run: ${it.job.fullDisplayName}"/>
+  <!-- Hosting review 2026-10-02: rendered as a job sub-page, so the new job page shows the
+       job's build bar, tabs and app bar actions above it, and the classic UI the job's sidepanel
+       as before (l:job-subpage reads it.object, the job). l:job-subpage does not take a
+       permissions attribute, so the check l:layout permissions="..." made is made here, against
+       the same nearest access-controlled ancestor, the job. -->
+  ${h.checkAnyPermission(it, it.viewPermissions)}
+  <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
+  <l:job-subpage>
+      <!-- The new job page names the job in its build bar already. -->
+      <l:app-bar title="${newJobPage ? 'Request Run' : 'Request Run: ' + it.job.fullDisplayName}"/>
       <!-- D-58b (3): the deliberate review of a job changed under a permission window. The button
            is shown only while JobRequestAction#isShowMarkReviewed holds; the endpoint re-checks
            Configure and GrantService refuses a grant-only Configure holder. -->
@@ -20,15 +26,14 @@
       </j:if>
       <j:if test="${it.showMarkReviewed}">
         <div class="jenkins-alert jenkins-alert-warning" role="status">
-          <p>
-            This job was changed under a temporary permission window and has not been reviewed,
-            so changes that widen its authorization are undone. Check what was changed under the
-            permission window (see Change Records) and the Pipeline script first.
-          </p>
+          <!-- Hosting review: no p as the alert's first child (it adds padding on top). -->
+          This job was changed under a temporary permission window and has not been reviewed,
+          so changes that widen its authorization are undone. Check what was changed under the
+          permission window (see Change Records) and the Pipeline script first.
           <!-- D-58c: the runs replayed under a window stay untrusted after the review. -->
           <j:set var="markedRuns" value="${it.markedRuns}"/>
           <j:if test="${!empty(markedRuns)}">
-            <p>These runs were replayed under a temporary permission window; only an administrator can re-run them.</p>
+            <div class="jenkins-!-margin-top-2">These runs were replayed under a temporary permission window; only an administrator can re-run them.</div>
             <ul>
               <j:forEach var="r" items="${markedRuns}">
                 <li>
@@ -70,6 +75,13 @@
             them approves the request.
           </p>
           <j:set var="errors" value="${it.formErrors}"/>
+          <!-- D-60: arrived from a refused build submission with its values (p.<name>). -->
+          <j:if test="${!errors.present and it.prefilled}">
+            <div class="jenkins-alert jenkins-alert-info" role="status">
+              The build was not started: this job only runs through an approved run request. The
+              parameter values you entered are filled in below; enter any password parameters again.
+            </div>
+          </j:if>
           <bc:formError errors="${errors}"/>
           <f:form method="post" action="submit" name="batch-control-request">
             <f:entry title="Reason" description="Why this run is needed (required).">
@@ -105,6 +117,5 @@
           </f:form>
         </j:otherwise>
       </j:choose>
-    </l:main-panel>
-  </l:layout>
+  </l:job-subpage>
 </j:jelly>

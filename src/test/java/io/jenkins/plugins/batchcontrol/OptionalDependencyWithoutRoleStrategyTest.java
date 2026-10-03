@@ -5,7 +5,6 @@ import hudson.model.Item;
 import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
-import hudson.security.ProjectMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -33,13 +32,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * security-05 S-03 (ARCHITECTURE section 4: "a missing plugin never breaks class loading"),
  * matrix row T-02-42: a real Jenkins started WITHOUT role-strategy. Jenkins boots, the Batch
  * Control matrix strategy works (a grant confers), the {@code /manage} page with the
- * batch-control-strategy monitor renders, and a legacy wrapper config.xml loads, both through
- * {@code Jenkins.reload()} and through a real restart.
+ * batch-control-strategy monitor renders, and the Batch Control matrix strategy is loaded from
+ * config.xml, both through {@code Jenkins.reload()} and through a real restart. (The legacy wrapper
+ * config.xml this row used to load was removed with its conversion by D-35e.)
  *
  * <p>This class deliberately references no role-strategy type (not even through
  * {@link StrategyFixtures}): its code is loaded into the JVM that lacks the plugin.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-35a/D-35d and docs/reports/security-05.md
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-35a/D-35d/D-35e and docs/reports/security-05.md
  * only (no src/main knowledge).
  */
 public class OptionalDependencyWithoutRoleStrategyTest {
@@ -48,23 +48,23 @@ public class OptionalDependencyWithoutRoleStrategyTest {
     @RegisterExtension
     final RealJenkinsExtension rr = new RealJenkinsExtension().omitPlugins("role-strategy");
 
-    /** T-02-42: without role-strategy the matrix path, the monitor page and the legacy upgrade all work. */
+    /** T-02-42: without role-strategy the matrix path, the monitor page and a reload and a restart all work. */
     @Test
     public void t_02_42_withoutRoleStrategyMatrixPathWorks() throws Throwable {
-        rr.then(OptionalDependencyWithoutRoleStrategyTest::bootAndUpgrade);
+        rr.then(OptionalDependencyWithoutRoleStrategyTest::bootAndReload);
         // The fixture pins the restart to the port the first boot was given, which was released
         // when that JVM stopped; under parallel surefire forks another process can take it in
         // between and the restart fails with "Failed to start Jetty". Ask for a fresh ephemeral
         // port instead: the restart still reuses the same JENKINS_HOME, which is what it measures.
         rr.withPort(0);
-        rr.then(OptionalDependencyWithoutRoleStrategyTest::legacyWrapperSurvivesRestart);
+        rr.then(OptionalDependencyWithoutRoleStrategyTest::strategySurvivesRestart);
     }
 
-    private static void bootAndUpgrade(JenkinsRule r) throws Throwable {
+    private static void bootAndReload(JenkinsRule r) throws Throwable {
         assertTrue(Jenkins.get().getPlugin("role-strategy") == null, "premise: role-strategy must not be installed");
         r.jenkins.setSecurityRealm(privateRealm()); // the real Jenkins JVM has no JenkinsRule$DummySecurityRealm
 
-        ProjectMatrixAuthorizationStrategy plain = new ProjectMatrixAuthorizationStrategy();
+        BatchControlMatrixAuthorizationStrategy plain = new BatchControlMatrixAuthorizationStrategy();
         plain.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
         for (String u : new String[] {"bob", "a1"}) {
             plain.add(Jenkins.READ, PermissionEntry.user(u));
@@ -74,11 +74,10 @@ public class OptionalDependencyWithoutRoleStrategyTest {
         plain.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
         r.jenkins.setAuthorizationStrategy(plain);
         r.jenkins.save();
-        LegacyWrapperXml.write(r.jenkins);
         r.jenkins.reload();
 
         assertSame(BatchControlMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
-                "without role-strategy the legacy matrix wrapper must still load as the Batch Control matrix strategy");
+                "without role-strategy the Batch Control matrix strategy must load from config.xml");
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(true);
@@ -104,14 +103,11 @@ public class OptionalDependencyWithoutRoleStrategyTest {
         assertEquals(200, manage.getWebResponse().getStatusCode(), "/manage must render without role-strategy");
         assertFalse(manage.getWebResponse().getContentAsString().contains("NoClassDefFoundError"),
                 "/manage must not show a NoClassDefFoundError");
-
-        // leave the legacy wrapper on disk for the restart step
-        LegacyWrapperXml.write(r.jenkins);
     }
 
-    private static void legacyWrapperSurvivesRestart(JenkinsRule r) throws Throwable {
+    private static void strategySurvivesRestart(JenkinsRule r) throws Throwable {
         assertSame(BatchControlMatrixAuthorizationStrategy.class, r.jenkins.getAuthorizationStrategy().getClass(),
-                "Jenkins must boot from a legacy wrapper config.xml without role-strategy");
+                "Jenkins must boot with the Batch Control matrix strategy without role-strategy");
         assertTrue(((BatchControlMatrixAuthorizationStrategy) r.jenkins.getAuthorizationStrategy())
                 .getGrantedPermissionEntries().get(Jenkins.ADMINISTER).contains(PermissionEntry.user("admin")),
                 "the global entries must be kept through the boot");

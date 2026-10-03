@@ -22,10 +22,4 @@ final class MatrixStrategies {
     static AuthorizationStrategy copyOf(@NonNull AuthorizationStrategy existing) {
         return BatchControlMatrixAuthorizationStrategy.copyOf(existing);
     }
-
-    /** An empty Batch Control matrix (denies everyone but SYSTEM). */
-    @NonNull
-    static AuthorizationStrategy empty() {
-        return new BatchControlMatrixAuthorizationStrategy();
-    }
 }
