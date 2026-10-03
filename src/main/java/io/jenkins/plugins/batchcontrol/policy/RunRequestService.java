@@ -71,6 +71,13 @@ public final class RunRequestService {
     private static final RunRequestService INSTANCE = new RunRequestService();
 
     private final ReentrantLock lock = new ReentrantLock();
+    /**
+     * security-33 S-33-09 (#75): {@link #requesterLacksBuild} impersonates the requester, which
+     * reaches the security realm; its answer is cached per request id, job and requester for a
+     * short time so page views and notifications do not hit the realm each time.
+     */
+    private final RequesterBuildCache requesterBuildCache =
+            new RequesterBuildCache(Duration.ofMinutes(5), 1000);
     private final Store store = Store.get();
 
     private RunRequestService() {
@@ -197,17 +204,39 @@ public final class RunRequestService {
         if (requester != null && requester.equals(current.getName())) {
             return !job.hasPermission(Item.BUILD);
         }
+        String key = request.getId() == null ? null
+                : request.getId() + '\u0000' + request.getJobFullName() + '\u0000' + requester;
+        Boolean cached = key == null ? null : requesterBuildCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
         hudson.model.User user = requester == null ? null : hudson.model.User.getById(requester, false);
+        boolean lacks;
         if (user == null) {
-            return true;
+            lacks = true; // fail-safe: the account no longer resolves
+        } else {
+            try {
+                lacks = !job.getACL().hasPermission2(user.impersonate2(), Item.BUILD);
+            } catch (RuntimeException e) {
+                // UsernameNotFoundException and realm failures: the permission cannot be confirmed.
+                // Not cached, so a transient realm failure is retried on the next view.
+                LOGGER.log(java.util.logging.Level.FINE, "Cannot evaluate Item/Build for requester " + requester, e);
+                return true;
+            }
         }
-        try {
-            return !job.getACL().hasPermission2(user.impersonate2(), Item.BUILD);
-        } catch (RuntimeException e) {
-            // UsernameNotFoundException and realm failures: the permission cannot be confirmed.
-            LOGGER.log(java.util.logging.Level.FINE, "Cannot evaluate Item/Build for requester " + requester, e);
-            return true;
+        if (key != null) {
+            requesterBuildCache.put(key, lacks);
         }
+        return lacks;
+    }
+
+    /**
+     * Persists {@code request} and drops its cached {@link #requesterLacksBuild} answer, so a
+     * decided, cancelled, executed or otherwise changed request is evaluated afresh (#75).
+     */
+    private void persist(RunRequest request) {
+        store.saveRunRequest(request);
+        requesterBuildCache.invalidate(request.getId());
     }
 
     /**
@@ -264,7 +293,7 @@ public final class RunRequestService {
         }
         lock.lock();
         try {
-            store.saveRunRequest(request);
+            persist(request);
         } finally {
             lock.unlock();
         }
@@ -297,7 +326,7 @@ public final class RunRequestService {
                 String reason = EndReasons.pendingExpired();
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(reason);
-                store.saveRunRequest(request);
+                persist(request);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Request " + id
                         + " passed its pending timeout and is now EXPIRED.");
@@ -314,7 +343,7 @@ public final class RunRequestService {
             request.setDecisionComment(comment);
             request.setSelfApproved(selfApproval);
             request.setExpiryBase(now);
-            store.saveRunRequest(request);
+            persist(request);
         } finally {
             lock.unlock();
         }
@@ -353,7 +382,7 @@ public final class RunRequestService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
-            store.saveRunRequest(request);
+            persist(request);
         } finally {
             lock.unlock();
         }
@@ -380,7 +409,7 @@ public final class RunRequestService {
             // Manage holder), in the same fields a decision uses.
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
-            store.saveRunRequest(request);
+            persist(request);
             // D-54: the approvers (and the requester, when a Manage holder cancelled) are told.
             NotificationDispatcher.runEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
@@ -420,7 +449,7 @@ public final class RunRequestService {
             request.addApproverChange(new RunRequest.ApproverChange(
                     previous, designated, caller, BatchClock.now()));
             request.setApprovers(designated);
-            store.saveRunRequest(request);
+            persist(request);
         } finally {
             lock.unlock();
         }
@@ -485,14 +514,14 @@ public final class RunRequestService {
                 String reason = EndReasons.approvedNotStarted();
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
-                store.saveRunRequest(request);
+                persist(request);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                 LOGGER.warning(() -> "Refusing approval marker of request " + requestId
                         + ": the approved-run timeout passed before submission (now EXPIRED)");
                 return false;
             }
             request.setQueuedAt(now);
-            store.saveRunRequest(request);
+            persist(request);
             return true;
         } finally {
             lock.unlock();
@@ -545,7 +574,7 @@ public final class RunRequestService {
                 request.setExecutedRunId(runId);
                 // Retention measures a request's last activity from this (security-10 S-09).
                 request.setExecutedAt(BatchClock.now());
-                store.saveRunRequest(request);
+                persist(request);
             }
         } finally {
             lock.unlock();
@@ -588,7 +617,7 @@ public final class RunRequestService {
                     String reason = EndReasons.pendingExpired();
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(reason);
-                    store.saveRunRequest(request);
+                    persist(request);
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (pending timeout)");
@@ -600,7 +629,7 @@ public final class RunRequestService {
                     String reason = EndReasons.approvedNotStarted();
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
-                    store.saveRunRequest(request);
+                    persist(request);
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (approved-run timeout)");
@@ -634,7 +663,7 @@ public final class RunRequestService {
                     Instant expiresAt = pendingExpiry(request);
                     if (now.isBefore(expiresAt) && !now.isBefore(expiresAt.minus(lead))) {
                         request.setExpiringNotified(true);
-                        store.saveRunRequest(request);
+                        persist(request);
                         notified = request;
                     }
                 }
@@ -693,7 +722,7 @@ public final class RunRequestService {
                     if (comment == null || comment.trim().isEmpty()) {
                         request.setDecisionComment(reason);
                     }
-                    store.saveRunRequest(request);
+                    persist(request);
                     NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
                     invalidated.add(request.getId());
                     LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
@@ -767,11 +796,11 @@ public final class RunRequestService {
                 request.setExpiryBase(now);
                 if (queuedIds.contains(request.getId())) {
                     // The restored queue item will run it; just persist the new expiry base.
-                    store.saveRunRequest(request);
+                    persist(request);
                 } else {
                     // Re-issue the consumption ticket for exactly one recovery submission.
                     request.setQueuedAt(null);
-                    store.saveRunRequest(request);
+                    persist(request);
                     submit = true;
                 }
             } finally {
