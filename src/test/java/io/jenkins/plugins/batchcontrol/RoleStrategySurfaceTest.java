@@ -65,7 +65,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 /**
  * D-35f (role-strategy 918 is the minimum supported version) and SPEC item 2 ("With the Batch
  * Control role-strategy strategy installed, Manage Roles ... work"). Matrix rows T-02-88..99
- * (note 183).
+ * (note 190).
  *
  * <ul>
  *   <li>T-02-88..95: every role-strategy save path (the REST endpoints under
