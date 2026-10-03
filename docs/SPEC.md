@@ -240,7 +240,7 @@ GrantRequest      id, scope{type: JOB|FOLDER, fullName}, actions[CREATE|CONFIGUR
                   status(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED), createdAt, decidedAt, decisionComment,
                   approverChanges[{from[],to[],by,at}]
 Grant             id, grantRequestId, user, scope, actions, grantedAt, expiresAt,
-                  revokedAt?, revokedBy?
+                  revokedAt?, revokedBy?, revokedReason? (D-63)
 RunRecord         runId(jobFullName#number), jobFullName, number, causeType, user?,
                   parameters, result, startedAt, durationMs, abortedBy?, runRequestId?
 Incident          id, runId, jobFullName, result, status(OPEN|ACKNOWLEDGED|RESOLVED),
