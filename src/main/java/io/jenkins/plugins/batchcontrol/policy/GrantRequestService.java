@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.PendingCount;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
@@ -29,6 +30,7 @@ import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 
 /**
  * The single entry point for every {@link GrantRequest} state transition (SPEC items 3 and 8).
@@ -78,6 +80,17 @@ public final class GrantRequestService {
     /** All stored grant requests, in creation order. */
     public List<GrantRequest> list() {
         return store.listGrantRequests();
+    }
+
+    /**
+     * D-61 / #76: the PENDING grant requests that concern {@code auth}, read from the open-request index only
+     * (no history scan): those awaiting their decision as a designated approver holding
+     * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
+     * to {@code auth} under P-09. The single source for the tab badge and the section.
+     */
+    public PendingCount countPendingFor(Authentication auth) {
+        return PendingCounter.count(store.listOpenGrantRequests(), auth, GrantRequest::getStatus, GrantRequest::isDesignatedApprover,
+                GrantRequest::getRequester);
     }
 
     // ---------------------------------------------------------------- creation (SPEC 3, 8)

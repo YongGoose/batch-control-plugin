@@ -18,6 +18,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.PendingCount;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
@@ -90,6 +91,17 @@ public final class RunRequestService {
     /** All stored requests, in creation order. */
     public List<RunRequest> list() {
         return store.listRunRequests();
+    }
+
+    /**
+     * D-61 / #76: the PENDING run requests that concern {@code auth}, read from the open-request index only
+     * (no history scan): those awaiting their decision as a designated approver holding
+     * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
+     * to {@code auth} under P-09. The single source for the tab badge and the section.
+     */
+    public PendingCount countPendingFor(Authentication auth) {
+        return PendingCounter.count(store.listOpenRunRequests(), auth, RunRequest::getStatus, RunRequest::isDesignatedApprover,
+                RunRequest::getRequester);
     }
 
     /**
