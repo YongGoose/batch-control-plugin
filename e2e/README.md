@@ -235,6 +235,30 @@ approves). Scenarios: `d38b.py` (D-38b), `move.py` + `mvstate.py` (D-59a), `rebu
 `smoke.py`. Run under `compose.prefix.yml`; re-run `arrange.py` after a restart (JCasC drops the
 added matrix entries).
 
+## e2e-12 driver (`r12/`)
+
+Round E2E-7 (every button, link and dialog, 2026-10-04). `r12/lib.py` loads `r6/lib.py` with screenshots in
+`screenshots/run-12/` and logs in `r12/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
+`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`, then `seed_fast.py`, `seed.py` (requests,
+activations, windows, changes and incidents through the plugin's own endpoints; ids to `out/ids.json`) and
+`seed_paging.py`. `run_crawl.sh` (`crawl.py <role> <new|classic>` for six roles, `set_flag.py` switches the new job
+page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State-changing controls: `actions.py`;
+entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
+`helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
+
+## e2e-14 driver (`r14/`)
+
+Final check of `main` after rounds 3 and 4 (2026-10-04). `r14/lib.py` is `r12/lib.py` with screenshots in
+`screenshots/run-14/` and logs in `r14/out/`; the r12 scripts are copied unchanged apart from their docstrings.
+Fresh JENKINS_HOME under its own compose project:
+`docker compose -p bc-e2e14 -f docker-compose.yml -f compose.prefix.yml up -d --build`, then the r12 arrangement plus
+`arrange_fast.py` (removes the new-job lock from `fast`, which the script console creates while run control is on)
+before `seed_fast.py`. New scripts: `def07.py <new|classic> [role ...]` (e2e-12 DEF-07 recheck: filter URLs, pager and
+export links keep the filter), `round3.py [ABCDEFGHI]` (the e2e-11 round-3 checks with assertions), `probe_pageerror.py`
+(diagnostic). `role/` holds the e2e-13 role-strategy drivers with `BC_BASE` defaulting to the `/jenkins` prefix;
+`grant_overlay.py` now opens the grants page dialog (D-66). Run `role/` last: `setup.py` replaces the matrix profile.
+Stop with `docker compose -p bc-e2e14 down -v`.
+
 ## e2e-13 driver (`r13/`)
 
 role-strategy 927 forwarding check (D-35g, 2026-10-04). `r13/lib.py` loads `r6/lib.py` with base URL
