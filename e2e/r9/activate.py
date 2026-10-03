@@ -8,11 +8,11 @@ def path(full):
 
 def activate(full, user="requester", action="ACTIVATE"):
     r = api(user, path(full) + "/batch-control-activation/submit", "POST",
-            data=[("action", action), ("reason", f"e2e-08 {action} {full}"), ("approvers", "approver-1")])
+            data=[("action", action), ("reason", f"e2e-09 {action} {full}"), ("approvers", "approver-1")])
     m = re.search(r"activations/([^/]+)/", r.headers.get("Location", ""))
     out = {"job": full, "submit": r.status_code, "location": r.headers.get("Location")}
     if m:
-        a = api("approver-1", f"/batch-control/activations/{m.group(1)}/approve", "POST", data={"comment": "e2e-08"})
+        a = api("approver-1", f"/batch-control/activations/{m.group(1)}/approve", "POST", data={"comment": "e2e-09"})
         out.update(id=m.group(1), approve=a.status_code)
     log("activate", out); print(out)
     return out

@@ -125,7 +125,7 @@ if (step === 'tabs') {
   // --- activation (HOLD/ACTIVATE on fresh-secret): approver-1 two tabs.
   const act = await login('requester');
   const before = await ids('activations');
-  await act.page.goto(`${BASE}/job/fresh-secret/batch-control/activation`);
+  await act.page.goto(`${BASE}/job/fresh-secret/batch-control-activation`);
   const af = act.page.locator('form[action*="activation/submit"]').first();
   await af.locator('textarea[name="reason"]').fill('e2e-05 X3 two tabs activation');
   await af.locator('input[name="approvers"][value="approver-1"]').check({ force: true });

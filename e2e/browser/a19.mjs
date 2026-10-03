@@ -8,7 +8,7 @@ const hits = [];
 const seen = new Set();
 const { page } = await login('admin');
 const queue = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/', '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/', '/batch-control/history/summary',
-  '/job/batch-daily/', '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control/activation', '/job/batch-daily/configure', '/job/batch-cron/', '/job/team-mb/', '/manage/', '/manage/configure', '/job/batch-daily/1/'];
+  '/job/batch-daily/', '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control-activation', '/job/batch-daily/configure', '/job/batch-cron/', '/job/team-mb/', '/manage/', '/manage/configure', '/job/batch-daily/1/'];
 for (const t of ['runs', 'incidents', 'changes', 'requests']) queue.push(`/batch-control/history/?tab=${t}`);
 while (queue.length) {
   const p = queue.shift();

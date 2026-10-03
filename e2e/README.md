@@ -143,6 +143,19 @@ ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`,
 `r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
 `arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
 
+## e2e-09 driver (`r9/`)
+
+Round E2E-4 (backlog fixes #71-#91, 2026-10-03). `r9/lib.py` is `r8/lib.py` with screenshots in
+`screenshots/run-9/` and logs in `r9/out/`. Arrange with `r7/arrange.py`, `r8/arrange.py` and
+`r8/arrange_side.py`; `s74.py` adds `moverd` (Read/Move/Delete on `prod/`, Discover only on `ops/`) and
+`s73.py` the ListView `nightly`. One script per issue: `s71.py` (activation form at
+`<item>/batch-control-activation/`, D-64), `s72.py`/`s72b.py` (new job page card, classic page),
+`s73.py` (Request Change Permission through a view), `s74*.py`, `s75.py`, `s76.py` (badges against the
+admin's lists), `s83.py` (refusal links; run `grants.py mover1 FOLDER ops CREATE 60` first), `s85.py`,
+`s86.py`, `s87.py`, `s88.py`, `s89.py`; regression: `smoke.py` (needs a 1-minute CONFIGURE window on
+`team/app-1` for requester), `d38b.py`, `s3.py`, `r_role.py`, `checklist.py`, `c16.py`. The scripts
+create state and are not idempotent: run them once on a fresh JENKINS_HOME, in that order.
+
 ## Older scenario scripts
 
 `scripts/rest-*.sh` (curl with crumb and cookie jar, raw output to `out/`) are

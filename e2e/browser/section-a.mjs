@@ -73,7 +73,7 @@ rows['A-13'] = async () => {
     await shot(page, '#side-panel', `A-13-${user}-sidebar`, { pad: 8 });
     const c1 = await status(page, '/job/batch-daily/batch-control/');
     const c2 = await status(page, '/job/batch-daily/batch-control/submit');
-    const c3 = await status(page, '/job/batch-daily/batch-control/activation');
+    const c3 = await status(page, '/job/batch-daily/batch-control-activation');
     log(L, `A-13 ${user}: sidebar [${entries.map((e) => e.trim()).join(', ')}] batch-control/=${c1} submit=${c2} activation=${c3}`);
     await context.close();
   }
@@ -133,7 +133,7 @@ rows['A-11'] = async () => {
   const { context, page } = await login('admin');
   const screens = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/',
     '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/',
-    '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control/activation'];
+    '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control-activation'];
   // plus every request / activation detail linked from the lists
   for (const list of ['/batch-control/activations/', '/batch-control/requests/', '/batch-control/grants/']) {
     await page.goto(BASE + list);

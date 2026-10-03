@@ -13,7 +13,7 @@ for (const kind of ['grants', 'activations']) {
     for (const ap of ['approver-1', 'approver-2']) await f.locator(`input[name="approvers"][value="${ap}"]`).check({ force: true });
     await Promise.all([page.waitForLoadState('load'), f.locator('button[name="Submit"]').click()]);
   } else {
-    await page.goto(`${BASE}/job/fresh-secret/batch-control/activation`);
+    await page.goto(`${BASE}/job/fresh-secret/batch-control-activation`);
     const f = page.locator('form[action*="activation/submit"]').first();
     await f.locator('textarea[name="reason"]').fill('e2e-05 X1c stale change approvers (activation)');
     for (const ap of ['approver-1', 'approver-2']) await f.locator(`input[name="approvers"][value="${ap}"]`).check({ force: true });

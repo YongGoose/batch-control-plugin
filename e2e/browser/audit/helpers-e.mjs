@@ -28,7 +28,7 @@ export async function approveAs(user, url, comment = 'ok') {
 }
 export async function activate(jobName, reason) {
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/job/${jobName}/batch-control/activation`);
+  await rq.page.goto(`${BASE}/job/${jobName}/batch-control-activation`);
   await rq.page.fill('textarea[name="reason"]', reason);
   await rq.page.locator('input[name="approvers"][value="approver-1"] + label').click();
   await Promise.all([rq.page.waitForNavigation({ waitUntil: 'load' }), rq.page.locator('button:has-text("Submit Request")').click()]);

@@ -14,7 +14,7 @@ async function approve(user, url, comment = 'ok') {
 }
 async function activation(job, action, reason) {
   const { context, page } = await login('requester');
-  await page.goto(`${BASE}/job/${job}/batch-control/activation`);
+  await page.goto(`${BASE}/job/${job}/batch-control-activation`);
   const heading = await txt(page, '#main-panel');
   if (!heading.includes(action === 'ACTIVATE' ? 'Request Activation' : 'Request a Hold')) { await context.close(); return 'not offered'; }
   await page.fill('textarea[name="reason"]', reason);
