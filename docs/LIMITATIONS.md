@@ -585,10 +585,14 @@ code does on purpose.
     `Referer` header of the next request. Password and other sensitive
     parameters are never carried. Anything typed into a plain string or text
     parameter is not sensitive in Jenkins' sense, so do not put secrets in
-    such parameters. Long values are not carried: a value over 2,000
-    characters is dropped, and so is the pre-fill when all the values
-    together exceed a total size limit; those fields then start at their
-    defaults and have to be entered again.
+    such parameters. Long values are not carried. A value is carried only if
+    it is at most 2,000 characters long, and the redirect's URL-encoded query
+    (including the `?`, the `&` separators and each `p.<name>=` prefix) is
+    capped at 4,000 characters: values are added in the order the parameters
+    are defined, and one that would push the query over the cap is left out,
+    while a later, shorter one may still fit. The form always opens; a field
+    whose value was not carried starts at its default and has to be entered
+    again.
 
 ## Records from earlier releases and strategy changes
 
