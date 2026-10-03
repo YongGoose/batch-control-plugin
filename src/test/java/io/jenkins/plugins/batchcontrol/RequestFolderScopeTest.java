@@ -244,6 +244,34 @@ public class RequestFolderScopeTest {
                 "and at the run requests section");
     }
 
+    /**
+     * T-05-40 (D-38c, backlog #87): fr holds Request only through {@code ops} and has a run request
+     * but no activation request; fr opens the activations section (200), which does not list u9's
+     * activation request for {@code out-x} (a job fr cannot see). Guards: the administrator's
+     * section lists it, and {@code none} (no Batch Control permission, no requests) still gets 404 at
+     * the root and no 200 at the activations section.
+     */
+    @Test
+    public void t_05_40_folderRequesterWithOnlyARunRequestOpensTheActivationsSection() throws Exception {
+        Set<String> before = ApproverFormFixtures.runRequestIds();
+        String foreign = ActivationFixtures.submitActivationOk(j, "u9", outside, "ACTIVATE", "u9 on out-x", "a1");
+        submitFollowing("fr", inside);
+        newRequestId(before);
+
+        WebResponse section = ApproverFormFixtures.get(j, "fr", "batch-control/activations/");
+        assertEquals(200, section.getStatusCode(), "fr (admitted to the root by a run request) must open the activations"
+                + " section (D-38c), got " + section.getStatusCode());
+        assertFalse(section.getContentAsString().contains(foreign),
+                "the section must not list u9's activation request for a job fr cannot see");
+        assertTrue(ApproverFormFixtures.get(j, "admin", "batch-control/activations/").getContentAsString().contains(foreign),
+                "guard: the foreign activation request exists and the administrator sees it");
+
+        assertEquals(404, ApproverFormFixtures.get(j, "none", "batch-control/").getStatusCode(),
+                "guard: a user without Batch Control permission and without requests gets 404 at the root");
+        int noneSection = ApproverFormFixtures.get(j, "none", "batch-control/activations/").getStatusCode();
+        assertTrue(noneSection >= 400, "guard: and no activations section, got " + noneSection);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** POSTs the run request form with redirects followed and returns where it landed. */

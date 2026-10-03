@@ -261,6 +261,63 @@ public class SwitchSaveFailureTest {
         assertFalse(cfg.isChangeControlEnabled(), "on disk change control must be off");
     }
 
+    /**
+     * T-08-66 (D-63, backlog #85): admin turns change control off on the global form while u1 holds
+     * an active window; the GRANT_REVOKE record for that window states "change control turned off",
+     * and the grants screen (opened by admin once change control is back on) shows that reason.
+     * Guard: an ordinary revoke by admin of another window leaves a GRANT_REVOKE record without it.
+     */
+    @Test
+    public void t_08_66_changeControlOffRevocationSaysSo() throws Exception {
+        Grant grant = changeControlOnWithActiveGrant();
+        Grant other = secondWindow();
+        List<String> seen = records(ChangeType.GRANT_REVOKE, null).stream().map(ChangeRecord::getId).collect(Collectors.toList());
+        try (ACLContext ignored = as("admin")) {
+            GrantService.get().revoke(other.getId());
+        }
+        List<ChangeRecord> manual = records(ChangeType.GRANT_REVOKE, null).stream()
+                .filter(r -> !seen.contains(r.getId())).collect(Collectors.toList());
+        assertEquals(1, manual.size(), "premise: the ordinary revoke leaves one GRANT_REVOKE record");
+        assertFalse(String.valueOf(manual.get(0).getDetail()).toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
+                "guard: an ordinary revoke must not claim change control was turned off: " + manual.get(0).getDetail());
+        manual.forEach(r -> seen.add(r.getId()));
+
+        int code = submitSwitch("admin", "changeControlEnabled", false);
+        assertTrue(code < 400, "the save must succeed, got HTTP " + code);
+        assertFalse(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "premise: the window was closed (P-15)");
+        List<ChangeRecord> bySwitch = records(ChangeType.GRANT_REVOKE, null).stream()
+                .filter(r -> !seen.contains(r.getId())).collect(Collectors.toList());
+        assertEquals(1, bySwitch.size(), "one GRANT_REVOKE record for the window closed by the switch, got " + bySwitch.size());
+        String detail = String.valueOf(bySwitch.get(0).getDetail());
+        assertTrue(detail.toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
+                "the GRANT_REVOKE record must say the window was revoked because change control was turned off: " + detail);
+
+        cfg.setChangeControlEnabled(true);
+        cfg.save();
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        Page grants = wc.goTo("batch-control/grants/");
+        assertEquals(200, grants.getWebResponse().getStatusCode(), "premise: admin opens the grants screen");
+        String text = ((org.htmlunit.html.HtmlPage) grants).asNormalizedText();
+        assertTrue(text.contains(grant.getId()), "premise: the closed window " + grant.getId() + " is listed");
+        assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("change control turned off"),
+                "the grants screen must show that the window was revoked because change control was turned off");
+    }
+
+    /** A second approved window (CONFIGURE on job other-x) for u1. */
+    private Grant secondWindow() throws Exception {
+        j.createFreeStyleProject("other-x");
+        GrantRequest request;
+        try (ACLContext ignored = as("u1")) {
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "other-x"),
+                    Arrays.asList(GrantAction.CONFIGURE), 60, "second window", "a1");
+        }
+        try (ACLContext ignored = as("a1")) {
+            Grant grant = GrantRequestService.get().approve(request.getId(), "ok");
+            assertNotNull(grant, "fixture: the second grant must have been issued");
+            return grant;
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void bothSwitchesOn() {
