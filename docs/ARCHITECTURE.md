@@ -75,7 +75,7 @@ GrantAwareACL extends ACL            (unchanged logic)
 - Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
 - Upgrade: none. The withdrawn generic wrapper `BatchControlAuthorizationStrategy` is removed without a load-time conversion; the plugin was never released (D-35e).
 - Migration: a security-page action copies a plain matrix-auth or role-strategy configuration into the subclass and back.
-- Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (for example a plain strategy installed on the security page or by JCasC; role-strategy 918+ keeps the subclass on its own saves, D-35f).
+- Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (for example a plain strategy installed on the security page or by JCasC; role-strategy 927+ keeps the subclass on its own saves, D-35f, D-35g).
 - With no active grant the subclass behaves exactly like its parent.
 - matrix-auth and role-strategy are optional dependencies; each subclass is an `@Extension(optional = true)` in its own class so a missing plugin never breaks class loading.
 
