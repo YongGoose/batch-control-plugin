@@ -88,7 +88,7 @@ Matrix와 Role 기반 권한 전략에 자동으로 노출되고, 관리자(Over
 - 수용 기준: 사유가 4,000자를 초과하거나 문자열 파라미터 값이 개당 10,000자를 초과하면 요청 생성이 거부된다. (R-7 부분 채택, D-22)
 - 수용 기준: 실행된 빌드에는 요청 ID, 요청자, 결재자가 Cause와 빌드 Action으로 표시된다.
 - 잡 단위 설정(JobProperty): `approvalRequired`(bool), 잡별 결재자 목록 제한(선택).
-- Acceptance: submitting a run request (job request form, incident rerun, and the service API) requires `Item/Build` on the job as the requester, in addition to `BatchControl/Request` and `Item/Read`; without it the submission is refused with 403 and no request is stored. An incident rerun also needs `BatchControl/ViewHistory`, which the Incidents screen requires. (D-38, #24, D-57)
+- Acceptance: submitting a run request (job request form, incident rerun, and the service API) requires `BatchControl/Request` and `Item/Read` on the job; `Item/Build` is not required. The request detail page and the approver notification state when the requester lacks `Item/Build` on the job. An incident rerun also needs `BatchControl/ViewHistory`, which the Incidents screen requires. (D-38a, D-57)
 - Acceptance: whether an approver may approve is decided by the approval policy alone. An approved request is submitted even when the approver holds only `Item/Discover` or no permission on the job: the job lookup for the submission runs as SYSTEM after the policy check. (#26)
 
 **6. 실행 경로 차단**
@@ -149,14 +149,15 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - 수용 기준: 만료 시각 경과 후 첫 권한 검사부터 거부된다(타이머 의존 없음).
 - 수용 기준: 활성 권한이 있는 상태에서 재시작해도 만료 전이면 유지, 만료 후면 즉시 없음.
 - 수용 기준: `Manage` 권한자는 활성 권한을 즉시 회수(revoke)할 수 있고 이력에 남는다.
-- 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다.
+- 수용 기준: 변경 통제 on 상태에서, 권한 부여 없이 Item/Configure·Create·Delete·Move를 가진 사용자가 있으면 관리 화면에 경고(AdministrativeMonitor)가 표시된다. (Move: D-59)
 - Acceptance: when change control is on and the installed authorization strategy is not a Batch Control strategy (for example after a save on role-strategy's Manage Roles page), the administrative monitor `batch-control-strategy` says that grants do not confer and offers to install the matching Batch Control strategy. It also warns when change control is on and no build authenticator (Authorize Project) is configured, because builds running as SYSTEM are outside the self-grant guard. (D-35a, D-35d; replaces the former Role Strategy "JIT unsupported" notice)
 - Acceptance: while change control is on and the configured build authenticators would let a build of a job without its own build authorization and without a user cause run as SYSTEM, the `batch-control-strategy` monitor shows one fixed warning (no job names) and the detail page of a pending request that includes CONFIGURE shows the same warning to users who may decide it or hold BatchControl/Manage, not to the requester. A global default build authorization removes both. The same applies when that build identity holds Overall/Administer or root-level Item/Configure without a grant. (D-50, D-50a, D-50b)
 - 수용 기준: 실행 통제가 켜져 있으면, 활성 Grant(권한 창) 안에서 생성된 잡은 `approvalRequired=true`가 기본으로 적용된다(권한 창을 이용해 무승인 실행 경로를 심는 것 방지). (R-2 경량 채택, D-17)
 - 수용 기준: 멀티브랜치 프로젝트가 자동 생성한 브랜치 자식 잡은 이 기본값에서 제외한다(설정 화면이 없어 해제 경로가 없고, 재인덱싱 시 설정이 재생성되기 때문). 해당 잡의 실행은 10절대로 기록된다. (D-32)
 - 수용 기준: 실행 통제가 켜져 있으면, 새로 생성되는 잡은 `blockTimer=true`·`blockUpstream=true` 로도 시작한다. 잡을 만드는 행위가 그 잡을 가동시키지 않는다. 가동하려면 잡 설정에서 해당 스위치를 꺼야 하며, 그 변경은 변경 통제 대상이라 권한 창과 기록을 거친다. 계산된 자식 잡은 D-32대로 제외한다. (D-34)
 - 수용 기준: 실행 통제가 켜져 있으면, **새로 생성되는 모든 잡**에 `approvalRequired=true`가 기본으로 적용된다(생성 경로·생성자와 무관). 통제를 풀려면 잡 설정을 바꿔야 하며, 그 변경 자체가 변경 통제 대상이라 기록에 남는다. 이 기본값 자체는 사람이 직접 누르는 실행에만 영향을 준다. 다만 새로 생성되는 잡에서는 D-34가 타이머·상위 잡 트리거를 같은 시점에 함께 막는다. 따라서 이 항목이 원래 달고 있던 “자동 생성 잡의 자동 빌드는 멈추지 않는다”는 단서는 D-34로 대체된다. 새로 생성되는 잡에서 계속 통과하는 것은 SCM 트리거뿐이고, 이미 존재하는 잡은 영향을 받지 않는다. (D-31, 뒷부분은 D-34로 대체)
-- Implementation: Batch Control variants of the matrix-auth and role-strategy strategies that layer active grants over the parent's ACLs, chosen on the global security page or installed by the monitor's migration button. A legacy wrapper configuration around a project-matrix or role-strategy delegate is converted on load; a wrapper around the global matrix strategy is unwrapped to it, and the monitor offers the conversion with a warning that per-item properties become effective. (D-35a, D-35d)
+- Implementation: Batch Control variants of the matrix-auth and role-strategy strategies that layer active grants over the parent's ACLs, chosen on the global security page or installed by the monitor's migration button. The withdrawn generic wrapper is not supported: the plugin was never released, so no saved configuration needs converting. (D-35a, D-35e)
+- Acceptance: while change control is on, moving an item (folders plugin Item/Move) by a user without Overall/Administer is allowed only if the user holds Item/Delete on the item and Item/Create on the destination, each native or from an active grant; a CREATE grant's name restriction is matched against the moved item's name. A refused move changes nothing, answers with a plain message and is recorded as GRANT_VIOLATION. With change control off moves behave as in Jenkins. (D-59)
 
 **9. 변경 자동 기록**
 생성·수정·삭제·이름변경·이동은 경로와 무관하게 누가·언제·무엇을 바꿨는지 자동으로 기록됩니다.
