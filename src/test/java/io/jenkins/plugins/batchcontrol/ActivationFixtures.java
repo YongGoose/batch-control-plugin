@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>The frozen web contract (matrix note 90):
  * <ul>
- *   <li>{@code GET job/<name>/batch-control/activation} — the request form;</li>
- *   <li>{@code POST job/<name>/batch-control/activation/submit} with {@code action}
+ *   <li>{@code GET job/<name>/batch-control-activation/} — the request form;</li>
+ *   <li>{@code POST job/<name>/batch-control-activation/submit} with {@code action}
  *       ({@code ACTIVATE}|{@code HOLD}), {@code reason} and the repeated {@code approvers};</li>
  *   <li>{@code GET batch-control/activations/} — the approver's inbox;</li>
  *   <li>{@code POST batch-control/activations/<id>/approve|reject|cancel} with {@code comment}.</li>
@@ -62,7 +62,7 @@ final class ActivationFixtures {
         params.add(new NameValuePair("action", action));
         params.add(new NameValuePair("reason", reason));
         params.addAll(approverPairs(approvers));
-        return post(j, userId, job.getUrl() + "batch-control/activation/submit", params);
+        return post(j, userId, job.getUrl() + "batch-control-activation/submit", params);
     }
 
     static Set<String> activationIds() {

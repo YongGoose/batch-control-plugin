@@ -49,7 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * activated. D-45 applies to computed folders as to jobs. Matrix rows T-06a-46/47.
  *
  * <p>The request is filed through the job-level URL of the multibranch project
- * ({@code job/<mb>/batch-control/activation/submit}), the same contract as for a job (note 102).
+ * ({@code job/<mb>/batch-control-activation/submit}), the same contract as for a job (note 102).
  * The branch source is a {@link SingleSCMSource} over {@link NullSCM}, so branch builds may
  * FAIL (no Jenkinsfile); the rows count builds, not results.
  *

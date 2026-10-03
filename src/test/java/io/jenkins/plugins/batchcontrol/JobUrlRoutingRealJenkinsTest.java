@@ -47,14 +47,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * T-UI-48). The plain-JenkinsRule rows on the same URLs (T-02-09, T-06a-*, T-06-89..97, T-UI-22/24)
  * keep covering the details; these rows are the real-class-loader smoke.
  *
- * <p>"Still works" for a GET is measured after following redirects (so moving the form to its own
- * action behind a redirect is allowed); a POST is not followed and must answer 2xx/3xx and store
- * the request. A user who may not use the action gets 404 (hidden), as before.
+ * <p>D-64 moves the activation form to its own action, {@code <item>/batch-control-activation/}
+ * (submit {@code .../submit}), for jobs and computed folders, and drops the old
+ * {@code <item>/batch-control/activation} without a redirect: the new URLs answer an allowed user,
+ * the old ones answer 404 even to them. A GET of a new URL is followed through redirects; a POST is
+ * not followed and must answer 2xx/3xx and store the request. A user who may not use the action
+ * gets 404 (hidden), as before.
  *
- * <p>Written from docs/SPEC.md items 2/6/6a, D-60, issue #71 and docs/TEST-MATRIX.md only
+ * <p>Written from docs/SPEC.md items 2/6/6a, D-60, D-64, issue #71 and docs/TEST-MATRIX.md only
  * (no src/main knowledge).
  */
 public class JobUrlRoutingRealJenkinsTest {
+
+    /** D-64: the activation form's own action. */
+    static final String NEW_FORM = "batch-control-activation/";
+    static final String NEW_SUBMIT = "batch-control-activation/submit";
+    /** The URL used before D-64, dropped without a redirect. */
+    static final String OLD_FORM = "batch-control/activation";
 
     @RegisterExtension
     final RealJenkinsExtension rr = new RealJenkinsExtension();
@@ -65,13 +74,13 @@ public class JobUrlRoutingRealJenkinsTest {
         rr.then(JobUrlRoutingRealJenkinsTest::requestRunForm);
     }
 
-    /** T-UI-71: the job's activation form and submission URLs; the job page's link; 404 for others. */
+    /** T-UI-71: the job's activation form and submission at the D-64 URL; the job page's link; old URL 404; 404 for others. */
     @Test
     public void t_ui_71_activationFormUrlsStillRouteInARealJenkins() throws Throwable {
         rr.then(JobUrlRoutingRealJenkinsTest::activationForm);
     }
 
-    /** T-UI-72: a computed folder's activation entry; 404 for others. */
+    /** T-UI-72: a computed folder's activation entry at the D-64 URL; old URL 404; 404 for others. */
     @Test
     public void t_ui_72_computedFolderActivationEntryStillRoutesInARealJenkins() throws Throwable {
         rr.then(JobUrlRoutingRealJenkinsTest::computedFolderActivation);
@@ -111,7 +120,7 @@ public class JobUrlRoutingRealJenkinsTest {
         control(job);
         assertFalse(ActivationService.get().isActivated(job), "premise: a job created under run control is not activated");
 
-        HtmlPage form = html(r, "u1", job.getUrl() + "batch-control/activation");
+        HtmlPage form = html(r, "u1", job.getUrl() + NEW_FORM);
         assertTrue(lower(form).contains("activat"), "the activation form must name the activation: " + excerpt(form));
         List<String> crumbs = crumbs(form);
         assertFalse(crumbs.isEmpty(), "the activation form must render breadcrumbs");
@@ -127,18 +136,19 @@ public class JobUrlRoutingRealJenkinsTest {
         }
 
         int before = ActivationService.get().list().size();
-        WebResponse submit = postActivation(r, "u1", job.getUrl() + "batch-control/activation/submit");
+        assertOldUrlIsGone(r, job.getUrl(), before);
+        WebResponse submit = postActivation(r, "u1", job.getUrl() + NEW_SUBMIT);
         int code = submit.getStatusCode();
-        assertTrue(code >= 200 && code < 400, "POST <job>/batch-control/activation/submit must succeed, got " + code
+        assertTrue(code >= 200 && code < 400, "POST <job>/" + NEW_SUBMIT + " must succeed, got " + code
                 + ": " + excerpt(submit.getContentAsString()));
         assertEquals(before + 1, ActivationService.get().list().size(), "the submission must store one activation request");
 
         // guard: the same access rules as before (hidden = 404), nothing stored
-        assertEquals(404, status(r, "plain", job.getUrl() + "batch-control/activation"),
+        assertEquals(404, status(r, "plain", job.getUrl() + NEW_FORM),
                 "a user without BatchControl/Request must get 404 at the activation form");
-        assertEquals(404, postActivation(r, "plain", job.getUrl() + "batch-control/activation/submit").getStatusCode(),
+        assertEquals(404, postActivation(r, "plain", job.getUrl() + NEW_SUBMIT).getStatusCode(),
                 "a user without BatchControl/Request must get 404 at the activation submission");
-        assertEquals(404, status(r, "blind", job.getUrl() + "batch-control/activation"),
+        assertEquals(404, status(r, "blind", job.getUrl() + NEW_FORM),
                 "a user who cannot read the job must get 404 at the activation form");
         assertEquals(before + 1, ActivationService.get().list().size(), "a refused submission must store nothing");
     }
@@ -148,28 +158,42 @@ public class JobUrlRoutingRealJenkinsTest {
         WorkflowMultiBranchProject mb = r.jenkins.createProject(WorkflowMultiBranchProject.class, "route-mb");
         assertFalse(ActivationService.get().isActivated(mb), "premise: a computed folder created under run control is not activated");
 
-        HtmlPage form = html(r, "u1", mb.getUrl() + "batch-control/activation");
+        HtmlPage form = html(r, "u1", mb.getUrl() + NEW_FORM);
         assertTrue(lower(form).contains("activat"), "the computed folder's activation form must name the activation: "
                 + excerpt(form));
 
         int before = ActivationService.get().list().size();
-        WebResponse submit = postActivation(r, "u1", mb.getUrl() + "batch-control/activation/submit");
+        assertOldUrlIsGone(r, mb.getUrl(), before);
+        WebResponse submit = postActivation(r, "u1", mb.getUrl() + NEW_SUBMIT);
         int code = submit.getStatusCode();
-        assertTrue(code >= 200 && code < 400, "POST <mb>/batch-control/activation/submit must succeed, got " + code
+        assertTrue(code >= 200 && code < 400, "POST <mb>/" + NEW_SUBMIT + " must succeed, got " + code
                 + ": " + excerpt(submit.getContentAsString()));
         assertEquals(before + 1, ActivationService.get().list().size(), "the submission must store one activation request");
 
         // guard
-        assertEquals(404, status(r, "plain", mb.getUrl() + "batch-control/activation"),
+        assertEquals(404, status(r, "plain", mb.getUrl() + NEW_FORM),
                 "a user without BatchControl/Request must get 404 at the computed folder's activation form");
-        assertEquals(404, postActivation(r, "plain", mb.getUrl() + "batch-control/activation/submit").getStatusCode(),
+        assertEquals(404, postActivation(r, "plain", mb.getUrl() + NEW_SUBMIT).getStatusCode(),
                 "a user without BatchControl/Request must get 404 at the computed folder's activation submission");
-        assertEquals(404, status(r, "blind", mb.getUrl() + "batch-control/activation"),
+        assertEquals(404, status(r, "blind", mb.getUrl() + NEW_FORM),
                 "a user who cannot read the computed folder must get 404 at its activation form");
         assertEquals(before + 1, ActivationService.get().list().size(), "a refused submission must store nothing");
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * D-64: the former {@code <item>/batch-control/activation} URL is dropped without a redirect, so
+     * even an allowed user gets 404 on its GET and POST (redirects are not followed, so a 3xx to the
+     * new URL also fails), and nothing is stored.
+     */
+    private static void assertOldUrlIsGone(JenkinsRule r, String itemUrl, int requestsBefore) throws Exception {
+        int get = client(r, "u1", false).getPage(new URL(r.getURL(), itemUrl + OLD_FORM)).getWebResponse().getStatusCode();
+        assertEquals(404, get, "D-64: GET <item>/" + OLD_FORM + " must answer 404 to an allowed user");
+        assertEquals(404, postActivation(r, "u1", itemUrl + OLD_FORM + "/submit").getStatusCode(),
+                "D-64: POST <item>/" + OLD_FORM + "/submit must answer 404 to an allowed user");
+        assertEquals(requestsBefore, ActivationService.get().list().size(), "the old URL must store nothing");
+    }
 
     private static void setUp(JenkinsRule r) throws Exception {
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
