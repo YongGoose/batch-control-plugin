@@ -35,7 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * SPEC item 5, D-38a: "The request detail page and the approver notification state when the
  * requester lacks {@code Item/Build} on the job." The frozen wording is
- * {@value #NOTICE}. Matrix rows T-05-21 .. T-05-24 (note 184).
+ * {@value #NOTICE}. Matrix rows T-05-21 .. T-05-24 (note 184) and T-05-31/32 for the
+ * APPROVERS_CHANGED notification to a re-designated approver (spec-review-S5 m-3, note 196).
  *
  * <p>Actors: {@code nb} holds Request and Item/Read but no Item/Build; {@code wb} holds the same
  * plus Item/Build (the twin in which the sentence must be absent); {@code a1} is the approver.
@@ -51,6 +52,7 @@ public class RequesterBuildNoticeTest {
     static final String NOTICE = "The requester does not have Build permission on this job.";
 
     private static final String A1_MAIL = "alpha.one@example.com";
+    private static final String A2_MAIL = "alpha.two@example.com";
 
     private JenkinsRule j;
     private FreeStyleProject job;
@@ -75,12 +77,13 @@ public class RequesterBuildNoticeTest {
                 .grant(Jenkins.ADMINISTER).everywhere().to("admin")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST).everywhere().to("nb", "wb")
                 .grant(Item.BUILD).everywhere().to("wb")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1"));
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to("a1", "a2"));
         User.getById("a1", true).addProperty(new Mailer.UserProperty(A1_MAIL));
+        User.getById("a2", true).addProperty(new Mailer.UserProperty(A2_MAIL));
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(true);
-        cfg.setApprovers(Arrays.asList("a1"));
+        cfg.setApprovers(Arrays.asList("a1", "a2"));
         cfg.setEmailNotifications(true);
         cfg.save();
 
@@ -135,6 +138,34 @@ public class RequesterBuildNoticeTest {
         String id = submitRunOk(j, "wb", job, "month-end batch", "a1");
         NotificationCapture.await(NotificationEvent.REQUEST_CREATED, id);
         String body = normalise(plainTextBody(awaitSingleMail(A1_MAIL)));
+        assertTrue(body.contains(id), "premise: the mail is the one for request " + id + ": " + excerpt(body));
+        assertFalse(body.contains("does not have Build permission"),
+                "the notice must not appear when the requester holds Item/Build: " + excerpt(body));
+    }
+
+    /**
+     * T-05-31 (spec-review-S5 m-3): nb re-designates the own request from a1 to a2; the
+     * APPROVERS_CHANGED notification to a2 (the new approver, who decides with it) states the notice.
+     */
+    @Test
+    public void t_05_31_approversChangedNotificationStatesTheRequesterLacksBuild() throws Exception {
+        String id = submitRunOk(j, "nb", job, "month-end batch", "a1");
+        NotificationCapture.await(NotificationEvent.REQUEST_CREATED, id);
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.changeRunApprovers(j, "nb", id, "a2"), "nb's re-designation");
+        NotificationCapture.await(NotificationEvent.APPROVERS_CHANGED, id); // premise: the event fired
+        String body = normalise(plainTextBody(awaitSingleMail(A2_MAIL)));
+        assertTrue(body.contains(id), "premise: the mail is the one for request " + id + ": " + excerpt(body));
+        assertTrue(body.contains(NOTICE), "the APPROVERS_CHANGED notification must state \"" + NOTICE + "\": " + excerpt(body));
+    }
+
+    /** T-05-32 (twin of T-05-31): the same re-designation by wb (holds Item/Build) carries no notice. */
+    @Test
+    public void t_05_32_approversChangedNotificationOmitsTheNoticeWhenTheRequesterHoldsBuild() throws Exception {
+        String id = submitRunOk(j, "wb", job, "month-end batch", "a1");
+        NotificationCapture.await(NotificationEvent.REQUEST_CREATED, id);
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.changeRunApprovers(j, "wb", id, "a2"), "wb's re-designation");
+        NotificationCapture.await(NotificationEvent.APPROVERS_CHANGED, id);
+        String body = normalise(plainTextBody(awaitSingleMail(A2_MAIL)));
         assertTrue(body.contains(id), "premise: the mail is the one for request " + id + ": " + excerpt(body));
         assertFalse(body.contains("does not have Build permission"),
                 "the notice must not appear when the requester holds Item/Build: " + excerpt(body));
