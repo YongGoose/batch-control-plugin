@@ -56,9 +56,12 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * carries no grant scope anyway (S-13). With no active grant, or while change control is off, the
  * strategy behaves exactly like its parent.
  *
- * <p>Known limitation (D-35a, PoC-5 row 6): role-strategy's Manage Roles save always installs a
- * plain {@link RoleBasedAuthorizationStrategy}. Open grants then stop conferring (fail-safe), and
- * {@code ops.BatchControlStrategyMonitor} offers to reinstall this class.
+ * <p>D-35f: role-strategy 918 or later is required (pinned in the pom). From that version on, the
+ * Manage Roles, Assign Roles and permission template pages edit the installed strategy in place,
+ * so every save keeps this class; the reset to a plain {@link RoleBasedAuthorizationStrategy} that
+ * older versions' Manage Roles save performed (D-35a, PoC-5 row 6) no longer happens. Installing a
+ * plain strategy on the global security page still stops grants from conferring (fail-safe), and
+ * {@code ops.BatchControlStrategyMonitor} then offers to reinstall this class.
  *
  * <p>role-strategy is an optional dependency; the descriptor is an optional extension.
  */
@@ -113,8 +116,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
 
     /**
      * The Batch Control strategy with every role, assignment and permission template of a
-     * role-strategy strategy (migration, the withdrawn wrapper's load conversion, the converter
-     * and JCasC). Declared with a core parameter type so {@link RoleStrategies} can call it
+     * role-strategy strategy (migration, the converter and JCasC). Declared with a core parameter type so {@link RoleStrategies} can call it
      * without loading role-strategy classes first.
      */
     @NonNull
