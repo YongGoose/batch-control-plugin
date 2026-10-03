@@ -14,7 +14,9 @@
       incidents or history.
     </st:attribute>
   </st:documentation>
-  <j:invokeStatic var="bcTabs" className="io.jenkins.plugins.batchcontrol.ui.SectionTabs" method="current"/>
+  <!-- Through the root action, not j:invokeStatic: invokeStatic loads classes with core's class
+       loader and cannot see plugin classes in a real Jenkins (only a flat test classpath). -->
+  <j:set var="bcTabs" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0).tabs}"/>
   <nav class="jenkins-buttons-row jenkins-!-margin-bottom-3" style="flex-wrap: wrap; gap: 0.25rem;"
        aria-label="Batch Control sections" data-batch-control-tabs="true">
     <j:forEach var="tab" items="${bcTabs}">

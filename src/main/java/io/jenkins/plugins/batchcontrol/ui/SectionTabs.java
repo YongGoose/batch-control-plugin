@@ -82,7 +82,7 @@ public final class SectionTabs {
     private SectionTabs() {
     }
 
-    /** The tabs the current user may open, for Jelly ({@code j:invokeStatic}). */
+    /** The tabs the current user may open (Jelly reaches it through {@code BatchControlRootAction#getTabs}). */
     @NonNull
     public static List<Tab> current() {
         SectionAccess links = new SectionAccess();
