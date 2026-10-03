@@ -9,37 +9,51 @@
   role-strategy configuration this plugin can copy (it.migratable), to Administer holders.
   When the installed strategy is matrix-auth's global matrix, converting makes per-item
   authorization properties effective again (D-35d (3), it.perItemWidening): the warning is a
-  separate warning-styled paragraph placed directly above the button, in the monitor body, so
-  it is read before the action (the controls slot renders above the body).
+  warning-styled paragraph, the first block of the monitor body, and the button (in the
+  controls slot) asks for confirmation through core's l:confirmationLink.
 
   D-35d (2): change control is on but no build authenticator is configured, so builds run as
   SYSTEM and can change authorization outside the self-grant guard (it.buildAuthenticatorMissing).
   This condition is independent of strategyUnsupported and shows in its own paragraph.
 -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <l:adminMonitor severity="warning">
+  <j:set var="controls">
+    <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders.
+         When converting would make per-item properties effective, core's l:confirmationLink
+         (POST with the crumb added by core's script) asks for confirmation first. -->
+    <j:if test="${it.strategyUnsupported and it.migratable and app.hasPermission(app.ADMINISTER)}">
+      <j:choose>
+        <j:when test="${it.perItemWidening}">
+          <l:confirmationLink href="${rootURL}/${it.url}/migrate" post="true" class="jenkins-button"
+                              title="Install the Batch Control variant?"
+                              message="Per-item authorization properties on folders, jobs and agents become effective and start granting the permissions they list."
+                              okText="Install">Install the Batch Control variant</l:confirmationLink>
+        </j:when>
+        <j:otherwise>
+          <form method="post" action="${rootURL}/${it.url}/migrate">
+            <button type="submit" class="jenkins-button">Install the Batch Control variant</button>
+          </form>
+        </j:otherwise>
+      </j:choose>
+    </j:if>
+  </j:set>
+  <l:adminMonitor severity="warning" controls="${controls}">
     <j:if test="${it.strategyUnsupported}">
-      <p>
-        <strong>Batch Control:</strong> change control is enabled, but the installed authorization
-        strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
-        grants do not confer any permission. Install the matching Batch Control strategy to restore
-        just-in-time change control.
-      </p>
       <j:if test="${it.perItemWidening}">
-        <p class="jenkins-!-warning-color">
+        <div class="jenkins-!-warning-color" style="margin-bottom: 0.5rem;">
           <l:icon src="symbol-warning-outline" class="icon-sm"/>
           <strong>Before you install:</strong> converting from the installed global matrix
           strategy makes per-item authorization properties effective. Any per-item authorization
           property already present on a folder, job or agent will start granting the permissions
           it lists. Check those properties first.
-        </p>
+        </div>
       </j:if>
-      <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders. -->
-      <j:if test="${it.migratable and app.hasPermission(app.ADMINISTER)}">
-        <form method="post" action="${rootURL}/${it.url}/migrate">
-          <button type="submit" class="jenkins-button jenkins-button--primary">Install the Batch Control variant</button>
-        </form>
-      </j:if>
+      <div>
+        <strong>Batch Control:</strong> change control is enabled, but the installed authorization
+        strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
+        grants do not confer any permission. Install the matching Batch Control strategy to restore
+        just-in-time change control.
+      </div>
     </j:if>
     <j:if test="${it.buildAuthenticatorMissing}">
       <p>
