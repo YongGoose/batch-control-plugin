@@ -143,6 +143,19 @@ ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`,
 `r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
 `arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
 
+## e2e-10 driver (`r10/`)
+
+Round E2E-5 (targeted re-check, 2026-10-03). `r10/lib.py` is `r9/lib.py` with screenshots in
+`screenshots/run-10/` and logs in `r10/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
+`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`. Order: `setup_grants.py a` (mover1 windows approved by
+approver-2), `move.py MV mover1 prod/mv-job ops moved`, revoke the DELETE window
+(`POST /batch-control/grants/active/<id>/revoke`), `setup_grants.py b <id>` (pending 1-minute request), `s89.py`
+(grants tables at 1280 px; `TAG=-b` for a second pass), `s86.py <1-minute grant id>` / `s86b.py` (monitor sentence,
+Mark as reviewed, old URL), `s71.py`, `s74.py`, `s74b.py`, `s83.py` (on `prod/y`), `smoke.py` (after
+`grants.py requester JOB team/app-1 CONFIGURE 1`), `s85.py`, and last `d59b.py arrange|create|viol|cc <bool>` with
+`move.py` (D-59b: applies `casc/profile-role-naming.yaml` and role-strategy's role-based naming strategy; it
+replaces the matrix profile, so run it last or reset).
+
 ## e2e-09 driver (`r9/`)
 
 Round E2E-4 (backlog fixes #71-#91, 2026-10-03). `r9/lib.py` is `r8/lib.py` with screenshots in

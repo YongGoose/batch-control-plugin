@@ -1,0 +1,33 @@
+# e2e-10 item 5 (D-59b, role-strategy#751). Applied by hand (r10/d59b.py), not at boot.
+# namer: Move+Delete on prod/*, Create only of names team-.* in folder team (role-based naming).
+jenkins:
+  authorizationStrategy:
+    batchControlRoleBased:
+      roles:
+        global:
+          - name: admin
+            permissions:
+              - Overall/Administer
+            entries:
+              - user: admin
+          - name: base
+            permissions:
+              - Overall/Read
+            entries:
+              - user: namer
+        items:
+          - name: prod-mover
+            pattern: "prod(/.*)?"
+            permissions:
+              - Job/Read
+              - Job/Move
+              - Job/Delete
+            entries:
+              - user: namer
+          - name: team-create
+            pattern: "team|team/team-.*"
+            permissions:
+              - Job/Read
+              - Job/Create
+            entries:
+              - user: namer
