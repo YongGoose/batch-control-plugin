@@ -2,16 +2,19 @@ package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
+import hudson.model.Item;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse2;
+import org.springframework.security.access.AccessDeniedException;
 
 /**
  * D-59: the answer to a move that {@link MoveGuard} refused, in the D-48 style: HTTP 403 and a
@@ -28,8 +31,33 @@ public class MoveRefusal extends Failure {
 
     private static final long serialVersionUID = 1L;
 
-    MoveRefusal(String message) {
+    /** Full name of the item whose move was refused (kept as a name: the exception is serializable). */
+    private final String itemFullName;
+
+    MoveRefusal(String message, String itemFullName) {
         super(message);
+        this.itemFullName = itemFullName;
+    }
+
+    /** Full name of the item whose move was refused. */
+    public String getItemFullName() {
+        return itemFullName;
+    }
+
+    /**
+     * For the refusal page's link back to the item: the item's URL relative to the Jenkins root
+     * (for example {@code job/prod/job/x/}), or {@code null} when the current user may not open it.
+     * The item is looked up as the current user, so Jenkins' Item/Read rule applies; an item the
+     * user can only discover (Item/Discover) gets no link either, since opening it would be refused.
+     */
+    @CheckForNull
+    public String getItemUrl() {
+        try {
+            Item item = Jenkins.get().getItemByFullName(itemFullName);
+            return item == null ? null : item.getUrl();
+        } catch (AccessDeniedException e) {
+            return null; // discoverable but not readable
+        }
     }
 
     @Override

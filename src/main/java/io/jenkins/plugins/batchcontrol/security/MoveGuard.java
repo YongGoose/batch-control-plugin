@@ -113,7 +113,7 @@ final class MoveGuard {
                     .append(", which does not include '").append(item.getName()).append("'.");
         }
         message.append(" Request a permission window that covers both, or ask an administrator.");
-        return new MoveRefusal(message.toString());
+        return new MoveRefusal(message.toString(), item.getFullName());
     }
 
     /**
