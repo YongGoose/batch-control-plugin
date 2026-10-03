@@ -41,6 +41,7 @@ Other profiles:
 | `casc/profile-role.yaml` | Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-role.yaml`; back with `/var/jenkins_casc/jenkins.yaml` | Batch Control: Role-Based Strategy (B19-03) |
 | `compose.locale-th-utc.yml` | `docker compose -f docker-compose.yml -f compose.locale-th-utc.yml up -d jenkins`; back with `docker compose up -d jenkins` | JVM locale th_TH_TH and zone UTC (B18-02/03) |
 | `compose.ldap.yml` + `casc/profile-ldap.yaml` | `scripts/ldap-up.sh` (renders `out/ldap/bootstrap.ldif` from `ldap/bootstrap.ldif.template` with the `.env` passwords and starts `batch-control-e2e-ldap`), then Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-ldap.yaml`; back with `/var/jenkins_casc/jenkins.yaml` (or a restart), then `scripts/ldap-down.sh` | LDAP realm (ldap plugin) with group entries: `bc-admins`, `bc-requesters`, `bc-approvers`, `bc-configurers`, `bc-auditors`; users `admin`, `lrequester`, `lapprover-1/2`, `lconfigurer`, `lauditor`, `lnobody` with `<id>@ldap.e2e.local` addresses (e2e-05) |
+| `compose.prefix.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build`; back with `docker compose up -d jenkins` | Jenkins under the context path `/jenkins` (`http://localhost:8080/jenkins/`, Jenkins URL set through `BC_JENKINS_URL`) with the new job page experiment on for every user (`-Dnew-job-page.flag.defaultValue=true`; a user can still turn it off on `/me/experiments/`) (e2e-06) |
 
 The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
 import works, the README's permission names are right.
@@ -111,6 +112,24 @@ POSTs from a browser session), `x1b.mjs`/`x1c.mjs` (stale change-approvers form)
 `ldap-designate.mjs`; the LDAP-down steps log in first and then stop
 `batch-control-e2e-ldap` themselves, because a new login needs the directory.
 `cd extra && npm install` once.
+
+## e2e-06 driver (`r6/`, Python)
+
+For a machine without Node.js: `r6/lib.py` is `extra/lib.mjs` ported to Python Playwright
+(`python3 -m venv venv && venv/bin/pip install playwright requests`; it drives the installed
+Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
+`screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
+and the `prod/` folder (script console, arrangement only; JCasC drops the accounts' matrix entries
+on the next boot), `grants.py <user> <JOB|FOLDER> <full name> <ACTIONS> [minutes]` requests a
+window over REST and has `approver-1` approve it, `move.py <id> <user> <source> <destination>
+<refused|moved>` drives the folders Move page (D-59), `s2*.py` role-strategy 918 pages, `s3.py`
+global matrix conversion, `s4*.py` new job page, `s5*.py` tab bar and destructive controls,
+`s6.py` regression spot-checks.
+
+The `rebuild` plugin's "Rebuild Last" entry has a null URL on a job without builds, which makes
+the new job page's "More actions" menu fail to open (core JS `menuItem` throws). For new job page
+menu checks disable it: `docker exec batch-control-e2e touch /var/jenkins_home/plugins/rebuild.jpi.disabled`
+and restart; remove the marker afterwards.
 
 ## Older scenario scripts
 

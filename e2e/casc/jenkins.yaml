@@ -165,7 +165,7 @@ jenkins:
               - BatchControl/Request
 unclassified:
   location:
-    url: "http://localhost:8080/"
+    url: "${BC_JENKINS_URL:-http://localhost:8080/}"
     adminAddress: "Batch Control e2e <jenkins@e2e.local>"
   mailer:
     smtpHost: mailpit
