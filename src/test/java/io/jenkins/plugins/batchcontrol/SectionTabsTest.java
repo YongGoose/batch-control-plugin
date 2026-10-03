@@ -243,44 +243,98 @@ public class SectionTabsTest {
         return wc.login(user);
     }
 
-    /** Sections with requests awaiting a decision, whose totals the overview shows to an administrator. */
+    /** Sections with requests awaiting a decision; their counts are shown only as tab badges (D-67). */
     static final List<String> COUNTED = Arrays.asList("requests", "activations", "grants");
 
     /**
-     * T-UI-56 (backlog #88): with nothing pending, the administrator's overview shows a count of 0
-     * for each decision section (requests, activations, grants), next to a link to the
-     * section in the page body (outside the tab bar). Guard: after one pending run request (designated
-     * to a1, not to admin) the requests count is 1 and the others stay 0.
+     * T-UI-90 (D-67, replaces T-UI-56 of backlog #88, which D-67 withdrew): the overview shows
+     * pending counts only as tab badges. With 7 run requests, 5 grant requests and 4 activation
+     * requests (filed by u1 and g1) awaiting a1, a1's tabs carry the badges 7, 5 and 4 (guard: the counts exist), while
+     * the page body outside the tab bar shows no count: no body link to a counted section has a
+     * number next to it (the #88 table) and no body text puts one of those numbers next to a word
+     * about pending requests (the banner). The administrator, to whom #88 showed the totals, sees no
+     * count in the body either (distinct counts, and their total 16, keep the check from matching
+     * unrelated text).
      */
     @Test
-    public void t_ui_56_overviewShowsPerSectionCountsToTheAdministrator() throws Exception {
-        HtmlPage empty = page("admin", ROOT);
-        for (String section : COUNTED) {
-            assertEquals("0", overviewCount(empty, section), section + ": with nothing pending the overview must show 0");
-        }
-
+    public void t_ui_90_overviewShowsCountsOnlyAsBadges() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("batch-x");
         BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(true));
+        List<FreeStyleProject> others = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            FreeStyleProject other = j.createFreeStyleProject("batch-y" + i);
+            BatchControlFixtures.setBatchControl(other, new BatchControlJobProperty(true));
+            others.add(other);
+        }
         try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
-            RunRequestService.get().create(job, new LinkedHashMap<>(), "month-end run", "a1");
+            for (int i = 0; i < 7; i++) {
+                RunRequestService.get().create(job, new LinkedHashMap<>(), "run " + i, "a1");
+            }
+            for (FreeStyleProject other : others) {
+                io.jenkins.plugins.batchcontrol.policy.ActivationService.get().create(other,
+                        io.jenkins.plugins.batchcontrol.model.ActivationRequest.Action.ACTIVATE, "go live", List.of("a1"));
+            }
         }
-        HtmlPage one = page("admin", ROOT);
-        assertEquals("1", overviewCount(one, "requests"), "guard: one pending run request counts 1 for the administrator");
-        for (String section : COUNTED.subList(1, COUNTED.size())) {
-            assertEquals("0", overviewCount(one, section), section + ": guard: still 0");
+        try (ACLContext ignored = ACL.as2(User.getById("g1", true).impersonate2())) {
+            for (int i = 0; i < 5; i++) {
+                io.jenkins.plugins.batchcontrol.policy.GrantRequestService.get().create(
+                        new io.jenkins.plugins.batchcontrol.model.GrantScope(
+                                io.jenkins.plugins.batchcontrol.model.GrantScope.Type.JOB, "batch-x"),
+                        Arrays.asList(io.jenkins.plugins.batchcontrol.model.GrantAction.CONFIGURE), 30, "fix " + i, "a1");
+            }
         }
+        HtmlPage approver = page("a1", ROOT);
+        assertEquals("7", badge(approver, "requests"), "guard: the requests tab badge stays (D-67)");
+        assertEquals("5", badge(approver, "grants"), "guard: the grants tab badge stays (D-67)");
+        assertEquals("4", badge(approver, "activations"), "guard: the activations tab badge stays (D-67)");
+        assertNoCountsInBody("a1", approver);
+        assertNoCountsInBody("admin", page("admin", ROOT));
+    }
+
+    private static void assertNoCountsInBody(String user, HtmlPage page) {
+        DomElement main = (DomElement) page.querySelector("#main-panel");
+        assertNotNull(main, "the overview must have a main panel");
+        for (String section : COUNTED) {
+            String count = overviewCount(page, main, section);
+            assertNull(count, user + ": the overview body must not show a count next to its link to " + section
+                    + " (the #88 count table was removed by D-67), found " + count + " in: " + excerpt(bodyText(main)));
+        }
+        String body = bodyText(main);
+        java.util.regex.Pattern banner = java.util.regex.Pattern.compile(
+                "(?i)(?<![\\w-])(7|5|4|16)(?![\\w-])\\W{0,3}(\\w+\\W+){0,4}(pending|await\\w*|request\\w*|decision\\w*|approv\\w*|grant\\w*|activation\\w*)");
+        java.util.regex.Matcher m = banner.matcher(body);
+        assertFalse(m.find(), user + ": the overview body must not show a pending-count banner (D-67), found '"
+                + (m.find(0) ? m.group() : "") + "' in: " + excerpt(body));
+    }
+
+    /** Text of the main panel outside the tab bar, without form controls and scripts. */
+    private static String bodyText(DomElement main) {
+        StringBuilder out = new StringBuilder();
+        for (org.htmlunit.html.DomNode n : main.getDescendants()) {
+            if (n instanceof org.htmlunit.html.DomText t && !insideTabBar(t) && !insideControl(t)) {
+                out.append(t.getWholeText()).append(' ');
+            }
+        }
+        return out.toString().replaceAll("\\s+", " ");
+    }
+
+    private static boolean insideControl(org.htmlunit.html.DomNode node) {
+        for (org.htmlunit.html.DomNode n = node.getParentNode(); n != null; n = n.getParentNode()) {
+            String name = n.getNodeName();
+            if ("script".equals(name) || "style".equals(name) || "select".equals(name) || "template".equals(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * The count shown with the overview body's link to {@code section}: the first stand-alone number
-     * in the link's text or, failing that, in one of its three nearest ancestors. Null when the body
-     * has no link to the section or no number near it.
+     * The count shown with an overview body link to {@code section}: the first stand-alone number
+     * in the link's text or in one of its three nearest ancestors. Null when no body link to the
+     * section has a number near it (or there is no such link).
      */
-    private static String overviewCount(HtmlPage page, String section) {
-        DomElement main = (DomElement) page.querySelector("#main-panel");
-        assertNotNull(main, "the overview must have a main panel");
+    private static String overviewCount(HtmlPage page, DomElement main, String section) {
         java.util.regex.Pattern number = java.util.regex.Pattern.compile("(?<![\\w-])(\\d+)(?![\\w-])");
-        List<String> links = new ArrayList<>();
         for (Object o : main.querySelectorAll("a[href]")) {
             DomElement a = (DomElement) o;
             if (insideTabBar(a)) {
@@ -292,7 +346,6 @@ public class SectionTabsTest {
             } catch (java.net.MalformedURLException e) {
                 continue;
             }
-            links.add(path);
             if (!(path.endsWith("batch-control/" + section + "/") || path.endsWith("batch-control/" + section))) {
                 continue;
             }
@@ -305,8 +358,7 @@ public class SectionTabsTest {
                 node = node.getParentNode();
             }
         }
-        throw new AssertionError("the overview body must link the " + section + " section with a count next to it; body links: "
-                + links + "; text: " + excerpt(main.asNormalizedText()));
+        return null;
     }
 
     private static boolean insideTabBar(org.htmlunit.html.DomNode node) {

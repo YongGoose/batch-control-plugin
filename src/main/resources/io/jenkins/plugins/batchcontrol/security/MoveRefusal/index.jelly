@@ -34,7 +34,7 @@
           </div>
         </j:if>
         <j:if test="${it.itemUrl != null}">
-          <div class="jenkins-!-margin-top-2"><a href="${rootURL}/${it.itemUrl}">${it.itemFullName}</a></div>
+          <div class="jenkins-!-margin-top-2"><a class="model-link" href="${rootURL}/${it.itemUrl}">${it.itemFullName}</a></div>
         </j:if>
       </div>
     </l:main-panel>

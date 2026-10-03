@@ -72,7 +72,7 @@
                   <td>
                     <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
                     <j:choose>
-                      <j:when test="${jobUrl != null}"><a href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
+                      <j:when test="${jobUrl != null}"><a class="model-link" href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
                       <j:otherwise>${r.jobFullName}</j:otherwise>
                     </j:choose>
                   </td>
