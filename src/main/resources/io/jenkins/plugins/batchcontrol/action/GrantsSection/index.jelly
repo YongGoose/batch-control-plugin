@@ -285,7 +285,7 @@
                   <td style="white-space: nowrap;"><code>${it.createNameLabel(g)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
                   <td><j:forEach var="part" items="${it.formatParts(it.endedAt(g))}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
-                  <td style="white-space: nowrap;">${it.endedLabel(g)}</td>
+                  <td>${it.endedLabel(g)}</td>
                   <td style="white-space: nowrap;">
                     <j:if test="${it.isCanRenew(g)}">
                       <a href="${base}?from=${g.id}#new-grant-request">Request again</a>
