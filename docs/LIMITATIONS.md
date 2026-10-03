@@ -542,9 +542,10 @@ code does on purpose.
     recorded in the change history like a refused Replay. The rebuild
     plugin's **Rebuild** (a different link from a different plugin) is not
     among these: that plugin lets Batch Control hide it, so it does not
-    appear on such a job. A user who may see the job but not
-    build it is not offered the rerun form, and a rerun submitted anyway is
-    refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
+    appear on such a job. A user who may see the job but does not hold
+    `BatchControl/Request` on it is not offered the rerun form, and a rerun
+    submitted anyway is refused without creating a request; `Item/Build` is
+    not needed to request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01; D-38a).
 
     Jenkins' own build link has one more rough edge. On a job without
     parameters, clicking **Direct Build (needs approval)** submits in the

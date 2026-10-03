@@ -196,18 +196,28 @@ History 와 Change Records 는 실제로 존재했던 창과 그 아래에서 �
 
 | 권한 | 허용하는 것 |
 |---|---|
-| `BatchControl/Request` | 승인 보호된 잡에 대한 실행 요청 생성 |
+| `BatchControl/Request` | 승인 보호된 잡에 대한 실행 요청 생성(그 잡의 `Item/Read` 필요, `Item/Build`는 필요 없음) |
 | `BatchControl/Approve` | 실행 요청과 권한 창 요청의 승인 또는 반려 |
 | `BatchControl/RequestGrant` | 임시 변경 권한 요청 |
 | `BatchControl/ViewHistory` | 이력 화면, 대시보드, CSV 내보내기 조회 |
 | `BatchControl/Manage` | **Batch Control → Configuration**에서 전역 설정 관리, 권한 창 회수 |
 
 `Manage`는 `Overall/Administer`가 함의하고 나머지 넷을 함의하므로, 관리자는 모든 검사를
-통과합니다. 요청자에게는 보통 `Overall/Read`, `Item/Read`, `Item/Build`, `Request`,
+통과합니다. 요청자에게는 보통 `Overall/Read`, `Item/Read`, `Request`,
 `RequestGrant`를 주고 `Item/Configure`는 의도적으로 주지 않습니다. `CONFIGURE` 권한 창이
 바로 그것을 대신하기 때문입니다. 결재자에게는 보통 `Approve`와 `ViewHistory`를 주고
 `Request`는 주지 않습니다. `ViewHistory`는 이름보다 넓다는 점에 주의하십시오.
 [제약](#제약) 절을 보십시오.
+
+실행을 요청하는 데는 `BatchControl/Request`와 그 잡의 `Item/Read`만 필요하고 `Item/Build`는
+필요 없습니다. 실행 통제가 켜져 있는 동안 승인이 필요한 잡에서는 직접 실행 경로가 모두 거부되고
+승인된 실행은 플러그인이 큐에 넣으므로, `Item/Build`는 그 자체로 아무것도 허용하지 않으며 누가
+요청할 수 있는지는 `Request`가 정합니다. **승인이 필요한 잡에는 `Build` 대신 `Request`를
+부여하십시오.** 승인이 필요 없는 잡과, 실행 통제가 꺼진 인스턴스에서는 Jenkins 자신의 Build
+의미가 그대로 적용되므로 `Item/Build`를 유지합니다. 스스로는 잡을 시작할 수 없는 사람의 실행도
+승인으로 인가될 수 있으므로, 요청자가 그 잡의 `Item/Build`를 갖고 있지 않으면 요청 상세 화면과
+결재자 알림에 그 사실이 표시됩니다. Build 보유자만 요청할 수 있게 하려면 `Request`를 그들에게만
+할당하십시오.
 
 ### 4. 잡을 설정한다
 
@@ -254,8 +264,8 @@ Dashboard**는 인스턴스 전체의 모든 빌드를 원인(`USER`, `TIMER`, `
 수 있습니다. 재실행 요청은 실패한 빌드의 원래 파라미터를 그대로 싣습니다. 파라미터는 고정되어
 있어 고칠 수 없습니다. 재실행 양식에는 결재자 체크박스만 있고, 사유는 인시던트에서 자동으로
 만들어지므로 입력할 수 없습니다. 제출하려면 다른 실행 요청과 마찬가지로
-`BatchControl/Request`와 그 잡의 `Item/Read`, `Item/Build`가 필요하고, Incidents 화면 자체에는
-`BatchControl/ViewHistory`가 필요하므로 네 가지가 모두 있어야 합니다. 상태는 `OPEN`에서 `ACKNOWLEDGED`, `RESOLVED`로 한
+`BatchControl/Request`와 그 잡의 `Item/Read`가 필요하고(`Item/Build`는 필요 없음), Incidents
+화면 자체에는 `BatchControl/ViewHistory`가 필요하므로 세 가지가 모두 있어야 합니다. 상태는 `OPEN`에서 `ACKNOWLEDGED`, `RESOLVED`로 한
 방향으로만 흐르고, 전이마다 사용자와 시각과 코멘트가 남습니다. **History**는 실행, 오류 건,
 변경 기록, 요청을 기간·잡·사용자·결과·상태로 걸러 보여 주고, 각각을 CSV로 내보내며(공백을 제외한
 첫 글자가 `=`, `+`, `-`, `@`인 셀은 스프레드시트가 수식으로 계산하지 않도록 앞에 따옴표를
