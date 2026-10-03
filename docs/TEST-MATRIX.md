@@ -615,6 +615,9 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 | T-SEC-69 | 6a (D-59a) | integration | P1 | run and change control on; u1 holds native Move, native Delete on `prod`, native Create on `team`; job activated with every switch off and `allowedUpstreamJobs=[feeder]`; run control off | u1 moves `prod/x` into `team` | state kept, no HELD (guard, note 200) | MoveActivationLockTest |
 | T-SEC-70 | 8 (D-59, #74, security-33 S-33-05) | integration | P0 | change control on; u1: Overall/Read, Item/Discover, native Move globally; Read+Delete on `prod`; nothing on `secret` | u1 POSTs `prod/x/move/move` with `destination=/no-such-folder`, then `/secret` | `/secret` answers exactly as the unknown destination (302 back to the move page), no access-denied text; nothing moved; no GRANT_VIOLATION. Passes on 39f4bad too (note 210) | MoveDiscoverOnlyDestinationTest |
 | T-SEC-71 | 8 (D-59 guard of T-SEC-70) | integration | P0 | same; u1 reads `team` without Create | u1 moves `prod/x` to `/team`; then with native Create on `team` | refused 4xx, nothing moved, one GRANT_VIOLATION naming u1 and `prod/x`; twin moves with no new record (note 210) | MoveDiscoverOnlyDestinationTest |
+| T-SEC-73 | 8 (D-59b, role-strategy#751) | integration | P0 | Batch Control role strategy, change control on, `RoleBasedProjectNamingStrategy(true)`; mover: item role `prod/.*` [Read, Delete, Move], item role `team(/team-.*)?` [Read, Create] (Create on `team` premise) | mover moves `prod/x`, then `prod/team-ok`, into `team` | `x`: 4xx, nothing moved, one GRANT_VIOLATION naming mover, `prod/x` and "naming"; `team-ok`: moved, no new record (note 218) | MoveNamingStrategyTest |
+| T-SEC-74 | 8 (D-59b guard) | integration | P0 | same, default naming strategy | mover moves `prod/x` into `team` | moved, no violation (D-59 unchanged) (note 218) | MoveNamingStrategyTest |
+| T-SEC-75 | 8 (D-59b guard), 1 | integration | P0 | same as T-SEC-73 | twin with change control on (refused); then change control off, same move | moved as in Jenkins, no new violation (note 219) | MoveNamingStrategyTest |
 | T-E2E-01 | 5,6 | e2e | P0 | requester/approver 계정 | requester 요청 → approver 승인 | 빌드 실행, 대시보드에 요청 ID 연결 표시 | |
 | T-E2E-02 | 6 | e2e | P0 | approvalRequired 잡 | requester가 사이드바 확인 | "Build Now" 없음, "Request Run" 있음 | |
 | T-E2E-03 | 8 | e2e | P0 | requester | 권한 요청→승인→설정 화면 | 저장 성공, 만료 후 저장 403 안내 — 이 행의 "설정 화면"은 Phase 5까지 자동 단언이 없었다. 화면 열기의 통합 단언은 T-08-14 (note 31) | |
@@ -1076,6 +1079,10 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 
 211. **Requester Build notice across views (T-05-36..39, backlog #75).** Written from SPEC 5 (D-38a), issue #75 and the behaviour core-dev reported (per-request cache, 5 minutes on the plugin clock, dropped when the request is saved). A test `AbstractPasswordBasedSecurityRealm` counts `loadUserByUsername2` per name; only lookups of the requester are counted, after REQUEST_CREATED reached the notifiers. On 39f4bad (no plugin cache) 5 views already cost one lookup of nb, so T-05-36 does not discriminate the fix; it stays as an upper bound. T-05-37..39 assert correctness only (the cache must never hide a change of Build after a new request, a save or the cache life); they pass on both commits. The stale answer inside the cache life is deliberately not asserted.
 
+218. **Naming strategy on moves (T-SEC-73/74, D-59b).** Written from SPEC 8 (D-59 line as amended) and D-59b. The Create item role uses `team(/team-.*)?` so that Create on the container `team` is a measured premise, and the naming strategy refuses `team/x` while it accepts `team/team-ok`. "Naming the naming rule" is asserted as the word "naming" in the record's target or detail. T-SEC-73 fails on 6ba5aec (302, the item moved) and passes with core-dev's uncommitted MoveGuard change.
+
+219. **Change control off (T-SEC-75).** The twin refusal comes first so that the row cannot pass because moves are never refused. It fails on 6ba5aec at the twin, for the same reason as T-SEC-73.
+
 ## red-team 시나리오 제외 사유 (red-team-01, 매트릭스 행 미추가)
 
 | RT | 제외 사유 |
@@ -1157,3 +1164,4 @@ test-author가 소유한다. Phase 2에서 SPEC의 모든 수용 기준을 행�
 - **Refused-move browser page row, note 192**: +1 row, integration, P0: T-SEC-63. Totals: P0 +1; T-SEC +1.
 - **D-59a rows, note 200**: +6 rows, all integration: T-SEC-65/66/67 (P0), T-SEC-64/68/69 (P1). Totals: P0 +3, P1 +3; T-SEC +6.
 - **Backlog #74/#75 rows, notes 210-211**: +6 rows, integration: T-SEC-70/71 (P0), T-05-37/38/39 (P1), T-05-36 (P2). Totals: P0 +2, P1 +3, P2 +1; T-SEC +2, T-05 +4.
+- **D-59b rows, notes 218-219**: +3 rows, integration, P0: T-SEC-73/74/75. Totals: P0 +3; T-SEC +3.
