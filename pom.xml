@@ -117,6 +117,10 @@
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>role-strategy</artifactId>
+      <!-- D-35f: 918 is the minimum supported role-strategy. Older releases
+           (including the BOM's 898) replace the Batch Control variant on a
+           Manage Roles save. Overrides the BOM version on purpose. -->
+      <version>918.v91e5468d8db_2</version>
       <optional>true</optional>
     </dependency>
     <dependency>

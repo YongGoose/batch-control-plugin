@@ -58,25 +58,36 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 ## The authorization strategy
 
 8. **Batch Control's grants work with matrix-auth and role-strategy through
-    Batch Control's own strategy variants**, `Batch Control: Matrix-based
-    security` and `Batch Control: Role-Based Strategy`. Each is a subclass of
-    the corresponding upstream strategy, so the upstream's own per-item
-    configuration (folder, job and agent authorization properties, item and
-    agent roles, pattern-based naming) stays configurable and effective. Any
-    other authorization strategy is not a supported grant target: on upgrade
-    from an older release, a saved variant whose delegate was neither
-    matrix-auth nor role-strategy is unwrapped back to a plain instance of that
-    strategy, and grants stop conferring anything from that point. Selecting a
-    strategy that is not one of the two variants gets you run control and
-    recording only, with an administrative monitor saying so.
-9. **role-strategy's own "Manage Roles" and "Assign Roles" saves keep the
-    Batch Control variant in place**, tested against role-strategy 918: neither
-    save reinstalls the plain `RoleBasedAuthorizationStrategy`, so grants keep
-    conferring afterwards; an earlier assumption that they did is not reproduced
-    on this version (e2e-03 DD-09). The administrative monitor that detects a
-    swap and offers a one-click reinstall of the variant, carrying over every
-    role and assignment, stays in place as a safety net should a different
-    role-strategy release replace it another way.
+    Batch Control's own strategy variants**, `Batch Control: Project-based
+    Matrix Authorization Strategy` and `Batch Control: Role-Based Strategy`.
+    Each is a subclass of the corresponding upstream strategy, so the
+    upstream's own per-item configuration (folder, job and agent authorization
+    properties, item and agent roles, pattern-based naming) stays configurable
+    and effective. No other authorization strategy is a grant target, including
+    Jenkins' built-in global "Matrix-based security": selecting a strategy that
+    is not one of the two variants gets you run control and recording only,
+    with an administrative monitor saying so. See item 36 before converting
+    from the global matrix strategy.
+9. **role-strategy 918 or newer is required, and its "Manage Roles" and
+    "Assign Roles" saves keep the Batch Control variant in place.** Older
+    role-strategy releases, including 898, the version in the plugin BOM,
+    replace the variant with a plain `RoleBasedAuthorizationStrategy` on a
+    Manage Roles save, so open windows stop conferring. Batch Control
+    therefore declares 918.v91e5468d8db_2 as the minimum for its optional
+    role-strategy dependency, and Jenkins will not load it next to an older
+    role-strategy (D-35f). On 918 every save path of the role pages (adding
+    and removing roles and templates, Assign Roles) edits the installed
+    strategy in place. The administrative monitor stays, because an
+    administrator can still install a plain strategy on the Security page,
+    and it offers a one-click reinstall of the variant that keeps every role
+    and assignment. role-strategy's UI rework is still going on upstream (the
+    open pull request jenkinsci/role-strategy-plugin#766 redesigns Assign
+    Roles and adds a `checkSidName` descriptor endpoint), so a regression
+    test checks that every descriptor method role-strategy's pages call on
+    the installed strategy exists on the Batch Control descriptor and that
+    the save paths keep the variant. A role-strategy release that breaks the
+    integration fails Batch Control's build instead of reaching users
+    unnoticed.
 10. **Change control is permission-based, not save-based.** Jenkins offers no way
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no
@@ -454,18 +465,21 @@ code does on purpose.
       record yet, builds run as anonymous, and the warning judges anonymous's
       permissions. Once that account exists, the warning reflects its
       permissions within the same five minutes.
-36. **A legacy wrapper around the global matrix strategy is unwrapped on
-    upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
-    per-item ACLs, so converting it straight into the Batch Control matrix
-    strategy would make every stale job, folder and agent
-    `AuthorizationMatrixProperty` effective at once and let any native
-    Configure holder start editing item ACLs. Upgrading from an older release
-    therefore leaves the plain global matrix strategy installed. Moving to
-    **Batch Control: Matrix-based security** afterwards is a separate action
-    an administrator takes explicitly, with the **Install the Batch Control
+36. **Coming from the global matrix strategy, converting turns on per-item
+    permissions.** Converting from Jenkins' built-in global matrix strategy
+    (`GlobalMatrixAuthorizationStrategy`, "Matrix-based security") is not a
+    like-for-like swap. Grants need the project-matrix variant, **Batch
+    Control: Project-based Matrix Authorization Strategy**, and the global
+    matrix strategy ignores per-item authorization. Converting therefore makes
+    every job, folder and agent `AuthorizationMatrixProperty` already saved on
+    the instance effective at that moment, including stale ones nobody has
+    looked at since they stopped mattering, and from then on anyone who holds
+    `Item/Configure` on an item can edit that item's permissions. Review the
+    per-item properties before converting. The conversion is never
+    automatic: an administrator starts it with the **Install the Batch Control
     variant** button of the administrative monitor on Manage Jenkins (shown
-    while change control is on), which says plainly that per-item
-    properties become effective from that point.
+    while change control is on), and the monitor says the same thing before
+    the click.
 
 ## Notifications and computed folders
 
