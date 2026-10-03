@@ -577,12 +577,13 @@ code does on purpose.
 ## The new job page and pre-filled requests
 
 45. **With the rebuild plugin installed and the new job page enabled, the
-    "More actions" menu of a job that has no completed build fails to open**
-    (rebuild's **Rebuild Last** has no URL then). This affects every job,
-    controlled or not, until it has a completed build. On approval-required
-    jobs the menu offers **Rebuild** and **Rebuild Last**; running them is
+    "More actions" menu of a freestyle-type job that has no completed build
+    fails to open**, because rebuild's **Rebuild Last** entry has no URL on
+    such a job. This affects every such job, controlled or not, until it has
+    a completed build; Pipeline jobs without builds open the menu normally.
+    On approval-required jobs the menu offers only **Rebuild Last** (the
+    rebuild plugin's **Rebuild** is hidden, see item 41); running it is
     refused and recorded like any direct run.
-
 47. **On the new job page, core's build button comes first and green, and
     Request Run second.** Core always places its own build button in the
     first app-bar group with the build role and colours it green; plugins
@@ -591,7 +592,6 @@ code does on purpose.
     appears after it, also green. For a user who may request a run, both lead
     to the same Request Run form, with any submitted parameter values filled
     in (D-60). Accepted by the owner (E2E-1 DEF-02).
-
 48. **Pre-filled parameter values travel in the URL.** When a refused build
     submission leads to the Request Run form with the submitted values filled
     in (D-60), the values of non-sensitive parameters are carried in the
