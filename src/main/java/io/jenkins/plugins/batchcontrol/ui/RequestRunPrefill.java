@@ -33,7 +33,8 @@ import org.kohsuke.stapler.StaplerRequest2;
  * are never written into the URL nor taken from it (P-03), file parameters cannot be, and a value
  * the definition refuses (a choice outside its choices) is dropped and leaves the job's default.
  * Values longer than {@value #MAX_VALUE_LENGTH} characters are left out so the redirect stays
- * within common URL limits; the user re-enters them.
+ * within common URL limits, and a longer {@value #PREFIX} query value is ignored; the user
+ * re-enters them.
  *
  * <p>A crafted link can only pre-fill a form the viewer may already open: the viewer still reads
  * and submits it, and every rendered value goes through the parameter definition's own view,
@@ -109,8 +110,8 @@ public final class RequestRunPrefill {
         }
         List<ParameterDefinition> shown = new ArrayList<>(definitions.size());
         for (ParameterDefinition definition : definitions) {
-            String text = definition.getName() == null ? null : req.getParameter(PREFIX + definition.getName());
-            shown.add(text == null || !isCarriable(definition) ? definition : withDefault(definition, text));
+            String text = prefillValue(definition, req);
+            shown.add(text == null ? definition : withDefault(definition, text));
         }
         return shown;
     }
@@ -125,12 +126,25 @@ public final class RequestRunPrefill {
             return false;
         }
         for (ParameterDefinition definition : definitions) {
-            if (definition.getName() != null && isCarriable(definition)
-                    && req.getParameter(PREFIX + definition.getName()) != null) {
+            if (prefillValue(definition, req) != null) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The {@value #PREFIX}{@code <name>} value of {@code req} for a carriable definition, or
+     * {@code null}: absent, not carriable, or longer than {@value #MAX_VALUE_LENGTH} characters
+     * (the same bound as {@link #carriedValues}, so a hand-made link cannot carry more either).
+     */
+    @CheckForNull
+    private static String prefillValue(ParameterDefinition definition, StaplerRequest2 req) {
+        if (!isCarriable(definition)) {
+            return null;
+        }
+        String text = req.getParameter(PREFIX + definition.getName());
+        return text == null || text.length() > MAX_VALUE_LENGTH ? null : text;
     }
 
     private static boolean isCarriable(ParameterDefinition definition) {
