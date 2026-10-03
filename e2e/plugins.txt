@@ -11,9 +11,10 @@ cloudbees-folder
 # ProjectMatrixAuthorizationStrategy, so it is only offered with matrix-auth.
 matrix-auth
 # role-strategy: "Batch Control: Role-Based Strategy" (role profile, B8-R*).
-# Pinned to the minimum supported release (D-35f): 918 edits the installed
-# strategy in place on Manage Roles; older releases replace it.
-role-strategy:918.v91e5468d8db_2
+# Pinned to the minimum supported release (D-35g): 927 has the redesigned
+# Assign Roles page the Batch Control descriptor forwards to (since 918 the role
+# pages edit the installed strategy in place, D-35f).
+role-strategy:927.v9cf5527c4085
 mailer
 # configuration-as-code: the environment is configured by e2e/casc/jenkins.yaml
 # (E-08) and the permission-name export check (A-07, B19).
