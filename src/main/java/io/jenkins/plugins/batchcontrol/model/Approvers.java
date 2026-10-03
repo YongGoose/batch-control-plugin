@@ -31,7 +31,7 @@ public final class Approvers {
         return new ArrayList<>(set);
     }
 
-    /** The one-element set for a single (legacy) approver id; empty for {@code null}/blank. */
+    /** The one-element set for a single approver id; empty for {@code null}/blank. */
     public static List<String> of(String approver) {
         List<String> list = new ArrayList<>();
         if (approver != null && !approver.trim().isEmpty()) {

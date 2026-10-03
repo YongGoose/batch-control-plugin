@@ -660,9 +660,7 @@ public final class FileStore implements Store {
     }
 
     private void attachDiff(ChangeRecord record) {
-        if (record.getDiff() == null) {
-            record.setDiff(readTextOrNull(PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
-        }
+        record.setDiff(readTextOrNull(PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
     }
 
     // ---------------------------------------------------------------- incidents
@@ -1420,7 +1418,6 @@ public final class FileStore implements Store {
     private static final byte[] K_TARGET = key("target");
     private static final byte[] K_AT = key("at");
     private static final byte[] K_GRANT_ID = key("grantId");
-    private static final byte[] K_DIFF = key("diff");
     private static final byte[] K_DETAIL = key("detail");
     private static final byte[] K_CREATED = key("createdAt");
 
@@ -1453,7 +1450,7 @@ public final class FileStore implements Store {
                 line.optString(K_USER, true),
                 Instant.ofEpochMilli(line.requireLong(K_AT)),
                 line.optString(K_GRANT_ID, false),
-                line.optString(K_DIFF, false),
+                null,
                 line.optString(K_DETAIL, false));
     }
 
@@ -1501,7 +1498,7 @@ public final class FileStore implements Store {
         json.element("at", record.getAt().toEpochMilli());
         putIfNotNull(json, "grantId", record.getGrantId());
         // The diff text is intentionally NOT inlined: it lives in changes/diff/<id>.patch
-        // (see appendChangeRecord). Reading still accepts a legacy inline "diff" field.
+        // (see appendChangeRecord).
         putIfNotNull(json, "detail", record.getDetail());
         return json;
     }
@@ -1514,7 +1511,7 @@ public final class FileStore implements Store {
                 optString(json, "user"),
                 Instant.ofEpochMilli(json.getLong("at")),
                 optString(json, "grantId"),
-                optString(json, "diff"),
+                null,
                 optString(json, "detail"));
     }
 }
