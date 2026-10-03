@@ -584,16 +584,6 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * The status column of the request table. An APPROVED request whose window has ended says so
-     * (DEF-18: a 1-minute window was listed as APPROVED long after it expired).
-     */
-    public String statusLabel(GrantRequest request) {
-        String detail = statusDetail(request);
-        return detail.isEmpty() ? String.valueOf(request.getStatus())
-                : request.getStatus() + " (" + detail + ")";
-    }
-
-    /**
      * Backlog #89: the window state of an approved request, without the status word
      * ("window open, 2h left", "window revoked", "window expired"), or an empty string. The list
      * shows it below the status so the status column stays narrow at 1280 px.

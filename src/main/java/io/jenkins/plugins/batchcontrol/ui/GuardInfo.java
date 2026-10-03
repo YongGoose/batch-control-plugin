@@ -86,10 +86,6 @@ public final class GuardInfo {
         public Changed getActiveWindow() {
             return activeWindow;
         }
-
-        public boolean isStillGuarded() {
-            return changedFolder != null || activeWindow != null;
-        }
     }
 
     /**

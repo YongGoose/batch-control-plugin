@@ -6,8 +6,6 @@ import hudson.ExtensionList;
 import hudson.model.RootAction;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
-import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.GrantRequestLinks;
 import io.jenkins.plugins.batchcontrol.ui.GuardInfo;
 import io.jenkins.plugins.batchcontrol.ui.OverviewCounts;
@@ -149,17 +147,6 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     /** Stapler: serves {@code /batch-control/activations/...}. */
     public ActivationsSection getActivations() {
         return new ActivationsSection();
-    }
-
-    /**
-     * Landing-page inbox line: how many PENDING activation or hold requests name the viewer as a
-     * designated approver; 0 without {@code BatchControl/Approve}.
-     */
-    public int getPendingActivationCount() {
-        if (!Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)) {
-            return 0;
-        }
-        return ActivationService.get().listPendingFor(Jenkins.getAuthentication2().getName()).size();
     }
 
     /** Stapler: serves {@code /batch-control/grants/...}. */
