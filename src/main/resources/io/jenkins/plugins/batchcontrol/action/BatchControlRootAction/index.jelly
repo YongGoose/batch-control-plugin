@@ -3,7 +3,8 @@
      are tabs (bc:tabs) instead of a side panel, the same entries as the breadcrumb dropdown
      (BatchControlRootAction#doContextMenu); each is shown only to a user who may open it (SPEC
      item 2). The overview lists the open items the viewer can act on as text with the tab
-     badges' counts; no duplicate navigation buttons. -->
+     badges' counts; no duplicate navigation buttons. Backlog #88: Manage holders also see the
+     totals per section. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Batch Control" type="one-column" permissions="${it.viewPermissions}">
     <j:set var="links" value="${it.links}"/>
@@ -36,7 +37,33 @@
           </div>
         </j:if>
       </j:forEach>
-      <j:if test="${!links.requests and !links.grants and !links.history}">
+      <!-- Backlog #88: totals per section for Batch Control/Manage holders (ui.OverviewCounts,
+           open-request indexes and the grant cache only). Numbers and constant labels only. -->
+      <j:set var="counts" value="${it.overviewCounts()}"/>
+      <j:if test="${!empty(counts)}">
+        <h2>Open Items</h2>
+        <table class="jenkins-table jenkins-table--small jenkins-table--auto-width" data-batch-control-counts="true">
+          <thead>
+            <tr>
+              <th>Section</th>
+              <th>Awaiting a decision</th>
+              <th>Other</th>
+            </tr>
+          </thead>
+          <tbody>
+            <j:forEach var="row" items="${counts}">
+              <tr data-batch-control-count="${row.id}">
+                <td><a href="${rootURL}/batch-control/${row.urlName}">${row.label}</a></td>
+                <td>${row.pending}</td>
+                <td>
+                  <j:if test="${row.otherLabel != null}">${row.otherLabel}: ${row.other}</j:if>
+                </td>
+              </tr>
+            </j:forEach>
+          </tbody>
+        </table>
+      </j:if>
+      <j:if test="${!links.requests and !links.activations and !links.grants and !links.history}">
         <p>
           None of the Batch Control screens is available to you right now. Grant requests can
           only be made while change control is enabled.
