@@ -70,26 +70,27 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     is not one of the two variants gets you run control and recording only,
     with an administrative monitor saying so. See item 36 before converting
     from the global matrix strategy.
-9. **role-strategy 918 or newer is required, and its "Manage Roles" and
-    "Assign Roles" saves keep the Batch Control variant in place.** Older
-    role-strategy releases, including 898, the version in the plugin BOM,
-    replace the variant with a plain `RoleBasedAuthorizationStrategy` on a
-    Manage Roles save, so open windows stop conferring. Batch Control
-    therefore declares 918.v91e5468d8db_2 as the minimum for its optional
+9. **role-strategy 927 or newer is required, and its "Manage Roles" and
+    "Assign Roles" saves keep the Batch Control variant in place.**
+    Batch Control declares 927.v9cf5527c4085, the release with the
+    redesigned Assign Roles page, as the minimum for its optional
     role-strategy dependency, and Jenkins will not load it next to an older
-    role-strategy (D-35f). On 918 every save path of the role pages (adding
-    and removing roles and templates, Assign Roles) edits the installed
-    strategy in place. The administrative monitor stays, because an
-    administrator can still install a plain strategy on the Security page,
-    and it offers a one-click reinstall of the variant that keeps every role
-    and assignment. role-strategy's UI rework is still going on upstream (the
-    open pull request jenkinsci/role-strategy-plugin#766 redesigns Assign
-    Roles and adds a `checkSidName` descriptor endpoint), so a regression
-    test checks that every descriptor method role-strategy's pages call on
-    the installed strategy exists on the Batch Control descriptor and that
-    the save paths keep the variant. A role-strategy release that breaks the
-    integration fails Batch Control's build instead of reaching users
-    unnoticed.
+    role-strategy (D-35g). Releases before 918, including 898, the version
+    in the plugin BOM, also replaced the variant with a plain
+    `RoleBasedAuthorizationStrategy` on a Manage Roles save, so open windows
+    stopped conferring (D-35f). On 927 every save path of the role pages
+    (adding and removing roles and templates, Assign Roles) edits the
+    installed strategy in place. The Batch Control descriptor does not copy
+    role-strategy's descriptor methods: it forwards to role-strategy's own,
+    so validation and the permission lists behave exactly as on the plain
+    strategy. The administrative monitor stays, because an administrator can
+    still install a plain strategy on the Security page, and it offers a
+    one-click reinstall of the variant that keeps every role and assignment.
+    A regression test checks that every descriptor method role-strategy's
+    pages call on the installed strategy exists on the Batch Control
+    descriptor and that the save paths keep the variant, so a later
+    role-strategy release that breaks the integration fails Batch Control's
+    build instead of reaching users unnoticed.
 10. **Change control is permission-based, not save-based.** Jenkins offers no way
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no

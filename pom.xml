@@ -126,8 +126,9 @@
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>role-strategy</artifactId>
       <!-- D-35g: 927 is the minimum supported role-strategy (redesigned Assign Roles
-           page). Releases before 918 (including the BOM's 898) replace the Batch Control
-           variant on a Manage Roles save (D-35f). Overrides the BOM version on purpose. -->
+           page); the Batch Control descriptor forwards to its descriptor methods. The BOM
+           still manages 898, which also replaced the variant on a Manage Roles save (D-35f).
+           Overrides the BOM version on purpose. -->
       <version>${role-strategy.version}</version>
       <optional>true</optional>
     </dependency>
@@ -225,8 +226,8 @@
   <build>
     <plugins>
       <plugin>
-        <!-- T-02-122 (#78, D-35f): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898
-             next to batch-control and expects the refusal. The old hpi is copied as a plain
+        <!-- T-02-122 (#78, D-35g): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898,
+             older than the 927 minimum, next to batch-control and expects the refusal. The old hpi is copied as a plain
              file into the test output directory (old-plugins/role-strategy.hpi); it is not a
              dependency, so it is not on the test classpath, not in the hpi's manifest and not
              seen by the enforcer or hpi.strictBundledArtifacts. -->

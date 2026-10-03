@@ -1,9 +1,10 @@
 # Early warning against the newest role-strategy release (issue #77).
-# role-strategy is reworking its Manage Roles / Assign Roles UI (jenkinsci/role-strategy-plugin
-# PR #766, a planned saveRoleAssignments endpoint). If a release rebuilds the strategy on save,
-# the Manage-Roles reset of D-35f could return. This job builds against the newest released
-# role-strategy and runs every test that touches it. The pom keeps 918 (the minimum, D-35f)
-# as the default of the role-strategy.version property; only this job overrides it.
+# Batch Control's role strategy descriptor forwards to role-strategy's own descriptor methods
+# (D-35g), and role-strategy's pages call them on the installed strategy. If a release adds or
+# renames such an endpoint, or rebuilds the strategy on save (the Manage-Roles reset of D-35f),
+# the integration breaks. This job builds against the newest released role-strategy and runs
+# every test that touches it. The pom keeps 927.v9cf5527c4085 (the minimum, D-35g) as the
+# default of the role-strategy.version property; only this job overrides it.
 #
 # Scheduled and manual only, never on pull requests or pushes: a new upstream release must
 # not turn unrelated pull requests red. Default read-only token, no secrets.

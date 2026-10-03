@@ -186,7 +186,7 @@ Batch Control is compiled against, which Jenkins enforces when loading plugins:
 | Optional plugin | Minimum version |
 |---|---|
 | `matrix-auth` | 3.3 |
-| `role-strategy` | 918.v91e5468d8db_2 |
+| `role-strategy` | 927.v9cf5527c4085 |
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
@@ -288,7 +288,7 @@ missed: windows get approved and then have no effect at all.
 
 Under **Manage Jenkins → Security → Authorization**, choose **Batch Control:
 Project-based Matrix Authorization Strategy** if you use (or want) matrix-auth,
-or **Batch Control: Role-Based Strategy** if you use role-strategy (918 or
+or **Batch Control: Role-Based Strategy** if you use role-strategy (927 or
 newer). Each is a
 drop-in variant of the corresponding upstream strategy: matrix, folder and agent
 authorization properties, and role assignments, all stay configurable and
@@ -315,9 +315,9 @@ additionally confers `Item/ExtendedRead`, `Credentials/UseItem` and
 ([Limitations](#limitations)). An administrative monitor warns if change control
 is on without one of these two variants installed, for example after a plain
 strategy is selected on the Security page, and offers the one-click reinstall.
-On role-strategy 918 and newer, saving **Manage Roles** or **Assign Roles**
-keeps the Batch Control variant in place, so grants keep conferring; older
-role-strategy releases did not, which is why 918 is the minimum. Run control and recording do not
+On role-strategy 927 and newer, the minimum, saving **Manage Roles** or the
+redesigned **Assign Roles** page keeps the Batch Control variant in place, so
+grants keep conferring. Run control and recording do not
 need any of this. A window confers its permissions only when a Batch Control
 variant is selected *and* change control is on.
 
@@ -572,12 +572,13 @@ Control: Role-Based Strategy** keeps that plugin's own per-item configuration (f
 agent authorization properties, item and agent roles) configurable and
 effective, since each variant is a subclass of the corresponding upstream
 strategy. Selecting any other strategy gets you run control and recording only,
-and an administrative monitor says so. role-strategy must be 918 or newer:
-older releases replace the variant with the plain strategy on a **Manage
-Roles** save, so Batch Control declares 918 as its minimum, and on 918 the
-**Manage Roles** and **Assign Roles** saves keep the variant. role-strategy's
-pages are still being reworked upstream, so a regression test guards this
-integration and a breaking role-strategy release fails Batch Control's build.
+and an administrative monitor says so. role-strategy must be 927 or newer, the release
+with the redesigned **Assign Roles** page; on it the **Manage Roles** and
+**Assign Roles** saves keep the variant. The variant's descriptor forwards to
+role-strategy's own descriptor methods rather than copying them, so validation
+behaves as on the plain strategy, and a regression test keeps guarding the
+integration: a later role-strategy release that breaks it fails Batch
+Control's build.
 
 **Converting from the global matrix strategy turns on per-item permissions.**
 Grants need the project-matrix variant. Jenkins' built-in global
