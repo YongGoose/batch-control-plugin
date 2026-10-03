@@ -11,9 +11,13 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.kohsuke.accmod.Restricted;
@@ -99,9 +103,30 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         String user = ChangeRecording.currentUser();
-        ChangeRecord record = ChangeRecord.create(ChangeType.MOVE, newFullName, user,
-                "Moved from '" + oldFullName + "' to '" + newFullName + "'");
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, newFullName, null));
+        // #84 (e2e-08 UX-2): a move across folders is usually authorised by two windows, the
+        // Delete window on the source item and the Create window on the destination. grantId
+        // keeps one id (the Create window, else the Delete window) so the record still links to a
+        // grant; the detail names every window, in the existing fields (no new format).
+        String destination = parentOf(newFullName);
+        Grant deleteGrant = GrantService.get().findActiveGrant(user, oldFullName, GrantAction.DELETE);
+        Grant createGrant = destination.isEmpty() ? null
+                : GrantService.get().findActiveCreateGrant(user, destination, item.getName());
+        StringBuilder detail = new StringBuilder("Moved from '").append(oldFullName)
+                .append("' to '").append(newFullName).append('\'');
+        List<String> windows = new ArrayList<>();
+        if (deleteGrant != null) {
+            windows.add("Delete on '" + oldFullName + "' from grant " + deleteGrant.getId());
+        }
+        if (createGrant != null) {
+            windows.add("Create in '" + destination + "' from grant " + createGrant.getId());
+        }
+        if (!windows.isEmpty()) {
+            detail.append("; permission windows used: ").append(String.join(", ", windows));
+        }
+        ChangeRecord record = ChangeRecord.create(ChangeType.MOVE, newFullName, user, detail.toString());
+        Grant primary = createGrant != null ? createGrant : deleteGrant;
+        record.setGrantId(primary != null ? primary.getId()
+                : ChangeRecording.activeGrantIdFor(user, newFullName, null));
         Store.get().appendChangeRecord(record);
     }
 

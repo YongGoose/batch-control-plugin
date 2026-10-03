@@ -184,10 +184,6 @@ public final class CreateNamePattern {
         }
     }
 
-    public String getSource() {
-        return source;
-    }
-
     @Override
     public String toString() {
         return source;

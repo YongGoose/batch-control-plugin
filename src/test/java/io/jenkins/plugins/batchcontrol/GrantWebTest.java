@@ -170,6 +170,40 @@ public class GrantWebTest {
         assertEquals(404, denied.getWebResponse().getStatusCode(), "a user with no Batch Control permission at all must get 404, not 403 (SPEC 2, #31)");
     }
 
+    /**
+     * T-08-65 (backlog #89, consistent landing as run and activation requests): u1 submits a grant
+     * request with redirects followed and lands on that request's detail page
+     * {@code batch-control/grants/<id>/} with 200, and the page shows the request id. Guard: the
+     * Grants list itself is a different page (its URL does not end with the id).
+     */
+    @Test
+    public void t_08_65_grantRequestSubmissionLandsOnItsDetailPage() throws Exception {
+        java.util.Set<String> before = ApproverFormFixtures.grantRequestIds();
+        JenkinsRule.WebClient wc = webClient().login("u1");
+        WebRequest request = new WebRequest(wc.createCrumbedUrl("batch-control/grants/create"), HttpMethod.POST);
+        java.util.List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
+        params.add(new org.htmlunit.util.NameValuePair("scopeType", "JOB"));
+        params.add(new org.htmlunit.util.NameValuePair("scopeFullName", "batch-x"));
+        params.add(new org.htmlunit.util.NameValuePair("actions", "CONFIGURE"));
+        params.add(new org.htmlunit.util.NameValuePair("durationMinutes", "60"));
+        params.add(new org.htmlunit.util.NameValuePair("reason", "scheduled maintenance"));
+        params.addAll(ApproverFormFixtures.approverPairs("a1"));
+        request.setRequestParameters(params);
+        Page landed = wc.getPage(request);
+
+        java.util.Set<String> after = ApproverFormFixtures.grantRequestIds();
+        after.removeAll(before);
+        assertEquals(1, after.size(), "exactly one grant request must have been stored, got " + after);
+        String id = after.iterator().next();
+        assertEquals(200, landed.getWebResponse().getStatusCode(), "the landing page must answer 200, got "
+                + landed.getWebResponse().getStatusCode() + " at " + landed.getUrl());
+        String path = landed.getUrl().getPath();
+        assertTrue(path.endsWith("batch-control/grants/" + id + "/") || path.endsWith("batch-control/grants/" + id),
+                "the submission must land on the grant request's page, landed on " + landed.getUrl());
+        assertTrue(landed.getWebResponse().getContentAsString().contains(id), "the page must show the request " + id);
+        assertFalse(path.endsWith("batch-control/grants/"), "guard: not the Grants list");
+    }
+
     /** The approve endpoint of the contract works: POST by the designated approver creates the grant. */
     @Test
     public void approvePostCreatesActiveGrant() throws Exception {

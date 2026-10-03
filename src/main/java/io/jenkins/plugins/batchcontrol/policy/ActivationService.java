@@ -11,6 +11,7 @@ import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.model.PendingCount;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
@@ -34,6 +35,7 @@ import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 
 /**
  * Activation approval (SPEC item 6a, D-39): whether a run-controlled job may run unattended, and
@@ -289,21 +291,33 @@ public final class ActivationService {
         return mine;
     }
 
+    /**
+     * D-61 / #76: the PENDING activation and hold requests that concern {@code auth}, read from the open-request index only
+     * (no history scan): those awaiting their decision as a designated approver holding
+     * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
+     * to {@code auth} under P-09. The single source for the tab badge and the section.
+     */
+    public PendingCount countPendingFor(Authentication auth) {
+        return PendingCounter.count(store.listOpenActivationRequests(), auth, ActivationRequest::getStatus, ActivationRequest::isDesignatedApprover,
+                ActivationRequest::getRequester);
+    }
+
+    /**
+     * The PENDING requests counted as {@link PendingCount#getAwaitingDecision()} by
+     * {@link #countPendingFor(Authentication)}, in creation order (oldest, the one closest to its
+     * timeout, first): empty unless {@code auth} holds Jenkins-level {@code BatchControl/Approve}.
+     */
+    public List<ActivationRequest> listAwaitingDecision(Authentication auth) {
+        if (!PendingCounter.isCountable(auth) || !PendingCounter.isApprover(auth)) {
+            return List.of();
+        }
+        return listPendingFor(auth.getName());
+    }
+
     /** The PENDING requests of one job, in creation order. */
     public List<ActivationRequest> listPendingForJob(String jobFullName) {
         List<ActivationRequest> forJob = new ArrayList<>();
         for (ActivationRequest request : listPending()) {
-            if (request.getJobFullName().equals(jobFullName)) {
-                forJob.add(request);
-            }
-        }
-        return forJob;
-    }
-
-    /** Every stored request of one job, in creation order. */
-    public List<ActivationRequest> listForJob(String jobFullName) {
-        List<ActivationRequest> forJob = new ArrayList<>();
-        for (ActivationRequest request : store.listActivationRequests()) {
             if (request.getJobFullName().equals(jobFullName)) {
                 forJob.add(request);
             }
@@ -752,11 +766,6 @@ public final class ActivationService {
         } finally {
             lock.unlock();
         }
-    }
-
-    /** Job form of {@link #onItemCreated(Item)}. */
-    public void onJobCreated(Job<?, ?> job) {
-        onItemCreated(job);
     }
 
     // ---------------------------------------------------------------- upgrade seeding (SPEC 6a)

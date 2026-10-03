@@ -27,7 +27,7 @@ if (on('monitor')) {
   row('B7-26', { roles: 'admin', V: '✓ admin only', G: `${/configurer/.test(rows1.join(' ')) ? '✓' : '✗'} the monitor names configurer in its table`, R: 'n.a.', C: 'n.a.', E: s1 ? '✓ A-03-1-monitor-user' : '✗' });
 }
 if (on('crumbs')) {
-  const pages = { job: '/job/batch-daily/batch-control/activation', folderJob: '/job/team/job/app-1/batch-control/activation', computed: '/job/team-mb/batch-control/activation', runForm: '/job/batch-daily/batch-control/', grants: '/batch-control/grants/', summary: '/batch-control/history/summary' };
+  const pages = { job: '/job/batch-daily/batch-control-activation', folderJob: '/job/team/job/app-1/batch-control-activation', computed: '/job/team-mb/batch-control-activation', runForm: '/job/batch-daily/batch-control/', grants: '/batch-control/grants/', summary: '/batch-control/history/summary' };
   const res = {};
   for (const [k, u] of Object.entries(pages)) {
     const r = await p.goto(BASE + u);

@@ -99,7 +99,7 @@ public class ActivationRequestTest {
      */
     @Test
     public void t_06a_16_designatedApproverApprovesAndTheJobIsActivated() throws Exception {
-        WebResponse form = get(j, "u1", job.getUrl() + "batch-control/activation");
+        WebResponse form = get(j, "u1", job.getUrl() + "batch-control-activation/");
         assertEquals(200, form.getStatusCode(), "the requester must be able to open the activation form");
         assertTrue(form.getContentAsString().contains("name=\"reason\""), "the form must ask for a reason");
 
@@ -224,7 +224,7 @@ public class ActivationRequestTest {
      */
     @Test
     public void t_06a_21_requestingNeedsRequestAndItemRead() throws Exception {
-        assertEquals(404, get(j, "viewer", job.getUrl() + "batch-control/activation").getStatusCode(),
+        assertEquals(404, get(j, "viewer", job.getUrl() + "batch-control-activation/").getStatusCode(),
                 "the activation form must be absent for a user without Request");
         assertEquals(404, submitActivation(j, "viewer", job, "ACTIVATE", "x", "a1").getStatusCode(),
                 "the submission must be absent for a user without Request");
@@ -243,7 +243,7 @@ public class ActivationRequestTest {
      */
     @Test
     public void t_06a_22_getOnStateChangingUrlsChangesNothing() throws Exception {
-        int submit = getAs(j, "u1", job.getUrl() + "batch-control/activation/submit?action=ACTIVATE&reason=x&approvers=a1")
+        int submit = getAs(j, "u1", job.getUrl() + "batch-control-activation/submit?action=ACTIVATE&reason=x&approvers=a1")
                 .getStatusCode();
         assertTrue(submit >= 400 && submit < 500, "GET submit must be refused, got " + submit);
         assertTrue(activationIds().isEmpty(), "a GET must not store a request");

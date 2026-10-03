@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.ui.DiffSummary;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.SectionTabs;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
@@ -53,7 +54,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
 
     @Override
     public String getDisplayName() {
-        return "Change Records";
+        return SectionTabs.CHANGES_TITLE;
     }
 
 

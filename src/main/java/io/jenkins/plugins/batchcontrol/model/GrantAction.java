@@ -15,19 +15,6 @@ public enum GrantAction {
     CONFIGURE,
     DELETE;
 
-    /** The Jenkins permission this action confers while a grant is active. */
-    public Permission toPermission() {
-        switch (this) {
-            case CREATE:
-                return Item.CREATE;
-            case CONFIGURE:
-                return Item.CONFIGURE;
-            case DELETE:
-                return Item.DELETE;
-            default:
-                throw new AssertionError("Unknown grant action: " + this);
-        }
-    }
 
     /**
      * The action corresponding to a Jenkins permission, or {@code null} when the permission is

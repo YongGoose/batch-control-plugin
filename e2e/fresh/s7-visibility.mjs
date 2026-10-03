@@ -3,7 +3,7 @@ import { login, BASE, shot, text, log, close } from './lib.mjs';
 
 const flat = (s) => s.replace(/\s+/g, ' ');
 const roles = ['admin', 'manager', 'approver-1', 'requester', 'auditor', 'nobc', 'reqonly', 'configurer', 'approver-disc'];
-const urls = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/', '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/', '/batch-control/history/runs.csv', '/batch-control-configuration/', '/job/fresh-daily/batch-control/', '/job/fresh-daily/batch-control/activation', '/batch-control/requests/20260930-080845-fvazja/'];
+const urls = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/', '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/', '/batch-control/history/runs.csv', '/batch-control-configuration/', '/job/fresh-daily/batch-control/', '/job/fresh-daily/batch-control-activation', '/batch-control/requests/20260930-080845-fvazja/'];
 for (const role of roles) {
   const { page, context } = await login(role);
   await page.goto(`${BASE}/`);

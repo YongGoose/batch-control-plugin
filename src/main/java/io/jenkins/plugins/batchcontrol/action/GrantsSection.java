@@ -247,9 +247,12 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
         if (errors.isEmpty()) {
             try {
-                GrantRequestService.get().create(scope, actions, durationMinutes, reason, approvers,
-                        createNamePattern);
-                rsp.sendRedirect2(".");
+                GrantRequest created = GrantRequestService.get().create(scope, actions, durationMinutes,
+                        reason, approvers, createNamePattern);
+                // Backlog #89: land on the new request's detail page, like run and activation
+                // requests (the requester may always see their own request, P-09).
+                rsp.sendRedirect2(req.getContextPath() + "/batch-control/grants/"
+                        + Util.rawEncode(created.getId()) + "/");
                 return;
             } catch (IllegalArgumentException | IllegalStateException e) {
                 errors.fromService(e.getMessage(), "name restriction", "createNamePattern",
@@ -385,6 +388,17 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /** Jelly helper: human-readable timestamp. */
     public String format(Instant instant) {
         return Dates.format(instant);
+    }
+
+    /**
+     * e2e-09 DEF-01 (#89): a timestamp as its date and its time-with-zone, for the grant tables,
+     * which render each part unbroken so that a narrow window breaks a cell only between them
+     * (never inside a date) and the page does not scroll sideways at 1280 px. Empty for null.
+     */
+    public List<String> formatParts(Instant instant) {
+        String text = Dates.format(instant);
+        int space = text.indexOf(' ');
+        return space < 0 ? List.of(text) : List.of(text.substring(0, space), text.substring(space + 1));
     }
 
     /**
@@ -546,10 +560,15 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return Paging.hasNext(getPastPage(), getPastTotal());
     }
 
-    /** How a grant ended, in words: "Expired" or "Revoked by admin". */
+    /**
+     * How a grant ended, in words: "Expired", "Revoked by admin", or for a revocation by the
+     * change control switch "Revoked (change control turned off) by admin" (#85).
+     */
     public String endedLabel(Grant grant) {
         if (grant.getRevokedAt() != null) {
-            return grant.getRevokedBy() == null ? "Revoked" : "Revoked by " + grant.getRevokedBy();
+            // #85 (D-63): a mass revocation by the change control switch says so.
+            String why = grant.getRevokedReason() == null ? "" : " (" + grant.getRevokedReason() + ")";
+            return grant.getRevokedBy() == null ? "Revoked" + why : "Revoked" + why + " by " + grant.getRevokedBy();
         }
         return "Expired";
     }
@@ -565,23 +584,25 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * The status column of the request table. An APPROVED request whose window has ended says so
-     * (DEF-18: a 1-minute window was listed as APPROVED long after it expired).
+     * Backlog #89: the window state of an approved request, without the status word
+     * ("window open, 2h left", "window revoked", "window expired"), or an empty string. The list
+     * shows it below the status so the status column stays narrow at 1280 px.
      */
-    public String statusLabel(GrantRequest request) {
+    public String statusDetail(GrantRequest request) {
         if (request.getStatus() != RequestStatus.APPROVED) {
-            return String.valueOf(request.getStatus());
+            return "";
         }
         Grant grant = grantsById().get(request.getId());
         if (grant == null) {
-            return "APPROVED";
+            return "";
         }
         if (grant.getRevokedAt() != null) {
-            return "APPROVED (window revoked)";
+            return grant.getRevokedReason() == null ? "window revoked"
+                    : "window revoked (" + grant.getRevokedReason() + ")";
         }
         return grant.isActiveAt(BatchClock.now())
-                ? "APPROVED (window open, " + Dates.until(grant.getExpiresAt()) + " left)"
-                : "APPROVED (window expired)";
+                ? "window open, " + Dates.until(grant.getExpiresAt()) + " left"
+                : "window expired";
     }
 
     /**

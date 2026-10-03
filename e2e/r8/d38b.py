@@ -66,7 +66,7 @@ s.shot("#main-panel", "D1-08-cancelled")
 st = api("admin", f"/batch-control/requests/{rid}/").text
 res["admin_sees_status"] = sorted(set(re.findall(r"PENDING|CANCELLED|APPROVED", clean(st))))
 # activation inside ops
-r = s.go("/job/ops/job/cron-a/batch-control/activation/?action=ACTIVATE")
+r = s.go("/job/ops/job/cron-a/batch-control-activation/?action=ACTIVATE")
 res["act_form_inside"] = r.status
 if r.status == 200:
     f = s.page.locator("form[name=batch-control-activation]")
@@ -83,7 +83,7 @@ s.done()
 # HOLD on ops/cron-a after approver approves activation
 if res.get("act_id"):
     res["act_approve"] = api("approver-1", f"/batch-control/activations/{res['act_id']}/approve", "POST", data={"comment": "ok"}).status_code
-    h = api("opsreq", "/job/ops/job/cron-a/batch-control/activation/submit", "POST",
+    h = api("opsreq", "/job/ops/job/cron-a/batch-control-activation/submit", "POST",
             data=[("action", "HOLD"), ("reason", "e2e-08 opsreq HOLD"), ("approvers", "approver-1")])
     res["hold_submit_inside"] = {"status": h.status_code, "location": h.headers.get("Location")}
 # outside: side/job-b (Read, no Request) and batch-daily (no Read)
@@ -92,8 +92,8 @@ for jp in ["/job/side/job/job-b", "/job/batch-daily"]:
         "job_page": api("opsreq", jp + "/").status_code,
         "request_form": api("opsreq", jp + "/batch-control/").status_code,
         "request_submit": api("opsreq", jp + "/batch-control/submit", "POST", data=[("reason", "x"), ("approvers", "approver-1")]).status_code,
-        "activation_form": api("opsreq", jp + "/batch-control/activation/?action=ACTIVATE").status_code,
-        "activation_submit": api("opsreq", jp + "/batch-control/activation/submit", "POST", data=[("action", "ACTIVATE"), ("reason", "x"), ("approvers", "approver-1")]).status_code,
+        "activation_form": api("opsreq", jp + "/batch-control-activation/?action=ACTIVATE").status_code,
+        "activation_submit": api("opsreq", jp + "/batch-control-activation/submit", "POST", data=[("action", "ACTIVATE"), ("reason", "x"), ("approvers", "approver-1")]).status_code,
     }
 s = Session("opsreq")
 s.go("/job/side/job/job-b/")

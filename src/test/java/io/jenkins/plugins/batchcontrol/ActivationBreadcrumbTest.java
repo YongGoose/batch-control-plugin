@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Screen contract (e2e-03 DEF-06, checklist A-11): the activation request form
- * ({@code job/<name>/batch-control/activation}) is its own screen, so its last breadcrumb names
+ * ({@code job/<name>/batch-control-activation/}) is its own screen, so its last breadcrumb names
  * the activation and is not the run request form's "Request Run". Matrix row T-UI-22 (note 121).
  *
  * <p>Breadcrumbs are read from core's breadcrumb list items
@@ -63,7 +63,7 @@ public class ActivationBreadcrumbTest {
         FreeStyleProject job = j.createFreeStyleProject("crumb-x");
         setBatchControl(job, new BatchControlJobProperty(true));
 
-        List<String> crumbs = crumbs("u1", job.getUrl() + "batch-control/activation");
+        List<String> crumbs = crumbs("u1", job.getUrl() + "batch-control-activation/");
         assertFalse(crumbs.isEmpty(), "the activation form must render breadcrumbs");
         String last = crumbs.get(crumbs.size() - 1);
         assertTrue(crumbs.stream().anyMatch(c -> c.equals("crumb-x")), "the breadcrumbs must name the job: " + crumbs);
@@ -85,7 +85,7 @@ public class ActivationBreadcrumbTest {
         setBatchControl(job, new BatchControlJobProperty(true));
 
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
-        String path = job.getUrl() + "batch-control/activation";
+        String path = job.getUrl() + "batch-control-activation/";
         HtmlPage page = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), path), HttpMethod.GET));
         assertEquals(200, page.getWebResponse().getStatusCode(), "u1 must reach " + path);
         List<org.htmlunit.html.HtmlAnchor> anchors = page.getByXPath("//li[contains(concat(' ',"

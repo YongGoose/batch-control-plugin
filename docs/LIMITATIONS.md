@@ -262,6 +262,17 @@ from scripts.
     normal, non-self approval. Keeping accounts and the approver list honest is an
     organisational control, not something a plugin can enforce.
 
+<!-- Item 49 was added after 26-48 and sits here by topic. The comment ends the list so that it renders as 49, not 26. -->
+
+49. **The "requester does not have Build permission" notice can lag a permission
+    change by up to five minutes.** The notice *The requester does not have Build
+    permission on this job.* on a run request is evaluated for the requester and
+    cached per request for up to five minutes. The cached value is dropped
+    whenever the request is saved (approved, rejected, cancelled or its approvers
+    re-designated), but not when the requester's permissions change, so after an
+    administrator grants the requester `Job/Build` the notice can keep showing
+    for up to five minutes (D-38a).
+
 ## Records and screens
 
 26. **A folder rename produces one `MOVE` record per descendant job**, plus a

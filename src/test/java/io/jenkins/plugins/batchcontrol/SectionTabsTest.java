@@ -35,6 +35,7 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import static io.jenkins.plugins.batchcontrol.UsabilityFixtures.excerpt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -240,6 +241,81 @@ public class SectionTabsTest {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
         wc.getOptions().setJavaScriptEnabled(false);
         return wc.login(user);
+    }
+
+    /** Sections with requests awaiting a decision, whose totals the overview shows to an administrator. */
+    static final List<String> COUNTED = Arrays.asList("requests", "activations", "grants");
+
+    /**
+     * T-UI-56 (backlog #88): with nothing pending, the administrator's overview shows a count of 0
+     * for each decision section (requests, activations, grants), next to a link to the
+     * section in the page body (outside the tab bar). Guard: after one pending run request (designated
+     * to a1, not to admin) the requests count is 1 and the others stay 0.
+     */
+    @Test
+    public void t_ui_56_overviewShowsPerSectionCountsToTheAdministrator() throws Exception {
+        HtmlPage empty = page("admin", ROOT);
+        for (String section : COUNTED) {
+            assertEquals("0", overviewCount(empty, section), section + ": with nothing pending the overview must show 0");
+        }
+
+        FreeStyleProject job = j.createFreeStyleProject("batch-x");
+        BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(true));
+        try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
+            RunRequestService.get().create(job, new LinkedHashMap<>(), "month-end run", "a1");
+        }
+        HtmlPage one = page("admin", ROOT);
+        assertEquals("1", overviewCount(one, "requests"), "guard: one pending run request counts 1 for the administrator");
+        for (String section : COUNTED.subList(1, COUNTED.size())) {
+            assertEquals("0", overviewCount(one, section), section + ": guard: still 0");
+        }
+    }
+
+    /**
+     * The count shown with the overview body's link to {@code section}: the first stand-alone number
+     * in the link's text or, failing that, in one of its three nearest ancestors. Null when the body
+     * has no link to the section or no number near it.
+     */
+    private static String overviewCount(HtmlPage page, String section) {
+        DomElement main = (DomElement) page.querySelector("#main-panel");
+        assertNotNull(main, "the overview must have a main panel");
+        java.util.regex.Pattern number = java.util.regex.Pattern.compile("(?<![\\w-])(\\d+)(?![\\w-])");
+        List<String> links = new ArrayList<>();
+        for (Object o : main.querySelectorAll("a[href]")) {
+            DomElement a = (DomElement) o;
+            if (insideTabBar(a)) {
+                continue;
+            }
+            String path;
+            try {
+                path = page.getFullyQualifiedUrl(a.getAttribute("href")).getPath();
+            } catch (java.net.MalformedURLException e) {
+                continue;
+            }
+            links.add(path);
+            if (!(path.endsWith("batch-control/" + section + "/") || path.endsWith("batch-control/" + section))) {
+                continue;
+            }
+            org.htmlunit.html.DomNode node = a;
+            for (int level = 0; level < 4 && node != null && node != main; level++) {
+                java.util.regex.Matcher m = number.matcher(node.asNormalizedText());
+                if (m.find()) {
+                    return m.group(1);
+                }
+                node = node.getParentNode();
+            }
+        }
+        throw new AssertionError("the overview body must link the " + section + " section with a count next to it; body links: "
+                + links + "; text: " + excerpt(main.asNormalizedText()));
+    }
+
+    private static boolean insideTabBar(org.htmlunit.html.DomNode node) {
+        for (org.htmlunit.html.DomNode n = node; n != null; n = n.getParentNode()) {
+            if (n instanceof DomElement e && e.hasAttribute("data-batch-control-tabs")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private HtmlPage page(String user, String path) throws Exception {

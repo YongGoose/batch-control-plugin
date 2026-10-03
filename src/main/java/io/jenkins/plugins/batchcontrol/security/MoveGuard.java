@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Items;
@@ -26,6 +27,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 
 /**
@@ -82,11 +84,15 @@ final class MoveGuard {
         boolean delete = item.hasPermission(Item.DELETE);
         boolean create = destination instanceof AccessControlled
                 && ((AccessControlled) destination).hasPermission(Item.CREATE);
-        if (delete && create) {
+        String destName = destination.getFullName();
+        // D-59b (role-strategy#751): a move creates the name in the destination, so the installed
+        // naming strategy must accept it there, as it would for a creation. Asked as the mover
+        // (this runs in the mover's own context), which is what role-strategy's strategy evaluates.
+        String namingRefusal = namingRefusal(destName, item.getName());
+        if (delete && create && namingRefusal == null) {
             return null;
         }
         String user = a.getName();
-        String destName = destination.getFullName();
         Grant restricting = create ? null : restrictingGrant(user, destName, item.getName());
         List<String> missing = new ArrayList<>();
         if (!delete) {
@@ -96,12 +102,32 @@ final class MoveGuard {
             missing.add("Item/Create on " + describe(destName));
         }
         String reason = missing.isEmpty() ? "" : "missing " + String.join(" and ", missing);
+        if (namingRefusal != null) {
+            reason = (reason.isEmpty() ? "" : reason + "; ") + "the project naming strategy does not allow the name '"
+                    + item.getName() + "' in " + describe(destName) + ": " + namingRefusal;
+        }
         if (restricting != null) {
             reason = (reason.isEmpty() ? "" : reason + "; ")
                     + "the name '" + item.getName() + "' is outside the name restriction '"
                     + restricting.getCreateNamePattern() + "' of grant " + restricting.getId();
         }
-        record(user, item, destName, reason, restricting);
+        // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
+        // column does not read "no grant" while a window existed.
+        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE);
+        Grant createWindow = destName.isEmpty() ? null
+                : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
+        List<String> windows = new ArrayList<>();
+        if (deleteWindow != null) {
+            windows.add("Delete on '" + item.getFullName() + "' from grant " + deleteWindow.getId());
+        }
+        if (createWindow != null) {
+            windows.add("Create in " + describe(destName) + " from grant " + createWindow.getId());
+        }
+        if (!windows.isEmpty()) {
+            reason = reason + "; active permission windows: " + String.join(", ", windows);
+        }
+        Grant linked = restricting != null ? restricting : createWindow != null ? createWindow : deleteWindow;
+        record(user, item, destName, reason, linked);
         // E2E-1 UX-2: a permission window has one scope, so a move across folders usually needs
         // two windows. The message names each missing part and what to request for it.
         String deletePart = "Delete on '" + item.getFullName() + "'";
@@ -133,14 +159,23 @@ final class MoveGuard {
                     .append(CreateNamePattern.describe(restricting.getCreateNamePattern()))
                     .append(", which does not include '").append(item.getName()).append("'.");
         }
-        if (toRequest.size() == 1) {
+        if (namingRefusal != null) {
+            message.append(" The project naming strategy does not allow the name '").append(item.getName())
+                    .append("' in ").append(describe(destName)).append(": ").append(namingRefusal);
+            if (!namingRefusal.endsWith(".")) {
+                message.append('.');
+            }
+        }
+        if (toRequest.isEmpty()) {
+            message.append(" Ask an administrator");
+        } else if (toRequest.size() == 1) {
             message.append(" Request a permission window for ").append(toRequest.get(0));
         } else {
             message.append(" A permission window covers one job or folder, so request one window for ")
                     .append(toRequest.get(0)).append(" and another for ").append(toRequest.get(1));
         }
-        message.append(", or ask an administrator.");
-        return new MoveRefusal(message.toString(), item.getFullName());
+        message.append(toRequest.isEmpty() ? "." : ", or ask an administrator.");
+        return new MoveRefusal(message.toString(), item.getFullName(), destName, !delete, !create);
     }
 
     /**
@@ -215,6 +250,26 @@ final class MoveGuard {
         return check(item, destination);
     }
 
+    /**
+     * D-59b: the installed project naming strategy's refusal of {@code name} in the group
+     * {@code parentFullName} ({@code ""} for the Jenkins root) for the current user, or
+     * {@code null} when it accepts the name. The default strategy accepts every name. A strategy
+     * that fails unexpectedly refuses (the move would otherwise bypass it).
+     */
+    @CheckForNull
+    private static String namingRefusal(String parentFullName, String name) {
+        try {
+            Jenkins.get().getProjectNamingStrategy().checkName(parentFullName, name);
+            return null;
+        } catch (Failure f) {
+            String msg = f.getMessage();
+            return msg == null || msg.isBlank() ? "the name is not allowed" : msg;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "The project naming strategy failed while checking a move", e);
+            return "the naming strategy could not check the name";
+        }
+    }
+
     /** The group named by the {@code destination} parameter ({@code /} or {@code /a/b}), if visible. */
     @CheckForNull
     private static ItemGroup<?> destination(@CheckForNull String destination) {
@@ -225,7 +280,15 @@ final class MoveGuard {
         if (destination.equals("/")) {
             return jenkins;
         }
-        Item group = jenkins.getItemByFullName(destination.substring(1)); // as the user: Read applies
+        Item group;
+        try {
+            group = jenkins.getItemByFullName(destination.substring(1)); // as the user: Read applies
+        } catch (AccessDeniedException e) {
+            // Discover without Read (security-33 S-33-05, #74): step aside exactly as for an
+            // unknown destination, so the folders plugin answers and nothing is recorded; a 403
+            // must not escape from inside a permission check.
+            return null;
+        }
         return group instanceof ItemGroup ? (ItemGroup<?>) group : null;
     }
 
@@ -275,14 +338,14 @@ final class MoveGuard {
     }
 
     private static void record(String user, Item item, String destName, String reason,
-                               @CheckForNull Grant restricting) {
+                               @CheckForNull Grant linked) {
         String target = item.getFullName();
         boolean written;
         try {
             written = BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
                     NewItemName.MOVE_OPERATION + " " + target + " " + destName, target, user,
                     "Refused to move '" + target + "' to " + describe(destName) + " for '" + user + "': " + reason,
-                    restricting == null ? null : restricting.getId());
+                    linked == null ? null : linked.getId());
         } catch (RuntimeException e) {
             // The refusal stands whatever happens to the record.
             LOGGER.log(Level.WARNING, "Could not record the refused move of '" + target + "'", e);

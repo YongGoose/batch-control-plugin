@@ -52,7 +52,9 @@ public final class SectionAccess {
     }
 
     /**
-     * {@code /batch-control/activations/**}: requesters, approvers and managers. An activation
+     * {@code /batch-control/activations/**}: requesters, approvers and managers hold it on
+     * Jenkins; since D-38c the section also opens for every other user admitted to the root
+     * ({@link #canOpenActivations()}). An activation
      * request needs {@code BatchControl/Request} (D-39) and is decided with
      * {@code BatchControl/Approve}, like a run request.
      */
@@ -102,15 +104,20 @@ public final class SectionAccess {
                 || RunRequestService.get().hasOwnRequests(Jenkins.getAuthentication2());
     }
 
-    /** D-38b: as {@link #canOpenRequests()}, for the Activations screen. */
+    /**
+     * D-38c (amends D-38b): whether the current user may open the Activations screen: every user
+     * admitted to the Batch Control root page. The rows stay limited by the visibility rules
+     * (possibly none), and requesting an activation is still checked on the job. No scan of all
+     * items.
+     */
     public static boolean canOpenActivations() {
-        return hasAny(activations())
-                || ActivationService.get().hasOwnRequests(Jenkins.getAuthentication2());
+        return canOpenRoot();
     }
 
     /** D-38b: whether the Batch Control root action exists for the current user. */
     public static boolean canOpenRoot() {
-        return hasAny(anyPermission()) || canOpenRequests() || canOpenActivations();
+        return hasAny(anyPermission()) || canOpenRequests()
+                || ActivationService.get().hasOwnRequests(Jenkins.getAuthentication2());
     }
 
     /**

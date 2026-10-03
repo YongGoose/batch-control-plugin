@@ -1,15 +1,38 @@
 <?jelly escape-by-default='true'?>
 <!-- SPEC item 8 (D-59, feedback in the D-48 style): the browser page of MoveRefusal, answered with
-     HTTP 403 after a move was refused (the message says nothing was moved). Only the refusal
-     message and, for a viewer who may read the item (MoveRefusal#getItemUrl non-null), a link
-     named after the item are rendered; both are escaped by default (item names are user input).
+     HTTP 403 after a move was refused (the message says nothing was moved). The refusal message
+     and, for a viewer who may read the item (MoveRefusal#getItemUrl non-null), a link named after
+     the item are rendered; both are escaped by default (item names are user input).
+     Backlog #83: for a viewer who may request permission windows (BatchControlRootAction#isCanRequestGrants),
+     each missing window links to the new grant request form prefilled for it. The links are
+     built by GrantRequestLinks (through BatchControlRootAction#grantRequestUrl), which resolves each name as the viewer (no link for an item the
+     viewer cannot see, nor for the Jenkins root, which has no window). The missing parts come
+     from MoveRefusal#isDeleteMissing / #isCreateMissing / #getDestinationFullName.
      No script and no Back link, the breadcrumb bar leads back. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Move not allowed" type="one-column">
     <l:main-panel>
       <l:app-bar title="Move not allowed"/>
+      <!-- Through the root action: j:invokeStatic cannot load plugin classes in a real Jenkins. -->
+      <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
+      <j:set var="canRequest" value="${bcRoot.canRequestGrants}"/>
+      <j:set var="deleteUrl" value="${canRequest and it.deleteMissing ? bcRoot.grantRequestUrl(it.itemFullName, 'DELETE') : null}"/>
+      <j:set var="createUrl" value="${canRequest and it.createMissing == true and !empty(it.destinationFullName) ? bcRoot.grantRequestUrl(it.destinationFullName, 'CREATE') : null}"/>
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
         <div>${it.message}</div>
+        <j:if test="${deleteUrl != null or createUrl != null}">
+          <div class="jenkins-!-margin-top-2">
+            Request the missing permission windows on the Grants screen (each form is prefilled):
+            <ul class="jenkins-!-margin-bottom-0">
+              <j:if test="${deleteUrl != null}">
+                <li><a href="${rootURL}/${deleteUrl}">Delete window for ${it.itemFullName}</a></li>
+              </j:if>
+              <j:if test="${createUrl != null}">
+                <li><a href="${rootURL}/${createUrl}">Create window for ${it.destinationFullName}</a></li>
+              </j:if>
+            </ul>
+          </div>
+        </j:if>
         <j:if test="${it.itemUrl != null}">
           <div class="jenkins-!-margin-top-2"><a href="${rootURL}/${it.itemUrl}">${it.itemFullName}</a></div>
         </j:if>

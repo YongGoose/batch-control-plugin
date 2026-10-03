@@ -27,6 +27,7 @@ public class ComputedFolderActivationActionFactory extends TransientActionFactor
     @NonNull
     @Override
     public Collection<? extends Action> createFor(@NonNull ComputedFolder target) {
-        return List.of(new ComputedFolderActivationAction((ComputedFolder<?>) target));
+        ComputedFolder<?> folder = (ComputedFolder<?>) target;
+        return List.of(new ComputedFolderActivationAction(folder), new JobActivationForm(folder));
     }
 }

@@ -129,7 +129,7 @@ steps.mb = async () => {
   await rq.page.goto(`${BASE}/job/team-mb/`);
   const link = rq.page.locator('#main-panel a:has-text("Request activation"), #side-panel a:has-text("Activation")').first();
   const hasLink = await link.count();
-  let url = `${BASE}/job/team-mb/batch-control/activation`;
+  let url = `${BASE}/job/team-mb/batch-control-activation`;
   if (hasLink) { await link.click(); await rq.page.waitForLoadState('load'); url = rq.page.url(); } else await rq.page.goto(url);
   await rq.page.fill('textarea[name="reason"]', 'Put the multibranch project into service (B10-06, D-46c).');
   await rq.page.locator('input[name="approvers"][value="approver-1"] + label').click();

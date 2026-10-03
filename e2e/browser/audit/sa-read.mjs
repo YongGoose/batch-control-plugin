@@ -60,7 +60,7 @@ if (on('A-13')) {
     const entries = (await side(page).allInnerTexts()).map((e) => e.trim());
     sh.push(!!(await shot(page, '#side-panel', `A-13-${u}-sidebar`, { pad: 8 })));
     const codes = [];
-    for (const p of ['batch-control/', 'batch-control/submit', 'batch-control/activation']) codes.push(`${p}=${(await page.goto(`${BASE}/job/batch-daily/${p}`)).status()}`);
+    for (const p of ['batch-control/', 'batch-control/submit', 'batch-control-activation']) codes.push(`${p}=${(await page.goto(`${BASE}/job/batch-daily/${p}`)).status()}`);
     res[u] = { job: r0.status(), entries, codes };
     await context.close();
   }
@@ -117,7 +117,7 @@ if (on('A-10')) {
 
 if (on('A-11')) {
   const { context, page } = await login('admin');
-  const screens = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/', '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/', '/batch-control/history/summary', '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control/activation'];
+  const screens = ['/batch-control/', '/batch-control/requests/', '/batch-control/activations/', '/batch-control/grants/', '/batch-control/changes/', '/batch-control/dashboard/', '/batch-control/incidents/', '/batch-control/history/', '/batch-control/history/summary', '/job/batch-daily/batch-control/', '/job/batch-daily/batch-control-activation'];
   for (const list of ['/batch-control/activations/', '/batch-control/requests/', '/batch-control/grants/', '/batch-control/incidents/']) {
     await page.goto(BASE + list);
     const hrefs = await page.locator('#main-panel a[href*="/batch-control/"]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
@@ -141,7 +141,7 @@ if (on('A-11')) {
   const sBack = rb.length ? await shot(rq.page, [rq.page.locator('#main-panel a:has-text("Back to")').first(), '.jenkins-breadcrumbs'], 'A-11-refusal-page-back-link', { pad: 10 }) : null;
   f.push(`refusal page (Direct Build -> Build) crumbs [${refCrumbs.join(' > ')}] BACK=${rb}`);
   // activation form crumbs and their targets (DEF-06)
-  await page.goto(`${BASE}/job/batch-daily/batch-control/activation`);
+  await page.goto(`${BASE}/job/batch-daily/batch-control-activation`);
   const ac = await page.locator('.jenkins-breadcrumbs a').evaluateAll((as) => as.map((a) => `${a.innerText.trim()}->${a.getAttribute('href')}`));
   const sAct = await shot(page, '.jenkins-breadcrumbs', 'A-11-activation-crumbs', { pad: 8 });
   // walk the crumbs of a deep page

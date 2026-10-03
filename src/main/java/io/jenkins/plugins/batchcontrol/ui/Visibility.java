@@ -96,15 +96,6 @@ public final class Visibility {
     // ---------------------------------------------------------------- run-link rule (D-44)
 
     /**
-     * Whether the caller holds {@code Item/Read} on the job with this full name. A job that does
-     * not exist, is not a {@link Job}, or is only discoverable counts as not readable.
-     */
-    public static boolean canReadJob(@CheckForNull String jobFullName) {
-        Job<?, ?> job = findVisibleJob(jobFullName);
-        return job != null && job.hasPermission(Item.READ);
-    }
-
-    /**
      * The one run-link rule of every Batch Control screen (D-44, #22): a run links to its build
      * page only when the viewer holds {@code Item/Read} on the job; otherwise the view renders
      * the run as plain text, and a build that has been deleted since is plain text too (e2e-03

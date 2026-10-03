@@ -8,7 +8,7 @@ res = {"action": action}
 s = Session("requester")
 s.go("/job/batch-cron/")
 s.shot(s.page.get_by_text("Batch Control: this job").first, f"{tag}-01-job-notice", pad=40)
-s.go(f"/job/batch-cron/batch-control/activation/?action={action}")
+s.go(f"/job/batch-cron/batch-control-activation/?action={action}")
 f = s.page.locator("form[name=batch-control-activation]")
 res["form_action"] = f.get_attribute("action")
 s.page.fill("textarea[name=reason]", f"e2e-07 {action} batch-cron")
