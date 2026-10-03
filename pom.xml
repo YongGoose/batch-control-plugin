@@ -40,6 +40,11 @@
          POM defines, i.e. false: a fresh JVM per test class); this only widens how many
          of those per-class forks run concurrently. -->
     <forkCount>1C</forkCount>
+    <!-- D-35f: 918 is the minimum supported role-strategy (see the dependency below).
+         A property only so that the scheduled role-strategy-latest workflow (#77) can
+         test against the newest release with -Drole-strategy.version=...; keep the
+         default at the minimum. -->
+    <role-strategy.version>918.v91e5468d8db_2</role-strategy.version>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
@@ -120,7 +125,7 @@
       <!-- D-35f: 918 is the minimum supported role-strategy. Older releases
            (including the BOM's 898) replace the Batch Control variant on a
            Manage Roles save. Overrides the BOM version on purpose. -->
-      <version>918.v91e5468d8db_2</version>
+      <version>${role-strategy.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>

@@ -1,0 +1,104 @@
+# Early warning against the newest role-strategy release (issue #77).
+# role-strategy is reworking its Manage Roles / Assign Roles UI (jenkinsci/role-strategy-plugin
+# PR #766, a planned saveRoleAssignments endpoint). If a release rebuilds the strategy on save,
+# the Manage-Roles reset of D-35f could return. This job builds against the newest released
+# role-strategy and runs every test that touches it. The pom keeps 918 (the minimum, D-35f)
+# as the default of the role-strategy.version property; only this job overrides it.
+#
+# Scheduled and manual only, never on pull requests or pushes: a new upstream release must
+# not turn unrelated pull requests red. Default read-only token, no secrets.
+---
+name: role-strategy latest
+on:
+  schedule:
+    # Mondays 03:17 UTC (12:17 KST).
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      role_strategy_version:
+        required: false
+        type: string
+        description: |
+          role-strategy version to test against.
+          Empty = newest release on the Jenkins update center.
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: role-strategy-latest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: role-strategy tests (newest release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Resolve the role-strategy version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.role_strategy_version }}
+        run: |
+          set -euo pipefail
+          if [ -n "${REQUESTED:-}" ]; then
+            version="$REQUESTED"
+            required_core="(not checked for a manual version)"
+          else
+            curl -fsSL --retry 3 https://updates.jenkins.io/current/update-center.actual.json -o uc.json
+            version="$(jq -r '.plugins["role-strategy"].version' uc.json)"
+            required_core="$(jq -r '.plugins["role-strategy"].requiredCore' uc.json)"
+            rm -f uc.json
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9A-Za-z._-]+$'; then
+            echo "::error::unexpected role-strategy version '$version'"
+            exit 1
+          fi
+          pinned="$(mvn -B -ntp -q help:evaluate -Dexpression=role-strategy.version -DforceStdout)"
+          core="$(mvn -B -ntp -q help:evaluate -Dexpression=jenkins.version -DforceStdout)"
+          echo "role-strategy: newest=$version pinned=$pinned requiredCore=$required_core jenkins.version=$core"
+          {
+            echo "### role-strategy latest"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tested | \`$version\` |"
+            echo "| pinned in pom | \`$pinned\` |"
+            echo "| its requiredCore | \`$required_core\` |"
+            echo "| jenkins.version | \`$core\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$version" = "$pinned" ]; then
+            echo "::notice::the newest role-strategy is the pinned $pinned; this run repeats the regular build's coverage"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Every test class that touches role-strategy: Role*Test (RoleStrategyTest,
+      # RoleStrategySurfaceTest, RoleSidValidationTest, RoleSidValidationRoleAdminTest,
+      # RoleVariantAssignRolesTest), the strategy migration/persistence/CasC tests, the grant
+      # monitors and the optional-dependency tests. The enforcer runs too, so an upper-bounds
+      # conflict brought in by the new release also fails the job.
+      - name: Test
+        env:
+          ROLE_STRATEGY_VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          mvn -B -ntp clean test
+          -Drole-strategy.version="$ROLE_STRATEGY_VERSION"
+          -Dtest='Role*Test,Strategy*Test,GrantMonitorsTest,OptionalDependencyWithout*Test'
+          -Dsurefire.failIfNoSpecifiedTests=true
+          -Daccess-modifier-checker.skip=true
+      - name: Upload surefire reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: surefire-reports-role-strategy-${{ steps.version.outputs.version }}
+          path: target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 14
