@@ -1,50 +1,11 @@
 <?jelly escape-by-default='true'?>
-<!-- #21: blocked unattended triggers are refused with nobody to tell, so the job page says so.
-     Rendered by the job main page for every action; nothing is shown unless a switch is on, run
-     control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches),
-     whether or not the job requires approval for manual runs (DEF-15).
-     Only constant text and switch names are rendered; no script. -->
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
-  <!-- New job page: the notices sit in the Overview's "Legacy" card, where the classic page's
-       top margin only adds empty space, so it is dropped there. -->
+<!-- Classic job page: the notices (notices.jelly) below the job's main panel. On core's new job
+     page they are a card of the Overview instead (#72, JobNoticesWidget), so nothing is
+     rendered here and they do not also appear in the Overview's "Legacy" card. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
-  <j:if test="${!empty(it.blockingSwitches)}">
-    <div class="jenkins-alert jenkins-alert-warning" role="status" style="${newJobPage ? null : 'margin-top: 1rem;'}">
-      <strong>Batch Control: unattended triggers of this job are blocked</strong>
-      <ul style="margin: 0.5rem 0;">
-        <j:if test="${it.timerBlocked}">
-          <li>
-            <b>Block cron (timer) triggers</b> (<code>blockTimer</code>) is on: scheduled cron
-            builds of this job are refused and do not run.
-          </li>
-        </j:if>
-        <j:if test="${it.upstreamBlocked}">
-          <li>
-            <b>Block upstream triggers</b> (<code>blockUpstream</code>) is on: builds triggered by
-            an upstream job are refused unless that job is listed in <b>Allowed upstream jobs</b>.
-          </li>
-        </j:if>
-      </ul>
-      <p style="margin: 0;">
-        To clear it, turn the switch off in the Batch Control section of the
-        <j:choose>
-          <j:when test="${it.canConfigure}"><a href="${rootURL}/${it.job.url}configure">job configuration</a>.</j:when>
-          <j:otherwise>job configuration.</j:otherwise>
-        </j:choose>
-        That change is recorded in the change history<j:if test="${it.changeControlEnabled}">
-          and, with change control on, needs a permission window
-          (<j:choose>
-            <j:when test="${it.links.grants}"><a href="${rootURL}/batch-control/grants/">Grants</a></j:when>
-            <j:otherwise>Grants</j:otherwise>
-          </j:choose>)</j:if>.
-        Refused attempts are listed as <code>TRIGGER_BLOCKED</code> change records.
-      </p>
-      <!-- e2e-03 DEF-15 / DEF-21 (D-46): shown whatever "Require approval to run" says, and
-           clearing a switch is not what puts a job into service; activation is. -->
-      <p style="margin: 0.5rem 0 0;">
-        Clearing a switch only removes that block: an unattended run also needs the job to be
-        activated, which is a separate, approved request (see the activation notice on this page).
-      </p>
-    </div>
+  <j:if test="${!newJobPage}">
+    <j:set var="noticeStyle" value="margin-top: 1rem;"/>
+    <st:include page="notices.jelly"/>
   </j:if>
 </j:jelly>
