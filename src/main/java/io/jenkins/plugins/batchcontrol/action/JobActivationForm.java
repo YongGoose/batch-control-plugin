@@ -3,9 +3,10 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
 import hudson.model.Failure;
+import hudson.model.Action;
 import hudson.model.Item;
 import hudson.model.Job;
-import hudson.model.ModelObject;
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
@@ -30,12 +31,12 @@ import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
- * The activation request form at {@code <item>/batch-control/activation} (SPEC item 6a, D-39)
- * for a job ({@link JobActivationRoute#getActivation()}) or a computed folder, which carries the
- * activation of its children (D-46c, {@link ComputedFolderActivationAction#getTarget()}). It
- * inherits the owning action's absence rule: without {@code BatchControl/Request} the whole
- * {@code <item>/batch-control/} space answers 404, so this form is never shown to a user who
- * could not submit it.
+ * The activation request form at {@code <item>/batch-control-activation/} (SPEC item 6a, D-39,
+ * D-64) for a job ({@link JobRequestActionFactory}) or a computed folder, which carries the
+ * activation of its children (D-46c, {@link ComputedFolderActivationActionFactory}). An action
+ * of its own, without a sidebar entry, so its breadcrumbs read {@code <item> > Activation}.
+ * Without {@code BatchControl/Request} {@link #getUrlName()} is {@code null}: the URL space
+ * answers 404, so this form is never shown to a user who could not submit it.
  *
  * <p>The form offers the one action that can change anything: {@code ACTIVATE} for a job that is
  * not activated, {@code HOLD} for one that is. {@link #doSubmit} passes the posted value to
@@ -43,10 +44,13 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * this class holds no state logic.
  */
 @Restricted(NoExternalUse.class)
-public class JobActivationForm implements ModelObject {
+public class JobActivationForm implements Action {
 
     /** {@link FormErrors} name of the activation form. */
     static final String FORM = "activation";
+
+    /** URL of the form below its item (D-64). */
+    static final String URL_NAME = "batch-control-activation";
 
     /** A job, or a computed folder (D-46c). */
     private final Item item;
@@ -67,6 +71,28 @@ public class JobActivationForm implements ModelObject {
     @Override
     public String getDisplayName() {
         return "Activation";
+    }
+
+    /** No sidebar entry: the job and folder pages link the form from their activation notice. */
+    @Override
+    @CheckForNull
+    public String getIconFileName() {
+        return null;
+    }
+
+    /**
+     * {@code null} without {@code BatchControl/Request}: the form exposes the approver list, so
+     * its URL space is absent (404) rather than refused, the same rule as before D-64 (on a job
+     * {@code BatchControl/Request}; on a computed folder the service's predicate, Request and
+     * {@code Item/Read}). {@link #doSubmit} re-checks the permissions.
+     */
+    @Override
+    @CheckForNull
+    public String getUrlName() {
+        boolean visible = item instanceof ComputedFolder
+                ? ActivationService.get().canRequest(item)
+                : item.hasPermission(BatchControlPermissions.REQUEST);
+        return visible ? URL_NAME : null;
     }
 
     /** Permissions for the form's {@code l:layout}. */

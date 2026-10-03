@@ -35,7 +35,7 @@
         </j:choose>
       </div>
     </j:if>
-    <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control/activation"/>
+    <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control-activation/"/>
     <j:set var="carrier" value="${it.carrier}"/>
     <j:choose>
       <j:when test="${carrier != null}">

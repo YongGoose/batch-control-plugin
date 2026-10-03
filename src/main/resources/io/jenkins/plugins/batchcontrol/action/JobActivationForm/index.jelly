@@ -6,10 +6,8 @@
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Activation - ${it.item.fullDisplayName}" permissions="${it.viewPermissions}">
     <st:include page="sidepanel.jelly" it="${it.item}"/>
-    <!-- e2e-03 DEF-06: see JobActivationRoute/activation.jelly. -->
-    <j:if test="${activationCrumb}">
-      <l:breadcrumb title="Activation" href="${rootURL}/${it.item.url}batch-control/activation"/>
-    </j:if>
+    <!-- e2e-03 DEF-06 / D-64: this action is the "Activation" crumb after the item's; no crumb
+         leads to the run request form. -->
     <l:main-panel>
       <l:app-bar title="Activation: ${it.item.fullDisplayName}"/>
 
@@ -110,7 +108,7 @@
                fields and the input kept (ui.FormErrors). -->
           <j:set var="errors" value="${it.formErrors}"/>
           <bc:formError errors="${errors}"/>
-          <f:form method="post" action="${rootURL}/${it.item.url}batch-control/activation/submit?action=${it.nextAction}" name="batch-control-activation">
+          <f:form method="post" action="${rootURL}/${it.item.url}batch-control-activation/submit?action=${it.nextAction}" name="batch-control-activation">
             <f:entry title="Reason" description="Why this change is needed (required).">
               <f:textarea name="reason" value="${errors.value('reason')}"/>
               <bc:fieldError errors="${errors}" field="reason"/>
