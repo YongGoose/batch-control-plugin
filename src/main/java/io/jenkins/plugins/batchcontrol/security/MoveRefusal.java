@@ -34,9 +34,41 @@ public class MoveRefusal extends Failure {
     /** Full name of the item whose move was refused (kept as a name: the exception is serializable). */
     private final String itemFullName;
 
-    MoveRefusal(String message, String itemFullName) {
+    /** Full name of the destination group; empty for the Jenkins root. */
+    private final String destinationFullName;
+    private final boolean deleteMissing;
+    private final boolean createMissing;
+
+    MoveRefusal(String message, String itemFullName, String destinationFullName,
+                boolean deleteMissing, boolean createMissing) {
         super(message);
         this.itemFullName = itemFullName;
+        this.destinationFullName = destinationFullName == null ? "" : destinationFullName;
+        this.deleteMissing = deleteMissing;
+        this.createMissing = createMissing;
+    }
+
+    /**
+     * Full name of the group the item was to be moved into, or the empty string for the Jenkins
+     * root (which no permission window can cover). Backlog #83: the refusal page links the Create
+     * window request for it.
+     */
+    public String getDestinationFullName() {
+        return destinationFullName;
+    }
+
+    /** Whether the refusal lacks Item/Delete on the item (a Delete window on the item would supply it). */
+    public boolean isDeleteMissing() {
+        return deleteMissing;
+    }
+
+    /**
+     * Whether the refusal lacks Item/Create on the destination, either entirely or because the
+     * active Create window's name restriction does not admit the item's name; a Create window on
+     * {@link #getDestinationFullName()} that admits the name would supply it.
+     */
+    public boolean isCreateMissing() {
+        return createMissing;
     }
 
     /** Full name of the item whose move was refused. */
