@@ -25,7 +25,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * rather than after it.
  *
  * <p>This action holds no URL space of its own: {@link #getUrlName()} returns a link to the
- * existing grant screen (relative to the job's URL, so it keeps the context path), pre-selecting {@code JOB} scope and this job's full name
+ * existing grant screen (relative to the job's URL, so it keeps the context path), pre-filling this job's full name (the form starts on the {@code JOB} scope by default)
  * (see {@code GrantsSection.getPrefillScopeFullName}), so the user lands on a form that is
  * already about the job they came from. There is no view, no {@code do*} method and no state:
  * every permission check that matters is the grant screen's own.
@@ -102,6 +102,12 @@ public class JobGrantRequestAction implements Action {
      * alike. Overriding {@code getEvent()} instead would need {@code LinkEvent}, a
      * {@code @Restricted(Beta.class)} API in the 2.568.x baseline.
      *
+     * <p>e2e-06 DEF-01: the URL carries one query parameter and no {@code &}. The new job page's
+     * menu escapes the event URL a second time, so {@code &} arrived as {@code &amp;} and the
+     * browser sent {@code amp;scopeFullName}, leaving the job unfilled. The grant form already
+     * starts on the JOB scope when {@code scopeType} is absent
+     * ({@code GrantsSection#getPrefillScopeType}), so {@code scopeType=JOB} is not needed.
+     *
      * <p>No routing is added under {@code /job/<name>/}: a name containing {@code ../} never
      * matches a URL token. The full name is passed through {@link Util#rawEncode} because
      * {@code Functions.getActionUrl} parses the value as a URI first and drops the sidebar entry
@@ -109,8 +115,7 @@ public class JobGrantRequestAction implements Action {
      */
     @Override
     public String getUrlName() {
-        return toRoot(job) + "batch-control/grants/?scopeType=JOB&scopeFullName="
-                + Util.rawEncode(job.getFullName());
+        return toRoot(job) + "batch-control/grants/?scopeFullName=" + Util.rawEncode(job.getFullName());
     }
 
     /**
