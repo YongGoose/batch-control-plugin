@@ -44,7 +44,7 @@ public class ActivationsSection implements ModelObject, StaplerProxy {
 
     @Override
     public Object getTarget() {
-        // D-38b: a user with activation requests of their own is admitted too; rows and detail
+        // D-38c: every user admitted to the root is admitted here; rows and detail
         // pages stay limited by Visibility.canSeeActivationRequest.
         if (!SectionAccess.canOpenActivations()) {
             Jenkins.get().checkAnyPermission(SectionAccess.activations());
