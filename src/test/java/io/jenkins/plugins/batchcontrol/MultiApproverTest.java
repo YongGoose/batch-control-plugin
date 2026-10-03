@@ -48,8 +48,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 3, D-37: a request designates one or more approvers; any one of them decides,
  * the first decision closes the request and names the decider ({@code decidedBy}); a
  * designation change edits the set and is recorded as (previous set, new set, by, at).
- * Matrix rows T-03-07 .. T-03-20. The legacy single-{@code approver} load is T-03-21 in
- * {@link MultiApproverLegacyLoadTest} (it needs a restart).
+ * Matrix rows T-03-07 .. T-03-20. T-03-21 (the legacy single-{@code approver} load) is
+ * withdrawn by D-69: there is no load-time conversion before the first release.
  *
  * <p>T-03-22 .. T-03-26 (D-37, D-26, P-09; matrix note 59) extend the requester-driven
  * designation change to grant requests through {@code POST batch-control/grants/<id>/changeApprover}:
@@ -102,7 +102,7 @@ public class MultiApproverTest {
 
     /**
      * T-03-07: a submission with approvers=[a1, a2] stores the whole set, in submission order,
-     * with no decider yet; the compatibility {@code approver} view is the first member.
+     * with no decider yet. (The compatibility {@code approver} view was dropped from SPEC by D-69.)
      */
     @Test
     public void t_03_07_severalApproversAreStored() throws Exception {
@@ -112,7 +112,6 @@ public class MultiApproverTest {
         assertEquals(RequestStatus.PENDING, request.getStatus());
         assertEquals(Arrays.asList("a1", "a2"), request.getApprovers(), "the designated set must be stored as submitted");
         assertNull(request.getDecidedBy(), "nobody has decided a PENDING request");
-        assertEquals("a1", request.getApprover(), "the compatibility approver field holds the first member of the set (D-37)");
     }
 
     /** T-03-08: a submission without any approver is refused; SPEC 3 requires one or more. */

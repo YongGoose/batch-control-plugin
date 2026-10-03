@@ -220,6 +220,34 @@ public class RequesterBuildNoticeCacheTest {
         }
     }
 
+    /**
+     * T-05-90 (R4-4, cache keyed by the request id; reverse of T-05-38/37): nb holds Item/Build
+     * and its request shows no notice; nb then loses Item/Build. A new request shows the notice at
+     * once (its own cache entry), and after nb re-designates the first request (a save) that
+     * request shows it too.
+     */
+    @Test
+    public void t_05_90_losingBuildIsShownAfterResaveAndOnANewRequest() throws Exception {
+        j.jenkins.setAuthorizationStrategy(strategy(true));
+        assertTrue(can("nb", Item.BUILD), "premise: nb holds Item/Build on batch-x");
+        String first = submitRunOk(j, "nb", job, "month-end batch", "a1");
+        JenkinsRule.WebClient wc = client();
+        assertFalse(detailText(wc, first).contains("does not have Build permission"),
+                "premise: no notice while nb holds Item/Build");
+
+        j.jenkins.setAuthorizationStrategy(strategy(false));
+        assertFalse(can("nb", Item.BUILD), "premise: nb no longer holds Item/Build on batch-x");
+        String second = submitRunOk(j, "nb", job, "second batch", "a1");
+        String secondText = detailText(wc, second);
+        assertTrue(secondText.contains(NOTICE), "a new request must not reuse another request's answer: " + excerpt(secondText));
+
+        ApproverFormFixtures.assertSuccess(ApproverFormFixtures.changeRunApprovers(j, "nb", first, "a1", "a2"),
+                "nb re-designating the first request");
+        String firstText = detailText(wc, first);
+        assertTrue(firstText.contains(NOTICE),
+                "after the re-designation the first request must show the notice (nb lost Item/Build): " + excerpt(firstText));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** a1's client: redirects off, HtmlUnit's response cache off so that every view reaches Jenkins. */
