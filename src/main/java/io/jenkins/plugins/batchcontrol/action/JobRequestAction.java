@@ -72,6 +72,14 @@ public class JobRequestAction implements Action, StaplerProxy {
         return job;
     }
 
+    /**
+     * The job, under the name core's {@code l:job-subpage} reads ({@code it.object}), so the
+     * request form renders as a sub-page of the job in both the classic and the new job page.
+     */
+    public Job<?, ?> getObject() {
+        return job;
+    }
+
     // ---------------------------------------------------------------- Action
 
     @Override

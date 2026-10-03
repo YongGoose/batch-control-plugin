@@ -5,10 +5,16 @@
      is not offered instead of being given a form the server will refuse. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
-  <l:layout title="Request Run - ${it.job.fullDisplayName}" permissions="${it.viewPermissions}">
-    <st:include page="sidepanel.jelly" it="${it.job}"/>
-    <l:main-panel>
-      <l:app-bar title="Request Run: ${it.job.fullDisplayName}"/>
+  <!-- Hosting review 2026-10-02: rendered as a job sub-page, so the new job page shows the
+       job's build bar, tabs and app bar actions above it, and the classic UI the job's sidepanel
+       as before (l:job-subpage reads it.object, the job). l:job-subpage does not take a
+       permissions attribute, so the check l:layout permissions="..." made is made here, against
+       the same nearest access-controlled ancestor, the job. -->
+  ${h.checkAnyPermission(it, it.viewPermissions)}
+  <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
+  <l:job-subpage>
+      <!-- The new job page names the job in its build bar already. -->
+      <l:app-bar title="${newJobPage ? 'Request Run' : 'Request Run: ' + it.job.fullDisplayName}"/>
       <!-- D-58b (3): the deliberate review of a job changed under a permission window. The button
            is shown only while JobRequestAction#isShowMarkReviewed holds; the endpoint re-checks
            Configure and GrantService refuses a grant-only Configure holder. -->
@@ -111,6 +117,5 @@
           </f:form>
         </j:otherwise>
       </j:choose>
-    </l:main-panel>
-  </l:layout>
+  </l:job-subpage>
 </j:jelly>
