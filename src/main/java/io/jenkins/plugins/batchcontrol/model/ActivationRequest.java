@@ -110,7 +110,7 @@ public final class ActivationRequest {
                                            String requester, List<String> approvers) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Objects.requireNonNull(action, "action");
-        return new ActivationRequest(Ids.newId(), jobFullName, action, reason, requester, approvers,
+        return new ActivationRequest(Ids.newRequestId(), jobFullName, action, reason, requester, approvers,
                 BatchClock.now());
     }
 

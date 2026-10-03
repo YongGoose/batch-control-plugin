@@ -226,7 +226,7 @@ public final class NotificationDispatcher {
     /** {@link NotificationEvent#GRANT_EXPIRING} for an active window, sent to its holder. */
     public static void grantExpiring(Grant grant, String reason) {
         try {
-            String requestId = grant.getGrantRequestId() != null ? grant.getGrantRequestId() : grant.getId();
+            String requestId = grant.getGrantRequestId();
             dispatch(NotificationEvent.GRANT_EXPIRING, new Notification(Notification.KIND_GRANT, requestId,
                     grant.getScope().getFullName(), grant.getUser(), reason,
                     grant.getUser() == null ? Collections.emptyList() : List.of(grant.getUser()),

@@ -432,8 +432,7 @@ public final class GrantRequestService {
             }
         }
         for (Grant grant : GrantService.get().claimExpiringNotifications(lead)) {
-            GrantRequest request = store.loadGrantRequest(grant.getGrantRequestId() != null
-                    ? grant.getGrantRequestId() : grant.getId());
+            GrantRequest request = store.loadGrantRequest(grant.getGrantRequestId());
             NotificationDispatcher.grantExpiring(grant, request == null ? null : request.getReason());
         }
     }

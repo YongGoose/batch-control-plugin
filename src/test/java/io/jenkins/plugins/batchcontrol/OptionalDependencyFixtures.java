@@ -55,8 +55,11 @@ final class OptionalDependencyFixtures {
         "matrix-auth", "role-strategy", "configuration-as-code", "mailer", "rebuild"
     };
 
-    /** The plugins batch-control requires (README Requirements, dependency-01 section 1). */
-    static final String[] REQUIRED = {"cloudbees-folder", "ionicons-api"};
+    /**
+     * The plugins batch-control requires (README Requirements, dependency-01 section 1;
+     * caffeine-api since R4-2, the requester-build cache).
+     */
+    static final String[] REQUIRED = {"cloudbees-folder", "ionicons-api", "caffeine-api"};
 
     private OptionalDependencyFixtures() {
         // utility class
