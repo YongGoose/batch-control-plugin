@@ -29,7 +29,7 @@
             <td>
               <j:choose>
                 <j:when test="${it.runUrl != null}">
-                  <a href="${rootURL}/${it.runUrl}">${it.incident.runId}</a>
+                  <a class="model-link" href="${rootURL}/${it.runUrl}">${it.incident.runId}</a>
                 </j:when>
                 <j:otherwise>${it.incident.runId}</j:otherwise>
               </j:choose>
@@ -45,7 +45,7 @@
               <td>
                 <j:choose>
                   <j:when test="${it.resolvedByRunUrl != null}">
-                    <a href="${rootURL}/${it.resolvedByRunUrl}">${it.incident.resolvedByRunId}</a>
+                    <a class="model-link" href="${rootURL}/${it.resolvedByRunUrl}">${it.incident.resolvedByRunId}</a>
                   </j:when>
                   <j:otherwise>${it.incident.resolvedByRunId}</j:otherwise>
                 </j:choose>
@@ -241,7 +241,7 @@
         <p class="jenkins-description">
           A user with Batch Control/Request and Job/Read can instead submit an ordinary run
           request from the Request Run entry on the page of
-          <a href="${rootURL}/${it.jobUrl}">${it.incident.jobFullName}</a>; that request is not
+          <a class="model-link" href="${rootURL}/${it.jobUrl}">${it.incident.jobFullName}</a>; that request is not
           linked to this incident.
         </p>
       </j:if>

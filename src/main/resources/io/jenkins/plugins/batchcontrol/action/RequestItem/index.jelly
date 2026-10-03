@@ -30,7 +30,7 @@
             <td>
               <j:choose>
                 <j:when test="${it.jobUrl != null}">
-                  <a href="${rootURL}/${it.jobUrl}">${it.request.jobFullName}</a>
+                  <a class="model-link" href="${rootURL}/${it.jobUrl}">${it.request.jobFullName}</a>
                 </j:when>
                 <j:otherwise>${it.request.jobFullName}</j:otherwise>
               </j:choose>
@@ -97,7 +97,7 @@
               <td>
                 <j:choose>
                   <j:when test="${it.executedRunUrl != null}">
-                    <a href="${rootURL}/${it.executedRunUrl}">${it.request.executedRunId}</a>
+                    <a class="model-link" href="${rootURL}/${it.executedRunUrl}">${it.request.executedRunId}</a>
                   </j:when>
                   <j:otherwise>${it.request.executedRunId}</j:otherwise>
                 </j:choose>
@@ -152,7 +152,7 @@
             <tbody>
               <j:forEach var="r" items="${it.recentRuns}">
                 <tr>
-                  <td><a href="${rootURL}/${r.url}">#${r.number}</a></td>
+                  <td><a class="model-link" href="${rootURL}/${r.url}">#${r.number}</a></td>
                   <td>${r.result}</td>
                   <td>${r.started}</td>
                   <td>${r.duration}</td>

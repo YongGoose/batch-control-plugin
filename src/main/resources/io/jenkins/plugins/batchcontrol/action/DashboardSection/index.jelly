@@ -61,7 +61,7 @@
                     <!-- Linked only with Item/Read on the job (D-44, Visibility#runUrl). -->
                     <j:set var="runUrl" value="${it.runUrl(r)}"/>
                     <j:choose>
-                      <j:when test="${runUrl != null}"><a href="${rootURL}/${runUrl}">#${r.number}</a></j:when>
+                      <j:when test="${runUrl != null}"><a class="model-link" href="${rootURL}/${runUrl}">#${r.number}</a></j:when>
                       <j:otherwise>#${r.number}</j:otherwise>
                     </j:choose>
                   </td>
