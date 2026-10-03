@@ -85,6 +85,21 @@ public final class FileStore implements Store {
 
     private static final FileStore INSTANCE = new FileStore();
 
+    private static final Comparator<Instant> INSTANT_NULLS_FIRST = Comparator.nullsFirst(Comparator.naturalOrder());
+    /*
+     * Requests are listed oldest first by their stored creation time, the id only breaking ties:
+     * ids are UUIDs (D-68) and carry no order.
+     */
+    private static final Comparator<RunRequest> OLDEST_FIRST_RUNREQUEST =
+            Comparator.comparing(RunRequest::getCreatedAt, INSTANT_NULLS_FIRST)
+                    .thenComparing(RunRequest::getId);
+    private static final Comparator<GrantRequest> OLDEST_FIRST_GRANTREQUEST =
+            Comparator.comparing(GrantRequest::getCreatedAt, INSTANT_NULLS_FIRST)
+                    .thenComparing(GrantRequest::getId);
+    private static final Comparator<ActivationRequest> OLDEST_FIRST_ACTIVATIONREQUEST =
+            Comparator.comparing(ActivationRequest::getCreatedAt, INSTANT_NULLS_FIRST)
+                    .thenComparing(ActivationRequest::getId);
+
     /** Number of write-lock stripes; a power of two. */
     private static final int LOCK_STRIPES = 64;
 
@@ -211,7 +226,9 @@ public final class FileStore implements Store {
 
     @Override
     public List<RunRequest> listRunRequests() {
-        return listXmlEntities(runRequestDir(), RunRequest.class, "run request");
+        List<RunRequest> all = listXmlEntities(runRequestDir(), RunRequest.class, "run request");
+        all.sort(OLDEST_FIRST_RUNREQUEST);
+        return all;
     }
 
     @Override
@@ -223,7 +240,6 @@ public final class FileStore implements Store {
                 ids.add(entry.summary().id());
             }
         }
-        ids.sort(Comparator.naturalOrder());
         List<RunRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
             RunRequest request = loadRunRequest(id);
@@ -238,6 +254,7 @@ public final class FileStore implements Store {
                 idx.put(request);
             }
         }
+        open.sort(OLDEST_FIRST_RUNREQUEST);
         return open;
     }
 
@@ -260,7 +277,8 @@ public final class FileStore implements Store {
         for (EntityIndex.RunEntry entry : index().runRequests.values()) {
             summaries.add(entry.summary());
         }
-        summaries.sort(Comparator.comparing(RequestSummary::id));
+        summaries.sort(Comparator.comparing(RequestSummary::createdAt, INSTANT_NULLS_FIRST)
+                .thenComparing(RequestSummary::id));
         return summaries;
     }
 
@@ -280,7 +298,9 @@ public final class FileStore implements Store {
 
     @Override
     public List<GrantRequest> listGrantRequests() {
-        return listXmlEntities(grantRequestDir(), GrantRequest.class, "grant request");
+        List<GrantRequest> all = listXmlEntities(grantRequestDir(), GrantRequest.class, "grant request");
+        all.sort(OLDEST_FIRST_GRANTREQUEST);
+        return all;
     }
 
     @Override
@@ -292,7 +312,6 @@ public final class FileStore implements Store {
                 ids.add(entry.id());
             }
         }
-        ids.sort(Comparator.naturalOrder());
         List<GrantRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
             GrantRequest request = loadGrantRequest(id);
@@ -306,6 +325,7 @@ public final class FileStore implements Store {
                 idx.put(request);
             }
         }
+        open.sort(OLDEST_FIRST_GRANTREQUEST);
         return open;
     }
 
@@ -342,7 +362,9 @@ public final class FileStore implements Store {
 
     @Override
     public List<ActivationRequest> listActivationRequests() {
-        return listXmlEntities(activationRequestDir(), ActivationRequest.class, "activation request");
+        List<ActivationRequest> all = listXmlEntities(activationRequestDir(), ActivationRequest.class, "activation request");
+        all.sort(OLDEST_FIRST_ACTIVATIONREQUEST);
+        return all;
     }
 
     @Override
@@ -367,7 +389,6 @@ public final class FileStore implements Store {
                 ids.add(entry.id());
             }
         }
-        ids.sort(Comparator.naturalOrder());
         List<ActivationRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
             ActivationRequest request = loadActivationRequest(id);
@@ -381,6 +402,7 @@ public final class FileStore implements Store {
                 idx.put(request);
             }
         }
+        open.sort(OLDEST_FIRST_ACTIVATIONREQUEST);
         return open;
     }
 
@@ -791,8 +813,8 @@ public final class FileStore implements Store {
             }
             deleted |= deleteFile(indexFile, "incident index of " + month);
             deleted |= deleteFile(PathCodec.resolveUnder(runsDir(), monthFileName(month)), "runs of " + month);
-            // Diff patches are named <id>.patch and ids start with yyyyMMdd, so the month
-            // bucket of a patch is recoverable from its file-name prefix.
+            // Diff patches are named <id>.patch and change record ids start with yyyyMMdd
+            // (Ids#newId), so the month bucket of a patch is recoverable from its file-name prefix.
             String idMonthPrefix = String.format(Locale.ROOT, "%04d%02d", month.getYear(), month.getMonthValue());
             if (Files.isDirectory(diffDir())) {
                 try (DirectoryStream<Path> stream = Files.newDirectoryStream(diffDir(), idMonthPrefix + "*.patch")) {

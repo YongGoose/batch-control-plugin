@@ -145,14 +145,14 @@ public final class RunRequest {
     }
 
     /**
-     * Creates a new PENDING request. The id and creation time come from
-     * {@link BatchClock} (id format {@code yyyyMMdd-HHmmss-<6 random alnum>}).
+     * Creates a new PENDING request with a random UUID id (D-68) and its creation time
+     * from {@link BatchClock}.
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, List<String> approvers) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Objects.requireNonNull(parameters, "parameters");
-        return new RunRequest(Ids.newId(), jobFullName, parameters, reason, requester, approvers,
+        return new RunRequest(Ids.newRequestId(), jobFullName, parameters, reason, requester, approvers,
                 RequestStatus.PENDING, BatchClock.now());
     }
 

@@ -108,8 +108,8 @@ public final class GrantRequest {
     }
 
     /**
-     * Creates a new PENDING grant request. The id and creation time come from
-     * {@link BatchClock} (id format {@code yyyyMMdd-HHmmss-<6 random alnum>}).
+     * Creates a new PENDING grant request with a random UUID id (D-68) and its creation time
+     * from {@link BatchClock}.
      * Duplicate actions are collapsed while preserving order.
      */
     public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
@@ -118,7 +118,7 @@ public final class GrantRequest {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(actions, "actions");
         List<GrantAction> distinct = new ArrayList<>(new LinkedHashSet<>(actions));
-        return new GrantRequest(Ids.newId(), scope, distinct, durationMinutes, reason,
+        return new GrantRequest(Ids.newRequestId(), scope, distinct, durationMinutes, reason,
                 requester, approvers, createNamePattern, RequestStatus.PENDING, BatchClock.now());
     }
 
