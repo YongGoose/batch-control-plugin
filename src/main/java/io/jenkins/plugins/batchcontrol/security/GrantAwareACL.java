@@ -4,6 +4,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -83,19 +84,27 @@ final class GrantAwareACL extends ACL {
     @CheckForNull
     private final File itemRootDir;
 
+    /**
+     * Whether the item is an item group (a folder, a multibranch project): a FOLDER_ONLY window
+     * confers no Delete on it (D-65). {@code true} when the item is unknown (fail-safe).
+     */
+    private final boolean itemIsGroup;
+
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName) {
-        this(delegate, itemFullName, null);
+        this(delegate, itemFullName, null, true);
     }
 
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull AbstractItem item) {
-        this(delegate, item == null ? null : item.getFullName(), item == null ? null : item.getRootDir());
+        this(delegate, item == null ? null : item.getFullName(), item == null ? null : item.getRootDir(),
+                item == null || item instanceof ItemGroup);
     }
 
     private GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName,
-                          @CheckForNull File itemRootDir) {
+                          @CheckForNull File itemRootDir, boolean itemIsGroup) {
         this.delegate = delegate;
         this.itemFullName = itemFullName;
         this.itemRootDir = itemRootDir;
+        this.itemIsGroup = itemIsGroup;
     }
 
     /**
@@ -137,7 +146,8 @@ final class GrantAwareACL extends ACL {
         // grant-aware ACL too; evaluated with grants on, a D-35c grant on a folder the holder
         // created would reach every descendant through that inheritance, and a JOB-scope grant on
         // a folder would widen to its children. Only this, the outermost layer, consults grants:
-        // FOLDER scope already matches descendants by path above, and D-35c answers for exactly
+        // FOLDER scope already matches descendants by path above (FOLDER_ONLY its direct items,
+        // D-65, which this keeps from reaching a nested folder's contents), and D-35c answers for exactly
         // the items the holder created.
         ACL parent = delegate;
         boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
@@ -342,7 +352,7 @@ final class GrantAwareACL extends ACL {
                 }
                 continue;
             }
-            if (GrantService.get().hasActiveGrant(user, itemFullName, p)) {
+            if (GrantService.get().hasActiveGrant(user, itemFullName, itemIsGroup, p)) {
                 return Decision.CONFERS;
             }
         }

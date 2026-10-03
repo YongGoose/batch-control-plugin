@@ -5,6 +5,7 @@ import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.Job;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -71,7 +72,9 @@ public class ItemChangeListener extends ItemListener {
         String user = ChangeRecording.currentUser();
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.DELETE, fullName, user, null);
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.DELETE));
+        Grant deleteGrant = GrantService.get().findActiveGrant(user, fullName, GrantAction.DELETE,
+                item instanceof ItemGroup);
+        record.setGrantId(deleteGrant == null ? null : deleteGrant.getId());
         Store.get().appendChangeRecord(record);
         Store.get().deleteConfigSnapshot(fullName);
     }
@@ -108,7 +111,8 @@ public class ItemChangeListener extends ItemListener {
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).
         String destination = parentOf(newFullName);
-        Grant deleteGrant = GrantService.get().findActiveGrant(user, oldFullName, GrantAction.DELETE);
+        Grant deleteGrant = GrantService.get().findActiveGrant(user, oldFullName, GrantAction.DELETE,
+                item instanceof ItemGroup);
         Grant createGrant = destination.isEmpty() ? null
                 : GrantService.get().findActiveCreateGrant(user, destination, item.getName());
         StringBuilder detail = new StringBuilder("Moved from '").append(oldFullName)

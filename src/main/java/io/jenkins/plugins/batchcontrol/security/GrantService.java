@@ -102,13 +102,34 @@ public final class GrantService {
     }
 
     /**
+     * As {@link #hasActiveGrant(String, String, Permission)}, telling whether the item is an item
+     * group: a FOLDER_ONLY grant confers Item/Delete only on a direct item that is not one (D-65).
+     */
+    public boolean hasActiveGrant(String user, String itemFullName, boolean itemIsGroup, Permission permission) {
+        GrantAction action = GrantAction.fromPermission(permission);
+        return action != null && findActiveGrant(user, itemFullName, action, itemIsGroup) != null;
+    }
+
+    /**
      * The first active grant of {@code user} that covers {@code itemFullName} and includes
      * {@code action}, or {@code null}. A {@code null} action matches any action (used by
      * {@code ItemChangeListener} to link RENAME/MOVE change records to the grant in use).
+     *
+     * <p>Without knowing whether the item is an item group, a FOLDER_ONLY grant is never taken to
+     * confer DELETE (fail-safe, D-65); callers holding the item use the four-argument form.
+     */
+    @CheckForNull
+    public Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
+        return findActiveGrant(user, itemFullName, action, action == GrantAction.DELETE);
+    }
+
+    /**
+     * As {@link #findActiveGrant(String, String, GrantAction)}, telling whether the item is an
+     * item group: a FOLDER_ONLY grant confers DELETE only on a direct item that is not one (D-65).
      */
     @CheckForNull
     public synchronized Grant findActiveGrant(String user, String itemFullName,
-                                              @CheckForNull GrantAction action) {
+                                              @CheckForNull GrantAction action, boolean itemIsGroup) {
         if (user == null || itemFullName == null) {
             return null;
         }
@@ -116,7 +137,9 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
+                    && (action == GrantAction.DELETE
+                            ? grant.getScope().includesDeleteOf(itemFullName, itemIsGroup)
+                            : grant.getScope().includes(itemFullName))
                     && (action == null || grant.getActions().contains(action))) {
                 return grant;
             }
@@ -128,6 +151,11 @@ public final class GrantService {
      * Every active grant of {@code user} that covers {@code itemFullName} and includes
      * {@code action} (D-40: the CREATE check has to see all of them, since each may carry a
      * different name restriction).
+     *
+     * <p>For {@link GrantAction#CREATE}, {@code itemFullName} is the item group the new item is
+     * created in (Item/Create is checked on the group's ACL), and the match is
+     * {@link io.jenkins.plugins.batchcontrol.model.GrantScope#includesCreateIn}: a FOLDER_ONLY
+     * scope confers Create in its folder only, never in a nested folder (D-65).
      */
     public synchronized List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
         List<Grant> found = new ArrayList<>();
@@ -138,7 +166,11 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
+                    && (action == GrantAction.CREATE
+                            ? grant.getScope().includesCreateIn(itemFullName)
+                            : action == GrantAction.DELETE
+                                    ? grant.getScope().includesDeleteOf(itemFullName, true)
+                                    : grant.getScope().includes(itemFullName))
                     && grant.getActions().contains(action)) {
                 found.add(grant);
             }
@@ -147,8 +179,9 @@ public final class GrantService {
     }
 
     /**
-     * D-40: the first active Create grant of {@code user} covering {@code itemFullName} whose name
-     * restriction (if any) allows {@code itemName}, or {@code null}.
+     * D-40: the first active Create grant of {@code user} conferring Create in the item group
+     * {@code itemFullName} whose name restriction (if any) allows {@code itemName}, or
+     * {@code null}.
      */
     @CheckForNull
     public Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
@@ -410,7 +443,14 @@ public final class GrantService {
         return false;
     }
 
-    /** Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item. */
+    /**
+     * Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item.
+     *
+     * <p>D-58b (1) guards every item below a scope item. For a FOLDER_ONLY scope (D-65) that
+     * reaches the contents of a nested folder too: the nested folder is a direct item whose
+     * configuration (and authorization property, inherited below it) the holder may change, so
+     * what lies below it stays guarded although the window confers nothing there.
+     */
     private static boolean covers(Grant grant, String itemFullName) {
         String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
         if (grant.getScope() != null && grant.getScope().includes(itemFullName)) {
@@ -734,8 +774,11 @@ public final class GrantService {
     public Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
         // D-40: the grant whose name restriction admits the item (its name, not the full name),
         // chosen outside the monitor (S-03), then recorded under it.
-        String itemName = itemFullName.substring(itemFullName.lastIndexOf('/') + 1);
-        Grant active = findActiveCreateGrant(user, itemFullName, itemName);
+        int slash = itemFullName.lastIndexOf('/');
+        String itemName = itemFullName.substring(slash + 1);
+        // The Create lookup takes the group the item was created in (D-65: FOLDER_ONLY).
+        String group = slash < 0 ? "" : itemFullName.substring(0, slash);
+        Grant active = findActiveCreateGrant(user, group, itemName);
         if (active == null) {
             return null;
         }
