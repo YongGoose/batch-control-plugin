@@ -335,6 +335,10 @@ authorise a run for someone who could not start the job themselves, the request
 detail page and the approver notification say so when the requester lacks
 `Item/Build` on the job, so the approver makes that decision knowingly. If you
 want only Build holders to be able to ask, assign `Request` only to them.
+A requester without `Item/Build` who posts to the job's `/build` endpoint from a
+script gets Jenkins' own 403 ("missing the Job/Build permission"), because core
+checks Build before Batch Control's gate runs; such users request runs through
+**Request Run** or the service API, not the build endpoint.
 
 ### 4. Configure jobs
 

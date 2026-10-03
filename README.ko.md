@@ -217,7 +217,10 @@ History 와 Change Records 는 실제로 존재했던 창과 그 아래에서 �
 의미가 그대로 적용되므로 `Item/Build`를 유지합니다. 스스로는 잡을 시작할 수 없는 사람의 실행도
 승인으로 인가될 수 있으므로, 요청자가 그 잡의 `Item/Build`를 갖고 있지 않으면 요청 상세 화면과
 결재자 알림에 그 사실이 표시됩니다. Build 보유자만 요청할 수 있게 하려면 `Request`를 그들에게만
-할당하십시오.
+할당하십시오. `Item/Build`가 없는 요청자가 스크립트로 잡의 `/build` 엔드포인트에 POST하면, 코어가
+Batch Control의 게이트보다 먼저 Build를 검사하므로 Jenkins 자신의 403("missing the Job/Build
+permission")을 받습니다. 이런 사용자는 build 엔드포인트가 아니라 **Request Run**이나 서비스 API로
+실행을 요청합니다.
 
 ### 4. 잡을 설정한다
 
