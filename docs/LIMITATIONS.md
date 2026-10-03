@@ -577,6 +577,19 @@ code does on purpose.
     to the same Request Run form, with any submitted parameter values filled
     in (D-60). Accepted by the owner (E2E-1 DEF-02).
 
+48. **Pre-filled parameter values travel in the URL.** When a refused build
+    submission leads to the Request Run form with the submitted values filled
+    in (D-60), the values of non-sensitive parameters are carried in the
+    redirect URL's query string. From there they can reach the browser
+    history, reverse-proxy and servlet container access logs, and the
+    `Referer` header of the next request. Password and other sensitive
+    parameters are never carried. Anything typed into a plain string or text
+    parameter is not sensitive in Jenkins' sense, so do not put secrets in
+    such parameters. Long values are not carried: a value over 2,000
+    characters is dropped, and so is the pre-fill when all the values
+    together exceed a total size limit; those fields then start at their
+    defaults and have to be entered again.
+
 ## Records from earlier releases and strategy changes
 
 42. **Approved runs recorded by an earlier release have no user.** A run
