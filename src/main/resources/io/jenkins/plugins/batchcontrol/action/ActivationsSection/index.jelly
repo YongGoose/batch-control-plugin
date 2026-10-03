@@ -1,7 +1,10 @@
 <?jelly escape-by-default='true'?>
-<!-- SPEC item 6a: the activation approval inbox and the activation requests the viewer may see
-     (P-09: requester, designated approvers, Manage). A job name links to the job only for a
-     viewer who holds Item/Read on it. D-38c: open to every user admitted to the root page. -->
+<!-- SPEC item 6a, D-66 (R4-8): the activation and hold requests the viewer may see (P-09:
+     requester, designated approvers, Manage) in the layout shared with the Grants and Run
+     Requests screens: pending (those awaiting the viewer's decision marked), active (the request
+     in effect for its job) and ended, each row linking to its detail page. A job name links to
+     the job only for a viewer who holds Item/Read on it. D-38c: open to every user admitted to
+     the root page. -->
 <j:jelly xmlns:bc="/io/jenkins/plugins/batchcontrol/tags" xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Activations" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
@@ -12,34 +15,6 @@
         take it out of service. Both take effect only once a designated approver approves them.
       </p>
 
-      <j:set var="inbox" value="${it.awaitingDecision}"/>
-      <j:if test="${!empty(inbox)}">
-        <h2>Awaiting Your Decision</h2>
-        <table class="jenkins-table jenkins-table--small">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Action</th>
-              <th>Job or folder</th>
-              <th>Requester</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            <j:forEach var="r" items="${inbox}">
-              <tr>
-                <td><a href="${r.id}/">${r.id}</a></td>
-                <td><strong>${it.actionLabel(r.action)}</strong></td>
-                <td>${r.jobFullName}</td>
-                <td>${r.requester}</td>
-                <td>${it.format(r.createdAt)}</td>
-              </tr>
-            </j:forEach>
-          </tbody>
-        </table>
-      </j:if>
-
-      <h2>Activation Requests</h2>
       <j:choose>
         <j:when test="${it.total == 0}">
           <!-- D-38c (backlog #87): the section opens for everyone admitted to the root, so the
@@ -52,47 +27,113 @@
           </div>
         </j:when>
         <j:otherwise>
-          <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Action</th>
-                <th>Job or folder</th>
-                <th>Requester</th>
-                <th>Approvers</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              <j:forEach var="r" items="${it.pageItems}">
-                <tr>
-                  <td><a href="${r.id}/">${r.id}</a></td>
-                  <td><strong>${it.actionLabel(r.action)}</strong></td>
-                  <td>
-                    <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
-                    <j:choose>
-                      <j:when test="${jobUrl != null}"><a href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
-                      <j:otherwise>${r.jobFullName}</j:otherwise>
-                    </j:choose>
-                  </td>
-                  <td>${r.requester}</td>
-                  <td>${it.join(r.approvers)}</td>
-                  <td>${r.status}</td>
-                  <td>${it.format(r.createdAt)}</td>
-                </tr>
-              </j:forEach>
-            </tbody>
-          </table>
-          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of activation requests">
-            <j:if test="${it.hasPrevious}">
-              <a class="jenkins-button" href="?page=${it.page - 1}">Newer</a>
-            </j:if>
-            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'request' : 'requests'})</span>
-            <j:if test="${it.hasNext}">
-              <a class="jenkins-button" href="?page=${it.page + 1}">Older</a>
-            </j:if>
-          </div>
+          <h2>Pending Requests</h2>
+          <j:choose>
+            <j:when test="${it.pendingTotal == 0}">
+              <p>No pending requests.</p>
+            </j:when>
+            <j:otherwise>
+              <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="pending">
+                <thead>
+                  <tr><th>ID</th><th>Action</th><th>Job or folder</th><th>Requester</th><th>Approvers</th><th>Created</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="r" items="${it.pendingItems}">
+                    <tr>
+                      <td style="white-space: nowrap;">
+                        <bc:idLink href="${r.id}/" value="${r.id}"/>
+                        <j:if test="${it.isAwaitingMyDecision(r)}">
+                          <div><small data-batch-control-awaiting="true">Awaiting your decision</small></div>
+                        </j:if>
+                      </td>
+                      <td><strong>${it.actionLabel(r.action)}</strong></td>
+                      <td>
+                        <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
+                        <j:choose>
+                          <j:when test="${jobUrl != null}"><a class="model-link" href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
+                          <j:otherwise>${r.jobFullName}</j:otherwise>
+                        </j:choose>
+                      </td>
+                      <td>${r.requester}</td>
+                      <td>${it.join(r.approvers)}</td>
+                      <td>${it.format(r.createdAt)}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+              <bc:pager param="pendingPage" page="${it.pendingPage}" total="${it.pendingTotal}"
+                        hasPrevious="${it.hasPendingPrevious}" hasNext="${it.hasPendingNext}" label="pending requests" singular="request" plural="requests"/>
+            </j:otherwise>
+          </j:choose>
+
+          <h2 class="jenkins-!-margin-top-3">Active</h2>
+          <j:choose>
+            <j:when test="${it.activeTotal == 0}">
+              <p>No approved request is in effect.</p>
+            </j:when>
+            <j:otherwise>
+              <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="active">
+                <thead>
+                  <tr><th>ID</th><th>Action</th><th>Job or folder</th><th>Requester</th><th>Approved by</th><th>Approved</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="r" items="${it.activeItems}">
+                    <tr>
+                      <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
+                      <td><strong>${it.actionLabel(r.action)}</strong></td>
+                      <td>
+                        <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
+                        <j:choose>
+                          <j:when test="${jobUrl != null}"><a class="model-link" href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
+                          <j:otherwise>${r.jobFullName}</j:otherwise>
+                        </j:choose>
+                      </td>
+                      <td>${r.requester}</td>
+                      <td>${r.decidedBy}</td>
+                      <td>${it.format(r.decidedAt)}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+              <bc:pager param="activePage" page="${it.activePage}" total="${it.activeTotal}"
+                        hasPrevious="${it.hasActivePrevious}" hasNext="${it.hasActiveNext}" label="requests in effect" singular="request" plural="requests"/>
+            </j:otherwise>
+          </j:choose>
+
+          <h2 class="jenkins-!-margin-top-3">Ended</h2>
+          <j:choose>
+            <j:when test="${it.endedTotal == 0}">
+              <p>No ended requests.</p>
+            </j:when>
+            <j:otherwise>
+              <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="ended">
+                <thead>
+                  <tr><th>ID</th><th>Action</th><th>Job or folder</th><th>Requester</th><th>Approvers</th><th>Status</th><th>Created</th></tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="r" items="${it.endedItems}">
+                    <tr>
+                      <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
+                      <td><strong>${it.actionLabel(r.action)}</strong></td>
+                      <td>
+                        <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
+                        <j:choose>
+                          <j:when test="${jobUrl != null}"><a class="model-link" href="${rootURL}/${jobUrl}">${r.jobFullName}</a></j:when>
+                          <j:otherwise>${r.jobFullName}</j:otherwise>
+                        </j:choose>
+                      </td>
+                      <td>${r.requester}</td>
+                      <td>${it.join(r.approvers)}</td>
+                      <td data-batch-control-status="${r.status}">${it.endedLabel(r)}</td>
+                      <td>${it.format(r.createdAt)}</td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+              <bc:pager param="endedPage" page="${it.endedPage}" total="${it.endedTotal}"
+                        hasPrevious="${it.hasEndedPrevious}" hasNext="${it.hasEndedNext}" label="ended requests" singular="request" plural="requests"/>
+            </j:otherwise>
+          </j:choose>
         </j:otherwise>
       </j:choose>
     </l:main-panel>

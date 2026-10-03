@@ -1,0 +1,13 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: the new grant request form for core's dialog (data-type="dialog-opener" with
+     data-dialog-url, or the classic sidebar entry of a job or folder). Only the form is rendered,
+     without the page layout, like core's Create User dialog; the dialog shows its first form and
+     posts it with the crumb header. Gated like the list page (GrantsSection#getTarget); the form
+     itself is shown only to a holder of BatchControl/RequestGrant. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
+  <st:setHeader name="X-Dialog-Title" value="Request Change Permission"/>
+  <l:ajax>
+    <j:set var="bcDialog" value="true"/>
+    <st:include page="_requestForm.jelly"/>
+  </l:ajax>
+</j:jelly>

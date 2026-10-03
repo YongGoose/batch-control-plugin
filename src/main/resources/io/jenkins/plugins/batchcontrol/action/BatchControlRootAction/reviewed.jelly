@@ -22,7 +22,7 @@
         </j:when>
         <j:otherwise>
           <div class="jenkins-alert jenkins-alert-success" role="status" data-batch-control-reviewed="true">
-            <a href="${rootURL}/${outcome.itemUrl}">${outcome.itemFullName}</a> was marked as
+            <a class="model-link" href="${rootURL}/${outcome.itemUrl}">${outcome.itemFullName}</a> was marked as
             reviewed and is no longer listed as changed under a permission window.
           </div>
           <j:choose>

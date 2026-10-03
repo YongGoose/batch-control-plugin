@@ -682,6 +682,13 @@ code does on purpose.
     while a later, shorter one may still fit. The form always opens; a field
     whose value was not carried starts at its default and has to be entered
     again.
+50. **The request dialogs on the new job page use a beta core API.** On the
+    new job page an action can open a dialog only through
+    `Action#getEvent()` returning `DialogEvent`, which core 2.568.x marks
+    `@Restricted(Beta)`; the plugin builds with `useBeta` for it (D-70). If a
+    later core release changes that API, the request dialogs on the new job
+    page may stop opening. The full request pages under `/batch-control/`
+    keep working either way.
 
 ## Out of scope by design
 

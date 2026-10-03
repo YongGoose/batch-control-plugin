@@ -42,6 +42,7 @@ Other profiles:
 | `compose.locale-th-utc.yml` | `docker compose -f docker-compose.yml -f compose.locale-th-utc.yml up -d jenkins`; back with `docker compose up -d jenkins` | JVM locale th_TH_TH and zone UTC (B18-02/03) |
 | `compose.ldap.yml` + `casc/profile-ldap.yaml` | `scripts/ldap-up.sh` (renders `out/ldap/bootstrap.ldif` from `ldap/bootstrap.ldif.template` with the `.env` passwords and starts `batch-control-e2e-ldap`), then Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-ldap.yaml`; back with `/var/jenkins_casc/jenkins.yaml` (or a restart), then `scripts/ldap-down.sh` | LDAP realm (ldap plugin) with group entries: `bc-admins`, `bc-requesters`, `bc-approvers`, `bc-configurers`, `bc-auditors`; users `admin`, `lrequester`, `lapprover-1/2`, `lconfigurer`, `lauditor`, `lnobody` with `<id>@ldap.e2e.local` addresses (e2e-05) |
 | `compose.prefix.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build`; back with `docker compose up -d jenkins` | Jenkins under the context path `/jenkins` (`http://localhost:8080/jenkins/`, Jenkins URL set through `BC_JENKINS_URL`) with the new job page experiment on for every user (`-Dnew-job-page.flag.defaultValue=true`; a user can still turn it off on `/me/experiments/`) (e2e-06) |
+| `compose.jdk25.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml -f compose.jdk25.yml up -d --build` | The same image built on `jenkins/jenkins:2.568.3-lts-jdk25` (Dockerfile `ARG JENKINS_TAG`), tagged `batch-control-e2e-jenkins:2.568.3-jdk25`; shares the JENKINS_HOME volume, so `down -v` first for a fresh home (e2e-11, R4-1) |
 
 The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
 import works, the README's permission names are right.
@@ -142,6 +143,22 @@ ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`,
 `r_role.py` (applies `casc/profile-role.yaml` through the CasC page and back), plus copies of
 `r6/move.py` and `r6/grants.py`. JCasC re-applies the matrix on every boot, so re-run
 `arrange.py` after a restart. `scripts/cli.sh` needs `BC_PREFIX=/jenkins` under `compose.prefix.yml`.
+
+## e2e-11 driver (`r11/`)
+
+Round E2E-6 (hosting review round 3, 2026-10-04). `r11/lib.py` is `r10/lib.py` with screenshots in
+`screenshots/run-11/` and logs in `r11/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
+`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py` and `r11/arrange.py` (users `classic`, the requester's
+permissions with the new job page turned off, and `fonly`, Read+Move+RequestGrant; `ops/a`, `ops/sub/b`, the
+multibranch `ops/mb`, the non-approval job `fast`). `seed_fast.py` queues 60 admin builds of `fast` for the
+dashboard bound. Scenarios: `s_dialogs.py [ADGH]` (grant and Request Run dialogs on the new UI, D-60, unknown ids),
+`s_rundlg_err.py`, `s_approve.py <run id> <grant id>`, `s_classic.py` (classic sidebar dialogs, folder-page dialog
+filing the FOLDER_ONLY window), `approve_api.py` / `grant_api.py` (arrangement over HTTP), `s_folder_only.py`,
+`s_folder_only_ui.py`, `move.py` (copy of `r10/move.py`), `s_revoke.py` / `s_revoke_holder.py`, `s_activation.py`,
+`s_pages.py`, `s_width.py`, `s_tabs.py` (turns `new-build-page.flag` on for admin and back), `s_modellink.py`,
+`s_lacks_build.py`, `s_newmenu.py`, `s_d38b.py`, `r_role.py` and `d59b.py` (both replace the matrix profile; re-run
+the arrange scripts afterwards), `s_dark_monitor.py`, and `j25.py` for the Java 25 smoke under `compose.jdk25.yml`.
+Diagnostics kept as evidence: `console_check.py`, `recon_overflow.py`, `probe_tick2.py`.
 
 ## e2e-10 driver (`r10/`)
 

@@ -1,0 +1,151 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: the new grant request form, shared by the form page (new.jelly) and core's dialog
+     (dialog.jelly; bcDialog is true there). Core's dialog shows only the first form of its
+     answer, so the prefill note and a refusal's messages are inside the form. A refused
+     submission (GrantsSection#doCreate, ui.FormErrors) comes back with each message next to its
+     field and the input kept; the action is absolute because the refusal is rendered at
+     .../grants/create. U-01: a prefill comes from the resolved model object, never from the raw
+     query string, and every value is escaped by the Jelly default. -->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
+  <j:set var="errors" value="${it.formErrors}"/>
+  <j:set var="renew" value="${it.renewSource}"/>
+  <j:set var="bcCanSubmit" value="false"/>
+  <f:form method="post" action="${rootURL}/batch-control/grants/create" name="createGrantRequest">
+    <j:if test="${bcDialog}">
+      <input type="hidden" name="dialog" value="true"/>
+    </j:if>
+    <j:choose>
+      <j:when test="${!it.canRequest}">
+        <div class="jenkins-alert jenkins-alert-warning" role="status">
+          You may not request permission windows: that needs <b>Batch Control/RequestGrant</b>.
+          Ask a Jenkins administrator for the permission.
+        </div>
+      </j:when>
+      <j:otherwise>
+        <j:if test="${it.prefilled and !errors.present}">
+          <p class="jenkins-description">
+            <j:choose>
+              <j:when test="${renew != null}">
+                Prefilled from ended grant ${renew.id} for <strong>${it.prefillScopeFullName}</strong>.
+                Check the actions and duration, say why you need it again, and check one or more
+                approvers.
+              </j:when>
+              <j:otherwise>
+                Prefilled for <strong>${it.prefillScopeFullName}</strong>. Check the actions you need,
+                say why, and check one or more approvers.
+              </j:otherwise>
+            </j:choose>
+          </p>
+        </j:if>
+        <bc:formError errors="${errors}"/>
+        <j:set var="scopeTypeValue" value="${errors.present ? errors.value('scopeType') : it.prefillScopeType}"/>
+        <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
+          <div class="jenkins-select">
+            <select name="scopeType" class="jenkins-select__input">
+              <option value="JOB" selected="${scopeTypeValue == 'JOB' ? 'true' : null}">Job (exact full name)</option>
+              <option value="FOLDER" selected="${scopeTypeValue == 'FOLDER' ? 'true' : null}">Folder and everything below</option>
+              <!-- D-65 (R4-15): the folder and the items directly in it, not nested folders. -->
+              <option value="FOLDER_ONLY" selected="${scopeTypeValue == 'FOLDER_ONLY' ? 'true' : null}">Folder only (not nested folders)</option>
+            </select>
+          </div>
+          <div class="jenkins-form-description">
+            Folder only covers the folder and the items directly in it: new items can be created
+            only directly in the folder, and a nested folder cannot be deleted.
+          </div>
+          <bc:fieldError errors="${errors}" field="scopeType"/>
+        </f:entry>
+        <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
+          <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
+                 value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"/>
+          <bc:fieldError errors="${errors}" field="scopeFullName"/>
+        </f:entry>
+        <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
+          <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
+               GrantsSection#doCreate reads with getParameterValues("actions"). -->
+          <div class="jenkins-!-margin-bottom-1">
+            <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"
+                        checked="${errors.present ? errors.checked('actions', 'CREATE') : it.isPrefillAction('CREATE')}"/>
+          </div>
+          <div class="jenkins-!-margin-bottom-1">
+            <f:checkbox name="actions" value="CONFIGURE" id="grant-action-configure" title="Configure"
+                        checked="${errors.present ? errors.checked('actions', 'CONFIGURE') : it.isPrefillAction('CONFIGURE')}"/>
+          </div>
+          <div>
+            <f:checkbox name="actions" value="DELETE" id="grant-action-delete" title="Delete"
+                        checked="${errors.present ? errors.checked('actions', 'DELETE') : it.isPrefillAction('DELETE')}"/>
+          </div>
+          <bc:fieldError errors="${errors}" field="actions"/>
+        </f:entry>
+        <!-- D-40: optional, CREATE only. Length-bounded here and in GrantsSection#doCreate;
+             syntax is validated by the service at submission. -->
+        <f:entry title="New job name restriction (Create only)"
+                 description="Optional. An exact job name, or a regular expression between slashes that must match the whole name."
+                 help="/plugin/batch-control/help/grant-create-name-pattern.html">
+          <input type="text" name="createNamePattern" class="jenkins-input"
+                 placeholder="nightly-report or /report-[0-9]+/"
+                 maxlength="${it.createNamePatternMaxLength}"
+                 value="${errors.present ? errors.value('createNamePattern') : it.prefillCreateNamePattern}"/>
+          <bc:fieldError errors="${errors}" field="createNamePattern"/>
+        </f:entry>
+        <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
+          <div class="jenkins-select">
+            <select name="durationMinutes" class="jenkins-select__input">
+              <j:forEach var="d" items="${it.durationOptions}">
+                <j:set var="durationSelected" value="${errors.present ? errors.value('durationMinutes') == d.toString() : it.isPrefillDuration(d)}"/>
+                <option value="${d}" selected="${durationSelected ? 'true' : null}">${it.minutesLabel(d)}</option>
+              </j:forEach>
+            </select>
+          </div>
+          <bc:fieldError errors="${errors}" field="durationMinutes"/>
+        </f:entry>
+        <f:entry title="Custom duration (minutes)"
+                 description="Optional. Overrides the preset above when set. Maximum: ${it.maxGrantMinutes} minutes.">
+          <input type="number" name="customDurationMinutes" class="jenkins-input"
+                 min="1" max="${it.maxGrantMinutes}" step="1" value="${errors.value('customDurationMinutes')}"/>
+          <bc:fieldError errors="${errors}" field="customDurationMinutes"/>
+        </f:entry>
+        <f:entry title="Reason" help="/plugin/batch-control/help/grant-reason.html">
+          <f:textarea name="reason" value="${errors.value('reason')}"/>
+          <bc:fieldError errors="${errors}" field="reason"/>
+        </f:entry>
+        <j:choose>
+          <j:when test="${empty(it.approverOptions)}">
+            <div class="jenkins-alert jenkins-alert-warning">
+              No approvers are configured. Ask an administrator to add approvers in the
+              Batch Control global configuration before requesting a grant.
+            </div>
+          </j:when>
+          <j:otherwise>
+            <!-- D-37: repeated "approvers" fields, one user id per checked box. -->
+            <f:entry title="Approvers" description="Any one of the checked approvers may decide."
+                     help="/plugin/batch-control/help/approvers.html">
+              <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
+              <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
+                <div class="jenkins-!-margin-bottom-1">
+                  <f:checkbox name="approvers" value="${a}" id="grant-approver-${s.index}"
+                              title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
+                </div>
+              </j:forEach>
+              <bc:fieldError errors="${errors}" field="approvers"/>
+            </f:entry>
+            <j:set var="bcCanSubmit" value="true"/>
+          </j:otherwise>
+        </j:choose>
+      </j:otherwise>
+    </j:choose>
+    <f:bottomButtonBar>
+      <j:if test="${bcCanSubmit}">
+        <f:submit value="Request Grant"/>
+      </j:if>
+      <j:choose>
+        <j:when test="${bcDialog}">
+          <!-- Core's dialog closes itself on a button with data-id="cancel". -->
+          <button type="button" class="jenkins-button" data-id="cancel">Cancel</button>
+        </j:when>
+        <j:otherwise>
+          <a href="${rootURL}/batch-control/grants/" class="jenkins-button">Cancel</a>
+        </j:otherwise>
+      </j:choose>
+    </f:bottomButtonBar>
+  </f:form>
+</j:jelly>

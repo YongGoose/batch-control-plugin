@@ -1,0 +1,23 @@
+<?jelly escape-by-default='true'?>
+<!-- e2e-11 DEF-05 (#89 after D-68): a request or window id in a list. A UUID (36 characters) is
+     shown cut to its first characters with an ellipsis, so the id column does not push a list
+     past 1280 px; the element still holds the whole id (copy, find in page, assistive technology)
+     and carries it as tooltip. Ids in the earlier, shorter format are shown whole. The link goes
+     to the full-id URL. Escaped by default. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <st:documentation>
+    An id, linked when href is given.
+    <st:attribute name="value" use="required">The full id.</st:attribute>
+    <st:attribute name="href">Link target; plain text without it.</st:attribute>
+  </st:documentation>
+  <j:set var="bcIdLong" value="${attrs.value != null and attrs.value.length() gt 22}"/>
+  <j:set var="bcIdStyle" value="${bcIdLong ? 'display: inline-block; max-width: 9ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;' : null}"/>
+  <j:choose>
+    <j:when test="${attrs.href != null}">
+      <a href="${attrs.href}" style="${bcIdStyle}" title="${bcIdLong ? attrs.value : null}" data-batch-control-id="${attrs.value}">${attrs.value}</a>
+    </j:when>
+    <j:otherwise>
+      <span style="${bcIdStyle}" title="${bcIdLong ? attrs.value : null}" data-batch-control-id="${attrs.value}">${attrs.value}</span>
+    </j:otherwise>
+  </j:choose>
+</j:jelly>

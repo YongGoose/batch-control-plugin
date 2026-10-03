@@ -4,6 +4,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -22,8 +23,10 @@ import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerResponse2;
 
 /**
- * The run request list at {@code /batch-control/requests/} (newest first, pages of
- * {@value #PAGE_SIZE} selected with {@code ?page=N}).
+ * The run request lists at {@code /batch-control/requests/} (D-66): pending requests (oldest
+ * first), active ones (approved, run not started) and ended ones (newest first), each in pages of
+ * {@value #PAGE_SIZE} selected with {@code ?pendingPage=N}, {@code ?activePage=N} and
+ * {@code ?endedPage=N}.
  *
  * <p>No state transition logic lives here; everything is delegated to
  * {@link RunRequestService}. Viewing requires one of the plugin permissions (requesters need to
@@ -38,6 +41,9 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     /** Lazily computed, per-request cached sorted snapshot. */
     private List<RunRequest> sorted;
+
+    /** Per-request cache of the pending, active and ended lists (D-66). */
+    private List<List<RunRequest>> lists;
 
     @Override
     public Object getTarget() {
@@ -90,28 +96,74 @@ public class RequestsSection implements ModelObject, StaplerProxy {
         return new RequestItem(request);
     }
 
-    // ---------------------------------------------------------------- paging (used from Jelly)
+    // ------------------------------------------- the three lists (D-66, used from Jelly)
 
-    /** Current 1-based page, from the {@code page} query parameter ({@link Paging}). */
-    public int getPage() {
-        return Paging.currentPage();
+    /** Pending requests on the current page, oldest first (closest to its timeout on top). */
+    public List<RunRequest> getPendingItems() {
+        return Paging.slice(lists().get(0), getPendingPage());
     }
 
-    /** The requests shown on the current page, newest first. */
-    public List<RunRequest> getPageItems() {
-        return Paging.slice(allSorted(), getPage());
+    public int getPendingPage() {
+        return Paging.currentPage("pendingPage");
     }
 
+    public int getPendingTotal() {
+        return lists().get(0).size();
+    }
+
+    public boolean isHasPendingPrevious() {
+        return Paging.hasPrevious(getPendingPage());
+    }
+
+    public boolean isHasPendingNext() {
+        return Paging.hasNext(getPendingPage(), getPendingTotal());
+    }
+
+    /** Approved requests whose run has not started yet, on the current page, newest first. */
+    public List<RunRequest> getActiveItems() {
+        return Paging.slice(lists().get(1), getActivePage());
+    }
+
+    public int getActivePage() {
+        return Paging.currentPage("activePage");
+    }
+
+    public int getActiveTotal() {
+        return lists().get(1).size();
+    }
+
+    public boolean isHasActivePrevious() {
+        return Paging.hasPrevious(getActivePage());
+    }
+
+    public boolean isHasActiveNext() {
+        return Paging.hasNext(getActivePage(), getActiveTotal());
+    }
+
+    /** Executed, rejected, cancelled, expired and invalidated requests, newest first. */
+    public List<RunRequest> getEndedItems() {
+        return Paging.slice(lists().get(2), getEndedPage());
+    }
+
+    public int getEndedPage() {
+        return Paging.currentPage("endedPage");
+    }
+
+    public int getEndedTotal() {
+        return lists().get(2).size();
+    }
+
+    public boolean isHasEndedPrevious() {
+        return Paging.hasPrevious(getEndedPage());
+    }
+
+    public boolean isHasEndedNext() {
+        return Paging.hasNext(getEndedPage(), getEndedTotal());
+    }
+
+    /** Every visible request, for the overall count. */
     public int getTotal() {
         return allSorted().size();
-    }
-
-    public boolean isHasPrevious() {
-        return Paging.hasPrevious(getPage());
-    }
-
-    public boolean isHasNext() {
-        return Paging.hasNext(getPage(), getTotal());
     }
 
     /** Jelly helper: an approver set for display ({@code a1, a2}). */
@@ -140,5 +192,28 @@ public class RequestsSection implements ModelObject, StaplerProxy {
             sorted = all;
         }
         return sorted;
+    }
+
+    /**
+     * D-66: pending, active (approved, run not started) and ended, each request in one list.
+     */
+    private List<List<RunRequest>> lists() {
+        if (lists == null) {
+            List<RunRequest> pending = new ArrayList<>();
+            List<RunRequest> active = new ArrayList<>();
+            List<RunRequest> ended = new ArrayList<>();
+            for (RunRequest request : allSorted()) {
+                if (request.getStatus() == RequestStatus.PENDING) {
+                    pending.add(request);
+                } else if (request.getStatus() == RequestStatus.APPROVED) {
+                    active.add(request);
+                } else {
+                    ended.add(request);
+                }
+            }
+            java.util.Collections.reverse(pending);
+            lists = List.of(pending, active, ended);
+        }
+        return lists;
     }
 }

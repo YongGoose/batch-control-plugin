@@ -409,8 +409,8 @@ an active window, the history of expired ones and a link to request another.
 **Activations** lists activation and hold requests, with the ones awaiting your
 decision at the top, and is where the approver decides them; the request itself
 starts from the **Request activation** link in the notice on the job's page.
-**Dashboard** (titled *Run Dashboard* on the page itself) lists every build in
-the instance with its
+**Dashboard** (titled *Run Dashboard* on the page itself) lists the 50 most
+recent builds in the instance, with a link to **History** for older ones, each with its
 cause (`USER`, `TIMER`, `UPSTREAM`, `APPROVED_REQUEST`, `SCM`, `OTHER`), user,
 parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,

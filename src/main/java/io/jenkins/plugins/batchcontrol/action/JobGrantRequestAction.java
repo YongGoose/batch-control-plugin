@@ -7,7 +7,10 @@ import hudson.model.Item;
 import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import jenkins.model.Jenkins;
+import jenkins.model.menu.event.DialogEvent;
+import jenkins.model.menu.event.Event;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -115,7 +118,26 @@ public class JobGrantRequestAction implements Action {
      */
     @Override
     public String getUrlName() {
-        return toRoot(job) + "batch-control/grants/?scopeFullName=" + Util.rawEncode(job.getFullName());
+        // D-66: the full-page form (the Grants list no longer starts with it).
+        return toRoot(job) + "batch-control/grants/new?scopeFullName=" + Util.rawEncode(job.getFullName());
+    }
+
+    /**
+     * D-66: root-relative URL of the dialog form, prefilled for this job (one query parameter, see
+     * {@link #getUrlName()}). The classic sidebar entry ({@code action.jelly}) opens it in core's
+     * dialog.
+     */
+    public String getDialogUrl() {
+        return "batch-control/grants/dialog?scopeFullName=" + Util.rawEncode(job.getFullName());
+    }
+
+    /**
+     * D-66: on the new job page the entry opens the dialog form, as core's own "Build with
+     * Parameters" does ({@link DialogEvent}); the URL is relative to the job's URL.
+     */
+    @Override
+    public Event getEvent() {
+        return DialogEvent.of(toRoot(job) + getDialogUrl());
     }
 
     /**
@@ -123,12 +145,6 @@ public class JobGrantRequestAction implements Action {
      * to the Jenkins root (which carries the context path, if any).
      */
     static String toRoot(Job<?, ?> job) {
-        StringBuilder up = new StringBuilder();
-        for (String segment : job.getUrl().split("/")) {
-            if (!segment.isEmpty()) {
-                up.append("../");
-            }
-        }
-        return up.toString();
+        return Dialogs.toRoot(job.getUrl());
     }
 }

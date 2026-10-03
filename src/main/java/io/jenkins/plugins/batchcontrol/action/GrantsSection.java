@@ -21,6 +21,7 @@ import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
+import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
@@ -50,11 +51,14 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *
  * <p>URL space (fixed contract, asserted by tests):
  * <ul>
- *   <li>{@code /batch-control/grants/} — grant request list + active grant list + new request
- *       form (served from {@code index.jelly}; PUT/DELETE/PATCH get 405)</li>
+ *   <li>{@code /batch-control/grants/} — pending requests, active and ended windows (served from
+ *       {@code index.jelly}; PUT/DELETE/PATCH get 405). D-66: no form here; the old prefill
+ *       links ({@code ?scopeFullName=}, {@code ?from=}) are redirected to {@code new}</li>
+ *   <li>{@code /batch-control/grants/new} — the new request form as a page;
+ *       {@code /batch-control/grants/dialog} — the same form for core's dialog (D-66)</li>
  *   <li>{@code POST /batch-control/grants/create} — submit a new grant request</li>
  *   <li>{@code /batch-control/grants/<id>/} — request detail; POST {@code approve} /
- *       {@code reject} / {@code cancel} (see {@link GrantRequestItem})</li>
+ *       {@code reject} / {@code cancel} / {@code revoke} (see {@link GrantRequestItem})</li>
  *   <li>{@code POST /batch-control/grants/active/<grantId>/revoke} — revoke an active grant
  *       (see {@link ActiveGrantsSection})</li>
  * </ul>
@@ -98,14 +102,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             + "System. Nothing has been deleted from the audit trail: windows that existed, and "
             + "the changes made under them, are still on the Change Records and History screens.";
 
-    /** Lazily computed, per-request cached sorted snapshot of grant requests. */
-    private List<GrantRequest> sortedRequests;
-
-    /** Lazily computed, per-request cached sorted snapshot of active grants. */
-    private List<Grant> sortedActive;
-
-    /** Lazily computed, per-request cached sorted snapshot of ended grants (D-33). */
-    private List<Grant> sortedPast;
+    /** Per-request cache of the pending, active and ended lists (D-66). */
+    private Lists lists;
 
     /** Per-request cache of every stored grant by id. */
     private Map<String, Grant> grantsById;
@@ -261,7 +259,34 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                         "scope", "scopeFullName");
             }
         }
-        errors.render(req, rsp, this);
+        // D-66: a refusal is shown where the form was, in the dialog or on the form page.
+        errors.render(req, rsp, this, Dialogs.refusalView(req, "new.jelly"));
+    }
+
+    /**
+     * D-66: the query string to carry from an old prefill link of the list page
+     * ({@code /batch-control/grants/?scopeFullName=...} or {@code ?from=...}) to the form page,
+     * or {@code null} when the list page was opened without one. Only the prefill parameters are
+     * carried, each URL-encoded; the form page resolves them again before it shows anything.
+     */
+    @CheckForNull
+    public String getLegacyFormQuery() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null || (req.getParameter("scopeFullName") == null && req.getParameter("from") == null)) {
+            return null;
+        }
+        StringBuilder query = new StringBuilder();
+        for (String name : new String[] {"scopeType", "scopeFullName", "from", "actions"}) {
+            String[] values = req.getParameterValues(name);
+            if (values == null) {
+                continue;
+            }
+            for (String value : values) {
+                query.append(query.length() == 0 ? "" : "&").append(name).append('=')
+                        .append(java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+        return query.toString();
     }
 
     /** The refusal of the new-request form on this request, or an empty one (DEF-09, Jelly). */
@@ -281,7 +306,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             type = null;
         }
         if (type == null) {
-            errors.field("scopeType", "Choose Job or Folder.");
+            errors.field("scopeType", "Choose Job, Folder and everything below, or Folder only (not nested folders).");
         }
         String fullName = rawFullName == null ? "" : rawFullName.trim();
         if (fullName.isEmpty()) {
@@ -440,7 +465,26 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                 // Fall through to the default.
             }
         }
-        return GrantScope.Type.JOB.name();
+        // R4-14: opened from a folder (one query parameter, see JobGrantRequestAction#getUrlName):
+        // the resolved item tells a folder from a job.
+        return isPrefilledForFolder() ? GrantScope.Type.FOLDER.name() : GrantScope.Type.JOB.name();
+    }
+
+    /**
+     * Whether the form was opened for a folder ({@code ?scopeFullName=} resolves, as the viewer,
+     * to an item group that is not a job).
+     */
+    public boolean isPrefilledForFolder() {
+        if (getRenewSource() != null) {
+            return false;
+        }
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getParameter("scopeFullName");
+        if (raw == null || raw.trim().isEmpty()) {
+            return false;
+        }
+        Item item = Visibility.findVisibleItem(raw.trim());
+        return item instanceof hudson.model.ItemGroup && !(item instanceof hudson.model.Job);
     }
 
     /**
@@ -514,7 +558,9 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             }
             return false;
         }
-        return isPrefilled() && GrantAction.CONFIGURE.name().equals(action);
+        // R4-14: from a folder, Create (New Item) is the usual need; from a job, Configure.
+        GrantAction usual = isPrefilledForFolder() ? GrantAction.CREATE : GrantAction.CONFIGURE;
+        return isPrefilled() && usual.name().equals(action);
     }
 
     /** The renewed grant's CREATE name restriction, or empty. */
@@ -532,136 +578,138 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return source != null && minutesOf(source) == minutes;
     }
 
-    // ------------------------------------------------------- ended grants (D-33, DEF-18)
-
-    /** Current 1-based page of the ended-grant table, from {@code pastPage}. */
-    public int getPastPage() {
-        return Paging.currentPage("pastPage");
-    }
+    // ------------------------------------------------- the three lists (D-66, R4-8)
 
     /**
-     * The ended (expired or revoked) grants shown on the current page, most recently ended
-     * first. SPEC item 8 (D-33): the permission screen gives the history of expired windows and a
-     * re-request link. Same visibility as the active table (own grants, or all with Manage).
+     * One row of the Grants lists: a grant request and, once approved, its permission window
+     * (the window carries the request's id). D-66: every request is listed exactly once — pending,
+     * active (its window is open) or ended (its window ended, or it was never approved) — instead
+     * of a request table that repeated the window tables.
+     *
+     * <p>A window whose request is no longer stored is listed on its own, without a detail link.
      */
-    public List<Grant> getPastPageItems() {
-        return Paging.slice(allPastSorted(), getPastPage());
-    }
+    public static final class Row {
 
-    public int getPastTotal() {
-        return allPastSorted().size();
-    }
+        @CheckForNull
+        private final GrantRequest request;
 
-    public boolean isHasPastPrevious() {
-        return Paging.hasPrevious(getPastPage());
-    }
+        @CheckForNull
+        private final Grant grant;
 
-    public boolean isHasPastNext() {
-        return Paging.hasNext(getPastPage(), getPastTotal());
-    }
+        private final String id;
 
-    /**
-     * How a grant ended, in words: "Expired", "Revoked by admin", or for a revocation by the
-     * change control switch "Revoked (change control turned off) by admin" (#85).
-     */
-    public String endedLabel(Grant grant) {
-        if (grant.getRevokedAt() != null) {
-            // #85 (D-63): a mass revocation by the change control switch says so.
-            String why = grant.getRevokedReason() == null ? "" : " (" + grant.getRevokedReason() + ")";
-            return grant.getRevokedBy() == null ? "Revoked" + why : "Revoked" + why + " by " + grant.getRevokedBy();
+        private final GrantScope scope;
+
+        private final List<GrantAction> actions;
+
+        private final String user;
+
+        @CheckForNull
+        private final String createNamePattern;
+
+        /** A request, with its window once approved. */
+        Row(GrantRequest request, @CheckForNull Grant grant) {
+            this.request = request;
+            this.grant = grant;
+            this.id = request.getId();
+            this.scope = request.getScope();
+            this.actions = request.getActions();
+            this.user = grant != null ? grant.getUser() : request.getRequester();
+            this.createNamePattern = request.getCreateNamePattern();
         }
-        return "Expired";
-    }
 
-    /** When a grant ended: its revocation time, else its expiry. */
-    public Instant endedAt(Grant grant) {
-        return grant.getRevokedAt() != null ? grant.getRevokedAt() : grant.getExpiresAt();
-    }
-
-    /** Whether the re-request link is shown: the caller's own grant and may request windows. */
-    public boolean isCanRenew(Grant grant) {
-        return isCanRequest() && isOwn(grant);
-    }
-
-    /**
-     * Backlog #89: the window state of an approved request, without the status word
-     * ("window open, 2h left", "window revoked", "window expired"), or an empty string. The list
-     * shows it below the status so the status column stays narrow at 1280 px.
-     */
-    public String statusDetail(GrantRequest request) {
-        if (request.getStatus() != RequestStatus.APPROVED) {
-            return "";
+        /** A window whose request is no longer stored. */
+        Row(Grant grant) {
+            this.request = null;
+            this.grant = grant;
+            this.id = grant.getId();
+            this.scope = grant.getScope();
+            this.actions = grant.getActions();
+            this.user = grant.getUser();
+            this.createNamePattern = grant.getCreateNamePattern();
         }
-        Grant grant = grantsById().get(request.getId());
-        if (grant == null) {
-            return "";
+
+        public String getId() {
+            return id;
         }
-        if (grant.getRevokedAt() != null) {
-            return grant.getRevokedReason() == null ? "window revoked"
-                    : "window revoked (" + grant.getRevokedReason() + ")";
+
+        @CheckForNull
+        public GrantRequest getRequest() {
+            return request;
         }
-        return grant.isActiveAt(BatchClock.now())
-                ? "window open, " + Dates.until(grant.getExpiresAt()) + " left"
-                : "window expired";
-    }
 
-    /**
-     * The CREATE name restriction of a grant in words (DEF-19): the pattern, "any name" for an
-     * unrestricted CREATE, empty when the grant does not include CREATE.
-     */
-    public String createNameLabel(Grant grant) {
-        if (!grant.getActions().contains(GrantAction.CREATE)) {
-            return "";
+        @CheckForNull
+        public Grant getGrant() {
+            return grant;
         }
-        String pattern = grant.getCreateNamePattern();
-        return pattern == null ? "any name" : pattern;
+
+        /** Whether the row links to a detail page ({@code /batch-control/grants/<id>/}). */
+        public boolean isLinked() {
+            return request != null;
+        }
+
+        public GrantScope getScope() {
+            return scope;
+        }
+
+        public List<GrantAction> getActions() {
+            return actions;
+        }
+
+        /** The window holder, or the requester before there is a window. */
+        public String getUser() {
+            return user;
+        }
+
+        /** The request status name, or {@code null} for a window without a stored request. */
+        @CheckForNull
+        public String getStatus() {
+            return request == null ? null : String.valueOf(request.getStatus());
+        }
+
+        /** When the row was created: the request's creation, else the window's start. */
+        Instant createdAt() {
+            GrantRequest r = request;
+            if (r != null) {
+                return r.getCreatedAt();
+            }
+            Grant g = grant;
+            return g == null ? Instant.EPOCH : g.getGrantedAt();
+        }
     }
 
-    /** Jelly helper: comma-joined action list ("CREATE, CONFIGURE"). */
-    public String join(Collection<?> items) {
-        return items == null
-                ? ""
-                : items.stream().map(String::valueOf).collect(Collectors.joining(", "));
+    /** Pending grant requests on the current page, oldest first (closest to its timeout on top). */
+    public List<Row> getPendingItems() {
+        return Paging.slice(lists().pending, getPendingPage());
     }
 
-    // ---------------------------------------------------------------- paging: grant requests
-
-    /** Current 1-based page of the request table, from the {@code page} query parameter. */
-    public int getPage() {
-        return Paging.currentPage();
+    public int getPendingPage() {
+        return Paging.currentPage("pendingPage");
     }
 
-    /** The grant requests shown on the current page, newest first. */
-    public List<GrantRequest> getPageItems() {
-        return Paging.slice(allRequestsSorted(), getPage());
+    public int getPendingTotal() {
+        return lists().pending.size();
     }
 
-    public int getTotal() {
-        return allRequestsSorted().size();
+    public boolean isHasPendingPrevious() {
+        return Paging.hasPrevious(getPendingPage());
     }
 
-    public boolean isHasPrevious() {
-        return Paging.hasPrevious(getPage());
+    public boolean isHasPendingNext() {
+        return Paging.hasNext(getPendingPage(), getPendingTotal());
     }
 
-    public boolean isHasNext() {
-        return Paging.hasNext(getPage(), getTotal());
+    /** Open permission windows on the current page, most recently granted first. */
+    public List<Row> getActiveItems() {
+        return Paging.slice(lists().active, getActivePage());
     }
 
-    // ---------------------------------------------------------------- paging: active grants
-
-    /** Current 1-based page of the active grant table, from {@code activePage}. */
     public int getActivePage() {
         return Paging.currentPage("activePage");
     }
 
-    /** The active grants shown on the current page, newest first. */
-    public List<Grant> getActivePageItems() {
-        return Paging.slice(allActiveSorted(), getActivePage());
-    }
-
     public int getActiveTotal() {
-        return allActiveSorted().size();
+        return lists().active.size();
     }
 
     public boolean isHasActivePrevious() {
@@ -672,24 +720,161 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return Paging.hasNext(getActivePage(), getActiveTotal());
     }
 
+    /**
+     * Ended windows and requests that never became one (rejected, cancelled, expired), on the
+     * current page, most recently ended first. SPEC item 8 (D-33): the history of expired windows
+     * with a re-request link.
+     */
+    public List<Row> getEndedItems() {
+        return Paging.slice(lists().ended, getEndedPage());
+    }
+
+    public int getEndedPage() {
+        return Paging.currentPage("endedPage");
+    }
+
+    public int getEndedTotal() {
+        return lists().ended.size();
+    }
+
+    public boolean isHasEndedPrevious() {
+        return Paging.hasPrevious(getEndedPage());
+    }
+
+    public boolean isHasEndedNext() {
+        return Paging.hasNext(getEndedPage(), getEndedTotal());
+    }
+
+    /**
+     * How a grant ended, in words: "Expired", "Revoked by admin", or for a revocation by the
+     * change control switch "Revoked (change control turned off) by admin" (#85).
+     */
+    public String endedLabel(Grant grant) {
+        return GrantRequestItem.endedLabel(grant);
+    }
+
+    /** When a grant ended: its revocation time, else its expiry. */
+    public Instant endedAt(Grant grant) {
+        return grant.getRevokedAt() != null ? grant.getRevokedAt() : grant.getExpiresAt();
+    }
+
+    /** When a row ended: its window's end, else the request's decision (or creation). */
+    public Instant endedAt(Row row) {
+        Grant grant = row.grant;
+        if (grant != null) {
+            return endedAt(grant);
+        }
+        GrantRequest request = row.request;
+        if (request != null && request.getDecidedAt() != null) {
+            return request.getDecidedAt();
+        }
+        return row.createdAt();
+    }
+
+    /** How a row ended, in words: the window's end, else the request's outcome. */
+    public String howEnded(Row row) {
+        Grant grant = row.grant;
+        if (grant != null) {
+            return endedLabel(grant);
+        }
+        GrantRequest request = row.request;
+        if (request == null) {
+            return "";
+        }
+        RequestStatus status = request.getStatus();
+        String by = request.getDecidedBy() == null ? "" : " by " + request.getDecidedBy();
+        switch (status) {
+            case REJECTED:
+                return "Rejected" + by;
+            case CANCELLED:
+                return "Cancelled" + by;
+            case EXPIRED:
+                return "Expired without a decision";
+            case INVALIDATED:
+                return "Invalidated";
+            default:
+                return status.name().charAt(0) + status.name().substring(1).toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    /** Whether the re-request button is shown: the caller's own ended window, and may request. */
+    public boolean isCanRenew(Row row) {
+        Grant grant = row.grant;
+        return grant != null && isCanRequest() && isOwn(grant);
+    }
+
+    /**
+     * The CREATE name restriction of a row in words (DEF-19): the pattern, "any name" for an
+     * unrestricted CREATE, empty when the row does not include CREATE.
+     */
+    public String createNameLabel(Row row) {
+        if (!row.getActions().contains(GrantAction.CREATE)) {
+            return "";
+        }
+        return row.createNamePattern == null ? "any name" : row.createNamePattern;
+    }
+
+    /** Jelly helper: comma-joined action list ("CREATE, CONFIGURE"). */
+    public String join(Collection<?> items) {
+        return items == null
+                ? ""
+                : items.stream().map(String::valueOf).collect(Collectors.joining(", "));
+    }
+
     // ---------------------------------------------------------------- helpers
 
-    private List<GrantRequest> allRequestsSorted() {
-        if (sortedRequests == null) {
-            // P-09 visibility (S-01): only Manage, the requester or the designated approver see
-            // a grant request; paging runs over the filtered list. Same predicate as the detail.
-            List<GrantRequest> all = new ArrayList<>();
+    /** The three lists, computed once per rendering. */
+    private static final class Lists {
+        final List<Row> pending = new ArrayList<>();
+        final List<Row> active = new ArrayList<>();
+        final List<Row> ended = new ArrayList<>();
+    }
+
+    private Lists lists() {
+        if (lists == null) {
+            Instant now = BatchClock.now();
+            Map<String, Grant> grants = grantsById();
+            Lists built = new Lists();
+            java.util.Set<String> listed = new java.util.HashSet<>();
+            // P-09 visibility (S-01): only Manage, the requester or a designated approver see a
+            // grant request (the same predicate as its detail page); paging runs over the filtered
+            // lists.
             for (GrantRequest request : GrantRequestService.get().list()) {
-                if (Visibility.canSeeGrantRequest(request)) {
-                    all.add(request);
+                if (!Visibility.canSeeGrantRequest(request)) {
+                    continue;
+                }
+                Grant grant = grants.get(request.getId());
+                listed.add(request.getId());
+                Grant window = request.getStatus() == RequestStatus.APPROVED ? grant : null;
+                Row row = new Row(request, window);
+                if (request.getStatus() == RequestStatus.PENDING) {
+                    built.pending.add(row);
+                } else if (window != null && window.isActiveAt(now)) {
+                    built.active.add(row);
+                } else {
+                    built.ended.add(row);
                 }
             }
-            all.sort(Comparator.comparing(GrantRequest::getCreatedAt)
-                    .thenComparing(GrantRequest::getId)
-                    .reversed());
-            sortedRequests = all;
+            // A window whose request is no longer stored: own windows, or all with Manage (who
+            // holds what where is recon data, S-01).
+            for (Grant grant : grants.values()) {
+                if (listed.contains(grant.getId()) || grant.getGrantedAt().isAfter(now)
+                        || !Visibility.canSeeGrant(grant)) {
+                    continue;
+                }
+                (grant.isActiveAt(now) ? built.active : built.ended).add(new Row(grant));
+            }
+            built.pending.sort(Comparator.comparing(Row::createdAt).thenComparing(Row::getId));
+            built.active.sort(Comparator.comparing(GrantsSection::grantedAt).thenComparing(Row::getId).reversed());
+            built.ended.sort(Comparator.comparing((Row r) -> endedAt(r)).thenComparing(Row::getId).reversed());
+            lists = built;
         }
-        return sortedRequests;
+        return lists;
+    }
+
+    private static Instant grantedAt(Row row) {
+        Grant grant = row.grant;
+        return grant == null ? row.createdAt() : grant.getGrantedAt();
     }
 
     private static boolean isOwn(Grant grant) {
@@ -710,39 +895,5 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             grantsById = byId;
         }
         return grantsById;
-    }
-
-    private List<Grant> allPastSorted() {
-        if (sortedPast == null) {
-            Instant now = BatchClock.now();
-            List<Grant> past = new ArrayList<>();
-            for (Grant grant : grantsById().values()) {
-                if (!grant.isActiveAt(now) && !grant.getGrantedAt().isAfter(now)
-                        && Visibility.canSeeGrant(grant)) {
-                    past.add(grant);
-                }
-            }
-            past.sort(Comparator.comparing(this::endedAt).thenComparing(Grant::getId).reversed());
-            sortedPast = past;
-        }
-        return sortedPast;
-    }
-
-    private List<Grant> allActiveSorted() {
-        if (sortedActive == null) {
-            // P-09 visibility (S-01): the active grant table shows only the caller's own grants
-            // unless the caller has Manage (who holds what where is recon data).
-            List<Grant> all = new ArrayList<>();
-            for (Grant grant : GrantService.get().listActive()) {
-                if (Visibility.canSeeGrant(grant)) {
-                    all.add(grant);
-                }
-            }
-            all.sort(Comparator.comparing(Grant::getGrantedAt)
-                    .thenComparing(Grant::getId)
-                    .reversed());
-            sortedActive = all;
-        }
-        return sortedActive;
     }
 }
