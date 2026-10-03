@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Items;
@@ -83,11 +84,15 @@ final class MoveGuard {
         boolean delete = item.hasPermission(Item.DELETE);
         boolean create = destination instanceof AccessControlled
                 && ((AccessControlled) destination).hasPermission(Item.CREATE);
-        if (delete && create) {
+        String destName = destination.getFullName();
+        // D-59b (role-strategy#751): a move creates the name in the destination, so the installed
+        // naming strategy must accept it there, as it would for a creation. Asked as the mover
+        // (this runs in the mover's own context), which is what role-strategy's strategy evaluates.
+        String namingRefusal = namingRefusal(destName, item.getName());
+        if (delete && create && namingRefusal == null) {
             return null;
         }
         String user = a.getName();
-        String destName = destination.getFullName();
         Grant restricting = create ? null : restrictingGrant(user, destName, item.getName());
         List<String> missing = new ArrayList<>();
         if (!delete) {
@@ -97,6 +102,10 @@ final class MoveGuard {
             missing.add("Item/Create on " + describe(destName));
         }
         String reason = missing.isEmpty() ? "" : "missing " + String.join(" and ", missing);
+        if (namingRefusal != null) {
+            reason = (reason.isEmpty() ? "" : reason + "; ") + "the project naming strategy does not allow the name '"
+                    + item.getName() + "' in " + describe(destName) + ": " + namingRefusal;
+        }
         if (restricting != null) {
             reason = (reason.isEmpty() ? "" : reason + "; ")
                     + "the name '" + item.getName() + "' is outside the name restriction '"
@@ -134,13 +143,22 @@ final class MoveGuard {
                     .append(CreateNamePattern.describe(restricting.getCreateNamePattern()))
                     .append(", which does not include '").append(item.getName()).append("'.");
         }
-        if (toRequest.size() == 1) {
+        if (namingRefusal != null) {
+            message.append(" The project naming strategy does not allow the name '").append(item.getName())
+                    .append("' in ").append(describe(destName)).append(": ").append(namingRefusal);
+            if (!namingRefusal.endsWith(".")) {
+                message.append('.');
+            }
+        }
+        if (toRequest.isEmpty()) {
+            message.append(" Ask an administrator");
+        } else if (toRequest.size() == 1) {
             message.append(" Request a permission window for ").append(toRequest.get(0));
         } else {
             message.append(" A permission window covers one job or folder, so request one window for ")
                     .append(toRequest.get(0)).append(" and another for ").append(toRequest.get(1));
         }
-        message.append(", or ask an administrator.");
+        message.append(toRequest.isEmpty() ? "." : ", or ask an administrator.");
         return new MoveRefusal(message.toString(), item.getFullName());
     }
 
@@ -214,6 +232,26 @@ final class MoveGuard {
             return null;
         }
         return check(item, destination);
+    }
+
+    /**
+     * D-59b: the installed project naming strategy's refusal of {@code name} in the group
+     * {@code parentFullName} ({@code ""} for the Jenkins root) for the current user, or
+     * {@code null} when it accepts the name. The default strategy accepts every name. A strategy
+     * that fails unexpectedly refuses (the move would otherwise bypass it).
+     */
+    @CheckForNull
+    private static String namingRefusal(String parentFullName, String name) {
+        try {
+            Jenkins.get().getProjectNamingStrategy().checkName(parentFullName, name);
+            return null;
+        } catch (Failure f) {
+            String msg = f.getMessage();
+            return msg == null || msg.isBlank() ? "the name is not allowed" : msg;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "The project naming strategy failed while checking a move", e);
+            return "the naming strategy could not check the name";
+        }
     }
 
     /** The group named by the {@code destination} parameter ({@code /} or {@code /a/b}), if visible. */
