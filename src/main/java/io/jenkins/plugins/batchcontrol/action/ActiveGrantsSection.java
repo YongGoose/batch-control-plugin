@@ -2,11 +2,13 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import jenkins.model.Jenkins;
+import jenkins.security.stapler.StaplerAccessibleType;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -20,22 +22,23 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *
  * <p>The whole subtree sits behind the {@link GrantsSection#getTarget()} permission gate; the
  * revoke endpoint additionally requires {@code Manage} (SPEC item 8).
+ *
+ * <p>{@link StaplerAccessibleType}: without a web method of its own (the former {@code doIndex}
+ * is now an {@code index.jelly}), Jenkins' routing filter would not let
+ * {@link GrantsSection#getActive()} return this type, and the revoke URLs below would answer 404.
  */
 @Restricted(NoExternalUse.class)
+@StaplerAccessibleType
 public class ActiveGrantsSection {
 
     /**
-     * Serves the bare {@code /batch-control/grants/active/} URL: nothing to show here, so a GET
-     * is redirected to the grants index. Every other verb is refused with 405 (no state change
-     * on this URL).
+     * The bare {@code /batch-control/grants/active/} URL has nothing to show: its
+     * {@code index.jelly} redirects to the grants index (hosting review: no {@code doIndex}).
+     * Permissions for that view: the Grants screen's ({@link SectionAccess#grants()}), which the
+     * parent gate {@link GrantsSection#getTarget()} has already enforced.
      */
-    // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
-    @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
-        if (HttpVerbs.refuseNonGet(req, rsp)) {
-            return;
-        }
-        rsp.sendRedirect2("..");
+    public Permission[] getViewPermissions() {
+        return SectionAccess.grants();
     }
 
     /**
@@ -61,17 +64,12 @@ public class ActiveGrantsSection {
         }
 
         /**
-         * Serves a GET of {@code /batch-control/grants/active/<grantId>/}: there is no detail
-         * view for a single grant, so redirect to the grants index. GET never changes state; the
-         * only state change in this subtree is the {@code @RequirePOST} revoke endpoint below.
+         * A GET of {@code /batch-control/grants/active/<grantId>/} has no detail view: its
+         * {@code index.jelly} redirects to the grants index (hosting review: no {@code doIndex}).
+         * The only state change in this subtree is the {@code @RequirePOST} revoke endpoint below.
          */
-        // Read-only GET view; permission enforced in parent section's getTarget(), non-GET is 405.
-        @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
-        public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
-            if (HttpVerbs.refuseNonGet(req, rsp)) {
-                return;
-            }
-            rsp.sendRedirect2("../..");
+        public Permission[] getViewPermissions() {
+            return SectionAccess.grants();
         }
 
         /**
