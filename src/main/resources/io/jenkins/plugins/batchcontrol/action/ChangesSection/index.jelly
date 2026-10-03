@@ -64,7 +64,7 @@
                     <j:choose>
                       <!-- Linked only for a user who may open the Grants screen (SPEC item 2). -->
                       <j:when test="${r.grantId != null and grantLinks and links.grant(r.grantId)}">
-                        <a href="${rootURL}/batch-control/grants/${r.grantId}/">${r.grantId}</a>
+                        <bc:idLink href="${rootURL}/batch-control/grants/${r.grantId}/" value="${r.grantId}"/>
                       </j:when>
                       <j:when test="${r.grantId != null}">${r.grantId}</j:when>
                       <j:otherwise>

@@ -26,7 +26,7 @@
             <tbody>
               <j:forEach var="r" items="${it.pendingItems}">
                 <tr>
-                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
                   <td>${r.jobFullName}</td>
                   <td>${r.requester}</td>
                   <td>${it.join(r.approvers)}</td>
@@ -53,7 +53,7 @@
             <tbody>
               <j:forEach var="r" items="${it.activeItems}">
                 <tr>
-                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
                   <td>${r.jobFullName}</td>
                   <td>${r.requester}</td>
                   <td>${r.decidedBy}</td>
@@ -80,7 +80,7 @@
             <tbody>
               <j:forEach var="r" items="${it.endedItems}">
                 <tr>
-                  <td><a href="${r.id}/">${r.id}</a></td>
+                  <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
                   <td>${r.jobFullName}</td>
                   <td>${r.requester}</td>
                   <td>${it.join(r.approvers)}</td>

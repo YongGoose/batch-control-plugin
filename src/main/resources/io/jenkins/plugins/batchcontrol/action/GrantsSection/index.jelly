@@ -52,7 +52,7 @@
             <tbody>
               <j:forEach var="r" items="${it.pendingItems}">
                 <tr>
-                  <td style="white-space: nowrap;"><a href="${base}${r.id}/">${r.id}</a></td>
+                  <td style="white-space: nowrap;"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></td>
                   <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
                   <td style="white-space: nowrap;">${it.join(r.actions)}</td>
                   <td style="white-space: nowrap;">${r.request.durationMinutes} min</td>
@@ -100,8 +100,8 @@
                 <tr>
                   <td style="white-space: nowrap;">
                     <j:choose>
-                      <j:when test="${r.linked}"><a href="${base}${r.id}/">${r.id}</a></j:when>
-                      <j:otherwise>${r.id}</j:otherwise>
+                      <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
+                      <j:otherwise><bc:idLink id="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${g.user}</td>
@@ -157,8 +157,8 @@
                 <tr>
                   <td style="white-space: nowrap;">
                     <j:choose>
-                      <j:when test="${r.linked}"><a href="${base}${r.id}/">${r.id}</a></j:when>
-                      <j:otherwise>${r.id}</j:otherwise>
+                      <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
+                      <j:otherwise><bc:idLink id="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${r.user}</td>

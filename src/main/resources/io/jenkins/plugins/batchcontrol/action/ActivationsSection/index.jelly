@@ -41,7 +41,7 @@
                   <j:forEach var="r" items="${it.pendingItems}">
                     <tr>
                       <td style="white-space: nowrap;">
-                        <a href="${r.id}/">${r.id}</a>
+                        <bc:idLink href="${r.id}/" value="${r.id}"/>
                         <j:if test="${it.isAwaitingMyDecision(r)}">
                           <div><small data-batch-control-awaiting="true">Awaiting your decision</small></div>
                         </j:if>
@@ -79,7 +79,7 @@
                 <tbody>
                   <j:forEach var="r" items="${it.activeItems}">
                     <tr>
-                      <td><a href="${r.id}/">${r.id}</a></td>
+                      <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
                       <td><strong>${it.actionLabel(r.action)}</strong></td>
                       <td>
                         <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
@@ -113,7 +113,7 @@
                 <tbody>
                   <j:forEach var="r" items="${it.endedItems}">
                     <tr>
-                      <td><a href="${r.id}/">${r.id}</a></td>
+                      <td><bc:idLink href="${r.id}/" value="${r.id}"/></td>
                       <td><strong>${it.actionLabel(r.action)}</strong></td>
                       <td>
                         <j:set var="jobUrl" value="${it.jobUrl(r)}"/>
