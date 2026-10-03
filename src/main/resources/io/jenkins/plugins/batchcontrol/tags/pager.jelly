@@ -1,0 +1,25 @@
+<?jelly escape-by-default='true'?>
+<!-- D-66: the Newer/Older links below one of the Pending, Active and Ended lists, 50 rows a page
+     (ui.Paging). Each list pages with its own query parameter. Numbers and constants only. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  <st:documentation>
+    Paging links of one list.
+    <st:attribute name="param" use="required">Query parameter of this list's page.</st:attribute>
+    <st:attribute name="page" use="required">Current 1-based page.</st:attribute>
+    <st:attribute name="total" use="required">Number of rows in the list.</st:attribute>
+    <st:attribute name="hasPrevious" use="required">Whether a newer page exists.</st:attribute>
+    <st:attribute name="hasNext" use="required">Whether an older page exists.</st:attribute>
+    <st:attribute name="label" use="required">Accessible name of the list, for example "pending requests".</st:attribute>
+  </st:documentation>
+  <j:if test="${attrs.hasPrevious or attrs.hasNext}">
+    <div class="jenkins-buttons-row jenkins-!-margin-top-1" role="navigation" aria-label="Pages of ${attrs.label}">
+      <j:if test="${attrs.hasPrevious}">
+        <a class="jenkins-button" href="?${attrs.param}=${attrs.page - 1}">Previous</a>
+      </j:if>
+      <span>Page ${attrs.page} (${attrs.total} ${attrs.label})</span>
+      <j:if test="${attrs.hasNext}">
+        <a class="jenkins-button" href="?${attrs.param}=${attrs.page + 1}">Next</a>
+      </j:if>
+    </div>
+  </j:if>
+</j:jelly>
