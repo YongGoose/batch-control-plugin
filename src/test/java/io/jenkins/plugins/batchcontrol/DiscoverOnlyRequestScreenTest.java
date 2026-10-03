@@ -114,20 +114,18 @@ public class DiscoverOnlyRequestScreenTest {
         j.waitUntilNoActivity();
 
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
-        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
-                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
-                // b: the caller of this finding. No Item/Read anywhere by default.
-                .grant(Jenkins.READ, BatchControlPermissions.REQUEST,
-                        BatchControlPermissions.VIEW_HISTORY).everywhere().to("b")
-                .grant(Item.DISCOVER).onItems(jobJ).to("b")
-                .grant(Item.DISCOVER).onItems(folder).to("b")
-                .grant(Item.READ).onItems(jobK).to("b")
-                // D-38 (#24): filing a run request needs Item/Build as the requester
-                .grant(Item.BUILD).onItems(jobJ, jobK).to("b")
-                .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST) // D-38 (#24): requesters need Item/Build
-                        .everywhere().to("u1")
-                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
-                        .everywhere().to("a1"));
+        j.jenkins.setAuthorizationStrategy(strategy(false));
+
+        // Guard (SPEC item 5, D-38a): a run request needs Item/Read on the job, so b, holding
+        // Request but not Item/Read on secret-j, cannot file one now. The rows below measure
+        // requests b filed while b could still read the job (see requestAs).
+        int stored = RunRequestService.get().list().size();
+        try (ACLContext ignored = as("b")) {
+            assertThrows(AccessDeniedException.class,
+                    () -> RunRequestService.get().create(jobJ, new LinkedHashMap<>(), "no read", "a1"),
+                    "guard: a requester without Item/Read on the job must be refused (D-38a)");
+        }
+        assertEquals(stored, RunRequestService.get().list().size(), "guard: the refused request must not be stored");
 
         // The premise of the whole finding, asserted rather than assumed: b may learn that
         // secret-j exists and may not read it, and core signals that by throwing.
@@ -422,15 +420,15 @@ public class DiscoverOnlyRequestScreenTest {
                 + "/following-sibling::table[1]/tbody/tr").size(), "the transition history must hold the opening transition");
 
         // Coordinator ruling (e2e-03 part 2, SPEC section 6 usability line and DEF-12 / T-05-19):
-        // b holds no Item/Read or Item/Build on secret-j, so a rerun request of it can never be
-        // submitted (D-38) and the rerun form must not be offered at all. This replaces the former
+        // b holds no Item/Read on secret-j, so a rerun request of it can never be submitted
+        // (D-38a requires Item/Read) and the rerun form must not be offered at all. This replaces the former
         // expectation that the rerun form's approver dropdown renders for b; the S-16 symptom (a
         // blank screen) is still covered by the field assertions above.
         List<String> rerunForms = page.getForms().stream()
                 .map(f -> f.getActionAttribute())
                 .filter(action -> action != null && action.contains("rerun"))
                 .collect(Collectors.toList());
-        assertTrue(rerunForms.isEmpty(), "the rerun form must not be offered to a discover-only caller (no Item/Read, no Item/Build);"
+        assertTrue(rerunForms.isEmpty(), "the rerun form must not be offered to a discover-only caller (no Item/Read);"
                 + " rerun forms on the page: " + rerunForms);
         assertTrue(page.getAnchors().stream().noneMatch(a -> a.getHrefAttribute().contains("/rerun")),
                 "no rerun link may be offered to a discover-only caller");
@@ -477,10 +475,50 @@ public class DiscoverOnlyRequestScreenTest {
         return ACL.as2(User.getById(userId, true).impersonate2());
     }
 
+    /**
+     * Files a run request as {@code userId}. SPEC item 5 (D-38a) requires Item/Read on the job at
+     * filing time, so a request of b's against secret-j is filed while b still holds Item/Read on
+     * it, and the measured strategy (b discover-only on secret-j) is restored straight after: the
+     * screen rows measure a requester who has since lost Item/Read, which is the S-16 situation.
+     */
     private RunRequest requestAs(String userId, Job<?, ?> job, String reason) {
+        boolean lostReadLater = "b".equals(userId) && job == jobJ;
+        if (lostReadLater) {
+            j.jenkins.setAuthorizationStrategy(strategy(true));
+        }
         try (ACLContext ignored = as(userId)) {
             return RunRequestService.get().create(job, new LinkedHashMap<>(), reason, "a1");
+        } finally {
+            if (lostReadLater) {
+                j.jenkins.setAuthorizationStrategy(strategy(false));
+                try (ACLContext ignored = as("b")) {
+                    assertFalse(jobJ.hasPermission(Item.READ), "fixture: b is discover-only on secret-j again");
+                }
+            }
         }
+    }
+
+    /**
+     * The class's authorization: b holds Request and ViewHistory, Item/Read on open-k and only
+     * Item/Discover on secret-j (unless {@code bReadsSecretJ}, used while b files a request);
+     * u1 is a requester (Request, Item/Read); a1 the approver.
+     */
+    private MockAuthorizationStrategy strategy(boolean bReadsSecretJ) {
+        MockAuthorizationStrategy strategy = new MockAuthorizationStrategy()
+                .grant(Jenkins.ADMINISTER).everywhere().to("admin")
+                // b: the caller of this finding. No Item/Read anywhere by default.
+                .grant(Jenkins.READ, BatchControlPermissions.REQUEST,
+                        BatchControlPermissions.VIEW_HISTORY).everywhere().to("b")
+                .grant(Item.DISCOVER).onItems(jobJ).to("b")
+                .grant(Item.DISCOVER).onItems(folder).to("b")
+                .grant(Item.READ).onItems(jobK).to("b")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.REQUEST).everywhere().to("u1")
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
+                        .everywhere().to("a1");
+        if (bReadsSecretJ) {
+            strategy.grant(Item.READ).onItems(jobJ).to("b");
+        }
+        return strategy;
     }
 
     /** The request ids the list screen actually rendered as rows. */

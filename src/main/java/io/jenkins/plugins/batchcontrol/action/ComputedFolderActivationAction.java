@@ -6,13 +6,11 @@ import hudson.model.Action;
 import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
-import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.util.ArrayList;
 import java.util.List;
-import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerProxy;
@@ -82,8 +80,9 @@ public class ComputedFolderActivationAction implements Action, StaplerProxy {
         return folder.hasPermission(Item.READ) && JobActivationNoticeAction.isRunControlEnabled();
     }
 
+    /** D-38b: Request (and Item/Read) on this folder, the service's predicate. */
     public boolean isCanRequest() {
-        return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        return ActivationService.get().canRequest(folder);
     }
 
     public boolean isActivated() {

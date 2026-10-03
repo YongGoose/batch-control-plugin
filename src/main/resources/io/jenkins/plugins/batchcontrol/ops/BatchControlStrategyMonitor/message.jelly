@@ -2,34 +2,39 @@
 <!--
   D-35a (ARCHITECTURE section 4): change control is on, but the installed authorization
   strategy is not a Batch Control strategy, so active grants confer nothing. Covers an
-  instance that never migrated and a role-strategy Manage Roles save, which reinstalls the
-  plain class. This text and the migration control only show while it.strategyUnsupported.
-  The migration button itself only shows when the installed strategy is a plain matrix-auth
-  or role-strategy configuration this plugin can copy (it.migratable). When the installed
-  strategy is matrix-auth's global matrix, converting makes per-item authorization properties
-  effective again (D-35d (3), it.perItemWidening), so the control warns about that before the
-  migrate button.
+  instance that never migrated and a plain strategy installed on the global security page or
+  by JCasC (role-strategy 918+ keeps the installed Batch Control class on its own pages, D-35f).
+  This text and the migration control only show while it.strategyUnsupported.
+  The migration button only shows when the installed strategy is a plain matrix-auth or
+  role-strategy configuration this plugin can copy (it.migratable), to Administer holders.
+  When the installed strategy is matrix-auth's global matrix, converting makes per-item
+  authorization properties effective again (D-35d (3), it.perItemWidening): the warning is a
+  warning-styled paragraph, the first block of the monitor body, and the button (in the
+  controls slot) asks for confirmation through core's l:confirmationLink.
 
   D-35d (2): change control is on but no build authenticator is configured, so builds run as
   SYSTEM and can change authorization outside the self-grant guard (it.buildAuthenticatorMissing).
   This condition is independent of strategyUnsupported and shows in its own paragraph.
 -->
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <j:set var="controls">
-    <j:if test="${it.strategyUnsupported}">
-      <j:if test="${it.perItemWidening}">
-        <div>
-          Converting from the installed global matrix strategy makes per-item authorization
-          properties effective: any per-item authorization property already present on a
-          folder, job or agent will start granting the permissions it lists.
-        </div>
-      </j:if>
-      <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders. -->
-      <j:if test="${it.migratable and app.hasPermission(app.ADMINISTER)}">
-        <form method="post" action="${rootURL}/${it.url}/migrate">
-          <f:submit value="Install the Batch Control variant"/>
-        </form>
-      </j:if>
+    <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders.
+         When converting would make per-item properties effective, core's l:confirmationLink
+         (POST with the crumb added by core's script) asks for confirmation first. -->
+    <j:if test="${it.strategyUnsupported and it.migratable and app.hasPermission(app.ADMINISTER)}">
+      <j:choose>
+        <j:when test="${it.perItemWidening}">
+          <l:confirmationLink href="${rootURL}/${it.url}/migrate" post="true" class="jenkins-button"
+                              title="Install the Batch Control variant?"
+                              message="Per-item authorization properties on folders, jobs and agents become effective and start granting the permissions they list."
+                              okText="Install">Install the Batch Control variant</l:confirmationLink>
+        </j:when>
+        <j:otherwise>
+          <form method="post" action="${rootURL}/${it.url}/migrate">
+            <button type="submit" class="jenkins-button">Install the Batch Control variant</button>
+          </form>
+        </j:otherwise>
+      </j:choose>
     </j:if>
   </j:set>
   <l:adminMonitor severity="warning" controls="${controls}">
@@ -38,6 +43,16 @@
          margin utility, tracked in "gap" since each block is conditional. -->
     <j:set var="gap" value=""/>
     <j:if test="${it.strategyUnsupported}">
+      <j:if test="${it.perItemWidening}">
+        <!-- e2e-06 DEF-04: no icon of its own, the alert already shows the monitor's icon. -->
+        <div class="jenkins-!-warning-color">
+          <strong>Before you install:</strong> converting from the installed global matrix
+          strategy makes per-item authorization properties effective. Any per-item authorization
+          property already present on a folder, job or agent will start granting the permissions
+          it lists. Check those properties first.
+        </div>
+        <j:set var="gap" value="jenkins-!-margin-top-2"/>
+      </j:if>
       <div class="${gap}">
         <strong>Batch Control:</strong> change control is enabled, but the installed authorization
         strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
@@ -116,10 +131,15 @@
                     </j:forEach>
                   </ul>
                 </j:if>
-                <form method="post" action="${rootURL}/${it.url}/markReviewed" style="display: inline; margin-left: 0.5rem;">
-                  <input type="hidden" name="item" value="${name}"/>
-                  <button type="submit" class="jenkins-button jenkins-button--tertiary">Mark as reviewed</button>
-                </form>
+                <!-- e2e-06 DEF-04: not a form, core floats every form in a monitor body to the
+                     right edge. core's l:confirmationLink POSTs (crumb added by core's script)
+                     with the item as the single query parameter doMarkReviewed reads. A plain
+                     jenkins-button: a tertiary one reads as plain text inside the alert. -->
+                <l:confirmationLink href="${rootURL}/${it.url}/markReviewed?item=${h.urlEncode(name)}" post="true"
+                                    class="jenkins-button jenkins-!-margin-left-1"
+                                    title="Mark ${name} as reviewed?"
+                                    message="Changes that widen its authorization are no longer undone."
+                                    okText="Mark as reviewed">Mark as reviewed</l:confirmationLink>
               </j:when>
               <j:otherwise><code>${name}</code></j:otherwise>
             </j:choose>

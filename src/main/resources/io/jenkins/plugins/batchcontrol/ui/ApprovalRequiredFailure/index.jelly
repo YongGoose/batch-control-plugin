@@ -4,6 +4,10 @@
      #isCanRequest); anyone else is told whom to ask, never shown a URL that answers 404.
      Only the job name and constant text are rendered; no script.
      e2e re-audit DEF-28: no "Back to" link; the breadcrumb bar leads back (hosting review).
+     D-60: a requester's refused parameterized build is redirected to the request form and never
+     sees this page. The <form> below has no action and no controls and is never submitted: the
+     parameters dialog of the new job page shows the first form of the response in place, so the
+     refusal appears in the dialog instead of the dialog re-opening core's classic build form.
      Hosting review 2026-10-02: the alert's first block is not wrapped in a p (a p adds padding on
      top); later blocks are divs spaced with the core margin utility. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
@@ -11,26 +15,28 @@
     <l:main-panel>
       <l:app-bar title="Approval required"/>
       <j:set var="job" value="${it.job}"/>
-      <div class="jenkins-alert jenkins-alert-warning" role="alert">
-        <strong>This build was not started.</strong>
-        Job <strong>${it.jobFullName}</strong> only runs through an approved Batch Control
-        run request.
-        <j:choose>
-          <j:when test="${it.canRequest}">
-            <div class="jenkins-!-margin-top-2">
-              <a href="${rootURL}/${job.url}batch-control/">Request Run</a> to submit a request
-              with a reason and the parameters; the build starts automatically once it is approved.
-            </div>
-          </j:when>
-          <j:otherwise>
-            <div class="jenkins-!-margin-top-2">
-              You may not submit run requests for this job (that needs Batch Control/Request and
-              Job/Build on it). Ask a user who may, an approver or a Jenkins administrator to
-              request this run for you.
-            </div>
-          </j:otherwise>
-        </j:choose>
-      </div>
+      <form class="batch-control-refusal">
+        <div class="jenkins-alert jenkins-alert-warning" role="alert">
+          <strong>This build was not started.</strong>
+          Job <strong>${it.jobFullName}</strong> only runs through an approved Batch Control
+          run request.
+          <j:choose>
+            <j:when test="${it.canRequest}">
+              <div class="jenkins-!-margin-top-2">
+                <a href="${rootURL}/${job.url}batch-control/">Request Run</a> to submit a request
+                with a reason and the parameters; the build starts automatically once it is approved.
+              </div>
+            </j:when>
+            <j:otherwise>
+              <div class="jenkins-!-margin-top-2">
+                You may not submit run requests for this job (that needs Batch Control/Request and
+                Job/Read on it). Ask a user who may, an approver or a Jenkins administrator to
+                request this run for you.
+              </div>
+            </j:otherwise>
+          </j:choose>
+        </div>
+      </form>
     </l:main-panel>
   </l:layout>
 </j:jelly>

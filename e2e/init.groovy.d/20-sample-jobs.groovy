@@ -90,8 +90,12 @@ def workflow = { parent, String name, String description, String script ->
     return job
 }
 
-def matrixProperty = { Map<String, List<String>> userPermissions, boolean blockInheritance ->
-    def propClass = uber.loadClass('hudson.security.AuthorizationMatrixProperty')
+// forFolder: folders take matrix-auth's folder property class, jobs the job one
+// (Folder.addProperty does not accept the job property).
+def matrixProperty = { Map<String, List<String>> userPermissions, boolean blockInheritance, boolean forFolder = false ->
+    def propClass = uber.loadClass(forFolder
+            ? 'com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty'
+            : 'hudson.security.AuthorizationMatrixProperty')
     def entryClass = uber.loadClass('org.jenkinsci.plugins.matrixauth.PermissionEntry')
     def typeClass = uber.loadClass('org.jenkinsci.plugins.matrixauth.AuthorizationType')
     def prop = propClass.getConstructor(List).newInstance([])
@@ -239,7 +243,7 @@ if (jenkins.getItemByFullName('team') == null) {
     def folder = jenkins.createProject(folderClass, 'team')
     folder.setDescription('Sample folder (folder scope, per-item authorization).')
     // approver-disc: Discover only below team/ (checklist 1.2, #26).
-    folder.addProperty(matrixProperty(['approver-disc': ['hudson.model.Item.Discover']], false))
+    folder.addProperty(matrixProperty(['approver-disc': ['hudson.model.Item.Discover']], false, true))
     folder.save()
     def app = folder.createProject(FreeStyleProject, 'app-1')
     app.getBuildersList().add(new Shell('echo app-1'))

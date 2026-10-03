@@ -8,6 +8,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -88,16 +89,50 @@ public final class SectionAccess {
         return false;
     }
 
+    // ---------------------------------------------------------------- D-38b: own requests
+
+    /**
+     * D-38b: whether the current user may open the Run Requests screen: one of
+     * {@link #requests()} on Jenkins, or run requests of their own to see (Request held only on
+     * some jobs or folders). The own-requests test is the service's index lookup, never a scan of
+     * all items.
+     */
+    public static boolean canOpenRequests() {
+        return hasAny(requests())
+                || RunRequestService.get().hasOwnRequests(Jenkins.getAuthentication2());
+    }
+
+    /** D-38b: as {@link #canOpenRequests()}, for the Activations screen. */
+    public static boolean canOpenActivations() {
+        return hasAny(activations())
+                || ActivationService.get().hasOwnRequests(Jenkins.getAuthentication2());
+    }
+
+    /** D-38b: whether the Batch Control root action exists for the current user. */
+    public static boolean canOpenRoot() {
+        return hasAny(anyPermission()) || canOpenRequests() || canOpenActivations();
+    }
+
+    /**
+     * The {@code l:layout} permissions of a screen whose gate admits a user through
+     * {@code hasOwn} as well as through {@code permissions}: {@code permissions} for a holder of
+     * one of them, and none (the gate has already admitted the user) for a user who is there
+     * only for requests of their own, whom the Jenkins-level check would refuse.
+     */
+    public static Permission[] viewPermissions(Permission[] permissions, boolean admitted) {
+        return admitted && !hasAny(permissions) ? new Permission[0] : permissions;
+    }
+
     // ---------------------------------------------------------------- link predicates (Jelly)
 
     /** Whether the Run Requests screen (and its detail pages) may be linked for this user. */
     public boolean isRequests() {
-        return hasAny(requests());
+        return canOpenRequests();
     }
 
     /** Whether the Activations screen (and its detail pages) may be linked for this user. */
     public boolean isActivations() {
-        return hasAny(activations());
+        return canOpenActivations();
     }
 
     /**

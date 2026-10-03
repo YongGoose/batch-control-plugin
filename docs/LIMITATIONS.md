@@ -58,25 +58,36 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 ## The authorization strategy
 
 8. **Batch Control's grants work with matrix-auth and role-strategy through
-    Batch Control's own strategy variants**, `Batch Control: Matrix-based
-    security` and `Batch Control: Role-Based Strategy`. Each is a subclass of
-    the corresponding upstream strategy, so the upstream's own per-item
-    configuration (folder, job and agent authorization properties, item and
-    agent roles, pattern-based naming) stays configurable and effective. Any
-    other authorization strategy is not a supported grant target: on upgrade
-    from an older release, a saved variant whose delegate was neither
-    matrix-auth nor role-strategy is unwrapped back to a plain instance of that
-    strategy, and grants stop conferring anything from that point. Selecting a
-    strategy that is not one of the two variants gets you run control and
-    recording only, with an administrative monitor saying so.
-9. **role-strategy's own "Manage Roles" and "Assign Roles" saves keep the
-    Batch Control variant in place**, tested against role-strategy 918: neither
-    save reinstalls the plain `RoleBasedAuthorizationStrategy`, so grants keep
-    conferring afterwards; an earlier assumption that they did is not reproduced
-    on this version (e2e-03 DD-09). The administrative monitor that detects a
-    swap and offers a one-click reinstall of the variant, carrying over every
-    role and assignment, stays in place as a safety net should a different
-    role-strategy release replace it another way.
+    Batch Control's own strategy variants**, `Batch Control: Project-based
+    Matrix Authorization Strategy` and `Batch Control: Role-Based Strategy`.
+    Each is a subclass of the corresponding upstream strategy, so the
+    upstream's own per-item configuration (folder, job and agent authorization
+    properties, item and agent roles, pattern-based naming) stays configurable
+    and effective. No other authorization strategy is a grant target, including
+    Jenkins' built-in global "Matrix-based security": selecting a strategy that
+    is not one of the two variants gets you run control and recording only,
+    with an administrative monitor saying so. See item 36 before converting
+    from the global matrix strategy.
+9. **role-strategy 918 or newer is required, and its "Manage Roles" and
+    "Assign Roles" saves keep the Batch Control variant in place.** Older
+    role-strategy releases, including 898, the version in the plugin BOM,
+    replace the variant with a plain `RoleBasedAuthorizationStrategy` on a
+    Manage Roles save, so open windows stop conferring. Batch Control
+    therefore declares 918.v91e5468d8db_2 as the minimum for its optional
+    role-strategy dependency, and Jenkins will not load it next to an older
+    role-strategy (D-35f). On 918 every save path of the role pages (adding
+    and removing roles and templates, Assign Roles) edits the installed
+    strategy in place. The administrative monitor stays, because an
+    administrator can still install a plain strategy on the Security page,
+    and it offers a one-click reinstall of the variant that keeps every role
+    and assignment. role-strategy's UI rework is still going on upstream (the
+    open pull request jenkinsci/role-strategy-plugin#766 redesigns Assign
+    Roles and adds a `checkSidName` descriptor endpoint), so a regression
+    test checks that every descriptor method role-strategy's pages call on
+    the installed strategy exists on the Batch Control descriptor and that
+    the save paths keep the variant. A role-strategy release that breaks the
+    integration fails Batch Control's build instead of reaching users
+    unnoticed.
 10. **Change control is permission-based, not save-based.** Jenkins offers no way
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no
@@ -87,6 +98,15 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
+46. **A `config.xml` that still names the removed generic wrapper stops
+    Jenkins at boot.** The class
+    `io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy`
+    no longer exists, and Jenkins core treats the authorization strategy as
+    critical, so a controller whose `$JENKINS_HOME/config.xml` still names it
+    does not start. Replace the `<authorizationStrategy>` element by hand or
+    set the strategy with JCasC. No released version of the plugin ever
+    contained that class, so only development and test instances can be
+    affected (D-35e).
 
 ## Automation and generated jobs
 
@@ -454,18 +474,21 @@ code does on purpose.
       record yet, builds run as anonymous, and the warning judges anonymous's
       permissions. Once that account exists, the warning reflects its
       permissions within the same five minutes.
-36. **A legacy wrapper around the global matrix strategy is unwrapped on
-    upgrade, not converted.** `GlobalMatrixAuthorizationStrategy` ignores
-    per-item ACLs, so converting it straight into the Batch Control matrix
-    strategy would make every stale job, folder and agent
-    `AuthorizationMatrixProperty` effective at once and let any native
-    Configure holder start editing item ACLs. Upgrading from an older release
-    therefore leaves the plain global matrix strategy installed. Moving to
-    **Batch Control: Matrix-based security** afterwards is a separate action
-    an administrator takes explicitly, with the **Install the Batch Control
+36. **Coming from the global matrix strategy, converting turns on per-item
+    permissions.** Converting from Jenkins' built-in global matrix strategy
+    (`GlobalMatrixAuthorizationStrategy`, "Matrix-based security") is not a
+    like-for-like swap. Grants need the project-matrix variant, **Batch
+    Control: Project-based Matrix Authorization Strategy**, and the global
+    matrix strategy ignores per-item authorization. Converting therefore makes
+    every job, folder and agent `AuthorizationMatrixProperty` already saved on
+    the instance effective at that moment, including stale ones nobody has
+    looked at since they stopped mattering, and from then on anyone who holds
+    `Item/Configure` on an item can edit that item's permissions. Review the
+    per-item properties before converting. The conversion is never
+    automatic: an administrator starts it with the **Install the Batch Control
     variant** button of the administrative monitor on Manage Jenkins (shown
-    while change control is on), which says plainly that per-item
-    properties become effective from that point.
+    while change control is on), and the monitor says the same thing before
+    the click.
 
 ## Notifications and computed folders
 
@@ -542,9 +565,10 @@ code does on purpose.
     recorded in the change history like a refused Replay. The rebuild
     plugin's **Rebuild** (a different link from a different plugin) is not
     among these: that plugin lets Batch Control hide it, so it does not
-    appear on such a job. A user who may see the job but not
-    build it is not offered the rerun form, and a rerun submitted anyway is
-    refused without creating a request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01).
+    appear on such a job. A user who may see the job but does not hold
+    `BatchControl/Request` on it is not offered the rerun form, and a rerun
+    submitted anyway is refused without creating a request; `Item/Build` is
+    not needed to request (e2e-03 DEF-12, DEF-16, DEF-25, DEF-01; D-38a).
 
     Jenkins' own build link has one more rough edge. On a job without
     parameters, clicking **Direct Build (needs approval)** submits in the
@@ -573,6 +597,71 @@ code does on purpose.
     plain strategy**, is recorded. Changing the authorization strategy
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
+
+## Moving items
+
+44. **While change control is on, moving an item needs `Item/Delete` on it.**
+    A move is treated as deleting the item at the source and creating it at
+    the destination, so a user without `Overall/Administer` needs `Item/Delete`
+    on the item and `Item/Create` on the destination, each standing or from an
+    active window (D-59). The cost: a non-administrator who holds `Item/Move`
+    and `Item/Create` standing but not `Item/Delete` can no longer move items
+    while change control is on, although plain Jenkins would let them. A
+    `DELETE` window on the item lets such a user move it, but the move then
+    costs what a delete and recreate would: while run control is also on, a
+    job moved by a non-administrator is no longer activated, gets the same
+    lock as a newly created job and is recorded as `HELD` naming the move, so
+    it does not run unattended until a new activation request is approved
+    (D-59a). Administrators' moves keep the job's state. The refused move
+    changes nothing and is recorded as a `GRANT_VIOLATION`. A user who holds
+    `Item/Delete` on two jobs can still swap them by moving them in and out
+    of a job-scoped window's name; such a user could already delete and
+    recreate them, and with run control on the swapped jobs arrive locked
+    and not activated, as recreated ones would. With change control off,
+    moves behave exactly as in Jenkins.
+
+    The rule governs the folders plugin's Move action, in the UI and over
+    REST, which use the same endpoint. Jenkins core offers no way to veto a
+    move, so a move made by another plugin that calls `Items.move` directly,
+    or by a third-party relocation handler ordered before Batch Control's,
+    is outside it. Core itself has no CLI move command, its renames stay
+    within the parent folder, and scripts need `Overall/Administer`, which
+    is exempt anyway.
+
+## The new job page and pre-filled requests
+
+45. **With the rebuild plugin installed and the new job page enabled, the
+    "More actions" menu of a freestyle-type job that has no completed build
+    fails to open**, because rebuild's **Rebuild Last** entry has no URL on
+    such a job. This affects every such job, controlled or not, until it has
+    a completed build; Pipeline jobs without builds open the menu normally.
+    On approval-required jobs the menu offers only **Rebuild Last** (the
+    rebuild plugin's **Rebuild** is hidden, see item 41); running it is
+    refused and recorded like any direct run.
+47. **On the new job page, core's build button comes first and green, and
+    Request Run second.** Core always places its own build button in the
+    first app-bar group with the build role and colours it green; plugins
+    cannot reorder or recolour it. On a job that requires approval Batch
+    Control relabels it **Direct Build (needs approval)**, so **Request Run**
+    appears after it, also green. For a user who may request a run, both lead
+    to the same Request Run form, with any submitted parameter values filled
+    in (D-60). Accepted by the owner (E2E-1 DEF-02).
+48. **Pre-filled parameter values travel in the URL.** When a refused build
+    submission leads to the Request Run form with the submitted values filled
+    in (D-60), the values of non-sensitive parameters are carried in the
+    redirect URL's query string. From there they can reach the browser
+    history, reverse-proxy and servlet container access logs, and the
+    `Referer` header of the next request. Password and other sensitive
+    parameters are never carried. Anything typed into a plain string or text
+    parameter is not sensitive in Jenkins' sense, so do not put secrets in
+    such parameters. Long values are not carried. A value is carried only if
+    it is at most 2,000 characters long, and the redirect's URL-encoded query
+    (including the `?`, the `&` separators and each `p.<name>=` prefix) is
+    capped at 4,000 characters: values are added in the order the parameters
+    are defined, and one that would push the query over the cap is left out,
+    while a later, shorter one may still fit. The form always opens; a field
+    whose value was not carried starts at its default and has to be entered
+    again.
 
 ## Out of scope by design
 

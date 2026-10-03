@@ -42,6 +42,7 @@ import jenkins.model.ParameterizedJobMixIn;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 
 /**
  * The single entry point for every {@link RunRequest} state transition (SPEC items 3, 5, 7;
@@ -91,6 +92,37 @@ public final class RunRequestService {
         return store.listRunRequests();
     }
 
+    /**
+     * D-38b: whether {@code auth} filed at least one run request, in any status. The requester
+     * always sees their own requests (P-09), so this tells the web layer that a user without
+     * Jenkins-level {@code BatchControl/Request} still has something to see in the run requests
+     * section. Answered from the store's in-memory index; no item is visited.
+     */
+    public boolean hasOwnRequests(Authentication auth) {
+        if (auth == null || ACL.isAnonymous2(auth)) {
+            return false;
+        }
+        return store.hasRunRequestBy(auth.getName());
+    }
+
+    /**
+     * D-38b: whether the current user may cancel {@code request}: its requester holding
+     * {@code BatchControl/Request} on the job, or a Manage holder. Permission only; the PENDING
+     * status is checked by {@link #cancel(String)}.
+     */
+    public boolean canCancel(RunRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName())
+                || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
+    }
+
+    /**
+     * D-38b: whether the current user may change the approvers of {@code request}: its requester
+     * holding {@code BatchControl/Request} on the job. Permission only.
+     */
+    public boolean canChangeApprovers(RunRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName());
+    }
+
     // ---------------------------------------------------------------- creation (SPEC 5, D-22)
 
     /**
@@ -119,13 +151,63 @@ public final class RunRequestService {
 
     /**
      * Whether the current user could submit a run request for {@code job} (e2e-03 DEF-12, SPEC
-     * section 6 usability): {@code BatchControl/Request}, {@code Item/Read} and {@code Item/Build}
-     * on the job, the permission checks of {@link #create} (D-38). Screens use it to show the
-     * Request Run entry and form only to such a user; {@link #create} still checks for real.
+     * section 6 usability): {@code BatchControl/Request} and {@code Item/Read} on the job (D-38a), the
+     * permission checks of {@link #create}. {@code Item/Build} is not required (D-38a). Screens
+     * use it to show the Request Run entry and form only to such a user; {@link #create} still
+     * checks for real.
      */
     public boolean canRequest(Job<?, ?> job) {
-        return job != null && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST)
-                && job.hasPermission(Item.READ) && job.hasPermission(Item.BUILD);
+        return job != null && job.hasPermission(BatchControlPermissions.REQUEST)
+                && job.hasPermission(Item.READ);
+    }
+
+    /**
+     * D-38a: the sentence the request detail page and the approver notification show when the
+     * requester does not hold {@code Item/Build} on the request's job.
+     */
+    public static final String REQUESTER_LACKS_BUILD_NOTICE =
+            "The requester does not have Build permission on this job.";
+
+    /**
+     * D-38a (SPEC item 6): whether the <em>requester</em> of {@code request} (not the current user)
+     * lacks {@code Item/Build} on the request's job, so an approval also authorises a run the
+     * requester could not start. {@code true} also when that cannot be confirmed because the
+     * requester's account no longer resolves; {@code false} when the requester holds it, or when
+     * the job does not exist or is not visible to the current user (who then cannot see the
+     * request's job either). Read only. Evaluated as the current user, with no switch to
+     * {@code ACL.SYSTEM2}: the job is looked up with the caller's own Read, and the requester's
+     * permission is asked of the job's ACL with the requester's impersonated authentication,
+     * which needs no elevation.
+     */
+    public boolean requesterLacksBuild(RunRequest request) {
+        if (request == null || request.getJobFullName() == null) {
+            return false;
+        }
+        Job<?, ?> job;
+        try {
+            job = Jenkins.get().getItemByFullName(request.getJobFullName(), Job.class);
+        } catch (org.springframework.security.access.AccessDeniedException e) {
+            return false; // discoverable but not readable
+        }
+        if (job == null) {
+            return false;
+        }
+        String requester = request.getRequester();
+        org.springframework.security.core.Authentication current = Jenkins.getAuthentication2();
+        if (requester != null && requester.equals(current.getName())) {
+            return !job.hasPermission(Item.BUILD);
+        }
+        hudson.model.User user = requester == null ? null : hudson.model.User.getById(requester, false);
+        if (user == null) {
+            return true;
+        }
+        try {
+            return !job.getACL().hasPermission2(user.impersonate2(), Item.BUILD);
+        } catch (RuntimeException e) {
+            // UsernameNotFoundException and realm failures: the permission cannot be confirmed.
+            LOGGER.log(java.util.logging.Level.FINE, "Cannot evaluate Item/Build for requester " + requester, e);
+            return true;
+        }
     }
 
     /**
@@ -150,11 +232,13 @@ public final class RunRequestService {
                              List<String> approvers, String incidentId) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
-        // D-38 (#24): a request only adds an approval on top of what the requester could already
-        // do, so the requester must be able to build the job. Checked before anything is stored;
-        // AccessDeniedException3 answers 403 on the web layer.
-        job.checkPermission(Item.BUILD);
+        // D-38a: Request is asked of the requested job (a grant on another job or folder does not
+        // count; a global grant is inherited).
+        job.checkPermission(BatchControlPermissions.REQUEST);
+        // D-38a: Item/Read on the job, not Item/Build. Request decides who may ask; the approver
+        // sees when the requester lacks Build (requesterLacksBuild). Checked before anything is
+        // stored; AccessDeniedException3 answers 403 on the web layer.
+        job.checkPermission(Item.READ);
         String requester = Jenkins.getAuthentication2().getName();
 
         if (reason == null || reason.trim().isEmpty()) {
@@ -283,10 +367,9 @@ public final class RunRequestService {
         lock.lock();
         try {
             RunRequest request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())
-                    && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
-                throw new AccessDeniedException(
-                        "Only the requester or a Manage holder may cancel request " + id + ".");
+            if (!canCancel(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "or a Manage holder may cancel request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "
@@ -322,9 +405,9 @@ public final class RunRequestService {
         lock.lock();
         try {
             request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())) {
-                throw new AccessDeniedException(
-                        "Only the requester may change the approvers of request " + id + ".");
+            if (!canChangeApprovers(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "may change the approvers of request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "

@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Matrix rows T-UI-16 .. T-UI-18 — finding U-02: a controlled job showed <em>two</em> sidebar
+ * Matrix rows T-UI-16 .. T-UI-18 (T-UI-18 revised for D-60, note 188) — finding U-02: a controlled job showed <em>two</em> sidebar
  * entries both reading "Request Run", and the one a user was most likely to click was core's own
  * build link, whose href schedules a run with no approved marker and is refused (e2e-01 UX-1).
  *
@@ -67,6 +67,8 @@ public class JobRunSidebarEntryTest {
                 // so without it this class would measure an absent entry, not a renamed one.
                 .grant(Jenkins.READ, Item.READ, Item.BUILD, BatchControlPermissions.REQUEST)
                         .everywhere().to("u1")
+                // nobc: Item/Build without Batch Control permission, who may not request (D-60 twin)
+                .grant(Jenkins.READ, Item.READ, Item.BUILD).everywhere().to("nobc")
                 .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE)
                         .everywhere().to("a1"));
 
@@ -172,27 +174,81 @@ public class JobRunSidebarEntryTest {
      * its build link for every Item/Build holder and a plugin cannot remove it, so the renamed
      * entry stays (docs/LIMITATIONS.md). Under the SPEC section 6 usability line its click must be
      * refused with a plain-words explanation naming approval — no "Oops!", stack trace or bare
-     * "Access Denied" — and nothing may be queued. A parameterised job's click opens core's
-     * parameters form; the refusal is then the answer to submitting it.
+     * "Access Denied" — and nothing may be queued.
+     *
+     * <p>A parameterised job's click opens core's parameters form, and the answer to submitting it
+     * follows SPEC item 6's D-60 line: for the requester it is a 303 to the job's Request Run form
+     * carrying the typed value ({@code p.<NAME>}), which names approval, pre-fills the value and is
+     * not the classic build form; for a user who may not request (nobc) it is still a refusal
+     * (>= 400) naming approval. Nothing is queued in either case (note 188).
      */
     private void assertDirectBuildClickIsExplained(Job<?, ?> target, String absoluteHref) throws Exception {
         String relative = absoluteHref.substring(j.getURL().toExternalForm().length());
         int nextBuildNumber = target.getNextBuildNumber();
         int builds = target.getBuilds().size();
-        org.htmlunit.Page answer;
         if (target instanceof jenkins.model.ParameterizedJobMixIn.ParameterizedJob
                 && ((jenkins.model.ParameterizedJobMixIn.ParameterizedJob<?, ?>) target).isParameterized()) {
-            JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
-            HtmlPage form = (HtmlPage) wc.getPage(new java.net.URL(absoluteHref));
-            answer = j.submit(form.getFormByName("parameters"));
-        } else {
-            answer = PluginInteractionFixtures.post(j, "u1", relative);
+            assertParameterizedSubmissionLeadsToRequestForm(target, absoluteHref);
+            PluginInteractionFixtures.assertBlocked(j, target, nextBuildNumber, builds);
+
+            org.htmlunit.Page refused = submitParameters("nobc", absoluteHref, null, true);
+            assertTrue(refused.getWebResponse().getStatusCode() >= 400, target.getFullName() + ": a user who may not"
+                    + " request must still be refused, got HTTP " + refused.getWebResponse().getStatusCode());
+            UsabilityFixtures.assertPlainRefusal(target.getFullName() + ": the direct build click by nobc",
+                    UsabilityFixtures.text(refused), java.util.regex.Pattern.compile("(?i)approv"));
+            PluginInteractionFixtures.assertBlocked(j, target, nextBuildNumber, builds);
+            return;
         }
+        org.htmlunit.Page answer = PluginInteractionFixtures.post(j, "u1", relative);
         assertTrue(answer.getWebResponse().getStatusCode() >= 400, target.getFullName() + ": the direct build click must be refused, got HTTP "
                 + answer.getWebResponse().getStatusCode());
         UsabilityFixtures.assertPlainRefusal(target.getFullName() + ": the direct build click", UsabilityFixtures.text(answer),
                 java.util.regex.Pattern.compile("(?i)approv"));
         PluginInteractionFixtures.assertBlocked(j, target, nextBuildNumber, builds);
+    }
+
+    /** D-60: the requester's submission answers 303 to the pre-filled Request Run form. */
+    private void assertParameterizedSubmissionLeadsToRequestForm(Job<?, ?> target, String absoluteHref) throws Exception {
+        String typed = "2026-10-31";
+        org.htmlunit.Page answer = submitParameters("u1", absoluteHref, typed, false);
+        assertEquals(303, answer.getWebResponse().getStatusCode(), target.getFullName() + ": the requester's parameterised"
+                + " build submission must answer 303 to the Request Run form (D-60), got HTTP " + answer.getWebResponse().getStatusCode());
+        String location = answer.getWebResponse().getResponseHeaderValue("Location");
+        assertNotNull(location, target.getFullName() + ": the 303 must carry a Location");
+        java.net.URL to = new java.net.URL(answer.getUrl(), location);
+        assertEquals(new java.net.URL(j.getURL(), target.getUrl() + "batch-control/").getPath(), to.getPath(),
+                target.getFullName() + ": the redirect must lead to the job's Request Run form: " + location);
+        assertTrue(to.getQuery() != null && to.getQuery().contains("p.DATE=" + typed), target.getFullName()
+                + ": the redirect must carry the typed value: " + location);
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("u1");
+        org.htmlunit.Page landing = wc.getPage(to);
+        assertEquals(200, landing.getWebResponse().getStatusCode(), target.getFullName() + ": the Request Run form must open");
+        assertTrue(landing instanceof HtmlPage, target.getFullName() + ": the Request Run form must be HTML");
+        HtmlPage page = (HtmlPage) landing;
+        assertTrue(page.asNormalizedText().toLowerCase(java.util.Locale.ROOT).contains("approv"), target.getFullName()
+                + ": the landing page must tell the user that approval is needed: " + excerpt(page.asNormalizedText()));
+        assertFalse(UsabilityFixtures.formsEndingWith(page, target.getUrl() + "batch-control/submit").isEmpty(),
+                target.getFullName() + ": the landing page must carry the Request Run form; forms: " + UsabilityFixtures.formActions(page));
+        assertTrue(page.getForms().stream().noneMatch(f -> "parameters".equals(f.getNameAttribute())),
+                target.getFullName() + ": the classic build form must not be shown");
+        assertTrue(UsabilityFixtures.pageKeepsValue(page, typed), target.getFullName() + ": the typed value must be pre-filled");
+    }
+
+    /** Opens core's parameters form at {@code absoluteHref} and submits it, optionally typing into DATE. */
+    private org.htmlunit.Page submitParameters(String userId, String absoluteHref, String date, boolean followRedirects)
+            throws Exception {
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
+        HtmlPage formPage = (HtmlPage) wc.getPage(new java.net.URL(absoluteHref));
+        org.htmlunit.html.HtmlForm form = formPage.getFormByName("parameters");
+        if (date != null) {
+            List<org.htmlunit.html.HtmlInput> inputs = form.getByXPath(
+                    ".//*[@name='parameter'][.//input[@name='name' and @value='DATE']]//input[@name='value']");
+            assertEquals(1, inputs.size(), "fixture: one value input for DATE");
+            inputs.get(0).setValue(date);
+        }
+        wc.getOptions().setRedirectEnabled(followRedirects);
+        return j.submit(form);
     }
 
     // ---------------------------------------------------------------- helpers

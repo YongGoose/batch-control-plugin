@@ -56,9 +56,12 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * carries no grant scope anyway (S-13). With no active grant, or while change control is off, the
  * strategy behaves exactly like its parent.
  *
- * <p>Known limitation (D-35a, PoC-5 row 6): role-strategy's Manage Roles save always installs a
- * plain {@link RoleBasedAuthorizationStrategy}. Open grants then stop conferring (fail-safe), and
- * {@code ops.BatchControlStrategyMonitor} offers to reinstall this class.
+ * <p>D-35f: role-strategy 918 or later is required (pinned in the pom). From that version on, the
+ * Manage Roles, Assign Roles and permission template pages edit the installed strategy in place,
+ * so every save keeps this class; the reset to a plain {@link RoleBasedAuthorizationStrategy} that
+ * older versions' Manage Roles save performed (D-35a, PoC-5 row 6) no longer happens. Installing a
+ * plain strategy on the global security page still stops grants from conferring (fail-safe), and
+ * {@code ops.BatchControlStrategyMonitor} then offers to reinstall this class.
  *
  * <p>role-strategy is an optional dependency; the descriptor is an optional extension.
  */
@@ -113,8 +116,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
 
     /**
      * The Batch Control strategy with every role, assignment and permission template of a
-     * role-strategy strategy (migration, the withdrawn wrapper's load conversion, the converter
-     * and JCasC). Declared with a core parameter type so {@link RoleStrategies} can call it
+     * role-strategy strategy (migration, the converter and JCasC). Declared with a core parameter type so {@link RoleStrategies} can call it
      * without loading role-strategy classes first.
      */
     @NonNull
@@ -132,8 +134,10 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
      * <p>e2e-03 DEF-20: role-strategy's Manage Roles, Assign Roles and permission template pages
      * address the installed strategy's descriptor ({@code it.strategy.descriptor} in Jelly and
      * {@code /descriptor/<class>/check*} from JavaScript). Every such method of the parent's
-     * descriptor is therefore exposed here and delegates to it, so the pages behave exactly as
-     * under the plain strategy. The web methods keep the parent's {@code @RequirePOST}; they
+     * descriptor is therefore exposed here, so the pages behave exactly as under the plain
+     * strategy. Methods role-strategy restricts, or removes in its UI rework (PR #766:
+     * {@code checkName} replaced by {@code checkSidName}), are re-implemented
+     * ({@link RoleSidChecks}) instead of delegated. The web methods keep the parent's {@code @RequirePOST}; they
      * only validate or render and the parent performs its own permission checks.
      */
     @Extension(optional = true)
@@ -175,7 +179,7 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         }
 
         /*
-         * Jenkins Security Scan alerts 31-36: the three role-page checks below serve role-strategy's
+         * Jenkins Security Scan alerts 31-36: the role-page checks below serve role-strategy's
          * Manage Roles and Assign Roles pages, so they need what role-strategy requires to open those
          * pages (Overall/SystemRead or one of its role-administration permissions; Overall/Administer
          * implies them). The check is inline in each method so the scanner can see it.
@@ -187,7 +191,22 @@ public class BatchControlRoleBasedAuthorizationStrategy extends RoleBasedAuthori
         public FormValidation doCheckName(@QueryParameter String value) {
             Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
                     RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
-            return parent().doCheckName(value);
+            // Re-implemented (RoleSidChecks): role-strategy PR #766 removes the parent's method.
+            return RoleSidChecks.checkName(value);
+        }
+
+        /**
+         * Assign Roles (redesigned page, role-strategy PR #766): resolves the sid typed in the add
+         * dialog as a user or group ({@code type} {@code USER} or {@code GROUP}). Re-implemented
+         * because the method does not exist in the parent's descriptor of role-strategy 918.
+         */
+        // The check is the inline checkAnyPermission below; the scanner rule has a known bug and misses it.
+        @SuppressWarnings("lgtm[jenkins/no-permission-check]")
+        @RequirePOST
+        public FormValidation doCheckSidName(@QueryParameter String value, @QueryParameter String type) {
+            Jenkins.get().checkAnyPermission(Jenkins.SYSTEM_READ, RoleBasedAuthorizationStrategy.ITEM_ROLES_ADMIN,
+                    RoleBasedAuthorizationStrategy.AGENT_ROLES_ADMIN);
+            return RoleSidChecks.checkSidName(value, type);
         }
 
         /**
