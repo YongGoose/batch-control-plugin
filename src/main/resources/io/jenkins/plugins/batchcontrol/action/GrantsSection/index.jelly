@@ -155,15 +155,23 @@
             </thead>
             <tbody>
               <j:forEach var="r" items="${it.pageItems}">
+                <!-- Backlog #89: IDs, durations and the status word do not wrap at 1280 px; the
+                     window state goes below the status, and the reason column takes the rest. -->
                 <tr>
-                  <td><a href="${base}${r.id}/">${r.id}</a></td>
+                  <td style="white-space: nowrap;"><a href="${base}${r.id}/">${r.id}</a></td>
                   <td>${r.scope.type}: ${r.scope.fullName}</td>
                   <td>${it.join(r.actions)}</td>
-                  <td>${r.durationMinutes} min</td>
+                  <td style="white-space: nowrap;">${r.durationMinutes} min</td>
                   <td>${r.reason}</td>
                   <td>${r.requester}</td>
                   <td>${it.join(r.approvers)}</td>
-                  <td>${it.statusLabel(r)}</td>
+                  <td data-batch-control-status="${r.status}">
+                    <span style="white-space: nowrap;">${r.status}</span>
+                    <j:set var="statusDetail" value="${it.statusDetail(r)}"/>
+                    <j:if test="${!empty(statusDetail)}">
+                      <div style="white-space: nowrap;"><small>${statusDetail}</small></div>
+                    </j:if>
+                  </td>
                 </tr>
               </j:forEach>
             </tbody>
@@ -208,7 +216,7 @@
             <tbody>
               <j:forEach var="g" items="${it.activePageItems}">
                 <tr>
-                  <td>${g.id}</td>
+                  <td style="white-space: nowrap;">${g.id}</td>
                   <td>${g.user}</td>
                   <td>${g.scope.type}: ${g.scope.fullName}</td>
                   <td>${it.join(g.actions)}</td>
@@ -267,7 +275,7 @@
             <tbody>
               <j:forEach var="g" items="${it.pastPageItems}">
                 <tr>
-                  <td>${g.id}</td>
+                  <td style="white-space: nowrap;">${g.id}</td>
                   <td>${g.user}</td>
                   <td>${g.scope.type}: ${g.scope.fullName}</td>
                   <td>${it.join(g.actions)}</td>

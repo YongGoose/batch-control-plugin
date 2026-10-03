@@ -247,9 +247,12 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
         if (errors.isEmpty()) {
             try {
-                GrantRequestService.get().create(scope, actions, durationMinutes, reason, approvers,
-                        createNamePattern);
-                rsp.sendRedirect2(".");
+                GrantRequest created = GrantRequestService.get().create(scope, actions, durationMinutes,
+                        reason, approvers, createNamePattern);
+                // Backlog #89: land on the new request's detail page, like run and activation
+                // requests (the requester may always see their own request, P-09).
+                rsp.sendRedirect2(req.getContextPath() + "/batch-control/grants/"
+                        + Util.rawEncode(created.getId()) + "/");
                 return;
             } catch (IllegalArgumentException | IllegalStateException e) {
                 errors.fromService(e.getMessage(), "name restriction", "createNamePattern",
@@ -569,19 +572,30 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * (DEF-18: a 1-minute window was listed as APPROVED long after it expired).
      */
     public String statusLabel(GrantRequest request) {
+        String detail = statusDetail(request);
+        return detail.isEmpty() ? String.valueOf(request.getStatus())
+                : request.getStatus() + " (" + detail + ")";
+    }
+
+    /**
+     * Backlog #89: the window state of an approved request, without the status word
+     * ("window open, 2h left", "window revoked", "window expired"), or an empty string. The list
+     * shows it below the status so the status column stays narrow at 1280 px.
+     */
+    public String statusDetail(GrantRequest request) {
         if (request.getStatus() != RequestStatus.APPROVED) {
-            return String.valueOf(request.getStatus());
+            return "";
         }
         Grant grant = grantsById().get(request.getId());
         if (grant == null) {
-            return "APPROVED";
+            return "";
         }
         if (grant.getRevokedAt() != null) {
-            return "APPROVED (window revoked)";
+            return "window revoked";
         }
         return grant.isActiveAt(BatchClock.now())
-                ? "APPROVED (window open, " + Dates.until(grant.getExpiresAt()) + " left)"
-                : "APPROVED (window expired)";
+                ? "window open, " + Dates.until(grant.getExpiresAt()) + " left"
+                : "window expired";
     }
 
     /**
