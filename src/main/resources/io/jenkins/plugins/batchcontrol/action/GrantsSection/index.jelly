@@ -218,7 +218,7 @@
                   <j:if test="${it.canRevoke}">
                     <td>
                       <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
-                                          title="Revoke this grant?"
+                                          title="Revoke this grant?" okText="Revoke"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
                         Revoke
                       </l:confirmationLink>

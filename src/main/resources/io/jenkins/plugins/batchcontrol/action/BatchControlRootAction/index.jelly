@@ -26,7 +26,10 @@
              them, and only while the page exists). -->
         <j:set var="configurationLink" value="${it.configurationLink}"/>
         <j:if test="${configurationLink != null}">
-          <l:task href="${rootURL}/${configurationLink.urlName}/" icon="symbol-settings-outline plugin-ionicons-api" title="Configuration"/>
+          <!-- e2e-06 UX-10: through Manage Jenkins for whoever may open it, so the breadcrumb reads
+               Manage Jenkins > Batch Control; the root URL for a BatchControl/Manage holder
+               without Overall/Manage, who cannot reach /manage/. -->
+          <l:task href="${rootURL}/${app.hasPermission(app.MANAGE) ? 'manage/' : ''}${configurationLink.urlName}/" icon="symbol-settings-outline plugin-ionicons-api" title="Configuration"/>
         </j:if>
       </l:tasks>
     </l:side-panel>

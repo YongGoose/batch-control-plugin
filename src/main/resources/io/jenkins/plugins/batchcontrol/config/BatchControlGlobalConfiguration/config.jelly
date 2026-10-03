@@ -78,7 +78,7 @@
         <j:choose>
           <j:when test="${app.hasPermission(app.ADMINISTER)}">
             <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${rootURL}/manage/administrativeMonitor/batch-control-strategy/revert"
-                                 post="true" title="Revert to the plain strategy?"
+                                 post="true" title="Revert to the plain strategy?" okText="Revert to plain strategy"
                                  message="Active grants stop conferring any permission immediately. This cannot be undone from here.">
               Revert to the plain strategy
             </l:confirmationLink>

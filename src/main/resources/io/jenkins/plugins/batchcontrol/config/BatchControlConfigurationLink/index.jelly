@@ -8,13 +8,17 @@
      side panel and header). noDefer is required: the refused-save draft and message
      (getConfiguration, getSaveError) are request attributes, which a deferred render loses.
      Save only, no Apply: Save already returns to this page, and Apply on a refused form
-     re-opened the whole form in a dialog. -->
+     re-opened the whole form in a dialog.
+     Breadcrumb: no includeBreadcrumb. The management link is itself an ancestor of the page and
+     supplies its crumb, after "Manage Jenkins" when reached through /manage/ (as core's own
+     settings sub-pages, e.g. About Jenkins, do); includeBreadcrumb only repeated it as
+     "Batch Control / Batch Control configuration" (e2e-06 UX-10). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
   <!-- D-52: saved changes (switches and every other field) and a strategy install or revert
        made with the Batch Control controls are recorded; a strategy change made on the
        Security page is not, so the description says exactly that. -->
   <l:settings-subpage title="Batch Control configuration" permission="${it.requiredPermission}"
-                      includeBreadcrumb="true" noDefer="true"
+                      noDefer="true"
                       description="The same settings as the Batch Control section of Manage Jenkins &gt; System. Every saved change to these settings, and installing or reverting a Batch Control authorization strategy with the Batch Control controls, is recorded in the change history. A strategy changed on the Security page is not recorded.">
     <!-- e2e-04 FD-03 / D-53: a refused save answers 400 and comes back here with the values the
          user typed (BatchControlConfigurationLink#getConfiguration) and the reason above the
