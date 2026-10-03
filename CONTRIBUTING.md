@@ -357,9 +357,12 @@ behind any of them.
 - **The gate is the whole suite green and SpotBugs reporting zero.** Please run
   `mvn -ntp clean verify` yourself before opening the PR. Every pull request and
   every push to `main` runs the same command in GitHub Actions
-  (`.github/workflows/build.yml`, Linux, JDK 21, job `build`); `build` is the
-  required status check for merging. After the move to jenkinsci, ci.jenkins.io also builds both
-  Linux and Windows on JDK 21 from the `Jenkinsfile`.
+  (`.github/workflows/build.yml`, Linux). Each JDK the hosting checker accepts
+  has its own checks — `build (jdk 21)`, `build (jdk 25)`, `test (jdk 21, shard 1)`,
+  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` is the
+  single required status check for merging. After the move to jenkinsci,
+  ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
+  the `Jenkinsfile`.
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins
