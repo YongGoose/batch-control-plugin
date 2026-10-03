@@ -26,17 +26,10 @@ public final class RunRequest {
 
     /**
      * One approver change entry: (previous set, new set, changed by, at) (SPEC item 3, D-37).
-     *
-     * <p>Entries written before D-37 carry a single {@code from}/{@code to} user id; they load
-     * as one-element sets through {@link #readResolve()}.
      */
     public static final class ApproverChange {
-        /** Legacy single previous approver (pre D-37); migrated by {@link #readResolve()}. */
-        private String from;
-        /** Legacy single new approver (pre D-37); migrated by {@link #readResolve()}. */
-        private String to;
-        private List<String> fromApprovers;
-        private List<String> toApprovers;
+        private final List<String> fromApprovers;
+        private final List<String> toApprovers;
         private final String by;
         private final long atMillis;
 
@@ -45,24 +38,6 @@ public final class RunRequest {
             this.toApprovers = to == null ? new ArrayList<>() : new ArrayList<>(to);
             this.by = by;
             this.atMillis = Objects.requireNonNull(at, "at").toEpochMilli();
-        }
-
-        /** Single-approver form, kept for callers written before D-37. */
-        public ApproverChange(String from, String to, String by, Instant at) {
-            this(Approvers.of(from), Approvers.of(to), by, at);
-        }
-
-        /** Migrates a pre-D-37 entry (single {@code from}/{@code to}) to the set form. */
-        private Object readResolve() {
-            if (fromApprovers == null) {
-                fromApprovers = Approvers.of(from);
-            }
-            if (toApprovers == null) {
-                toApprovers = Approvers.of(to);
-            }
-            from = null;
-            to = null;
-            return this;
         }
 
         /** The previous designated set. */
@@ -99,8 +74,6 @@ public final class RunRequest {
     private final Map<String, String> parameters;
     private final String reason;
     private final String requester;
-    /** Legacy single approver (pre D-37); migrated to {@link #approvers} by {@link #readResolve()}. */
-    private String approver;
     /** The designated approver set (D-37); any member may decide. */
     private List<String> approvers;
     /** The approver who approved or rejected the request (D-37); {@code null} until decided. */
@@ -145,14 +118,14 @@ public final class RunRequest {
     }
 
     /**
-     * Creates a new PENDING request. The id and creation time come from
-     * {@link BatchClock} (id format {@code yyyyMMdd-HHmmss-<6 random alnum>}).
+     * Creates a new PENDING request with a random UUID id (D-68) and its creation time
+     * from {@link BatchClock}.
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, List<String> approvers) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Objects.requireNonNull(parameters, "parameters");
-        return new RunRequest(Ids.newId(), jobFullName, parameters, reason, requester, approvers,
+        return new RunRequest(Ids.newRequestId(), jobFullName, parameters, reason, requester, approvers,
                 RequestStatus.PENDING, BatchClock.now());
     }
 
@@ -162,15 +135,8 @@ public final class RunRequest {
         return create(jobFullName, parameters, reason, requester, Approvers.of(approver));
     }
 
-    /**
-     * D-37 migration: a request stored with a single {@code approver} loads as a one-element
-     * set. The legacy field is cleared so the next write stores only the set.
-     */
+    /** XStream does not run field initialisers; an absent change list loads as empty. */
     private Object readResolve() {
-        if (approvers == null) {
-            approvers = Approvers.of(approver);
-        }
-        approver = null;
         if (approverChanges == null) {
             approverChanges = new ArrayList<>();
         }

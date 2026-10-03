@@ -216,9 +216,7 @@ public final class RunRequestService {
         if (requester != null && requester.equals(current.getName())) {
             return !job.hasPermission(Item.BUILD);
         }
-        String key = request.getId() == null ? null
-                : request.getId() + '\u0000' + request.getJobFullName() + '\u0000' + requester;
-        Boolean cached = key == null ? null : requesterBuildCache.get(key);
+        Boolean cached = requesterBuildCache.get(request.getId());
         if (cached != null) {
             return cached;
         }
@@ -236,9 +234,7 @@ public final class RunRequestService {
                 return true;
             }
         }
-        if (key != null) {
-            requesterBuildCache.put(key, lacks);
-        }
+        requesterBuildCache.put(request.getId(), lacks);
         return lacks;
     }
 

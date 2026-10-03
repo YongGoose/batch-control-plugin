@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * dependency-01 M-3, matrix row T-02-86: a real Jenkins with every optional plugin absent. Only
- * batch-control, its required plugins (cloudbees-folder, ionicons-api) and their required
+ * batch-control, its required plugins (cloudbees-folder, ionicons-api, caffeine-api) and their required
  * dependencies are installed: every other plugin of the test classpath is omitted, which covers
  * the five compile-time optional plugins (matrix-auth, role-strategy, configuration-as-code,
  * mailer, rebuild) and the plugins matched by name only (workflow-cps, pipeline-model-definition,

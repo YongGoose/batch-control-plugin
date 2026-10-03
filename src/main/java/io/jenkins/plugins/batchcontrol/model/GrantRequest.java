@@ -75,15 +75,13 @@ public final class GrantRequest {
     private final int durationMinutes;
     private final String reason;
     private final String requester;
-    /** Legacy single approver (pre D-37); migrated to {@link #approvers} by {@link #readResolve()}. */
-    private String approver;
     /** The designated approver set (D-37); any member may decide. */
     private List<String> approvers;
     /** The approver who approved or rejected the request (D-37); {@code null} until decided. */
     private String decidedBy;
     /** D-40: optional CREATE name restriction (exact name or {@code /regex/}); {@code null} for none. */
     private String createNamePattern;
-    /** D-37: approver changes, as for run requests; {@code null} in files written before D-37. */
+    /** D-37: approver changes, as for run requests; {@code null} until the first change. */
     private List<ApproverChange> approverChanges;
     /** D-36: the EXPIRING notification was sent (persisted so a restart does not resend). */
     private boolean expiringNotified;
@@ -108,8 +106,8 @@ public final class GrantRequest {
     }
 
     /**
-     * Creates a new PENDING grant request. The id and creation time come from
-     * {@link BatchClock} (id format {@code yyyyMMdd-HHmmss-<6 random alnum>}).
+     * Creates a new PENDING grant request with a random UUID id (D-68) and its creation time
+     * from {@link BatchClock}.
      * Duplicate actions are collapsed while preserving order.
      */
     public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
@@ -118,7 +116,7 @@ public final class GrantRequest {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(actions, "actions");
         List<GrantAction> distinct = new ArrayList<>(new LinkedHashSet<>(actions));
-        return new GrantRequest(Ids.newId(), scope, distinct, durationMinutes, reason,
+        return new GrantRequest(Ids.newRequestId(), scope, distinct, durationMinutes, reason,
                 requester, approvers, createNamePattern, RequestStatus.PENDING, BatchClock.now());
     }
 
@@ -126,15 +124,6 @@ public final class GrantRequest {
     public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
                                       String reason, String requester, String approver) {
         return create(scope, actions, durationMinutes, reason, requester, Approvers.of(approver), null);
-    }
-
-    /** D-37 migration: a request stored with a single {@code approver} loads as a one-element set. */
-    private Object readResolve() {
-        if (approvers == null) {
-            approvers = Approvers.of(approver);
-        }
-        approver = null;
-        return this;
     }
 
     public String getId() {

@@ -146,6 +146,12 @@
       <artifactId>ionicons-api</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <dependency>
+      <!-- BOM-managed. Bounded, expiring caches (R4-2) use the Caffeine API plugin instead of
+           a hand-written cache. Required plugin dependency. -->
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>caffeine-api</artifactId>
+    </dependency>
 
     <!-- Test-only dependencies for plugin interaction tests (#36). -->
     <!-- BOM-managed (versions supplied by io.jenkins.tools.bom:bom-2.568.x via bom-weekly). -->

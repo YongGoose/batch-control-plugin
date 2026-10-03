@@ -5,6 +5,11 @@
 # .github/test-shards.txt; .github/scripts/test-shards.py fails the run when a test class
 # matches no shard or two shards. The static checks run once, in the "checks" job. The
 # final "build" job aggregates every job and is the single required status.
+#
+# Every JDK the jenkinsci hosting checker accepts (21 and 25, R4-3) gets its own static
+# checks job ("build (jdk 21)") and its own test shards ("test (jdk 25, shard 1)"). The
+# list lives in env.JDKS (plan job, shard matrix) and in the checks matrix below; keep
+# them in sync with the Jenkinsfile.
 ---
 name: Build
 on:
@@ -34,12 +39,18 @@ jobs:
           persist-credentials: false
       - name: Check that every test class is in exactly one shard
         id: shards
+        env:
+          JDKS: '21,25'
         run: python3 .github/scripts/test-shards.py check
 
   checks:
-    name: static checks
+    name: build (jdk ${{ matrix.jdk }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk: ['21', '25']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,7 +58,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ matrix.jdk }}
           cache: maven
       # Enforcer, access-modifier checker, SpotBugs and the other verify-phase checks,
       # plus compilation of the test sources. Tests run in the shard jobs.
@@ -55,7 +66,7 @@ jobs:
         run: mvn -B -ntp clean verify -DskipTests
 
   test:
-    name: test (shard ${{ matrix.shard }})
+    name: test (jdk ${{ matrix.jdk }}, shard ${{ matrix.shard }})
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -69,7 +80,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ matrix.jdk }}
           cache: maven
       # The access-modifier checker runs once, in the checks job; SpotBugs is bound to
       # verify, which this job does not reach. The enforcer rules take seconds and the
@@ -89,7 +100,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: surefire-reports-shard-${{ matrix.shard }}
+          name: surefire-reports-jdk${{ matrix.jdk }}-shard-${{ matrix.shard }}
           path: target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14
