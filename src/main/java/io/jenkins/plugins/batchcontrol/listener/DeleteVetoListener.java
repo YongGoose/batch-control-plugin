@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.listener;
 
 import hudson.Extension;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -31,7 +32,8 @@ public class DeleteVetoListener extends ItemListener {
             return;
         }
         String user = Jenkins.getAuthentication2().getName();
-        if (GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE) != null) {
+        if (GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE,
+                item instanceof ItemGroup) != null) {
             return;
         }
         // e2e-03 DEF-26: the refusal says what is missing and links the Grants screen only for a

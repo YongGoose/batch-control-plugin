@@ -102,13 +102,34 @@ public final class GrantService {
     }
 
     /**
+     * As {@link #hasActiveGrant(String, String, Permission)}, telling whether the item is an item
+     * group: a FOLDER_ONLY grant confers Item/Delete only on a direct item that is not one (D-65).
+     */
+    public boolean hasActiveGrant(String user, String itemFullName, boolean itemIsGroup, Permission permission) {
+        GrantAction action = GrantAction.fromPermission(permission);
+        return action != null && findActiveGrant(user, itemFullName, action, itemIsGroup) != null;
+    }
+
+    /**
      * The first active grant of {@code user} that covers {@code itemFullName} and includes
      * {@code action}, or {@code null}. A {@code null} action matches any action (used by
      * {@code ItemChangeListener} to link RENAME/MOVE change records to the grant in use).
+     *
+     * <p>Without knowing whether the item is an item group, a FOLDER_ONLY grant is never taken to
+     * confer DELETE (fail-safe, D-65); callers holding the item use the four-argument form.
+     */
+    @CheckForNull
+    public Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
+        return findActiveGrant(user, itemFullName, action, action == GrantAction.DELETE);
+    }
+
+    /**
+     * As {@link #findActiveGrant(String, String, GrantAction)}, telling whether the item is an
+     * item group: a FOLDER_ONLY grant confers DELETE only on a direct item that is not one (D-65).
      */
     @CheckForNull
     public synchronized Grant findActiveGrant(String user, String itemFullName,
-                                              @CheckForNull GrantAction action) {
+                                              @CheckForNull GrantAction action, boolean itemIsGroup) {
         if (user == null || itemFullName == null) {
             return null;
         }
@@ -116,7 +137,9 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
+                    && (action == GrantAction.DELETE
+                            ? grant.getScope().includesDeleteOf(itemFullName, itemIsGroup)
+                            : grant.getScope().includes(itemFullName))
                     && (action == null || grant.getActions().contains(action))) {
                 return grant;
             }
@@ -145,7 +168,9 @@ public final class GrantService {
                     && user.equals(grant.getUser())
                     && (action == GrantAction.CREATE
                             ? grant.getScope().includesCreateIn(itemFullName)
-                            : grant.getScope().includes(itemFullName))
+                            : action == GrantAction.DELETE
+                                    ? grant.getScope().includesDeleteOf(itemFullName, true)
+                                    : grant.getScope().includes(itemFullName))
                     && grant.getActions().contains(action)) {
                 found.add(grant);
             }

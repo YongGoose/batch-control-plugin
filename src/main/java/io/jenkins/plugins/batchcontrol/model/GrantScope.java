@@ -87,6 +87,23 @@ public final class GrantScope {
     }
 
     /**
+     * Whether a DELETE action of this scope confers Item/Delete on {@code itemFullName}. For
+     * {@code FOLDER_ONLY} only a direct item that is not itself an item group: deleting the folder
+     * or a nested folder (any {@code ItemGroup}, a multibranch project included) would delete
+     * items outside the scope (D-65 owner ruling). For the other types it is
+     * {@link #includes(String)}.
+     *
+     * @param itemIsGroup whether the item is an item group; callers that cannot tell pass
+     *                    {@code true} (fail-safe)
+     */
+    public boolean includesDeleteOf(String itemFullName, boolean itemIsGroup) {
+        if (type == Type.FOLDER_ONLY) {
+            return !itemIsGroup && itemFullName != null && !itemFullName.equals(fullName) && includes(itemFullName);
+        }
+        return includes(itemFullName);
+    }
+
+    /**
      * Whether a CREATE action of this scope confers Item/Create in the item group
      * {@code groupFullName}, i.e. whether an item created directly in that group falls inside
      * this scope. For {@code FOLDER_ONLY} that is the folder itself only: a nested folder is a
