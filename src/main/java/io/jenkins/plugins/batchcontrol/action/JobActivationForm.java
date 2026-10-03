@@ -63,6 +63,16 @@ public class JobActivationForm implements Action {
         return item;
     }
 
+    /**
+     * The job, under the name core's {@code l:job-subpage} reads ({@code it.object}), so the form
+     * renders as a sub-page of the job on the new job page (e2e-14 DEF-08); {@code null} for a
+     * computed folder, which the view keeps on the classic layout.
+     */
+    @CheckForNull
+    public Job<?, ?> getObject() {
+        return item instanceof Job<?, ?> job ? job : null;
+    }
+
     /** Whether the target is a computed folder rather than a job (the view words it accordingly). */
     public boolean isFolder() {
         return !(item instanceof Job);
