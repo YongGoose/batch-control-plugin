@@ -8,7 +8,6 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
 import io.jenkins.plugins.batchcontrol.ui.GrantRequestLinks;
 import io.jenkins.plugins.batchcontrol.ui.GuardInfo;
-import io.jenkins.plugins.batchcontrol.ui.OverviewCounts;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.SectionTabs;
@@ -220,13 +219,5 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     @CheckForNull
     public GuardInfo.Outcome reviewOutcome(String itemFullName) {
         return GuardInfo.reviewed(itemFullName);
-    }
-
-    /**
-     * Backlog #88: per-section totals for the overview, for Batch Control/Manage holders only
-     * (empty otherwise). Not a Stapler route (no {@code get}/{@code do} prefix).
-     */
-    public List<OverviewCounts.Row> overviewCounts() {
-        return OverviewCounts.current();
     }
 }
