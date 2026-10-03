@@ -69,6 +69,13 @@
             them approves the request.
           </p>
           <j:set var="errors" value="${it.formErrors}"/>
+          <!-- D-60: arrived from a refused build submission with its values (p.<name>). -->
+          <j:if test="${!errors.present and it.prefilled}">
+            <div class="jenkins-alert jenkins-alert-info" role="status">
+              The build was not started: this job only runs through an approved run request. The
+              parameter values you entered are filled in below; enter any password parameters again.
+            </div>
+          </j:if>
           <bc:formError errors="${errors}"/>
           <f:form method="post" action="submit" name="batch-control-request">
             <f:entry title="Reason" description="Why this run is needed (required).">

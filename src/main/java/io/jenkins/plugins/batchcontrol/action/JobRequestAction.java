@@ -29,7 +29,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
 import jenkins.model.Jenkins;
+import jenkins.model.menu.Group;
+import jenkins.model.menu.Semantic;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
@@ -109,6 +112,23 @@ public class JobRequestAction implements Action, StaplerProxy {
     }
 
     /**
+     * Hosting review 2026-10-02: on the new job page the run request is the job's build button,
+     * so it sits first in the app bar rather than in the overflow menu. Only where the entry is
+     * shown at all ({@link #getIconFileName()}); core's own {@code BuildJobAction} is in the same
+     * group and reads {@link RequestRunUiDecorator#BLOCKED_BUILD_LABEL} on a controlled job.
+     */
+    @Override
+    public Group getGroup() {
+        return Group.FIRST_IN_APP_BAR;
+    }
+
+    /** Rendered as a build action (the build colour) on the new job page; see {@link #getGroup()}. */
+    @Override
+    public Semantic getSemantic() {
+        return Semantic.BUILD;
+    }
+
+    /**
      * e2e re-audit DEF-06/DEF-28: the activation form lies beneath this action's URL
      * ({@code <job>/batch-control/activation}), but it is not a run request, so its breadcrumbs
      * must read {@code <job> > Activation} and no crumb may open the run request form. Core's
@@ -164,7 +184,9 @@ public class JobRequestAction implements Action, StaplerProxy {
         List<ParameterDefinition> definitions = property.getParameterDefinitions();
         Object submitted = getFormErrors().getAttachment();
         if (!(submitted instanceof List)) {
-            return definitions;
+            // D-60: a refused build submission redirects here with its values as p.<name>.
+            return RequestRunPrefill.apply(definitions,
+                    org.kohsuke.stapler.Stapler.getCurrentRequest2());
         }
         Map<String, ParameterValue> byName = new LinkedHashMap<>();
         for (Object value : (List<?>) submitted) {
@@ -186,6 +208,13 @@ public class JobRequestAction implements Action, StaplerProxy {
             refilled.add(shown == null ? definition : shown);
         }
         return refilled;
+    }
+
+    /** D-60: whether the form shows values carried from a refused build submission. */
+    public boolean isPrefilled() {
+        ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
+        return property != null && RequestRunPrefill.isPrefilled(property.getParameterDefinitions(),
+                org.kohsuke.stapler.Stapler.getCurrentRequest2());
     }
 
     /** The refusal of the last submission on this request, or an empty one (DEF-09). */
