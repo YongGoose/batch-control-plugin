@@ -42,8 +42,16 @@
     <useBeta>true</useBeta>
     <!-- Parallelize surefire across whole test classes (reuseForks stays as the parent
          POM defines, i.e. false: a fresh JVM per test class); this only widens how many
-         of those per-class forks run concurrently. -->
+         of those per-class forks run concurrently. Each fork starts a Jenkins, so 1C
+         can run out of memory on a many-core machine or in a memory-limited container;
+         run with -DforkCount=4 there (CONTRIBUTING.md, "Commands", #91). 1C stays the
+         default because the CI runners are small (4 cores on ubuntu-latest). -->
     <forkCount>1C</forkCount>
+    <!-- D-35f: 918 is the minimum supported role-strategy (see the dependency below).
+         A property only so that the scheduled role-strategy-latest workflow (#77) can
+         test against the newest release with -Drole-strategy.version=...; keep the
+         default at the minimum. -->
+    <role-strategy.version>918.v91e5468d8db_2</role-strategy.version>
     <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
     <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
@@ -124,7 +132,7 @@
       <!-- D-35f: 918 is the minimum supported role-strategy. Older releases
            (including the BOM's 898) replace the Batch Control variant on a
            Manage Roles save. Overrides the BOM version on purpose. -->
-      <version>918.v91e5468d8db_2</version>
+      <version>${role-strategy.version}</version>
       <optional>true</optional>
     </dependency>
     <dependency>
@@ -141,6 +149,12 @@
       <groupId>io.jenkins.plugins</groupId>
       <artifactId>ionicons-api</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <!-- BOM-managed. Bounded, expiring caches (R4-2) use the Caffeine API plugin instead of
+           a hand-written cache. Required plugin dependency. -->
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>caffeine-api</artifactId>
     </dependency>
 
     <!-- Test-only dependencies for plugin interaction tests (#36). -->
@@ -202,6 +216,41 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- T-02-122 (#78, D-35f): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898
+             next to batch-control and expects the refusal. The old hpi is copied as a plain
+             file into the test output directory (old-plugins/role-strategy.hpi); it is not a
+             dependency, so it is not on the test classpath, not in the hpi's manifest and not
+             seen by the enforcer or hpi.strictBundledArtifacts. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-old-role-strategy</id>
+            <phase>process-test-resources</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.jenkins-ci.plugins</groupId>
+                  <artifactId>role-strategy</artifactId>
+                  <version>898.vc050ed2424ca_</version>
+                  <type>hpi</type>
+                  <outputDirectory>${project.build.testOutputDirectory}/old-plugins</outputDirectory>
+                  <destFileName>role-strategy.hpi</destFileName>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 
   <repositories>
     <repository>

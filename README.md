@@ -176,7 +176,7 @@ the job.
 ## Requirements
 
 Jenkins 2.568.3 or newer, the baseline the plugin is compiled against;
-`cloudbees-folder` and `ionicons-api`, both required, which the Plugin Manager
+`cloudbees-folder`, `ionicons-api` and `caffeine-api`, all required, which the Plugin Manager
 (or Deploy Plugin, when installing a build of your own) resolves for you.
 
 The integrations with these plugins are optional: Batch Control loads without

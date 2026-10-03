@@ -5,7 +5,9 @@ Usage:
   test-shards.py check
       Lists every test class Surefire would run and checks that each one matches exactly
       one shard in .github/test-shards.txt, and that no shard is empty. On success it
-      writes the job matrix to $GITHUB_OUTPUT (key "matrix").
+      writes the job matrix to $GITHUB_OUTPUT (key "matrix"): one entry per JDK and
+      shard. The JDK versions come from the JDKS environment variable (comma-separated,
+      default "21").
   test-shards.py verify <shard-id>
       Run after a shard's Surefire run. Checks that target/surefire-reports holds a report
       for every class assigned to the shard and for no other class, then writes the
@@ -130,7 +132,14 @@ def cmd_check():
     lines.append(f"| total | | {len(classes)} |")
     print("\n".join(lines))
     write_summary("### Test shards\n\n" + "\n".join(lines))
-    matrix = {"include": [{"shard": s["id"], "tests": ",".join(s["patterns"])} for s in shards]}
+    jdks = [j.strip() for j in os.environ.get("JDKS", "21").split(",") if j.strip()]
+    matrix = {
+        "include": [
+            {"jdk": j, "shard": s["id"], "tests": ",".join(s["patterns"])}
+            for j in jdks
+            for s in shards
+        ]
+    }
     write_output("matrix", json.dumps(matrix, separators=(",", ":")))
     print(f"OK: {len(classes)} test classes, each in exactly one of {len(shards)} shards")
 

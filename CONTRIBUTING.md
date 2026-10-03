@@ -35,6 +35,21 @@ mvn hpi:run                                # local Jenkins at http://localhost:8
 mvn -ntp clean package -DskipTests         # target/batch-control.hpi
 ```
 
+Surefire runs one JVM per test class, `forkCount` of them at a time, and the
+default is `1C` (one per CPU core). Each fork starts its own Jenkins, so on a
+machine with many cores and comparatively little memory, or in a Docker
+container with a memory limit, `1C` can run out of memory: the symptom is a
+test that dies with "Jenkins process terminated prematurely" or a crashed fork,
+and that passes when run alone. Cap the forks for such runs:
+
+```sh
+mvn -ntp clean verify -DforkCount=4        # bounded parallelism for local and Docker runs
+```
+
+Budget roughly 1 GB of free memory per fork. The default stays `1C` because the
+CI runners are small (GitHub's `ubuntu-latest` has 4 cores, so `1C` already
+means 4 forks there) and a fixed number would slow the CI agents that have more.
+
 On Windows, Git Bash with an explicit environment is what the project has been
 built with:
 
@@ -357,9 +372,12 @@ behind any of them.
 - **The gate is the whole suite green and SpotBugs reporting zero.** Please run
   `mvn -ntp clean verify` yourself before opening the PR. Every pull request and
   every push to `main` runs the same command in GitHub Actions
-  (`.github/workflows/build.yml`, Linux, JDK 21, job `build`); `build` is the
-  required status check for merging. After the move to jenkinsci, ci.jenkins.io also builds both
-  Linux and Windows on JDK 21 from the `Jenkinsfile`.
+  (`.github/workflows/build.yml`, Linux). Each JDK the hosting checker accepts
+  has its own checks — `build (jdk 21)`, `build (jdk 25)`, `test (jdk 21, shard 1)`,
+  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` is the
+  single required status check for merging. After the move to jenkinsci,
+  ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
+  the `Jenkinsfile`.
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins
