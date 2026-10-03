@@ -4,10 +4,12 @@ This is the complete list. [`README.md`](../README.md) carries the subset that
 changes an administrator's decisions; everything else is here, because each of
 these will otherwise be discovered in production.
 
-The numbering is stable so that issues and reviews can cite an item. The
-authority for behaviour is [`SPEC.md`](SPEC.md); the reasoning behind the
-deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+The numbering is stable so that issues, reviews and tests can cite an item: a new
+item takes the next free number and goes in the section it belongs to, so the
+numbers within a section are not always consecutive (item 46 is under "The
+authorization strategy"). The authority for behaviour is [`SPEC.md`](SPEC.md);
+the reasoning behind the deliberate choices is in [`DECISIONS.md`](DECISIONS.md)
+and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Scope of control
 
@@ -98,6 +100,9 @@ deliberate choices is in [`DECISIONS.md`](DECISIONS.md) and section 7 of
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
+
+<!-- Item 46 was added after 13-45 and sits here by topic. The comment ends the list so that it renders as 46, not 13. -->
+
 46. **A `config.xml` that still names the removed generic wrapper stops
     Jenkins at boot.** The class
     `io.jenkins.plugins.batchcontrol.security.BatchControlAuthorizationStrategy`
@@ -638,6 +643,9 @@ code does on purpose.
     On approval-required jobs the menu offers only **Rebuild Last** (the
     rebuild plugin's **Rebuild** is hidden, see item 41); running it is
     refused and recorded like any direct run.
+
+<!-- Item 46 is under "The authorization strategy". The comment ends the list so that 47 and 48 render with their own numbers. -->
+
 47. **On the new job page, core's build button comes first and green, and
     Request Run second.** Core always places its own build button in the
     first app-bar group with the build role and colours it green; plugins
