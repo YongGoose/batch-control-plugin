@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * whose click on another plugin's build button ... only gets that plugin's generic failure
  * message still sees why and where to go. A refusal page links the request screen only for users
  * who may open it and otherwise says whom to ask." Matrix rows T-06-56 .. T-06-60 (note 116),
- * T-06-71 (note 143) and T-UI-23 (note 140).
+ * T-06-71 (note 143) and T-UI-23 (note 140); T-06-59 and T-UI-23 revised for D-60 (note 185).
  *
  * <p>The notice is recognised in the job page's main panel (never the side panel, whose
  * "Request Run" entry T-06-15 already covers) as an element whose text names both a manual run
@@ -142,23 +142,32 @@ public class ApprovalNoticeTest {
     }
 
     /**
-     * T-06-59 (DEF-02): the requester submits the parameters form of an approval-required,
-     * parameterized job (core's Build with Parameters). The refusal page names the approval
-     * requirement and links the request screen with an {@code <a>} (not a URL in plain text).
+     * T-06-59 (DEF-02, rewritten for D-60): the requester submits the parameters form of an
+     * approval-required, parameterized job (core's Build with Parameters). The answer is a 303 to
+     * the job's request screen {@code job/<name>/batch-control/} carrying the typed value as
+     * {@code p.P}; following it shows the request screen (approval named), not the classic build
+     * form. Nothing is built.
      */
     @Test
-    public void t_06_59_parameterizedRefusalPageLinksRequestScreenForRequester() throws Exception {
+    public void t_06_59_parameterizedRefusalRedirectsRequesterToRequestScreen() throws Exception {
         FreeStyleProject job = parameterized("refuse-req");
 
-        Page refusal = submitParametersForm("u1", job);
-        assertTrue(refusal.getWebResponse().getStatusCode() >= 400,
-                "the refused submission must not answer success, got " + refusal.getWebResponse().getStatusCode());
-        assertTrue(refusal.getWebResponse().getContentAsString().toLowerCase(Locale.ROOT).contains("approv"),
-                "the refusal page must say that approval is required");
-        assertTrue(refusal instanceof HtmlPage, "the refusal must be an HTML page, got "
-                + refusal.getWebResponse().getContentType());
-        assertTrue(anyRequestLink((HtmlPage) refusal, job), "the refusal page must link " + job.getUrl()
-                + "batch-control/ as an <a> for a requester: " + excerpt(((HtmlPage) refusal).asNormalizedText()));
+        Page answer = submitParametersForm("u1", job, "typed-59", false);
+        assertEquals(303, answer.getWebResponse().getStatusCode(), "a requester's refused parameterized build must"
+                + " answer 303 (D-60), got " + answer.getWebResponse().getStatusCode());
+        String location = answer.getWebResponse().getResponseHeaderValue("Location");
+        assertNotNull(location, "the 303 must carry a Location");
+        URL target = new URL(answer.getUrl(), location);
+        assertEquals(new URL(j.getURL(), job.getUrl() + "batch-control/").getPath(), target.getPath(),
+                "the redirect must lead to the request screen: " + location);
+        assertTrue(target.getQuery() != null && target.getQuery().contains("p.P=typed-59"),
+                "the redirect must carry the typed value as p.P: " + location);
+
+        HtmlPage screen = pageAt("u1", target.toExternalForm().substring(j.getURL().toExternalForm().length()));
+        assertTrue(screen.asNormalizedText().toLowerCase(Locale.ROOT).contains("approv"),
+                "the request screen must name approval: " + excerpt(screen.asNormalizedText()));
+        assertTrue(screen.getForms().stream().noneMatch(f -> "parameters".equals(f.getNameAttribute())),
+                "the redirect must not fall back to the classic build form");
         assertBlockedNoBuild(job);
     }
 
@@ -251,9 +260,13 @@ public class ApprovalNoticeTest {
 
         List<Page> answers = new ArrayList<>();
         answers.add(PluginInteractionFixtures.post(j, "u1", plain.getUrl() + "build?delay=0sec"));
-        answers.add(submitParametersForm("u1", param));
+        answers.add(submitParametersForm("nobc", param));
         answers.add(PluginInteractionFixtures.post(j, "nobc", plain.getUrl() + "build?delay=0sec"));
-        String[] paths = {"direct build as u1", "parameters form as u1", "direct build as nobc"};
+        String[] paths = {"direct build as u1", "parameters form as nobc", "direct build as nobc"};
+        // D-60: the requester's parameters form is no longer a refusal page but a 303 to the
+        // pre-filled request screen (T-06-59), so it has no back link to check here
+        assertEquals(303, submitParametersForm("u1", param, "x", false).getWebResponse().getStatusCode(),
+                "fixture (D-60): the requester's parameters form redirects to the request screen");
         Pattern backText = Pattern.compile("(?i)\\bback\\s+to\\b");
         Pattern backCaption = Pattern.compile("(?is)^\\W*back\\b.*");
         for (int i = 0; i < answers.size(); i++) {
@@ -312,6 +325,12 @@ public class ApprovalNoticeTest {
     }
 
     private Page submitParametersForm(String userId, FreeStyleProject job) throws Exception {
+        return submitParametersForm(userId, job, null, true);
+    }
+
+    /** Submits core's parameters form, optionally typing {@code value} into P, with or without following redirects. */
+    private Page submitParametersForm(String userId, FreeStyleProject job, String value, boolean followRedirects)
+            throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login(userId);
         wc.getOptions().setJavaScriptEnabled(true);
         HtmlPage formPage = (HtmlPage) wc.getPage(new WebRequest(new URL(j.getURL(), job.getUrl() + "build?delay=0sec"),
@@ -321,6 +340,13 @@ public class ApprovalNoticeTest {
         assertTrue(code == 200 || code == 405, "fixture: " + userId + " must reach the parameters form of "
                 + job.getFullName() + ", got " + code);
         HtmlForm form = formPage.getFormByName("parameters");
+        if (value != null) {
+            List<org.htmlunit.html.HtmlInput> inputs = form.getByXPath(
+                    ".//*[@name='parameter'][.//input[@name='name' and @value='P']]//input[@name='value']");
+            assertEquals(1, inputs.size(), "fixture: one value input for P");
+            inputs.get(0).setValue(value);
+        }
+        wc.getOptions().setRedirectEnabled(followRedirects);
         return j.submit(form);
     }
 

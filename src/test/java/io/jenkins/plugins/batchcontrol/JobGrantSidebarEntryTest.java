@@ -150,9 +150,11 @@ public class JobGrantSidebarEntryTest {
 
         HtmlAnchor entry = entryOn("g1", jobX);
         assertNotNull(entry, "a RequestGrant holder without Item/Configure must see the entry");
-        assertEquals(j.contextPath + "/batch-control/grants/?scopeType=JOB&scopeFullName=batch-x",
-                entry.getHrefAttribute(), "the entry must link to the grant screen with the JOB scope and this job's full"
-                        + " name");
+        assertTrue(j.contextPath.length() > 1, "premise: JenkinsRule serves under a non-root context path ("
+                + j.contextPath + "), so a link that drops it cannot resolve correctly by accident");
+        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=batch-x",
+                resolved(entry), "the entry must resolve to the grant screen under the context path, with the JOB scope"
+                        + " and this job's full name (raw href " + entry.getHrefAttribute() + ")");
     }
 
     /**
@@ -283,21 +285,46 @@ public class JobGrantSidebarEntryTest {
 
         HtmlAnchor entry = entryOn("g1", nested);
         assertNotNull(entry, "the entry must appear on a job inside a folder too");
-        assertEquals(j.contextPath + "/batch-control/grants/?scopeType=JOB&scopeFullName=team%2Fj",
-                entry.getHrefAttribute(), "the '/' of the full name must be URL-encoded, or the sidebar entry is dropped"
-                        + " by core's action-URL parsing");
+        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=team%2Fj",
+                resolved(entry), "the '/' of the full name must be URL-encoded, or the sidebar entry is dropped"
+                        + " by core's action-URL parsing; the link must resolve under the context path (raw href "
+                        + entry.getHrefAttribute() + ")");
+        assertFollowsToForm(entry, "team/j");
 
-        // Follow the link the way a browser would, and the form must come back about team/j.
-        HtmlPage page = (HtmlPage) j.createWebClient()
-                .withThrowExceptionOnFailingStatusCode(false).login("g1")
-                .getPage(new WebRequest(new URL(j.getURL(), entry.getHrefAttribute()
-                        .substring(j.contextPath.length() + 1)), HttpMethod.GET));
-        assertEquals(200, page.getWebResponse().getStatusCode());
-        assertEquals("team/j", scopeField(page).getValue(), "the folder path must survive the round trip through the query string");
-        assertTrue(configureCheckbox(page).isChecked(), "the nested job's form must also start with CONFIGURE checked");
+        // two folders deep, under JenkinsRule's non-root context path: the job-relative link must
+        // climb out of every job/<name>/ segment and keep the context path
+        assertTrue(j.contextPath.length() > 1, "premise: a non-root context path (" + j.contextPath + ")");
+        Folder outer = j.jenkins.createProject(Folder.class, "ops");
+        Folder inner = outer.createProject(Folder.class, "nightly");
+        FreeStyleProject deep = inner.createProject(FreeStyleProject.class, "k");
+        assertEquals("ops/nightly/k", deep.getFullName(), "fixture");
+        HtmlAnchor deepEntry = entryOn("g1", deep);
+        assertNotNull(deepEntry, "the entry must appear on a job two folders deep");
+        assertEquals(j.getURL() + "batch-control/grants/?scopeType=JOB&scopeFullName=ops%2Fnightly%2Fk",
+                resolved(deepEntry), "the entry on a job two folders deep must resolve to the grant screen under the"
+                        + " context path (raw href " + deepEntry.getHrefAttribute() + ")");
+        assertFollowsToForm(deepEntry, "ops/nightly/k");
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * The anchor's href resolved against the page it was rendered on and with dot segments
+     * removed, i.e. the URL a browser requests (RFC 3986 section 5.2).
+     */
+    private static String resolved(HtmlAnchor anchor) throws Exception {
+        return anchor.getHtmlPageOrNull().getFullyQualifiedUrl(anchor.getHrefAttribute()).toURI().normalize().toString();
+    }
+
+    /** Follows the entry the way a browser would; the form must come back about {@code fullName}. */
+    private void assertFollowsToForm(HtmlAnchor entry, String fullName) throws Exception {
+        HtmlPage page = (HtmlPage) j.createWebClient()
+                .withThrowExceptionOnFailingStatusCode(false).login("g1")
+                .getPage(new WebRequest(new URL(resolved(entry)), HttpMethod.GET));
+        assertEquals(200, page.getWebResponse().getStatusCode(), "following the entry for " + fullName + " must answer 200");
+        assertEquals(fullName, scopeField(page).getValue(), "the folder path must survive the round trip through the query string");
+        assertTrue(configureCheckbox(page).isChecked(), "the form for " + fullName + " must start with CONFIGURE checked");
+    }
 
     /** The sidebar entry under test on a job page, or null when it is not rendered. */
     private HtmlAnchor entryOn(String userId, Job<?, ?> job) throws Exception {
