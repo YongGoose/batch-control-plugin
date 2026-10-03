@@ -98,13 +98,30 @@ final class MoveGuard {
                     + restricting.getCreateNamePattern() + "' of grant " + restricting.getId();
         }
         record(user, item, destName, reason, restricting);
+        // E2E-1 UX-2: a permission window has one scope, so a move across folders usually needs
+        // two windows. The message names each missing part and what to request for it.
+        String deletePart = "Delete on '" + item.getFullName() + "'";
+        String createPart = "Create in " + describe(destName);
+        List<String> lacking = new ArrayList<>();
+        List<String> toRequest = new ArrayList<>();
+        if (!delete) {
+            lacking.add(deletePart);
+            toRequest.add(deletePart);
+        }
+        if (!create && restricting == null) {
+            lacking.add(createPart);
+            toRequest.add(createPart);
+        }
+        if (restricting != null) {
+            toRequest.add(createPart + " that allows the name '" + item.getName() + "'");
+        }
         StringBuilder message = new StringBuilder()
                 .append("Moving '").append(item.getFullName()).append("' to ").append(describe(destName))
-                .append(" was refused, and nothing was moved. While change control is on, a move needs")
-                .append(" Item/Delete on the item and Item/Create on the destination, from your own")
-                .append(" permissions or an active permission window.");
-        if (!missing.isEmpty()) {
-            message.append(" You are missing ").append(String.join(" and ", missing)).append('.');
+                .append(" was refused; nothing was moved. While change control is on, a move needs ")
+                .append(deletePart).append(" and ").append(createPart)
+                .append(", each from your own permissions or an active permission window.");
+        if (!lacking.isEmpty()) {
+            message.append(" You lack ").append(String.join(" and ", lacking)).append('.');
         }
         if (restricting != null) {
             message.append(" Your permission window for ").append(describe(destName))
@@ -112,7 +129,13 @@ final class MoveGuard {
                     .append(CreateNamePattern.describe(restricting.getCreateNamePattern()))
                     .append(", which does not include '").append(item.getName()).append("'.");
         }
-        message.append(" Request a permission window that covers both, or ask an administrator.");
+        if (toRequest.size() == 1) {
+            message.append(" Request a permission window for ").append(toRequest.get(0));
+        } else {
+            message.append(" A permission window covers one job or folder, so request one window for ")
+                    .append(toRequest.get(0)).append(" and another for ").append(toRequest.get(1));
+        }
+        message.append(", or ask an administrator.");
         return new MoveRefusal(message.toString(), item.getFullName());
     }
 
