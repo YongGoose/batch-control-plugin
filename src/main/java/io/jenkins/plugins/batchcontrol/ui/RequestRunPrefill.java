@@ -34,7 +34,8 @@ import org.kohsuke.stapler.StaplerRequest2;
  * the definition refuses (a choice outside its choices) is dropped and leaves the job's default.
  * Values longer than {@value #MAX_VALUE_LENGTH} characters are left out so the redirect stays
  * within common URL limits, and a longer {@value #PREFIX} query value is ignored; the user
- * re-enters them.
+ * re-enters them. The whole encoded query is capped at {@value #MAX_QUERY_LENGTH} characters:
+ * in definition order, a value that would take it past the cap is left out (S-33-03).
  *
  * <p>A crafted link can only pre-fill a form the viewer may already open: the viewer still reads
  * and submits it, and every rendered value goes through the parameter definition's own view,
@@ -48,6 +49,13 @@ public final class RequestRunPrefill {
 
     /** Longest value carried in the redirect URL. */
     static final int MAX_VALUE_LENGTH = 2000;
+
+    /**
+     * Longest query string the redirect may carry, URL-encoded, including the leading {@code ?}
+     * and the separators (security-33 S-33-03: the redirect's {@code Location} header stays
+     * well inside common header limits however many parameters the job has).
+     */
+    static final int MAX_QUERY_LENGTH = 4000;
 
     private RequestRunPrefill() {
     }
@@ -63,6 +71,7 @@ public final class RequestRunPrefill {
         if (property == null || submitted == null) {
             return carried;
         }
+        int queryLength = 0;
         Map<String, ParameterValue> byName = new LinkedHashMap<>();
         for (ParameterValue value : submitted) {
             if (value != null && value.getName() != null) {
@@ -79,9 +88,18 @@ public final class RequestRunPrefill {
                 continue; // Secret, file, run or anything that does not round-trip as text
             }
             String text = String.valueOf(raw);
-            if (text.length() <= MAX_VALUE_LENGTH) {
-                carried.put(definition.getName(), text);
+            if (text.length() > MAX_VALUE_LENGTH) {
+                continue;
             }
+            // S-33-03: in definition order, a value is carried only while the encoded query
+            // stays within MAX_QUERY_LENGTH; one that would exceed it is left out (a later,
+            // shorter one may still fit). The form still opens, just less pre-filled.
+            int added = 1 + encode(PREFIX + definition.getName()).length() + 1 + encode(text).length();
+            if (queryLength + added > MAX_QUERY_LENGTH) {
+                continue;
+            }
+            queryLength += added;
+            carried.put(definition.getName(), text);
         }
         return carried;
     }
@@ -91,9 +109,9 @@ public final class RequestRunPrefill {
         StringBuilder query = new StringBuilder();
         for (Map.Entry<String, String> entry : values.entrySet()) {
             query.append(query.length() == 0 ? '?' : '&')
-                    .append(URLEncoder.encode(PREFIX + entry.getKey(), StandardCharsets.UTF_8))
+                    .append(encode(PREFIX + entry.getKey()))
                     .append('=')
-                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+                    .append(encode(entry.getValue()));
         }
         return query.toString();
     }
@@ -145,6 +163,10 @@ public final class RequestRunPrefill {
         }
         String text = req.getParameter(PREFIX + definition.getName());
         return text == null || text.length() > MAX_VALUE_LENGTH ? null : text;
+    }
+
+    private static String encode(String text) {
+        return URLEncoder.encode(text, StandardCharsets.UTF_8);
     }
 
     private static boolean isCarriable(ParameterDefinition definition) {
