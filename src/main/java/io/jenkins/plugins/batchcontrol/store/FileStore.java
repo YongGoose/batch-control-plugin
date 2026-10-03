@@ -1344,7 +1344,7 @@ public final class FileStore implements Store {
         List<T> items = from >= sorted.size()
                 ? new ArrayList<>()
                 : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
-        return new RecordPage<>(items, from, matched, scanned, truncated, oversized);
+        return new RecordPage<>(items, from, matched, truncated, oversized);
     }
 
     // ---------------------------------------------------------------- JSON codecs

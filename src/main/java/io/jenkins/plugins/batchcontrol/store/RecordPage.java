@@ -8,8 +8,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 /**
  * One page of a bounded record query (#13): the rows to render plus what the pager needs.
  *
- * <p>A query reads the requested months newest first and stops after {@link #getScanned()} reached
- * the query's scan cap. {@link #getMatched()} counts the matches among the records that were read;
+ * <p>A query reads the requested months newest first and stops once it has read the query's scan
+ * cap of records. {@link #getMatched()} counts the matches among the records that were read;
  * when {@link #isTruncated()} is {@code true} older records exist that were not read, so the count
  * is a lower bound and the screen should say "narrow the filter" instead of showing it as a total.
  *
@@ -21,19 +21,13 @@ public final class RecordPage<T> {
     private final List<T> items;
     private final int offset;
     private final int matched;
-    private final int scanned;
     private final boolean truncated;
     private final int oversized;
 
-    RecordPage(List<T> items, int offset, int matched, int scanned, boolean truncated) {
-        this(items, offset, matched, scanned, truncated, 0);
-    }
-
-    RecordPage(List<T> items, int offset, int matched, int scanned, boolean truncated, int oversized) {
+    RecordPage(List<T> items, int offset, int matched, boolean truncated, int oversized) {
         this.items = Collections.unmodifiableList(items);
         this.offset = offset;
         this.matched = matched;
-        this.scanned = scanned;
         this.truncated = truncated;
         this.oversized = Math.max(0, oversized);
     }
@@ -46,11 +40,6 @@ public final class RecordPage<T> {
     /** Matching records among those read (exact when not {@link #isTruncated()}). */
     public int getMatched() {
         return matched;
-    }
-
-    /** Records read (parsed) by this query, matching or not. */
-    public int getScanned() {
-        return scanned;
     }
 
     /** Whether the scan cap stopped the query before the oldest requested record. */

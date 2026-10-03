@@ -10,8 +10,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * {@code countPendingFor(Authentication)} methods of the policy services, so the tab badges and
  * the sections share one rule.
  *
- * <p>Decisions come first: {@link #isDecisions()} is {@code true} as soon as one request awaits
- * the viewer's decision, and {@link #getCount()} is then that number; otherwise it is the number
+ * <p>Decisions come first: as soon as one request awaits the viewer's decision,
+ * {@link #getCount()} is that number; otherwise it is the number
  * of the viewer's own pending requests.
  */
 @Restricted(NoExternalUse.class)
@@ -39,11 +39,6 @@ public final class PendingCount {
     /** The viewer's own PENDING requests that are not already counted as awaiting their decision. */
     public int getOwn() {
         return own;
-    }
-
-    /** Whether the displayed count is of decisions (otherwise of the viewer's own requests). */
-    public boolean isDecisions() {
-        return awaitingDecision > 0;
     }
 
     /** The number to display: decisions when there are any, else own requests; 0 when nothing is pending. */
