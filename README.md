@@ -59,9 +59,13 @@ change control is on, a user without `Overall/Administer` can move an item only
 if they hold `Item/Delete` on the item and `Item/Create` at the destination, each
 either standing or from an active window, and a `CREATE` window's name
 restriction is matched against the moved item's name. A refused move changes
-nothing, tells the user why and is recorded as a `GRANT_VIOLATION`; the cost is
-in [Limitations](docs/LIMITATIONS.md#moving-items). Once
-it is approved they do the work under their own account, with every usual Jenkins
+nothing, tells the user why and is recorded as a `GRANT_VIOLATION`. While run
+control is also on, a job moved by a non-administrator arrives the way a newly
+created job does: not activated and locked, recorded as `HELD`, so it needs a
+new activation before it runs unattended again. The rule covers the folders
+plugin's Move action (UI and REST); the cost and scope are in
+[Limitations](docs/LIMITATIONS.md#moving-items). Once a window
+is approved its holder does the work under their own account, with every usual Jenkins
 safeguard still in place. What the approver decides is *who* may change *what*, and
 *for how long*; it is not an approval of the change itself, which does not exist
 yet and is never shown to them. What was actually changed is answered afterwards,
