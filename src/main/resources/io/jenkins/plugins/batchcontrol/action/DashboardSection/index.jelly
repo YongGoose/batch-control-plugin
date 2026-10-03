@@ -4,39 +4,26 @@
     <l:main-panel>
       <l:app-bar title="Run Dashboard"/>
       <bc:tabs active="dashboard"/>
+      <!-- D-67: at most the 50 most recent runs; History lists the rest (filters, paging, CSV). -->
       <p class="jenkins-description">
-        Every build of every job with cause, user, parameters, result and duration.
-        Showing the last ${it.days} day(s), newest first. Secret parameter values are stored masked.
+        The ${it.limit} most recent builds of every job with cause, user, parameters, result and
+        duration, newest first. Secret parameter values are stored masked.
       </p>
-
-      <!-- Window selector: a plain GET form; changing the window never changes state. -->
-      <form method="get" action="." class="jenkins-buttons-row" style="margin-bottom: 1rem;">
-        <label for="days">Days:</label>
-        <input type="number" id="days" name="days" min="1" max="365" value="${it.days}" class="jenkins-input" style="width: 6rem;"/>
-        <button type="submit" class="jenkins-button">Show</button>
-      </form>
 
       <j:set var="links" value="${it.links}"/>
       <j:set var="requestLinks" value="${links.requests}"/>
       <!-- security-11 N-02: lines over 1 MiB are skipped on every read path, CSV included. -->
       <j:if test="${it.oversized > 0}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
-          ${it.oversized} over-long record(s) (larger than 1 MiB) were skipped while reading this
-          period and are not listed here. The CSV export skips them too; the controller log names
+          ${it.oversized} over-long record(s) (larger than 1 MiB) were skipped while reading the
+          newest records and are not listed here. The CSV export skips them too; the controller log names
           the file that holds them.
         </div>
       </j:if>
-      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
-      <j:if test="${it.truncated}">
-        <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
-          This period holds more records than one screen can scan (the newest 50,000 were read),
-          so this list and its count are incomplete. The CSV export is complete for the period:
-          <a href="${it.csvUrl}">download it</a>.
-        </div>
-      </j:if>
+      <j:set var="items" value="${it.items}"/>
       <j:choose>
-        <j:when test="${it.total == 0}">
-          <p>No runs recorded in the last ${it.days} day(s).</p>
+        <j:when test="${empty(items)}">
+          <p>No runs recorded.</p>
         </j:when>
         <j:otherwise>
           <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0">
@@ -55,13 +42,13 @@
               </tr>
             </thead>
             <tbody>
-              <j:forEach var="r" items="${it.pageItems}">
+              <j:forEach var="r" items="${items}">
                 <tr>
                   <td>
                     <!-- Linked only with Item/Read on the job (D-44, Visibility#runUrl). -->
                     <j:set var="runUrl" value="${it.runUrl(r)}"/>
                     <j:choose>
-                      <j:when test="${runUrl != null}"><a href="${rootURL}/${runUrl}">#${r.number}</a></j:when>
+                      <j:when test="${runUrl != null}"><a class="model-link" href="${rootURL}/${runUrl}">#${r.number}</a></j:when>
                       <j:otherwise>#${r.number}</j:otherwise>
                     </j:choose>
                   </td>
@@ -86,15 +73,10 @@
               </j:forEach>
             </tbody>
           </table>
-          <div class="jenkins-buttons-row jenkins-!-margin-top-1 jenkins-!-margin-bottom-3" role="navigation" aria-label="Pages of runs">
-            <j:if test="${it.hasPrevious}">
-              <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page - 1}">Newer</a>
-            </j:if>
-            <span>Page ${it.page} (${it.total} ${it.total == 1 ? 'run' : 'runs'} in the last ${it.days} ${it.days == 1 ? 'day' : 'days'})</span>
-            <j:if test="${it.hasNext}">
-              <a class="jenkins-button" href="?days=${it.days}&amp;page=${it.page + 1}">Older</a>
-            </j:if>
-          </div>
+          <p class="jenkins-!-margin-top-1" data-batch-control-history-link="true">
+            Older runs, filters and the CSV export are on the
+            <a href="${rootURL}/batch-control/history/">History</a> tab.
+          </p>
         </j:otherwise>
       </j:choose>
     </l:main-panel>

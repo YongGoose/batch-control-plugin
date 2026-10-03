@@ -58,7 +58,7 @@
                   <td>
                     <j:choose>
                       <j:when test="${it.runUrl(i) != null}">
-                        <a href="${rootURL}/${it.runUrl(i)}">${i.runId}</a>
+                        <a class="model-link" href="${rootURL}/${it.runUrl(i)}">${i.runId}</a>
                       </j:when>
                       <j:otherwise>${i.runId}</j:otherwise>
                     </j:choose>

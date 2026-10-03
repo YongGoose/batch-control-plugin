@@ -16,7 +16,7 @@
           <j:choose>
             <j:when test="${carrierUrl != null}">
               <strong>Batch Control: activation is held by
-                <a href="${rootURL}/${carrierUrl}">${carrier.fullDisplayName}</a>,
+                <a class="model-link" href="${rootURL}/${carrierUrl}">${carrier.fullDisplayName}</a>,
                 which is ${it.carrierState(carrier)}.</strong>
             </j:when>
             <j:otherwise>
