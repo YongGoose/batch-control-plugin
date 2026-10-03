@@ -3,38 +3,39 @@
      holders, at /batch-control-configuration/ (BatchControlConfigurationLink). The fields are the
      configuration's own config.jelly, bound to the configuration exactly as on Manage Jenkins >
      System, so the field checks and help texts are the same; saving posts to configSubmit, which
-     re-checks the permission and refuses invalid values. -->
+     re-checks the permission and refuses invalid values.
+     Hosting review 2026-10-02: the page uses the core settings-subpage layout (Manage Jenkins
+     side panel and header). noDefer is required: the refused-save draft and message
+     (getConfiguration, getSaveError) are request attributes, which a deferred render loses.
+     Save only, no Apply: Save already returns to this page, and Apply on a refused form
+     re-opened the whole form in a dialog.
+     Breadcrumb: no includeBreadcrumb. The management link is itself an ancestor of the page and
+     supplies its crumb, after "Manage Jenkins" when reached through /manage/ (as core's own
+     settings sub-pages, e.g. About Jenkins, do); includeBreadcrumb only repeated it as
+     "Batch Control / Batch Control configuration" (e2e-06 UX-10). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
-  <l:layout title="Batch Control configuration" permission="${it.requiredPermission}" type="one-column">
-    <l:main-panel>
-      <l:app-bar title="Batch Control configuration"/>
-      <!-- D-52: saved changes (switches and every other field) and a strategy install or revert
-           made with the Batch Control controls are recorded; a strategy change made on the
-           Security page is not, so the sentence says exactly that. -->
-      <p class="jenkins-description">
-        The same settings as the Batch Control section of Manage Jenkins &gt; System. Every saved
-        change to these settings, and installing or reverting a Batch Control authorization
-        strategy with the Batch Control controls, is recorded in the change history. A strategy
-        changed on the Security page is not recorded.
-      </p>
-      <!-- e2e-04 FD-03 / D-53: a refused save answers 400 and comes back here with the values the
-           user typed (BatchControlConfigurationLink#getConfiguration) and the reason above the
-           form. Escaped by default. -->
-      <j:set var="saveError" value="${it.saveError}"/>
-      <j:if test="${saveError != null}">
-        <div class="jenkins-alert jenkins-alert-danger" role="alert">
-          <strong>Nothing was saved.</strong> ${saveError}
-        </div>
-      </j:if>
-      <j:set var="descriptor" value="${it.configuration}"/>
-      <j:set var="instance" value="${it.configuration}"/>
-      <f:form method="post" action="configSubmit" name="config">
-        <st:include from="${descriptor}" page="${descriptor.globalConfigPage}"/>
-        <f:bottomButtonBar>
-          <f:submit value="Save"/>
-          <f:apply/>
-        </f:bottomButtonBar>
-      </f:form>
-    </l:main-panel>
-  </l:layout>
+  <!-- D-52: saved changes (switches and every other field) and a strategy install or revert
+       made with the Batch Control controls are recorded; a strategy change made on the
+       Security page is not, so the description says exactly that. -->
+  <l:settings-subpage title="Batch Control configuration" permission="${it.requiredPermission}"
+                      noDefer="true"
+                      description="The same settings as the Batch Control section of Manage Jenkins &gt; System. Every saved change to these settings, and installing or reverting a Batch Control authorization strategy with the Batch Control controls, is recorded in the change history. A strategy changed on the Security page is not recorded.">
+    <!-- e2e-04 FD-03 / D-53: a refused save answers 400 and comes back here with the values the
+         user typed (BatchControlConfigurationLink#getConfiguration) and the reason above the
+         form. Escaped by default. -->
+    <j:set var="saveError" value="${it.saveError}"/>
+    <j:if test="${saveError != null}">
+      <div class="jenkins-alert jenkins-alert-danger" role="alert">
+        <strong>Nothing was saved.</strong> ${saveError}
+      </div>
+    </j:if>
+    <j:set var="descriptor" value="${it.configuration}"/>
+    <j:set var="instance" value="${it.configuration}"/>
+    <f:form method="post" action="configSubmit" name="config">
+      <st:include from="${descriptor}" page="${descriptor.globalConfigPage}"/>
+      <f:bottomButtonBar>
+        <f:submit value="Save"/>
+      </f:bottomButtonBar>
+    </f:form>
+  </l:settings-subpage>
 </j:jelly>

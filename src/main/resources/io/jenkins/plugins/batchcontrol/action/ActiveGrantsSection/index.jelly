@@ -1,0 +1,12 @@
+<?jelly escape-by-default='true'?>
+<!-- Hosting review (no doIndex): this URL under /batch-control/grants/active/ has no page of its
+     own; active grants are listed on the Grants screen, so a GET is redirected there. The
+     permission check l:layout permissions="..." would make is made first, against the same
+     array (getViewPermissions, the Grants screen's), after the parent gate
+     GrantsSection#getTarget has already checked it. No layout is rendered because nothing is
+     shown; no state changes here (revoke is a separate @RequirePOST endpoint). The target is
+     relative, so the context path is kept. -->
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
+  ${h.checkAnyPermission(it, it.viewPermissions)}
+  <st:redirect url=".."/>
+</j:jelly>
