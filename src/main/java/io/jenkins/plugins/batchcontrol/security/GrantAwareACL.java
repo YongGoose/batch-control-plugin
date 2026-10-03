@@ -137,7 +137,8 @@ final class GrantAwareACL extends ACL {
         // grant-aware ACL too; evaluated with grants on, a D-35c grant on a folder the holder
         // created would reach every descendant through that inheritance, and a JOB-scope grant on
         // a folder would widen to its children. Only this, the outermost layer, consults grants:
-        // FOLDER scope already matches descendants by path above, and D-35c answers for exactly
+        // FOLDER scope already matches descendants by path above (FOLDER_ONLY its direct items,
+        // D-65, which this keeps from reaching a nested folder's contents), and D-35c answers for exactly
         // the items the holder created.
         ACL parent = delegate;
         boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));

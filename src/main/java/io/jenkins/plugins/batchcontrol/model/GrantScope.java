@@ -5,7 +5,8 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Target scope of a grant request / grant: a single job or a folder subtree.
+ * Target scope of a grant request / grant: a single job, a folder subtree, or a folder and its
+ * direct items (D-65).
  *
  * <p>Folder matching is done on path-segment boundaries: scope {@code team/batch} includes
  * {@code team/batch} itself and {@code team/batch/job1}, but never {@code team/batch-other}.
@@ -17,10 +18,17 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class GrantScope {
 
-    /** Scope kind. */
+    /**
+     * Scope kind. Stored by name in the existing {@code type} field, so files written before
+     * {@link #FOLDER_ONLY} existed load unchanged (D-65).
+     */
     public enum Type {
+        /** The job with exactly this full name. */
         JOB,
-        FOLDER
+        /** The folder and everything below it, nested folders included. */
+        FOLDER,
+        /** The folder itself and the items whose parent is that folder, not nested folders' contents (D-65). */
+        FOLDER_ONLY
     }
 
     private final Type type;
@@ -46,7 +54,9 @@ public final class GrantScope {
      *   <li>{@code JOB}: exact match only.</li>
      *   <li>{@code FOLDER}: the folder itself (CREATE is checked on the folder ACL)
      *       and any descendant, with a {@code /} segment-boundary check.</li>
-     *   <li>An empty scope name matches nothing at all, for either type — see below.</li>
+     *   <li>{@code FOLDER_ONLY} (D-65): the folder itself and its direct items ({@code f/x}, never
+     *       {@code f/sub/x}).</li>
+     *   <li>An empty scope name matches nothing at all, for any type — see below.</li>
      * </ul>
      */
     public boolean includes(String itemFullName) {
@@ -66,7 +76,28 @@ public final class GrantScope {
         if (type == Type.JOB) {
             return fullName.equals(itemFullName);
         }
-        return itemFullName.equals(fullName) || itemFullName.startsWith(fullName + "/");
+        if (itemFullName.equals(fullName)) {
+            return true;
+        }
+        String prefix = fullName + "/";
+        if (!itemFullName.startsWith(prefix)) {
+            return false;
+        }
+        return type == Type.FOLDER || itemFullName.indexOf('/', prefix.length()) < 0;
+    }
+
+    /**
+     * Whether a CREATE action of this scope confers Item/Create in the item group
+     * {@code groupFullName}, i.e. whether an item created directly in that group falls inside
+     * this scope. For {@code FOLDER_ONLY} that is the folder itself only: a nested folder is a
+     * direct item, but what is created in it lies outside the scope (D-65). For the other types it
+     * is {@link #includes(String)} of the group, as before.
+     */
+    public boolean includesCreateIn(String groupFullName) {
+        if (type == Type.FOLDER_ONLY) {
+            return groupFullName != null && !fullName.isEmpty() && fullName.equals(groupFullName);
+        }
+        return includes(groupFullName);
     }
 
     @Override
