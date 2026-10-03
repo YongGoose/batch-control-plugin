@@ -82,6 +82,30 @@ public final class ApprovalPolicy {
         }
     }
 
+    /**
+     * D-38b: whether the current caller is {@code requester} and holds {@code BatchControl/Request}
+     * on the item {@code fullName} (inherited from a folder or from Jenkins, as Jenkins' ACL
+     * resolves it). This is the requester's right to cancel or re-designate their own request;
+     * Jenkins-level Request is no longer required. When the item no longer exists, Jenkins-level
+     * Request decides.
+     *
+     * <p>The requester identity is checked first; only then is the item looked up through
+     * {@link #itemForPolicy(String)} (a SYSTEM lookup, so a requester who lost {@code Item/Read}
+     * is judged on Request alone), and the permission is evaluated for the caller's own
+     * authentication, never as SYSTEM.
+     */
+    public static boolean callerIsRequesterWithRequest(String requester, String fullName) {
+        org.springframework.security.core.Authentication caller = Jenkins.getAuthentication2();
+        if (!Approvers.sameUser(caller.getName(), requester)) {
+            return false;
+        }
+        hudson.model.Item item = itemForPolicy(fullName);
+        if (item == null) {
+            return Jenkins.get().hasPermission(BatchControlPermissions.REQUEST);
+        }
+        return item.getACL().hasPermission2(caller, BatchControlPermissions.REQUEST);
+    }
+
     /** Whether the current caller is an administrator (Overall/Administer). */
     public static boolean callerIsAdmin() {
         return Jenkins.get().hasPermission(Jenkins.ADMINISTER);

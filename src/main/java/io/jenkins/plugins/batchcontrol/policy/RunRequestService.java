@@ -42,6 +42,7 @@ import jenkins.model.ParameterizedJobMixIn;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 
 /**
  * The single entry point for every {@link RunRequest} state transition (SPEC items 3, 5, 7;
@@ -89,6 +90,37 @@ public final class RunRequestService {
     /** All stored requests, in creation order. */
     public List<RunRequest> list() {
         return store.listRunRequests();
+    }
+
+    /**
+     * D-38b: whether {@code auth} filed at least one run request, in any status. The requester
+     * always sees their own requests (P-09), so this tells the web layer that a user without
+     * Jenkins-level {@code BatchControl/Request} still has something to see in the run requests
+     * section. Answered from the store's in-memory index; no item is visited.
+     */
+    public boolean hasOwnRequests(Authentication auth) {
+        if (auth == null || ACL.isAnonymous2(auth)) {
+            return false;
+        }
+        return store.hasRunRequestBy(auth.getName());
+    }
+
+    /**
+     * D-38b: whether the current user may cancel {@code request}: its requester holding
+     * {@code BatchControl/Request} on the job, or a Manage holder. Permission only; the PENDING
+     * status is checked by {@link #cancel(String)}.
+     */
+    public boolean canCancel(RunRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName())
+                || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
+    }
+
+    /**
+     * D-38b: whether the current user may change the approvers of {@code request}: its requester
+     * holding {@code BatchControl/Request} on the job. Permission only.
+     */
+    public boolean canChangeApprovers(RunRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName());
     }
 
     // ---------------------------------------------------------------- creation (SPEC 5, D-22)
@@ -335,10 +367,9 @@ public final class RunRequestService {
         lock.lock();
         try {
             RunRequest request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())
-                    && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
-                throw new AccessDeniedException(
-                        "Only the requester or a Manage holder may cancel request " + id + ".");
+            if (!canCancel(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "or a Manage holder may cancel request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "
@@ -374,9 +405,9 @@ public final class RunRequestService {
         lock.lock();
         try {
             request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())) {
-                throw new AccessDeniedException(
-                        "Only the requester may change the approvers of request " + id + ".");
+            if (!canChangeApprovers(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "may change the approvers of request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Request " + id + " is "

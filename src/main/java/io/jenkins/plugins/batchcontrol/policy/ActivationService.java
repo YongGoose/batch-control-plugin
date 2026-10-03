@@ -227,6 +227,46 @@ public final class ActivationService {
         return store.listActivationRequests();
     }
 
+    /**
+     * D-38b: whether {@code auth} filed at least one activation or hold request, in any status
+     * (the requester always sees their own, P-09). Answered from the store's in-memory index; no
+     * item is visited.
+     */
+    public boolean hasOwnRequests(org.springframework.security.core.Authentication auth) {
+        if (auth == null || ACL.isAnonymous2(auth)) {
+            return false;
+        }
+        return store.hasActivationRequestBy(auth.getName());
+    }
+
+    /**
+     * D-38b: whether the current user could request an activation or hold of {@code item}: the
+     * permission checks of {@link #create(Item, ActivationRequest.Action, String, List)}, namely
+     * {@code BatchControl/Request} and {@code Item/Read} on the item. Screens use it to show the
+     * request form; {@code create} still checks for real.
+     */
+    public boolean canRequest(Item item) {
+        return item != null && item.hasPermission(BatchControlPermissions.REQUEST)
+                && item.hasPermission(Item.READ);
+    }
+
+    /**
+     * D-38b: whether the current user may cancel {@code request}: its requester holding
+     * {@code BatchControl/Request} on the item, or a Manage holder. Permission only.
+     */
+    public boolean canCancel(ActivationRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName())
+                || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE);
+    }
+
+    /**
+     * D-38b: whether the current user may change the approvers of {@code request}: its requester
+     * holding {@code BatchControl/Request} on the item. Permission only.
+     */
+    public boolean canChangeApprovers(ActivationRequest request) {
+        return ApprovalPolicy.callerIsRequesterWithRequest(request.getRequester(), request.getJobFullName());
+    }
+
     /** The PENDING activation and hold requests, in creation order (the approval inbox). */
     public List<ActivationRequest> listPending() {
         List<ActivationRequest> pending = new ArrayList<>();
@@ -294,7 +334,8 @@ public final class ActivationService {
                                     List<String> approvers) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(action, "action");
-        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST);
+        // D-38b: Request is checked on the item (granted there, on a folder, or globally).
+        job.checkPermission(BatchControlPermissions.REQUEST);
         job.checkPermission(Item.READ);
         String requester = Jenkins.getAuthentication2().getName();
 
@@ -453,10 +494,9 @@ public final class ActivationService {
         lock.lock();
         try {
             ActivationRequest request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())
-                    && !Jenkins.get().hasPermission(BatchControlPermissions.MANAGE)) {
-                throw new AccessDeniedException(
-                        "Only the requester or a Manage holder may cancel activation request " + id + ".");
+            if (!canCancel(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "or a Manage holder may cancel activation request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Activation request " + id + " is "
@@ -490,9 +530,9 @@ public final class ActivationService {
         lock.lock();
         try {
             request = require(id);
-            if (!Approvers.sameUser(caller, request.getRequester())) {
-                throw new AccessDeniedException(
-                        "Only the requester may change the approvers of activation request " + id + ".");
+            if (!canChangeApprovers(request)) {
+                throw new AccessDeniedException("Only the requester, holding BatchControl/Request on the job, "
+                        + "may change the approvers of activation request " + id + ".");
             }
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Activation request " + id + " is "
