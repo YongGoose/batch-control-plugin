@@ -65,7 +65,7 @@
             </tbody>
           </table>
           <bc:pager param="pendingPage" page="${it.pendingPage}" total="${it.pendingTotal}"
-                    hasPrevious="${it.hasPendingPrevious}" hasNext="${it.hasPendingNext}" label="pending requests"/>
+                    hasPrevious="${it.hasPendingPrevious}" hasNext="${it.hasPendingNext}" label="pending requests" singular="request" plural="requests"/>
         </j:otherwise>
       </j:choose>
 
@@ -125,7 +125,7 @@
             </tbody>
           </table>
           <bc:pager param="activePage" page="${it.activePage}" total="${it.activeTotal}"
-                    hasPrevious="${it.hasActivePrevious}" hasNext="${it.hasActiveNext}" label="active grants"/>
+                    hasPrevious="${it.hasActivePrevious}" hasNext="${it.hasActiveNext}" label="active grants" singular="active grant" plural="active grants"/>
         </j:otherwise>
       </j:choose>
 
@@ -178,7 +178,7 @@
             </tbody>
           </table>
           <bc:pager param="endedPage" page="${it.endedPage}" total="${it.endedTotal}"
-                    hasPrevious="${it.hasEndedPrevious}" hasNext="${it.hasEndedNext}" label="ended grants and requests"/>
+                    hasPrevious="${it.hasEndedPrevious}" hasNext="${it.hasEndedNext}" label="ended grants and requests" singular="ended item" plural="ended items"/>
         </j:otherwise>
       </j:choose>
     </l:main-panel>
