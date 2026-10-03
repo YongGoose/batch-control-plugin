@@ -25,12 +25,15 @@ import org.kohsuke.stapler.StaplerRequest2;
  *   <li>{@code confirmRename} and {@code checkNewName} (rename, and its validation):
  *       {@code newName}, else {@code value}, for the item being renamed and its parent group;</li>
  *   <li>CLI {@code create-job} and {@code copy-job}: the command's own target argument, bound to
- *       the command's user and target folder (S-13).</li>
+ *       the command's user and target folder (S-13);</li>
+ *   <li>D-59: a POST to the folders plugin's {@code move/move}: the name of the item being moved,
+ *       for the group named by {@code destination} only. Not recordable here: {@link MoveGuard}
+ *       decides the move as a whole and writes the one record of a refusal.</li>
  * </ul>
  *
  * <p>Anything else is {@link Kind#UNKNOWN} and a restricted grant confers nothing there
  * (fail-safe): a script, a build running as the user, another CLI command, a POST to any other
- * endpoint (for example moving an item into the scope). A read-only page view (GET or HEAD) of
+ * endpoint. A read-only page view (GET or HEAD) of
  * another endpoint is {@link Kind#UNNAMED}: it cannot create anything, and answering it keeps the
  * "New Item" link and page available.
  *
@@ -47,6 +50,11 @@ final class NewItemName {
         /** The name cannot be determined; a restricted grant must not confer Create. */
         UNKNOWN
     }
+
+    /** The web method of the folders plugin's move action ({@code <item>/move/move}). */
+    static final String MOVE_OPERATION = "move";
+
+    private static final String RELOCATION_ACTION = "com.cloudbees.hudson.plugins.folder.relocate.RelocationAction";
 
     private static final NewItemName UNNAMED = new NewItemName(Kind.UNNAMED, null, false, null);
     private static final NewItemName UNKNOWN = new NewItemName(Kind.UNKNOWN, null, false, null);
@@ -117,6 +125,11 @@ final class NewItemName {
                     return named(value, !readOnly && "createItem".equals(endpoint), endpoint);
                 }
             }
+        } else if (MOVE_OPERATION.equals(endpoint) && !readOnly) {
+            Item moved = movedItem(req);
+            if (moved != null && ("/" + groupFullName).equals(req.getParameter("destination"))) {
+                return named(moved.getName(), false, MOVE_OPERATION);
+            }
         } else if (isRenameEndpoint(endpoint)) {
             Item renamed = req.findAncestorObject(Item.class);
             if (renamed != null && groupFullName.equals(renamed.getParent().getFullName())) {
@@ -171,6 +184,33 @@ final class NewItemName {
     /** Whether {@code operation} is a CLI {@code create-job}/{@code copy-job} (e2e-03 DEF-36). */
     static boolean isCliOperation(@CheckForNull String operation) {
         return operation != null && operation.startsWith("cli:");
+    }
+
+    /**
+     * D-59: the item the current request moves, when it is a POST to the folders plugin's
+     * {@code <item>/move/move}; else {@code null}.
+     */
+    @CheckForNull
+    static Item movedItem(@CheckForNull StaplerRequest2 req) {
+        if (req == null || readOnly(req) || !MOVE_OPERATION.equals(endpoint(req))
+                || !isMoveAction(req)) {
+            return null;
+        }
+        return req.findAncestorObject(Item.class);
+    }
+
+    /**
+     * Whether the web method was dispatched through the folders plugin's move action (its class
+     * is restricted to that plugin, so it is matched by name).
+     */
+    private static boolean isMoveAction(StaplerRequest2 req) {
+        for (org.kohsuke.stapler.Ancestor ancestor : req.getAncestors()) {
+            Object object = ancestor.getObject();
+            if (object != null && RELOCATION_ACTION.equals(object.getClass().getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isRenameEndpoint(@CheckForNull String endpoint) {
