@@ -36,6 +36,10 @@
     <jenkins.baseline>2.568</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
+    <!-- D-70: the new job page's request dialogs return jenkins.model.menu.event.DialogEvent
+         from Action#getEvent(), the API core's Build with Parameters uses, which is
+         @Restricted(Beta) in core 2.568.x. useBeta lets the access-modifier checker accept it. -->
+    <useBeta>true</useBeta>
     <!-- Parallelize surefire across whole test classes (reuseForks stays as the parent
          POM defines, i.e. false: a fresh JVM per test class); this only widens how many
          of those per-class forks run concurrently. -->
