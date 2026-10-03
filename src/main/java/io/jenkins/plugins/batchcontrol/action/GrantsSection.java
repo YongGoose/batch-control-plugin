@@ -549,10 +549,15 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return Paging.hasNext(getPastPage(), getPastTotal());
     }
 
-    /** How a grant ended, in words: "Expired" or "Revoked by admin". */
+    /**
+     * How a grant ended, in words: "Expired", "Revoked by admin", or for a revocation by the
+     * change control switch "Revoked (change control turned off) by admin" (#85).
+     */
     public String endedLabel(Grant grant) {
         if (grant.getRevokedAt() != null) {
-            return grant.getRevokedBy() == null ? "Revoked" : "Revoked by " + grant.getRevokedBy();
+            // #85 (D-63): a mass revocation by the change control switch says so.
+            String why = grant.getRevokedReason() == null ? "" : " (" + grant.getRevokedReason() + ")";
+            return grant.getRevokedBy() == null ? "Revoked" + why : "Revoked" + why + " by " + grant.getRevokedBy();
         }
         return "Expired";
     }
@@ -591,7 +596,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             return "";
         }
         if (grant.getRevokedAt() != null) {
-            return "window revoked";
+            return grant.getRevokedReason() == null ? "window revoked"
+                    : "window revoked (" + grant.getRevokedReason() + ")";
         }
         return grant.isActiveAt(BatchClock.now())
                 ? "window open, " + Dates.until(grant.getExpiresAt()) + " left"
