@@ -18,11 +18,11 @@
   <j:set var="controls">
     <j:if test="${it.strategyUnsupported}">
       <j:if test="${it.perItemWidening}">
-        <p>
+        <div>
           Converting from the installed global matrix strategy makes per-item authorization
           properties effective: any per-item authorization property already present on a
           folder, job or agent will start granting the permissions it lists.
-        </p>
+        </div>
       </j:if>
       <!-- e2e-04 FD-01: doMigrate needs Overall/Administer; the control is only for its holders. -->
       <j:if test="${it.migratable and app.hasPermission(app.ADMINISTER)}">
@@ -33,29 +33,35 @@
     </j:if>
   </j:set>
   <l:adminMonitor severity="warning" controls="${controls}">
+    <!-- Hosting review 2026-10-02: no block starts with a p (a p adds padding on top of the
+         alert). Each block is a div; every block after the first shown one gets the core
+         margin utility, tracked in "gap" since each block is conditional. -->
+    <j:set var="gap" value=""/>
     <j:if test="${it.strategyUnsupported}">
-      <p>
+      <div class="${gap}">
         <strong>Batch Control:</strong> change control is enabled, but the installed authorization
         strategy (${it.installedStrategyName ?: 'none'}) is not a Batch Control strategy, so active
         grants do not confer any permission. Install the matching Batch Control strategy to restore
         just-in-time change control.
-      </p>
+      </div>
+      <j:set var="gap" value="jenkins-!-margin-top-2"/>
     </j:if>
     <j:if test="${it.buildAuthenticatorMissing}">
-      <p>
+      <div class="${gap}">
         <strong>Batch Control:</strong> change control is enabled, but no build authenticator is
         configured, so builds run as SYSTEM. A build (for example a Pipeline <code>properties</code>
         step or a Job DSL seed job) can then change authorization outside Batch Control's
         self-grant guard. Install and configure
         <a href="https://plugins.jenkins.io/authorize-project/">Authorize Project</a> under
         <a href="${rootURL}/manage/configureSecurity">Security</a>.
-      </p>
+      </div>
+      <j:set var="gap" value="jenkins-!-margin-top-2"/>
     </j:if>
     <!-- D-50a (SPEC item 2): one fixed warning with no job names, while change control is on and
          builds can run as SYSTEM or as an account with Configure (D-50b,
          BatchControlStrategyMonitor#isBuildsMayRunAsSystem). -->
     <j:if test="${it.buildsMayRunAsSystem}">
-      <p>
+      <div class="${gap}">
         <strong>Batch Control:</strong> builds on this instance can run as SYSTEM or as an account
         that already has Configure permission, so a holder of a Configure permission window can
         make a build change a job's permissions permanently. Set a global default build
@@ -65,7 +71,8 @@
         dedicated low-privilege account). "Run as the user who triggered the build" is only safe
         together with such a fallback, because timer and SCM builds have no triggering user. A
         strategy on a single job is not enough.
-      </p>
+      </div>
+      <j:set var="gap" value="jenkins-!-margin-top-2"/>
     </j:if>
     <!-- D-58a (4): items in the "changed under a grant" state (at most 50, sorted), from
          BatchControlStrategyMonitor#getItemsChangedUnderGrant. Administrator-only page; names are
@@ -74,20 +81,20 @@
     <!-- D-58c: the marked runs come from the Batch Control root action (ui.ReplayedRuns). -->
     <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
     <j:if test="${!empty(changedItems)}">
-      <p>
+      <div class="${gap}">
         <strong>Batch Control:</strong> these items were changed under a temporary permission
         window and have not been reviewed. Until one of them is marked as reviewed (below, or by a
         user with Configure permission and Batch Control/Request on the job's Batch Control
         page), changes that widen its authorization are undone, whoever saves it. Saving the
         item does not end this.
-      </p>
+      </div>
       <!-- D-58b (3): a deliberate review per item (POST, crumb added to every POST form by
            Jenkins; BatchControlStrategyMonitor#doMarkReviewed checks Administer). -->
-      <p>
+      <div class="jenkins-!-margin-top-2">
         Check what was changed under the permission window (see
         <a href="${rootURL}/batch-control/changes/">Change Records</a>) and the Pipeline script
         first, then mark the item as reviewed.
-      </p>
+      </div>
       <ul>
         <j:forEach var="name" items="${changedItems}">
           <j:set var="changedItem" value="${app.getItemByFullName(name)}"/>

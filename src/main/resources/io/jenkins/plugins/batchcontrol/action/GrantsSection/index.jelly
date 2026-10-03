@@ -217,7 +217,7 @@
                   <td>${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
                     <td>
-                      <l:confirmationLink href="${base}active/${g.id}/revoke" post="true"
+                      <l:confirmationLink class="jenkins-button jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
                                           title="Revoke this grant?"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
                         Revoke

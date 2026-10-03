@@ -3,31 +3,31 @@
      The request form is linked only for a viewer who may open it (ApprovalRequiredFailure
      #isCanRequest); anyone else is told whom to ask, never shown a URL that answers 404.
      Only the job name and constant text are rendered; no script.
-     e2e re-audit DEF-28: no "Back to" link; the breadcrumb bar leads back (hosting review). -->
+     e2e re-audit DEF-28: no "Back to" link; the breadcrumb bar leads back (hosting review).
+     Hosting review 2026-10-02: the alert's first block is not wrapped in a p (a p adds padding on
+     top); later blocks are divs spaced with the core margin utility. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Approval required" type="one-column">
     <l:main-panel>
       <l:app-bar title="Approval required"/>
       <j:set var="job" value="${it.job}"/>
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
-        <p>
-          <strong>This build was not started.</strong>
-          Job <strong>${it.jobFullName}</strong> only runs through an approved Batch Control
-          run request.
-        </p>
+        <strong>This build was not started.</strong>
+        Job <strong>${it.jobFullName}</strong> only runs through an approved Batch Control
+        run request.
         <j:choose>
           <j:when test="${it.canRequest}">
-            <p style="margin-bottom: 0;">
+            <div class="jenkins-!-margin-top-2">
               <a href="${rootURL}/${job.url}batch-control/">Request Run</a> to submit a request
               with a reason and the parameters; the build starts automatically once it is approved.
-            </p>
+            </div>
           </j:when>
           <j:otherwise>
-            <p style="margin-bottom: 0;">
+            <div class="jenkins-!-margin-top-2">
               You may not submit run requests for this job (that needs Batch Control/Request and
               Job/Build on it). Ask a user who may, an approver or a Jenkins administrator to
               request this run for you.
-            </p>
+            </div>
           </j:otherwise>
         </j:choose>
       </div>
