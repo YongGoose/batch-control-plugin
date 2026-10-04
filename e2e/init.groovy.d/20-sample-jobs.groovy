@@ -301,6 +301,9 @@ if (jenkins.getItemByFullName('team-mb') == null) {
         def mb = jenkins.createProject(mbClass, 'team-mb')
         def sourceClass = uber.loadClass('jenkins.plugins.git.GitSCMSource')
         def source = sourceClass.getConstructor(String).newInstance('file://' + repo.absolutePath)
+        // Without a discovery trait indexing finds no branch (e2e-15); "Discover branches" is what the
+        // configure page adds by default.
+        source.setTraits([uber.loadClass('jenkins.plugins.git.traits.BranchDiscoveryTrait').getConstructor().newInstance()])
         def branchSourceClass = uber.loadClass('jenkins.branch.BranchSource')
         mb.getSourcesList().add(branchSourceClass.getConstructor(uber.loadClass('jenkins.scm.api.SCMSource')).newInstance(source))
         mb.save()

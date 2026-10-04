@@ -246,6 +246,19 @@ page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State
 entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
 `helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
 
+## e2e-15 driver (`r15/`)
+
+Multibranch activation page after the DEF-08 fix (2026-10-04). `r15/lib.py` is `r14/lib.py` with screenshots in
+`screenshots/run-15/` and logs in `r15/out/`. Fresh JENKINS_HOME under its own compose project:
+`docker compose -p bc-e2e15 -f docker-compose.yml -f compose.prefix.yml up -d --build` (no extra plugins: the image
+already has `workflow-multibranch` and `git`). `arrange.py` adds "Discover branches" to `team-mb` if missing (homes
+seeded before the e2e-15 seed fix) and indexes it (`main`, `feature-1`). `check.py crawl` (requester and admin, new job
+page on and off: every side-panel, app-bar, breadcrumb and main-panel control on the activation pages of `team-mb`, its
+two branch jobs, `batch-pipeline` and `batch-daily`; approver-1 404), `check.py submit <flag> <page> <user>`, `menu.py`
+(app-bar More actions on each job page vs its activation sub-page; disable `rebuild` first for `batch-daily`, see the
+e2e-06 note), `side_dialog.py`, `folder_compare.py`, and `probe.py` (diagnostic). Stop with
+`docker compose -p bc-e2e15 -f docker-compose.yml -f compose.prefix.yml down -v`.
+
 ## e2e-14 driver (`r14/`)
 
 Final check of `main` after rounds 3 and 4 (2026-10-04). `r14/lib.py` is `r12/lib.py` with screenshots in
