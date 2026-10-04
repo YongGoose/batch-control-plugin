@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-10-04 — hosting review rounds 3 and 4 (mawinter69, #5338, 2026-10-03): all merged
+- Decisions: D-35g (role-strategy 927 minimum, forward to its descriptor), D-63, D-64, D-65 (FOLDER_ONLY scope), D-66 (lists and dialogs), D-67 (badges only, dashboard 50), D-68 (UUID ids), D-69 (no pre-release migration code), D-70 (beta DialogEvent).
+- PRs merged: #98 Java 25 build, caffeine cache, CI per JDK 21/25, UUID ids, migration code removed; #99 FOLDER_ONLY scope; #100 badges, core tab look, model-link, dashboard 50; #101 Pending/Active/Ended lists, revoke on detail, request dialogs, DEF-07 crumb fix; #102 role-strategy 927 forwarding; #103 UX-1 empty id cells (regression of the DEF-05 fix); #104 e2e-14 report; #105 DEF-08 activation page layout on the new job page. #97 (Dependabot 918) closed as superseded.
+- Gates (mvn clean verify, JDK 21 and 25): main at b6c1693 788 tests, 0 failures, SpotBugs 0; GitHub CI 19/19 on every PR.
+- e2e: e2e-11 (round 3), e2e-12 (exhaustive control crawl, DEF-07), e2e-13 (role-strategy 927, 8/8), e2e-14 (final main: 615 scripted checks, ~20k crawl checks, DEF-08), e2e-15 (multibranch activation page): 6/6 pass, no defect (seed fix: multibranch branch discovery).
+- Reply posted on #5338 (2026-10-04).
+- Waiting: mawinter69's re-review. UX review (30 items, UX-1 fixed) is held until the owner asks for UX work.
+
 ## 2026-10-03 — hosting review round 2 (mawinter69, #5338, 2026-10-02): six PRs opened
 - Decisions: D-35e, D-35f, D-35f(a), D-38a, D-38b, D-59, D-59a, D-60, D-61 (PR #64, docs branch).
 - PRs: #65 Move change-controlled (D-59/D-59a, security finding); #66 role-strategy 918 pin, legacy wrapper removed, role-strategy surface guard, #766 forward compatibility; #67 new job page compatibility and pre-filled Request Run (D-60); #68 UI polish; #69 run request without Item/Build, job-level Request (D-38a/D-38b); #70 tabs, badges, context menu (D-61, stacked on #68).
