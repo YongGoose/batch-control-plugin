@@ -41,18 +41,30 @@ public final class DeletionAttribution {
      * Remembers the current user as the one deleting {@code item}, unless the current
      * authentication is SYSTEM (an item below a folder being deleted, attributed through the
      * folder's entry). Call from {@code onCheckDelete} once no veto can follow.
+     *
+     * <p>S-39-05: first, whoever deletes, the entries left by deletions that were refused or failed
+     * after {@code onCheckDelete} are dropped, and so is an earlier entry of {@code item} itself (core
+     * calls {@code onCheckDelete} before it registers the deletion, so a fresh deletion of the item
+     * never finds its own entry valid). A deletion started as SYSTEM therefore never names the user
+     * of an earlier, aborted deletion of the same folder.
      */
     static void remember(Item item) {
+        Map<Item, String> started = DELETING.get();
+        if (started != null) {
+            started.keySet().removeIf(other -> other == item || !ItemDeletion.isRegistered(other));
+            if (started.isEmpty()) {
+                DELETING.remove();
+                started = null;
+            }
+        }
         Authentication auth = Jenkins.getAuthentication2();
         if (ACL.SYSTEM2.equals(auth)) {
             return;
         }
-        Map<Item, String> started = DELETING.get();
         if (started == null) {
             started = new WeakHashMap<>();
             DELETING.set(started);
         }
-        started.keySet().removeIf(other -> !ItemDeletion.isRegistered(other)); // left by refused or failed deletions
         started.put(item, auth.getName());
     }
 
