@@ -362,11 +362,17 @@ from scripts.
     request submission is capped at 100 MB, configurable in bytes with the
     system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
     because requesting a run does not require `Item/Build` (D-38a). The cap is
-    judged from the declared `Content-Length` before Batch Control reads the
-    form. A body that declares no length, a chunked one for example, is judged
-    by the actual size of what Jenkins parsed from it, the sum of its parts,
-    and counts as over the cap when that size cannot be measured (D-72b). An
-    over-size submission is answered with HTTP 413, and Batch
+    judged on what the request would keep, before anything is stored: the
+    content of each file value, the decoded size of each `base64File` value,
+    and the stored text of every other value, each with its name. A file value
+    whose size cannot be determined is refused (fail closed). The reason has
+    its own length limit above and is not counted. Two earlier checks are only
+    early filters: the declared `Content-Length`, judged from the headers
+    before Batch Control reads the form, and, for a body that declares no
+    length (a chunked one, for example), the size of what Jenkins parsed from
+    it that the submission can read, which counts as over the cap when it
+    cannot be measured (D-72b, security-37). A submission over the cap at any
+    of these checks is answered with HTTP 413, and Batch
     Control creates nothing and keeps nothing in JENKINS_HOME. It does not
     prevent the upload itself: Jenkins parses a multipart body posted under a
     job URL while it dispatches the URL, before any plugin code runs (D-72a),
