@@ -229,7 +229,8 @@ rows['A-08'] = async () => {
       } else log(L, 'A-08 no Appearance page for the user; relying on the OS colour scheme');
     }
     await page.goto(`${BASE}/batch-control/grants/`);
-    const scope = page.locator('select[name="scopeType"]');
+    // D-71: no scope type selector; the Duration select is the remaining styled select used for this check
+    const scope = page.locator('select[name="durationMinutes"]');
     const dur = page.locator('select[name="durationMinutes"]');
     log(L, `A-08 ${theme} grants form selects: ${(await selectReport(page)).join(' | ')}`);
     // keyboard operability
@@ -261,17 +262,18 @@ rows['A-08'] = async () => {
 rows['A-09'] = async () => {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/batch-control/grants/`);
-  await page.selectOption('select[name="scopeType"]', 'FOLDER');
-  await page.fill('input[name="scopeFullName"]', 'team');
+  await page.waitForSelector('input[name="scopeFullName"]');
+  await page.fill('input[name="scopeFullName"]', 'team'); // D-71: one item (folder), no scope type
   const cb = (v) => page.locator(`input[name="actions"][value="${v}"]`);
+  const lbl = (v) => cb(v).locator('xpath=following-sibling::label[1]'); // #107 renames the Create id to cb<n>
   // click the boxes and their labels, as a user would
-  await page.locator('#grant-action-create + label').click();
-  await page.locator('#grant-action-configure + label').click();
-  await page.locator('#grant-action-delete + label').click();
+  await lbl('CREATE').click();
+  await lbl('CONFIGURE').click();
+  await lbl('DELETE').click();
   await page.waitForTimeout(400);
   const all = [await cb('CREATE').isChecked(), await cb('CONFIGURE').isChecked(), await cb('DELETE').isChecked()];
   await shot(page, page.locator('input[name="actions"]').first().locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-09-1-all-checked', { pad: 12 });
-  await page.locator('#grant-action-configure + label').click(); // uncheck by label
+  await lbl('CONFIGURE').click(); // uncheck by label
   await page.waitForTimeout(400);
   const after = [await cb('CREATE').isChecked(), await cb('CONFIGURE').isChecked(), await cb('DELETE').isChecked()];
   await shot(page, page.locator('input[name="actions"]').first().locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-09-2-create-delete', { pad: 12 });
@@ -359,18 +361,22 @@ rows['A-20'] = async () => {
 rows['A-23'] = async () => {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/batch-control/grants/`);
-  const scope = page.locator('select[name="scopeType"]');
-  const opts = await scope.locator('option').allInnerTexts();
-  await scope.selectOption('FOLDER');
+  await page.waitForSelector('input[name="scopeFullName"]');
+  // D-71: no scope type selector; the window names one item and its kind is shown by the name check
+  const noScopeType = await page.locator('select[name="scopeType"]').count();
   await page.fill('input[name="scopeFullName"]', 'team-mb');
-  // help text of Scope type
-  const help = page.locator('select[name="scopeType"]').locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]').locator('a.jenkins-help-button, .jenkins-help-button').first();
+  await page.locator('input[name="scopeFullName"]').blur();
+  await page.waitForTimeout(1200);
+  const kind = (await page.locator('[data-batch-control-item-kind]').count())
+    ? await page.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null;
+  // help text of the item name field
+  const help = page.locator('input[name="scopeFullName"]').locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]').locator('a.jenkins-help-button, .jenkins-help-button').first();
   await help.click().catch(() => {});
   await page.waitForTimeout(1200);
   const helpText = (await page.locator('.help-area .help, .help').allInnerTexts()).join(' ').replace(/\s+/g, ' ');
-  await shot(page, scope.locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-23', { pad: 12 });
-  log(L, `A-23 scope options ${JSON.stringify(opts)}; help: ${helpText.slice(0, 400)}`);
-  await page.locator('#grant-action-configure + label').click();
+  await shot(page, page.locator('input[name="scopeFullName"]').locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-23', { pad: 12 });
+  log(L, `A-23 no scope type selector=${noScopeType === 0}; team-mb kind=${kind}; help: ${helpText.slice(0, 400)}`);
+  await page.locator('input[name="actions"][value="CONFIGURE"]').locator('xpath=following-sibling::label[1]').click();
   await page.fill('textarea[name="reason"]', 'Adjust the multibranch source of team-mb (A-23).');
   await page.locator('#grant-approver-1 + label').click();
   await Promise.all([page.waitForLoadState('load'), page.locator('button:has-text("Request Grant")').click()]);

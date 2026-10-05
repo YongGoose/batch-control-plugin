@@ -18,10 +18,10 @@ def sec_A():
     s = Session("requester")
     s.go("/batch-control/grants/")
     s.page.locator("#main-panel a, #main-panel button", has_text="Request Change Permission").first.click()
-    s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+    s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
     d = dlg(s)
     res["A_url_while_open"] = s.page.url
-    d.locator("select[name=scopeType]").select_option("JOB")
+# D-71: scope type selector removed (no select_option)
     d.locator("input[name=scopeFullName]").fill("batch-daily")
     tick(d.locator("input[name=actions][value=CONFIGURE]"))
     d.locator("textarea[name=reason]").fill("e2e-11 grant dialog reason")

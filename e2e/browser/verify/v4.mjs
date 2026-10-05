@@ -54,7 +54,7 @@ if (false) {
 if (false) {
 // B7-17 invalid regex, B7-25 unreadable scope
 for (const [id, opts] of [['B7-17', { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/app-[/' }], ['B7-25', { type: 'JOB', scope: 'team/secret-job', actions: ['CONFIGURE'] }]]) {
-  await p.goto(`${BASE}/batch-control/grants/`); await p.selectOption('select[name="scopeType"]', opts.type); await p.fill('input[name="scopeFullName"]', opts.scope);
+  await p.goto(`${BASE}/batch-control/grants/`); await p.fill('input[name="scopeFullName"]', opts.scope);
   for (const a of opts.actions) { const b = p.locator(`input[name="actions"][value="${a}"]`); if (!(await b.isChecked())) await b.locator('xpath=following-sibling::label[1]').click(); }
   if (opts.pattern) await p.fill('input[name="createNamePattern"]', opts.pattern);
   const reason = `Verify ${id} ${T}`; await p.fill('textarea[name="reason"]', reason); await p.locator('input[name="approvers"][value="approver-1"] + label').click();

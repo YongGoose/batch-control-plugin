@@ -10,7 +10,7 @@ def ids(user):
 
 def grant(user, typ, name, actions, minutes="60"):
     before = ids("approver-1")
-    data = [("scopeType", typ), ("scopeFullName", name), ("durationMinutes", minutes),
+    data = [("scopeFullName", name), ("durationMinutes", minutes),
             ("reason", f"e2e-06 {user} {actions} on {name}"), ("approvers", "approver-1")]
     data += [("actions", a) for a in actions.split(",")]
     r = api(user, "/batch-control/grants/create", "POST", data=data)

@@ -8,7 +8,7 @@ def ids(user):
 
 def req(user, typ, name, actions, minutes, approver, approve=True):
     before = ids(approver)
-    data = [("scopeType", typ), ("scopeFullName", name), ("durationMinutes", minutes),
+    data = [("scopeFullName", name), ("durationMinutes", minutes),
             ("reason", f"e2e-10 {actions} on {name}"), ("approvers", approver)] + [("actions", a) for a in actions.split(",")]
     r = api(user, "/batch-control/grants/create", "POST", data=data)
     new = sorted(ids(approver) - before)

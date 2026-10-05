@@ -57,7 +57,7 @@ GJOBS = iter(["batch-rebuild", "batch-nag", "batch-throttle", "batch-token", "ba
 
 def f_grant():
     r = api("requester", "/batch-control/grants/create", "POST",
-            data=[("scopeType", "JOB"), ("scopeFullName", next(GJOBS)), ("actions", "CONFIGURE"), ("durationMinutes", "15"),
+            data=[("scopeFullName", next(GJOBS)), ("actions", "CONFIGURE"), ("durationMinutes", "15"),
                   ("reason", "e2e-12 action test"), ("approvers", "approver-1"), ("approvers", "admin")])
     return "grants", loc_id(r)
 

@@ -64,7 +64,6 @@ check "baseline: requester GET /job/$SCOPE/configure" 403 \
 # --- a. an approved CONFIGURE grant
 request_grant() {   # $1 = body file -> HTTP status
   bc_post requester "$1" "/batch-control/grants/create" \
-    --data-urlencode "scopeType=JOB" \
     --data-urlencode "scopeFullName=$SCOPE" \
     --data-urlencode "actions=CONFIGURE" \
     --data-urlencode "durationMinutes=15" \

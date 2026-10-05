@@ -24,7 +24,7 @@ res["req_requestrun_team"] = api("requester", "/job/team/job/app-1/batch-control
 res["req_daily"] = api("requester", "/job/batch-daily/").status_code
 res["req_configure_before"] = api("requester", "/job/team/job/app-1/configure").status_code
 # grant
-r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeType", "JOB"), ("scopeFullName", "team/app-1"), ("actions", "CONFIGURE"), ("durationMinutes", "15"), ("reason", "e2e-11 role"), ("approvers", "approver-1")])
+r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeFullName", "team/app-1"), ("actions", "CONFIGURE"), ("durationMinutes", "15"), ("reason", "e2e-11 role"), ("approvers", "approver-1")])
 res["grant_create"] = r.status_code
 new = set(re.findall(r"/grants/([0-9a-f-]{36})/", r.headers.get("Location", "")))
 res["grant_id"] = sorted(new)

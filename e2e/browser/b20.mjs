@@ -33,7 +33,7 @@ await ad.page.goto(`${BASE}/batch-control/changes/`);
 await shot(ad.page, ad.page.locator('#main-panel tr:has-text("GRANT_REVOKE")').first().locator('xpath=..').locator('tr:has-text("GRANT_REVOKE")'), 'B20-01-revoke-records', { pad: 8 });
 // B20-02 grant request while off (REST) and approval of a pending one
 const b0 = (await changeRows(/GRANT_REQUEST_BLOCKED/)).length;
-const r2 = await api('requester', '/batch-control/grants/create', { method: 'POST', body: new URLSearchParams({ scopeType: 'JOB', scopeFullName: 'batch-daily', actions: 'CONFIGURE', durationMinutes: '15', reason: 'while off (B20-02)', approvers: 'approver-1' }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+const r2 = await api('requester', '/batch-control/grants/create', { method: 'POST', body: new URLSearchParams({ scopeFullName: 'batch-daily', actions: 'CONFIGURE', durationMinutes: '15', reason: 'while off (B20-02)', approvers: 'approver-1' }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
 const bl = await changeRows(/GRANT_REQUEST_BLOCKED/);
 log(L, `B20-02 REST grant request while change control is off -> ${r2.status} "${errText(r2.text)}"; GRANT_REQUEST_BLOCKED +${bl.length - b0}: ${bl[0] || ''}`);
 // B20-03 back on: windows stay revoked

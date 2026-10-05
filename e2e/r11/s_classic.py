@@ -1,5 +1,5 @@
 """R4-9/R4-14: dialogs from the classic job sidebar (user `classic`, new job page off) and from a folder page
-(user `fonly`, FOLDER_ONLY request on ops, used by s_folder_only.py)."""
+(user `fonly`, one-item window on the folder ops, D-71; used by s_folder_only.py)."""
 import re
 from lib import Session, close, api, log
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -39,10 +39,10 @@ res["E_run_uuid"] = bool(re.search(r"/requests/" + UUID + "/$", s.page.url))
 s.shot("#main-panel", "E-03-classic-run-detail")
 s.go("/job/batch-pipeline/")
 s.page.locator("#tasks a, #tasks button", has_text="Request Change Permission").first.click()
-s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
 d = s.page.locator("dialog[open]").first
 res["E_grant_url_while_open"] = s.page.url
-res["E_grant_prefill"] = (d.locator("select[name=scopeType]").input_value(), d.locator("input[name=scopeFullName]").input_value())
+res["E_grant_prefill"] = ((d.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if d.locator("[data-batch-control-item-kind]").count() else None), d.locator("input[name=scopeFullName]").input_value())
 tick(d, "actions", "CONFIGURE")
 d.locator("select[name=durationMinutes]").select_option("15")
 d.locator("textarea[name=reason]").fill("e2e-11 classic grant dialog (revoke test)")
@@ -53,7 +53,7 @@ res["E_grant_landing"] = s.page.url
 s.shot("#main-panel", "E-05-classic-grant-detail")
 s.done()
 
-# F. folder page, new-job-page user (folders render the classic page for everyone) - fonly asks FOLDER_ONLY on ops
+# F. folder page, new-job-page user (folders render the classic page for everyone) - fonly asks a window on the folder ops (D-71)
 s = Session("fonly")
 s.go("/job/ops/")
 res["F_side"] = [re.sub(r"\s+", " ", a.inner_text()).strip() for a in s.page.locator("#tasks a, #tasks button").all()][:14]
@@ -61,12 +61,12 @@ appbar = s.page.locator("[data-testid=app-bar-overflow-button]")
 res["F_newui_appbar"] = appbar.count()
 s.shot("#side-panel" if s.page.locator("#side-panel").count() else "body", "F-01-folder-page")
 s.page.locator("#tasks a, #tasks button, .jenkins-app-bar a, .jenkins-app-bar button", has_text="Request Change Permission").first.click()
-s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
 d = s.page.locator("dialog[open]").first
 res["F_url_while_open"] = s.page.url
-res["F_prefill"] = (d.locator("select[name=scopeType]").input_value(), d.locator("input[name=scopeFullName]").input_value())
-res["F_scope_options"] = d.locator("select[name=scopeType] option").all_inner_texts()
-d.locator("select[name=scopeType]").select_option("FOLDER_ONLY")
+res["F_prefill"] = ((d.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if d.locator("[data-batch-control-item-kind]").count() else None), d.locator("input[name=scopeFullName]").input_value())
+res["F_item_kind"] = d.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if d.locator("[data-batch-control-item-kind]").count() else None
+# D-71: scope type selector removed (no select_option)
 s.page.wait_for_timeout(300)
 res["F_scope_help_visible"] = [t.strip() for t in d.locator(".jenkins-form-description, .help").all_inner_texts() if "Folder only" in t or "folder" in t.lower()][:3]
 for a in ("CREATE", "CONFIGURE", "DELETE"):

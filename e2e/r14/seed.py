@@ -3,8 +3,10 @@ as the real accounts (the script console only arranges: executors, view, the fai
 
 Run requests: pending (requester, reqonly, opsreq, nested job), executed, rejected, cancelled, expired.
 Activations: ACTIVATE approved (batch-cron), HOLD pending (batch-cron), ACTIVATE pending (batch-upstream),
-ACTIVATE rejected/cancelled. Grants: pending JOB/FOLDER, active JOB/FOLDER/FOLDER_ONLY, ended (expired),
-revoked, rejected, cancelled. Changes under a window, incidents (FAILURE/UNSTABLE), a list view.
+ACTIVATE rejected/cancelled. Grants (one-item windows, D-71; the scope type selector is gone): pending on a job and on
+a folder, active on jobs (batch-daily, team/app-1) and on the folders team (Configure+Create) and ops (Configure; the
+former FOLDER_ONLY window, whose Delete is refused at submission since D-71), ended (expired), revoked,
+rejected, cancelled. Changes under a window (each on the window's own item), incidents (FAILURE/UNSTABLE), a list view.
 Ids are written to out/ids.json for the crawler."""
 import json, re, time
 from lib import api, groovy
@@ -34,8 +36,9 @@ def act_req(user, job, action, reason, approvers=("approver-1",)):
     return loc_id(r)
 
 
-def grant_req(user, stype, scope, actions, minutes, reason, approvers=("approver-1",)):
-    data = [("scopeType", stype), ("scopeFullName", scope), ("durationMinutes", str(minutes)), ("reason", reason)]
+def grant_req(user, scope, actions, minutes, reason, approvers=("approver-1",)):
+    """D-71: a window names one item (scopeFullName); there is no scopeType field any more."""
+    data = [("scopeFullName", scope), ("durationMinutes", str(minutes)), ("reason", reason)]
     data += [("actions", a) for a in actions] + [("approvers", a) for a in approvers]
     r = api(user, "/batch-control/grants/create", "POST", data=data)
     assert r.status_code == 302, (scope, r.status_code, r.text[:300])
@@ -78,31 +81,48 @@ ids["act_cancelled"] = act_req("requester", "batch-pt-source", "ACTIVATE", "Chan
 decide("requester", "activations", ids["act_cancelled"], "cancel")
 
 # --- grants
-ids["g_active_job"] = grant_req("requester", "JOB", "batch-daily", ["CONFIGURE"], 60, "Fix the DATE default")
+ids["g_active_job"] = grant_req("requester", "batch-daily", ["CONFIGURE"], 60, "Fix the DATE default")
 decide("approver-1", "grants", ids["g_active_job"], "approve")
-ids["g_active_folder"] = grant_req("requester", "FOLDER", "team", ["CONFIGURE", "CREATE"], 60, "Team folder clean-up")
+ids["g_active_folder"] = grant_req("requester", "team", ["CONFIGURE", "CREATE"], 60, "Team folder clean-up")
 decide("approver-1", "grants", ids["g_active_folder"], "approve")
-ids["g_active_fonly"] = grant_req("fonly", "FOLDER_ONLY", "ops", ["CREATE", "CONFIGURE", "DELETE"], 60, "Ops folder-only work")
+# D-71: the former FOLDER_ONLY window on ops asked for Delete as well; Delete on a folder is refused at submission now
+ids["g_fonly_delete_refused"] = api("fonly", "/batch-control/grants/create", "POST", data=[
+    ("scopeFullName", "ops"), ("actions", "CREATE"), ("actions", "CONFIGURE"), ("actions", "DELETE"), ("durationMinutes", "60"),
+    ("reason", "Ops folder work incl. delete"), ("approvers", "approver-1")]).status_code
+assert ids["g_fonly_delete_refused"] == 400, ("Delete on the folder ops must be refused at submission", ids["g_fonly_delete_refused"])
+# Configure only: with Create as well fonly would hold every permission a window can carry on ops, and the folder
+# page offers no "Request Change Permission" to such a user (FolderGrantRequestAction), which round3.py A opens
+ids["g_active_fonly"] = grant_req("fonly", "ops", ["CONFIGURE"], 60, "Ops folder configuration")
 decide("approver-1", "grants", ids["g_active_fonly"], "approve")
-ids["g_expired"] = grant_req("requester", "JOB", "prod/x", ["CONFIGURE"], 1, "Short window that will expire")
+# D-71: a folder window covers the folder only, so the job edit below needs its own window (Mark as reviewed, misc.py M)
+ids["g_active_app1"] = grant_req("requester", "team/app-1", ["CONFIGURE"], 60, "Fix app-1 description")
+decide("approver-1", "grants", ids["g_active_app1"], "approve")
+ids["g_expired"] = grant_req("requester", "prod/x", ["CONFIGURE"], 1, "Short window that will expire")
 decide("approver-1", "grants", ids["g_expired"], "approve")
-ids["g_revoked"] = grant_req("requester", "JOB", "prod/y", ["CONFIGURE"], 60, "Window to be revoked")
+ids["g_revoked"] = grant_req("requester", "prod/y", ["CONFIGURE"], 60, "Window to be revoked")
 decide("approver-1", "grants", ids["g_revoked"], "approve")
 ids["g_revoked_status"] = decide("manager", "grants", ids["g_revoked"], "revoke")
-ids["g_rejected"] = grant_req("requester", "JOB", "prod/z", ["DELETE"], 15, "Delete old job")
+ids["g_rejected"] = grant_req("requester", "prod/z", ["DELETE"], 15, "Delete old job")
 decide("approver-1", "grants", ids["g_rejected"], "reject", "Keep it")
-ids["g_cancelled"] = grant_req("requester", "JOB", "team/app-1", ["CONFIGURE"], 15, "Not needed after all")
+ids["g_cancelled"] = grant_req("requester", "team/app-1", ["CONFIGURE"], 15, "Not needed after all")
 decide("requester", "grants", ids["g_cancelled"], "cancel")
-ids["g_pending_job"] = grant_req("requester", "JOB", "batch-pipeline", ["CONFIGURE"], 30, "Pipeline script fix", ("approver-1", "approver-2"))
-ids["g_pending_folder"] = grant_req("requester", "FOLDER", "prod", ["CREATE"], 15, "New prod job")
+ids["g_pending_job"] = grant_req("requester", "batch-pipeline", ["CONFIGURE"], 30, "Pipeline script fix", ("approver-1", "approver-2"))
+ids["g_pending_folder"] = grant_req("requester", "prod", ["CREATE"], 15, "New prod job")
 
-# --- changes under windows (a change record per save)
+# --- changes under windows (a change record per save; each on the item its window names, D-71)
 r = api("requester", "/job/batch-daily/submitDescription", "POST", data={"description": "Daily batch (edited under window e2e-12)"})
 ids["change_desc_status"] = r.status_code
-r = api("requester", "/job/team/job/app-1/submitDescription", "POST", data={"description": "app-1 edited under FOLDER window"})
+r = api("requester", "/job/team/job/app-1/submitDescription", "POST", data={"description": "app-1 edited under its own window"})
 ids["change_desc2_status"] = r.status_code
+# a folder's submitDescription edits its view (View/Configure), so the folder's own configuration goes through config.xml
+x = api("requester", "/job/team/config.xml").text
+x = re.sub(r"<description>.*?</description>|<description/>", "<description>team folder edited under the folder window</description>", x, count=1, flags=re.S)
+r = api("requester", "/job/team/config.xml", "POST", data=x.encode("utf-8"), headers={"Content-Type": "application/xml"})
+ids["change_desc_folder_status"] = r.status_code
 r = api("admin", "/job/ops/job/a/submitDescription", "POST", data={"description": "admin edit"})
 ids["change_admin_status"] = r.status_code
+assert ids["change_desc_status"] in (200, 302) and ids["change_desc2_status"] in (200, 302) \
+    and ids["change_desc_folder_status"] in (200, 302), ("saves under the windows", ids)
 
 # --- incidents: failing/unstable uncontrolled jobs built by admin; a view
 

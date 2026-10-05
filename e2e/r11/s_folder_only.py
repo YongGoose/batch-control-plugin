@@ -1,5 +1,11 @@
-"""R4-15/D-65: what a FOLDER_ONLY window on `ops` (CREATE+CONFIGURE+DELETE, holder fonly) allows, over HTTP as fonly.
-fonly holds Item/Read+Move+RequestGrant globally and a standing Item/Create on prod (move destination)."""
+"""SUPERSEDED by D-71 (e2e-16): the FOLDER_ONLY scope type is withdrawn. A window now names exactly one item
+(no CREATE+CONFIGURE+DELETE "folder-only" reach): a CONFIGURE window on a folder covers the folder itself only, a
+CREATE window creates directly inside it only, and DELETE on a folder is refused at submission. The live, D-71-correct
+checks are in e2e/r16/items.py (sec_F folder CONFIGURE/CREATE, sec_D folder DELETE refused) and e2e/r14/round3.py
+sec_A. This file is kept for provenance of the e2e-11 (D-65) pass and is not part of the CI shard set.
+
+Original intent (D-65): what a FOLDER_ONLY window on `ops` (CREATE+CONFIGURE+DELETE, holder fonly) allowed, over HTTP
+as fonly. fonly holds Item/Read+Move+RequestGrant globally and a standing Item/Create on prod (move destination)."""
 from lib import api, log
 res = {}
 def st(r):

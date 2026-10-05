@@ -5,7 +5,7 @@ from lib import api
 u, st, sf, mins, acts = sys.argv[1:6]
 h = api(u, "/batch-control/grants/dialog?scopeFullName=" + sf).text
 action = re.search(r'<form[^>]*action="([^"]+)"', h).group(1).replace("/jenkins", "", 1)
-data = [("scopeType", st), ("scopeFullName", sf), ("durationMinutes", mins), ("reason", "e2e-11 arrange"), ("approvers", "approver-1")]
+data = [("scopeFullName", sf), ("durationMinutes", mins), ("reason", "e2e-11 arrange"), ("approvers", "approver-1")]
 data += [("actions", a) for a in acts.split(",")]
 r = api(u, action, "POST", data=data)
 loc = r.headers.get("Location", "")

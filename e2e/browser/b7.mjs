@@ -9,13 +9,17 @@ const errText = (t) => (t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').match(/(
 /** requester submits a grant request in the form; returns the detail URL (and the page for inspection). */
 async function requestGrant(page, { type = 'JOB', scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
   await page.goto(`${BASE}/batch-control/grants/`);
-  await page.selectOption('select[name="scopeType"]', type);
-  await page.fill('input[name="scopeFullName"]', scope);
+  await page.waitForSelector('input[name="scopeFullName"]');
+  await page.fill('input[name="scopeFullName"]', scope); // D-71: one item, no scope type
   for (const a of actions) {
     const box = page.locator(`input[name="actions"][value="${a}"]`);
     if (!(await box.isChecked())) await box.locator('xpath=following-sibling::label[1]').click();
   }
-  if (pattern !== undefined) await page.fill('input[name="createNamePattern"]', pattern);
+  if (pattern !== undefined) { // #107: the field is revealed by ticking Create (done above)
+    const field = page.locator('input[name="createNamePattern"]');
+    await field.waitFor({ state: 'visible' }).catch(() => {});
+    await field.fill(pattern);
+  }
   await page.selectOption('select[name="durationMinutes"]', String(minutes));
   await page.fill('textarea[name="reason"]', reason);
   await page.locator(`input[name="approvers"][value="${approver}"] + label`).click();

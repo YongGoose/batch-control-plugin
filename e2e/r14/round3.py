@@ -1,15 +1,17 @@
 """e2e-14 G2b: the key e2e-11 round-3 checks on the merged main, with explicit assertions.
 
 usage: python round3.py [ABCDEFGHI]   rows: out/round3.jsonl, shots: R3-<sec>-*.png
-A folder-only scope (D-65): folder-page dialog as fonly, approve in the browser, then what the window allows,
-  incl. the nested delete refusal (ops/sub, ops/mb, ops itself) and a browser save/refusal
+A one-item window on a folder (D-71, replaces the D-65 folder-only check): folder-page dialog as fonly (no scope
+  type selector, the folder's kind shown), Delete on the folder refused next to the field, Create+Configure approved
+  in the browser; then the window configures ops only (not ops/a, ops/sub, ops/mb), creates directly in ops only,
+  deletes nothing (a job's own Delete window does), and a browser save/refusal
 B overview badges only (R4-6/D-67): no table/alert, badge counts equal the list rows
 C tab look (R4-7): our tab bar vs core's new build page tabs
 D model-link (R4-11): dashboard, request detail, activation list/detail; chevron opens core's menu
 E dashboard 50 + History links (R4-13)
 F Pending/Active/Ended lists (R4-8/D-66) on requests, activations, grants; footers; no horizontal scroll at 1280
 G revoke on the window's detail page (R4-12): holder sees no Revoke, manager revokes, holder loses access
-H request dialogs from the job page (new: requester, classic: classic) and the folder page; UUID landing
+H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
 import json, re, sys
 from lib import Session, close, api, groovy, BASE, clean
@@ -83,6 +85,27 @@ def approve_in_browser(user, kind, rid, sec, tag):
 
 
 # ---------------------------------------------------------------- A
+KIND_RE = {"Folder": r"\.Folder$", "Freestyle": r"FreeStyleProject$", "Pipeline": r"WorkflowJob$",
+           "Multibranch": r"WorkflowMultiBranchProject$"}
+
+
+def dialog_kind(d, timeout=6000):
+    """D-71: the grant form's name check answers with the item's kind ([data-batch-control-item-kind], icon + name)."""
+    k = d.locator("[data-batch-control-item-kind]")
+    try:
+        k.first.wait_for(timeout=timeout)
+    except Exception:
+        return None, None, False
+    return (k.first.get_attribute("data-batch-control-item-kind"), re.sub(r"\s+", " ", k.first.inner_text()).strip(),
+            k.first.locator("svg").count() > 0)
+
+
+def untick(d, name, value):
+    box = d.locator(f"input[name={name}][value={value}]")
+    if box.is_checked():
+        box.locator("xpath=following-sibling::label").first.click()
+
+
 def sec_A():
     groovy("""def ops = jenkins.model.Jenkins.get().getItemByFullName('ops')
 if (ops.getItem('del-me') == null) ops.createProject(hudson.model.FreeStyleProject, 'del-me')
@@ -91,68 +114,99 @@ return ops.items*.name""")
     s = Session("fonly")
     s.go("/job/ops/")
     s.page.locator("#tasks a, #tasks button, .jenkins-app-bar a, .jenkins-app-bar button", has_text="Request Change Permission").first.click()
-    s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+    s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
     d = s.page.locator("dialog[open]").first
     url_open = s.page.url
-    prefill = (d.locator("select[name=scopeType]").input_value(), d.locator("input[name=scopeFullName]").input_value())
-    opts = d.locator("select[name=scopeType] option").all_inner_texts()
-    d.locator("select[name=scopeType]").select_option("FOLDER_ONLY")
-    s.page.wait_for_timeout(300)
-    help_txt = [t.strip() for t in d.locator(".jenkins-form-description, .help").all_inner_texts() if "Folder only" in t][:1]
+    prefill = d.locator("input[name=scopeFullName]").input_value()
+    selector = d.locator("select[name=scopeType]").count()
+    kind, kind_text, icon = dialog_kind(d)
     for a in ("CREATE", "CONFIGURE", "DELETE"):
         tick(d, "actions", a)
     d.locator("select[name=durationMinutes]").select_option("60")
-    d.locator("textarea[name=reason]").fill("e2e-14 folder-only window on ops")
+    d.locator("textarea[name=reason]").fill("e2e-16 window on the folder ops")
     tick(d, "approvers", "approver-1")
     s.shot("dialog[open]", "R3-A-01-folder-dialog")
+    # D-71: Delete applies only to a job, so the submission is refused next to the actions, input kept
+    d.get_by_role("button", name="Request Grant").click()
+    s.page.wait_for_timeout(2500)
+    d = s.page.locator("dialog[open]").first
+    refusal = {"dialog_open": d.count(), "url": s.page.url.replace(BASE, ""),
+               "errors": [t.strip()[:200] for t in s.page.locator("dialog[open] .error, dialog[open] .jenkins-alert-danger").all_inner_texts() if t.strip()][:3]}
+    if d.count():
+        refusal["kept"] = (d.locator("input[name=scopeFullName]").input_value(),
+                           [b.get_attribute("value") for b in d.locator("input[name=actions]").all() if b.is_checked()])
+        s.shot("dialog[open]", "R3-A-01b-folder-delete-refused")
+    check("A", "folder page dialog opens in place pre-filled 'ops', no scope type selector, kind Folder with its icon; "
+          "Delete on the folder is refused next to the field with the input kept",
+          url_open.rstrip("/").endswith("/job/ops") and prefill == "ops" and selector == 0 and kind and re.search(KIND_RE["Folder"], kind)
+          and icon and refusal["dialog_open"] == 1 and any("applies only to a job" in e for e in refusal["errors"])
+          and refusal.get("kept", (None, []))[0] == "ops" and "DELETE" in refusal.get("kept", (None, []))[1],
+          url_open=url_open.replace(BASE, ""), prefill=prefill, scope_type_selector=selector, kind=kind, kind_text=kind_text, icon=icon,
+          refusal=refusal)
+    untick(d, "actions", "DELETE")
+    tick(d, "approvers", "approver-1")
+    if not d.locator("textarea[name=reason]").input_value():
+        d.locator("textarea[name=reason]").fill("e2e-16 window on the folder ops")
     landing = submit_dialog(s, d, "Request Grant")
     gid = re.search(UUID, landing).group(0)
-    check("A", "folder page dialog opens in place, pre-filled FOLDER ops, three scope types, lands on UUID detail",
-          url_open.rstrip("/").endswith("/job/ops") and prefill == ("FOLDER", "ops") and len(opts) == 3 and gid,
-          url_open=url_open.replace(BASE, ""), prefill=prefill, options=opts, help=help_txt, landing=landing.replace(BASE, ""))
     s.shot("#main-panel", "R3-A-02-pending-detail")
-    console_ok("A", s, "folder page + dialog")
+    detail_kind = s.page.locator("#main-panel [data-batch-control-item-kind]").first
+    check("A", "Create+Configure on the folder lands on the UUID detail page, which shows the item with its kind",
+          gid and detail_kind.count() and re.search(KIND_RE["Folder"], detail_kind.get_attribute("data-batch-control-item-kind") or ""),
+          landing=landing.replace(BASE, ""), detail_kind=detail_kind.inner_text() if detail_kind.count() else None)
+    console_ok("A", s, "folder page + dialog", expected=("400 POST",))
     s.done()
     txt = approve_in_browser("approver-1", "grants", gid, "A", "02b")
-    js = api("admin", f"/batch-control/grants/{gid}/").text
     check("A", "approver-1 approves in the browser", "Approved" in txt or "Open" in txt or "APPROVED" in txt, text=txt[:300])
     st = lambda r: r.status_code  # noqa
     res = {}
     for item in ("ops", "ops/a", "ops/sub", "ops/mb", "ops/sub/b"):
         res[f"configure {item}"] = st(api("fonly", J(item) + "/configure"))
-    check("A", "configure: ops, ops/a, ops/sub, ops/mb 200; ops/sub/b 403",
-          [res[f"configure {i}"] for i in ("ops", "ops/a", "ops/sub", "ops/mb", "ops/sub/b")] == [200, 200, 200, 200, 403], **res)
+    check("A", "configure (D-71): the folder ops 200; ops/a, ops/sub, ops/mb, ops/sub/b 403 (a folder window covers the folder only)",
+          [res[f"configure {i}"] for i in ("ops", "ops/a", "ops/sub", "ops/mb", "ops/sub/b")] == [200, 403, 403, 403, 403], **res)
     cr = {}
     for parent, name in (("ops", "fo-new"), ("ops/sub", "fo-nested"), ("", "fo-root")):
         base = J(parent) if parent else ""
         r = api("fonly", base + f"/createItem?name={name}&mode=hudson.model.FreeStyleProject", "POST",
                 headers={"Content-Type": "application/x-www-form-urlencoded"})
         cr[f"{parent or '(root)'}/{name}"] = (st(r), st(api("admin", base + f"/job/{name}/api/json")))
-    check("A", "create: ops/fo-new allowed; ops/sub/fo-nested and root refused",
+    cr["configure ops/fo-new (D-35c, created through the window)"] = st(api("fonly", J("ops/fo-new") + "/configure"))
+    check("A", "create: ops/fo-new allowed and configurable by its creator (D-35c); ops/sub/fo-nested and root refused",
           cr["ops/fo-new"] == (302, 200) and cr["ops/sub/fo-nested"][1] == 404 and cr["(root)/fo-root"][1] == 404
-          and cr["ops/sub/fo-nested"][0] == 403 and cr["(root)/fo-root"][0] == 403, **cr)
+          and cr["ops/sub/fo-nested"][0] == 403 and cr["(root)/fo-root"][0] == 403
+          and cr["configure ops/fo-new (D-35c, created through the window)"] == 200, **cr)
     de = {}
     for item in ("ops/del-me", "ops/sub", "ops/mb", "ops", "ops/sub/b"):
         r = api("fonly", J(item) + "/doDelete", "POST")
         de[item] = (st(r), st(api("admin", J(item) + "/api/json")), clean(r.text)[:160] if st(r) >= 400 else "")
-    check("A", "delete: ops/del-me deleted; nested folder ops/sub, ops/mb, ops and ops/sub/b refused and still present",
-          de["ops/del-me"][:2] == (302, 404) and all(de[i][0] == 403 and de[i][1] == 200 for i in ("ops/sub", "ops/mb", "ops", "ops/sub/b")),
-          **{k: v for k, v in de.items()})
-    # browser: fonly saves ops/sub configure (allowed), opens ops/sub/b configure (refused); delete ops/sub in the browser
+    check("A", "delete under the folder window: nothing (ops/del-me, ops/sub, ops/mb, ops, ops/sub/b refused and still present)",
+          all(de[i][0] == 403 and de[i][1] == 200 for i in ("ops/del-me", "ops/sub", "ops/mb", "ops", "ops/sub/b")), **de)
+    # the job's own Delete window (D-71: Delete applies to a job)
+    r = api("fonly", "/batch-control/grants/create", "POST", data=[("scopeFullName", "ops/del-me"), ("actions", "DELETE"), ("durationMinutes", "15"),
+                                                                   ("reason", "e2e-16 delete ops/del-me"), ("approvers", "approver-1")])
+    gdel = re.search(UUID, r.headers.get("Location", "") or "")
+    gdel = gdel.group(0) if gdel else None
+    if gdel:
+        api("approver-1", f"/batch-control/grants/{gdel}/approve", "POST", data={"comment": "ok"})
+    r = api("fonly", J("ops/del-me") + "/doDelete", "POST")
+    dj = (st(r), st(api("admin", J("ops/del-me") + "/api/json")))
+    check("A", "a Delete window on the job ops/del-me deletes it", gdel and dj == (302, 404), grant=gdel, delete=dj)
+    # browser: fonly saves the folder ops (its own configuration), opens ops/sub configure (refused)
     b = Session("fonly")
-    r = b.go("/job/ops/job/sub/configure")
+    r = b.go("/job/ops/configure")
     saved = None
     if r.status == 200:
-        b.page.locator("textarea[name=description], textarea[name='_.description']").first.fill("e2e-14 folder-only save ops/sub")
+        b.page.locator("textarea[name=description], textarea[name='_.description']").first.fill("e2e-16 save of the folder ops under its window")
         with b.page.expect_navigation() as nav:
             b.page.locator("button[name=Submit]").first.click()
         saved = (nav.value.status, b.page.url.replace(BASE, ""))
-    r2 = b.go("/job/ops/job/sub/job/b/configure")
+    r2 = b.go("/job/ops/job/sub/configure")
     b.shot("#main-panel" if b.page.locator("#main-panel").count() else "body", "R3-A-03-nested-configure-refused")
-    desc = api("admin", "/job/ops/job/sub/api/json?tree=description").json().get("description")
-    check("A", "browser: ops/sub configure saved under the window; ops/sub/b configure refused",
-          saved and saved[0] == 200 and desc == "e2e-14 folder-only save ops/sub" and r2.status == 403, saved=saved, nested_status=r2.status, desc=desc)
-    # browser delete of the nested folder ops/sub (folder Delete is a confirmation POST from the folder page)
+    desc = api("admin", "/job/ops/api/json?tree=description").json().get("description")
+    check("A", "browser: the folder ops saved under its window; ops/sub configure refused",
+          saved and saved[0] == 200 and desc == "e2e-16 save of the folder ops under its window" and r2.status == 403,
+          saved=saved, nested_status=r2.status, desc=desc)
+    # browser: no Delete Folder on ops/sub for fonly (no window confers Delete on a folder)
     b.go("/job/ops/job/sub/")
     dl = b.page.locator("#tasks a, #tasks button, a, button", has_text=re.compile(r"^\s*Delete Folder\s*$"))
     info = {"delete_entry": dl.count()}
@@ -168,11 +222,10 @@ return ops.items*.name""")
             info["text"] = re.sub(r"\s+", " ", b.text())[:300]
             b.shot("#main-panel" if b.page.locator("#main-panel").count() else "body", "R3-A-04-nested-delete-refused")
     info["still_present"] = api("admin", "/job/ops/job/sub/api/json").status_code
-    check("A", "browser: Delete Folder on nested ops/sub refused, folder still present",
+    check("A", "browser: Delete Folder on ops/sub not offered (or refused), folder still present",
           info["still_present"] == 200 and (info["delete_entry"] == 0 or "Delete" in info.get("text", "") or "denied" in info.get("text", "").lower()
                                            or "permission" in info.get("text", "").lower()), **info)
     b.done()
-    ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
     recs = groovy("""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/changes/%s.jsonl')
 return f.readLines().findAll{ it.contains('ops/fo-new') || it.contains('ops/del-me') }.join('\\n')""" % lib.month())
     lines = [json.loads(x) for x in re.findall(r"\{.*?\}", recs)]
@@ -180,13 +233,15 @@ return f.readLines().findAll{ it.contains('ops/fo-new') || it.contains('ops/del-
     newest = {t: max((x for x in by_fonly if x["type"] == t), key=lambda x: x["at"], default=None) for t in ("CREATE", "DELETE")}
     covering = groovy("""def d = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/grants')
 return d.listFiles().findAll{ it.name.endsWith('.xml') }.collect{ new XmlSlurper().parse(it) }.findAll{ g ->
-  g.user.text() == 'fonly' && g.scope.type.text() == 'FOLDER_ONLY' && g.scope.fullName.text() == 'ops' }.collect{ g ->
-  g.id.text() + ':' + g.grantedAtMillis.text() + ':' + g.expiresAtMillis.text() }.join(',')""").replace("Result: ", "")
-    win = {c.split(":")[0]: (int(c.split(":")[1]), int(c.split(":")[2])) for c in covering.split(",") if c}
-    ok = all(v and v.get("grantId") in win and win[v["grantId"]][0] <= v["at"] <= win[v["grantId"]][1] for v in newest.values())
-    check("A", "this run's change records CREATE ops/fo-new and DELETE ops/del-me by fonly carry a FOLDER_ONLY window of fonly on ops "
-          "that was open at that moment (the new one, or an earlier one still open: the first covering window is recorded)",
-          ok, newest=newest, new_grant=gid, fonly_folder_only_windows=win)
+  g.user.text() == 'fonly' && g.scope.type.text() == 'ITEM' && g.scope.fullName.text() in ['ops', 'ops/del-me'] }.collect{ g ->
+  g.id.text() + ':' + g.grantedAtMillis.text() + ':' + g.expiresAtMillis.text() + ':' + g.scope.fullName.text() }.join(',')""").replace("Result: ", "")
+    win = {c.split(":")[0]: (int(c.split(":")[1]), int(c.split(":")[2]), c.split(":")[3]) for c in covering.split(",") if c}
+    want = {"CREATE": "ops", "DELETE": "ops/del-me"}
+    ok = all(v and v.get("grantId") in win and win[v["grantId"]][0] <= v["at"] <= win[v["grantId"]][1] and win[v["grantId"]][2] == want[t]
+             for t, v in newest.items())
+    check("A", "this run's change records: CREATE ops/fo-new by fonly carries fonly's ITEM window on the folder ops, DELETE ops/del-me "
+          "the window on the job itself, each open at that moment",
+          ok, newest=newest, new_grant=gid, delete_grant=gdel, fonly_item_windows=win)
 
 
 # ---------------------------------------------------------------- B
@@ -372,7 +427,7 @@ def sec_F():
 
 # ---------------------------------------------------------------- G
 def sec_G():
-    r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeType", "JOB"), ("scopeFullName", "prod/ok-move"), ("actions", "CONFIGURE"),
+    r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeFullName", "prod/ok-move"), ("actions", "CONFIGURE"),
                                                                      ("durationMinutes", "15"), ("reason", "e2e-14 revoke test"), ("approvers", "approver-1")])
     gid = re.search(UUID, r.headers.get("Location", "")).group(0)
     api("approver-1", f"/batch-control/grants/{gid}/approve", "POST", data={"comment": "ok"})
@@ -427,11 +482,15 @@ def run_dialog(s, where, tag):
 
 
 def grant_dialog(s, where, tag):
+    """D-71: the prefill is the item's full name; the kind comes from the name check (no scope type selector)."""
     s.page.locator(where, has_text="Request Change Permission").first.click()
-    s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+    s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
     url_open = s.page.url
     d = s.page.locator("dialog[open]").first
-    pre = (d.locator("select[name=scopeType]").input_value(), d.locator("input[name=scopeFullName]").input_value())
+    kind, _, icon = dialog_kind(d)
+    kind_short = next((k for k, rx in KIND_RE.items() if kind and re.search(rx, kind)), kind)
+    pre = (kind_short if icon and d.locator("select[name=scopeType]").count() == 0 else f"{kind_short} (selector or no icon)",
+           d.locator("input[name=scopeFullName]").input_value())
     tick(d, "actions", "CONFIGURE")
     d.locator("select[name=durationMinutes]").select_option("15")
     d.locator("textarea[name=reason]").fill(f"e2e-14 {tag} grant dialog")
@@ -457,8 +516,8 @@ def sec_H():
         ov.first.click(); s.page.wait_for_timeout(1000)
         u, pre, landing = grant_dialog(s, ".tippy-box a, .tippy-box button, .jenkins-dropdown a, .jenkins-dropdown button", "new")
         info.update(url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
-    check("H", "new job page: More actions -> Request Change Permission dialog pre-filled JOB batch-pipeline, lands on UUID grant",
-          info.get("prefill") == ("JOB", "batch-pipeline") and re.search("/grants/" + UUID, info.get("landing", "")), **info)
+    check("H", "new job page: More actions -> Request Change Permission dialog pre-filled batch-pipeline, kind Pipeline with icon, lands on UUID grant",
+          info.get("prefill") == ("Pipeline", "batch-pipeline") and re.search("/grants/" + UUID, info.get("landing", "")), **info)
     console_ok("H", s, "new job page dialogs", expected=("400 POST",))
     s.done()
     # classic: user classic
@@ -471,16 +530,18 @@ u.addProperty(new jenkins.model.experimentalflags.UserExperimentalFlagsProperty(
           url_open=u.replace(BASE, ""), errors=errs, landing=landing.replace(BASE, ""))
     s.go("/job/batch-daily/")
     u, pre, landing = grant_dialog(s, "#tasks a, #tasks button", "classic")
-    check("H", "classic side panel: Request Change Permission pre-filled JOB batch-daily, UUID landing",
-          pre == ("JOB", "batch-daily") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
+    check("H", "classic side panel: Request Change Permission pre-filled batch-daily, kind Freestyle with icon, UUID landing",
+          pre == ("Freestyle", "batch-daily") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
     console_ok("H", s, "classic dialogs", expected=("400 POST",))
     s.done()
-    # folder page: requester on team (FOLDER)
+    # folder page: requester on the folder prod (D-71: the window names the folder itself). Not team: the seed gave
+    # requester Configure and Create windows on team, and a user who holds every permission a window can carry on a
+    # folder is offered no entry there (FolderGrantRequestAction)
     s = Session("requester")
-    s.go("/job/team/")
+    s.go("/job/prod/")
     u, pre, landing = grant_dialog(s, "#tasks a, #tasks button, .jenkins-app-bar a, .jenkins-app-bar button", "folder")
-    check("H", "folder page team: Request Change Permission pre-filled FOLDER team, UUID landing",
-          pre == ("FOLDER", "team") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
+    check("H", "folder page prod: Request Change Permission pre-filled prod, kind Folder with icon, UUID landing",
+          pre == ("Folder", "prod") and re.search("/grants/" + UUID, landing), url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
     console_ok("H", s, "folder dialog")
     s.done()
 

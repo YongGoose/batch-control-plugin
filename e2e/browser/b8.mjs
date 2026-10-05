@@ -14,7 +14,7 @@ const count = () => groovy(COUNT);
 const monitorText = async (p) => { await p.goto(`${BASE}/manage/`); return (await p.locator('.jenkins-alert:has-text("Batch Control")').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ')); };
 async function grantConfigure(reason) {
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=batch-pipeline`);
+  await rq.page.goto(`${BASE}/batch-control/grants/?scopeFullName=batch-pipeline`);
   await rq.page.selectOption('select[name="durationMinutes"]', '15');
   await rq.page.fill('textarea[name="reason"]', reason);
   await rq.page.locator('#grant-approver-0 + label').click();

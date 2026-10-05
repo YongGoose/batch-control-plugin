@@ -109,8 +109,8 @@ for (const u of ['requester', 'configurer', 'admin', 'nobc']) {
   if (u === 'requester') {
     await page.locator('#side-panel a:has-text("Request Change Permission")').click(); await page.waitForLoadState('load');
     const pre = await page.locator('#main-panel p.jenkins-description:has-text("Prefilled")').innerText().catch(() => '');
-    log(L, `B2-09 click -> ${page.url()} scopeType=${await page.inputValue('select[name="scopeType"]')} scope=${await page.inputValue('input[name="scopeFullName"]')} configure=${await page.locator('input[value="CONFIGURE"]').isChecked()} "${pre}"`);
-    await shot(page, ['#main-panel p.jenkins-description:has-text("Prefilled")', 'select[name="scopeType"]', 'input[name="scopeFullName"]', 'input[value="CONFIGURE"]'], 'B2-09', { pad: 10 });
+    log(L, `B2-09 click -> ${page.url()} kind=${(await page.locator('[data-batch-control-item-kind]').count()) ? await page.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : 'none'} scope=${await page.inputValue('input[name="scopeFullName"]')} configure=${await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked()} "${pre}"`);
+    await shot(page, ['#main-panel p.jenkins-description:has-text("Prefilled")', '[data-batch-control-item-kind]', 'input[name="scopeFullName"]', 'input[name="actions"][value="CONFIGURE"]'], 'B2-09', { pad: 10 });
   }
   await page.context().close();
 }

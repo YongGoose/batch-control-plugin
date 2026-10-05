@@ -12,7 +12,7 @@ s.go("/job/team/job/sub/job/deep-job/")
 res["classic_side"] = [re.sub(r"\s+", " ", a.inner_text()).strip() for a in s.page.locator("#tasks a").all()][:12]
 s.shot("#side-panel", "N2-01-classic-side-panel")
 s.page.locator("#tasks a", has_text="Request Change").first.click(); s.page.wait_for_load_state("load")
-res["classic_prefill"] = (s.page.url, s.page.locator("select[name=scopeType]").input_value(), s.page.locator("input[name=scopeFullName]").input_value())
+res["classic_prefill"] = (s.page.url, (s.page.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if s.page.locator("[data-batch-control-item-kind]").count() else None), s.page.locator("input[name=scopeFullName]").input_value())
 s.go("/job/batch-daily/batch-control/")
 res["classic_request_run_h1"] = s.page.locator("h1").first.inner_text()
 s.shot("#main-panel", "N2-02-classic-request-run")

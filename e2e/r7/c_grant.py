@@ -8,7 +8,7 @@ def request(user, typ, name, actions, minutes, tag, pattern=None):
     s = Session(user)
     s.go("/batch-control/grants/")
     f = s.page.locator("form[name=createGrantRequest]")
-    s.page.select_option("select[name=scopeType]", typ)
+    # D-71: scope type selector removed
     s.page.fill("input[name=scopeFullName]", name)
     for a in ["CREATE", "CONFIGURE", "DELETE"]:
         cb = s.page.locator(f"#grant-action-{a.lower()}")

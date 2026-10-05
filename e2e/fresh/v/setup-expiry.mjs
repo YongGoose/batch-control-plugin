@@ -13,7 +13,7 @@ await page.fill('textarea[name="reason"]', 'verify: activation left to expire');
 await page.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
 await Promise.all([page.waitForLoadState('load'), page.locator('#main-panel form button[name="Submit"]').first().click()]);
 ids.act = page.url().match(/activations\/([^/]+)/)[1];
-await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=fresh-secret`);
+await page.goto(`${BASE}/batch-control/grants/?scopeFullName=fresh-secret`);
 const f = page.locator('form[action$="grants/create"]');
 await f.locator('input[name="actions"][value="CONFIGURE"]').setChecked(true, { force: true });
 await f.locator('textarea[name="reason"]').fill('verify: grant request left to expire');

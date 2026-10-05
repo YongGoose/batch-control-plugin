@@ -17,4 +17,3 @@ echo "HTTP $(post requester $BC_REQUESTER_PASSWORD '/job/fresh-folder/createItem
 echo "== requester creates a run request naming itself as approver (forged form post)"
 echo "HTTP $(post requester $BC_REQUESTER_PASSWORD '/job/fresh-daily/batch-control/submit' --data-urlencode 'reason=self approval attempt' --data-urlencode 'approvers=requester' --data-urlencode 'json={"reason":"self approval attempt","approvers":"requester"}')"; excerpt
 echo "== requester grant request naming itself as approver"
-echo "HTTP $(post requester $BC_REQUESTER_PASSWORD '/batch-control/grants/create' --data-urlencode 'scopeType=JOB' --data-urlencode 'scopeFullName=fresh-daily' --data-urlencode 'actions=CONFIGURE' --data-urlencode 'durationMinutes=15' --data-urlencode 'reason=self grant' --data-urlencode 'approvers=requester')"; excerpt

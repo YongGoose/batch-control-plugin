@@ -20,7 +20,7 @@ for job, tag in [("/job/batch-daily/", "A1-1"), ("/job/team/job/sub/job/deep-job
             entry.click()
         s.page.wait_for_load_state("load")
         rec["landed"] = s.page.url; rec["status"] = nav.value.status
-        rec["scopeType"] = s.page.locator("select[name=scopeType]").input_value()
+        rec["scopeType"] = (s.page.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if s.page.locator("[data-batch-control-item-kind]").count() else None)
         rec["scopeFullName"] = s.page.locator("input[name=scopeFullName]").input_value()
         s.shot("form[name=createGrantRequest]", f"{tag}-03-prefilled")
     rec["console"] = [c[:120] for c in s.console]

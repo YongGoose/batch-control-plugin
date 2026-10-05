@@ -284,16 +284,24 @@ export async function changeRows(re) {
 /** Error text of a Jenkins error / access-denied page. */
 export const errText = (t) => (t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').match(/(?:Error|Access Denied|Oops!?) (.{0,240}?) (?:REST API|Logging ID)/) || [null, t.replace(/\s+/g, ' ').slice(0, 160)])[1];
 
-/** requester (page's user) submits a grant request in the form; returns { url } or { error, status }. */
+/** requester (page's user) submits a grant request in the form; returns { url } or { error, status }.
+ *  D-71: a window names one item (scopeFullName); there is no scope type selector, so `type` is ignored
+ *  (kept in the signature so callers need not change). #107: the "New job name restriction" field lives in an
+ *  optionalBlock that is hidden until Create is ticked, so the CREATE action is checked before the pattern is filled. */
 export async function requestGrant(page, { type = 'JOB', scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
   await page.goto(`${BASE}/batch-control/grants/`);
-  await page.selectOption('select[name="scopeType"]', type);
+  await page.waitForSelector('input[name="scopeFullName"]');
   await page.fill('input[name="scopeFullName"]', scope);
   for (const a of actions) {
     const box = page.locator(`input[name="actions"][value="${a}"]`);
     if (!(await box.isChecked())) await box.locator('xpath=following-sibling::label[1]').click();
   }
-  if (pattern !== undefined) await page.fill('input[name="createNamePattern"]', pattern);
+  if (pattern !== undefined) {
+    // The field is revealed by ticking Create (#107); it is a plain visible input without it only on pre-#107 builds.
+    const field = page.locator('input[name="createNamePattern"]');
+    await field.waitFor({ state: 'visible' }).catch(() => {});
+    await field.fill(pattern);
+  }
   await page.selectOption('select[name="durationMinutes"]', String(minutes));
   await page.fill('textarea[name="reason"]', reason);
   await page.locator(`input[name="approvers"][value="${approver}"] + label`).click();

@@ -10,7 +10,7 @@ if (phase === 'before') {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/job/batch-pipeline/`);
   await page.locator('#side-panel a:has-text("Request Change Permission")').click(); await page.waitForLoadState('load');
-  const pre = { type: await page.locator('select[name="scopeType"]').inputValue(), scope: await page.locator('input[name="scopeFullName"]').inputValue(), conf: await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked() };
+  const pre = { kind: (await page.locator('[data-batch-control-item-kind]').count()) ? await page.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null, scope: await page.locator('input[name="scopeFullName"]').inputValue(), conf: await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked() };
   await page.selectOption('select[name="durationMinutes"]', '15');
   const reason = `Audit A-22 ${Date.now()}: fix the pipeline script`;
   await page.fill('textarea[name="reason"]', reason);

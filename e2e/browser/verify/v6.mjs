@@ -23,7 +23,7 @@ if (on('expired')) {
   const again = p.locator('tr', { hasText: gid }).locator('a, button').filter({ hasText: /Request again/i }).first();
   const s2 = await shot(p, p.locator('tr', { hasText: gid }), 'B7-10-ended-grant-request-again', { pad: 8 });
   let pre = null;
-  if (await again.count()) { await Promise.all([p.waitForLoadState('load'), again.click()]); pre = { type: await p.locator('select[name="scopeType"]').inputValue(), scope: await p.locator('input[name="scopeFullName"]').inputValue(), conf: await p.locator('input[name="actions"][value="CONFIGURE"]').isChecked() }; }
+  if (await again.count()) { await Promise.all([p.waitForLoadState('load'), again.click()]); pre = { kind: (await p.locator('[data-batch-control-item-kind]').count()) ? await p.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null, scope: await p.locator('input[name="scopeFullName"]').inputValue(), conf: await p.locator('input[name="actions"][value="CONFIGURE"]').isChecked() }; }
   ev(`V6 B7-09 ${r && r.status()} "${t.slice(0, 120)}" unchanged ${unchanged}; rows ${JSON.stringify(rowTxt)}; again ${JSON.stringify(pre)}; headings ${(et.match(/Ended Grants[^.]{0,40}/) || [''])[0]}`);
   row('B7-09', { roles: 'requester', V: 'n.a.', G: `${r && r.status() === 403 && unchanged ? '✓' : '✗'} Save after the 1-minute window ended -> ${r && r.status()}, config unchanged`, R: `${pre && pre.scope === 'batch-daily' ? '✓' : '✗'} core's "${t.slice(0, 70)}" (SPEC 8, D-33), and the Grants screen now carries the ended window with "Request again" (DEF-18 fixed): ${rowTxt.join(' || ').slice(0, 160)}`, C: 'n.a.', E: s1 && s2 ? '✓ B7-09-save-after-expiry, B7-10-ended-grant-request-again' : '✗' });
   row('B7-10', { roles: 'requester', V: `${pre ? '✓' : '✗'} "Request again" offered on the ended window`, G: `${pre && pre.type === 'JOB' && pre.scope === 'batch-daily' && pre.conf ? '✓' : '✗'} the ended window is listed (${rowTxt.find((x) => /expired|ended|Expired/i.test(x)) ? 'status says so' : 'status: ' + (rowTxt[0] || '').slice(0, 60)}); Request again prefills ${JSON.stringify(pre)}`, R: 'n.a.', C: 'n.a.', E: s2 ? '✓ B7-10-ended-grant-request-again' : '✗' });
@@ -101,7 +101,7 @@ if (on('mail')) {
 if (on('killswitch')) {
   const ad = await login('admin'); await setGlobal(ad.page, { changeControlEnabled: false });
   const r0 = await changeRows(); await p.goto(`${BASE}/batch-control/grants/`); const gt = await mainText(p); const gs = await shot(p, '#main-panel', 'B20-02-grants-closed', { pad: 8 });
-  const r = await formPost('requester', '/batch-control/grants/create', { json: JSON.stringify({ scopeType: 'JOB', scopeFullName: 'batch-daily', actions: ['CONFIGURE'], durationMinutes: '15', reason: 'kill switch', approvers: ['approver-1'] }) });
+  const r = await formPost('requester', '/batch-control/grants/create', { json: JSON.stringify({ scopeFullName: 'batch-daily', actions: ['CONFIGURE'], durationMinutes: '15', reason: 'kill switch', approvers: ['approver-1'] }) });
   await sleep(1500); const r1 = await changeRows(); const nw = r1.slice(0, r1.length - r0.length);
   await setGlobal(ad.page, { changeControlEnabled: true }); await ad.context.close();
   ev(`V6 B20-02 grants "${gt.slice(0, 200)}"; POST ${JSON.stringify(r)}; new records ${nw.join(' || ')}`);

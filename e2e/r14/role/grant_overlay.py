@@ -27,9 +27,16 @@ r.go("/batch-control/grants/")
 # e2e-14: since r4/ui (D-66) the grants page has a "Request Change Permission" button that opens the form in a dialog
 r.page.locator("#main-panel button, #main-panel a", has_text="Request Change Permission").first.click()
 f = r.page.locator("dialog[open]").first
-f.locator("select[name=scopeType]").wait_for()
-f.locator("select[name=scopeType]").select_option("JOB")
+# D-71: one item per window, no scope type selector; the name check shows the item's kind
+f.locator("input[name=scopeFullName]").wait_for()
+res["scope type selector"] = f.locator("select[name=scopeType]").count()
 f.locator("input[name=scopeFullName]").fill("team/app-1")
+f.locator("input[name=scopeFullName]").blur()
+try:
+    f.locator("[data-batch-control-item-kind]").first.wait_for(timeout=5000)
+    res["item kind"] = f.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind")
+except Exception:
+    res["item kind"] = None
 f.locator("input[name=actions][value=CONFIGURE] + label").click()
 dur = f.locator("select[name=durationMinutes]")
 if dur.count():

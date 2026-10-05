@@ -17,7 +17,6 @@ const form = (page) => page.locator('form[action$="grants/create"]');
 
 async function fill(page, { type = 'JOB', scope, actions = [], minutes, custom, pattern, reason, approvers = ['approver-1'] }) {
   const f = form(page);
-  await f.locator('select[name="scopeType"]').selectOption(type);
   await f.locator('input[name="scopeFullName"]').fill(scope ?? '');
   for (const act of ['CREATE', 'CONFIGURE', 'DELETE']) await f.locator(`input[name="actions"][value="${act}"]`).setChecked(actions.includes(act), { force: true });
   if (pattern !== undefined) await f.locator('input[name="createNamePattern"]').fill(pattern);
