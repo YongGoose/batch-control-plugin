@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.ItemKind;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -20,9 +21,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -35,9 +39,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 4 (restart durability) and item 8 (D-71), matrix rows T-08-106 and T-08-126
- * (note 260): an ITEM window and the item kind it records survive a restart with their reach
- * unchanged, and a stored window with one of the earlier scope types is not converted (D-69), so
- * it confers nothing after the restart while an intact window next to it still loads.
+ * (note 260) and T-08-145 (note 262): an ITEM window and the item kind it records survive a
+ * restart with their reach unchanged, and a stored window or request with one of the earlier scope
+ * types is not converted (D-69), so it confers nothing after the restart while an intact one next
+ * to it still loads.
  *
  * <p>The grant file is located as ARCHITECTURE section 5 describes ({@code batch-control/grants/<id>.xml})
  * and is read only for premises; the earlier-type file is made from a file the current plugin
@@ -56,6 +61,8 @@ public class ItemScopeRestartTest {
     private String folderWindowId;
     private String folderRequestId;
     private String staleWindowId;
+    private final Map<String, String> staleRequestIds = new LinkedHashMap<>();
+    private String intactRequestId;
 
     /**
      * T-08-106 (rewritten for D-71; was the D-65 FOLDER/FOLDER_ONLY restart row): u1's CONFIGURE
@@ -152,7 +159,81 @@ public class ItemScopeRestartTest {
         });
     }
 
+    /**
+     * T-08-145 (D-71, D-69, spec-review-S6 m-4: "Stored windows and requests with the earlier scope
+     * types (JOB, FOLDER, FOLDER_ONLY) are not converted"): three PENDING CONFIGURE requests have
+     * their files ({@code batch-control/requests/grant/<id>.xml}, ARCHITECTURE 5) rewritten to an
+     * earlier scope type, each made from the file the plugin wrote by replacing its single
+     * {@code ITEM} value (premise asserted): u2's on {@code ops} to FOLDER, u3's on {@code ops} to
+     * FOLDER_ONLY, u4's on {@code ops/a} to JOB. After the restart none of them can be approved
+     * (a1's approval POST answers 4xx), its detail URL does not crash (below 500), none is listed as
+     * APPROVED, no window is open for u2, u3 or u4, and none of them holds Configure on {@code ops},
+     * {@code ops/a} or {@code ops/sub/b}. Guards: u1's intact request on {@code ops/c} next to them
+     * is still PENDING, the grants page opens for a1 (200) and links it, and its approval confers
+     * Configure on {@code ops/c}.
+     */
+    @Test
+    public void t_08_145_grantRequestWithAnEarlierScopeTypeIsNotConverted() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            staleRequestIds.put("u2", request("u2", "ops", GrantAction.CONFIGURE).getId());
+            staleRequestIds.put("u3", request("u3", "ops", GrantAction.CONFIGURE).getId());
+            staleRequestIds.put("u4", request("u4", "ops/a", GrantAction.CONFIGURE).getId());
+            intactRequestId = request("u1", "ops/c", GrantAction.CONFIGURE).getId();
+            rewriteScopeType(r, staleRequestIds.get("u2"), "FOLDER");
+            rewriteScopeType(r, staleRequestIds.get("u3"), "FOLDER_ONLY");
+            rewriteScopeType(r, staleRequestIds.get("u4"), "JOB");
+        });
+        session.then(r -> {
+            Item ops = r.jenkins.getItemByFullName("ops");
+            Item a = r.jenkins.getItemByFullName("ops/a");
+            Item b = r.jenkins.getItemByFullName("ops/sub/b");
+            Item c = r.jenkins.getItemByFullName("ops/c");
+            for (Map.Entry<String, String> stale : staleRequestIds.entrySet()) {
+                String user = stale.getKey();
+                String id = stale.getValue();
+                WebResponse approval = ApproverFormFixtures.decideGrant(r, "a1", id, "approve", "ok");
+                assertTrue(approval.getStatusCode() >= 400 && approval.getStatusCode() < 500,
+                        "D-69/D-71: " + user + "'s request stored with an earlier scope type must not be approved, got HTTP "
+                                + approval.getStatusCode() + ": " + ApproverFormFixtures.excerpt(approval.getContentAsString()));
+                int detail = ApproverFormFixtures.get(r, "a1", "batch-control/grants/" + id + "/").getStatusCode();
+                assertTrue(detail < 500, "the detail URL of " + user + "'s earlier-type request must not crash, got HTTP " + detail);
+                assertTrue(GrantRequestService.get().list().stream()
+                                .noneMatch(g -> id.equals(g.getId()) && g.getStatus() == RequestStatus.APPROVED),
+                        user + "'s earlier-type request must not be APPROVED");
+                assertTrue(GrantService.get().listActive().stream().noneMatch(g -> user.equals(g.getUser())),
+                        "no window may be open for " + user);
+                for (Item item : new Item[] {ops, a, b}) {
+                    assertFalse(can(user, item, Item.CONFIGURE), user + "'s earlier-type request must confer nothing on " + item.getFullName());
+                }
+            }
+
+            GrantRequest intact = GrantRequestService.get().load(intactRequestId);
+            assertNotNull(intact, "guard: the intact request loads after the restart");
+            assertEquals(RequestStatus.PENDING, intact.getStatus(), "guard: the intact request is still PENDING");
+            WebResponse list = ApproverFormFixtures.get(r, "a1", "batch-control/grants/");
+            assertEquals(200, list.getStatusCode(), "guard: the grants page opens next to the earlier-type files");
+            assertTrue(list.getContentAsString().contains(intactRequestId), "guard: the grants page lists the intact request");
+            ApproverFormFixtures.assertSuccess(ApproverFormFixtures.decideGrant(r, "a1", intactRequestId, "approve", "ok"),
+                    "guard: approval of the intact request");
+            assertTrue(can("u1", c, Item.CONFIGURE), "guard: the intact request's window confers Configure on ops/c");
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** Replaces the single scope type value ITEM of the grant request file {@code id} by {@code earlierType}. */
+    private static void rewriteScopeType(JenkinsRule r, String id, String earlierType) throws Exception {
+        Path file = r.jenkins.getRootDir().toPath().resolve("batch-control/requests/grant/" + id + ".xml");
+        assertTrue(Files.isRegularFile(file), "premise (ARCHITECTURE 5): the grant request is stored at " + file);
+        String xml = Files.readString(file, StandardCharsets.UTF_8);
+        int asElement = xml.split(">ITEM<", -1).length - 1;
+        int asAttribute = xml.split("\"ITEM\"", -1).length - 1;
+        assertEquals(1, asElement + asAttribute,
+                "premise: the grant request file holds the scope type value ITEM exactly once: " + ApproverFormFixtures.excerpt(xml));
+        Files.writeString(file, xml.replace(">ITEM<", ">" + earlierType + "<").replace("\"ITEM\"", "\"" + earlierType + "\""),
+                StandardCharsets.UTF_8);
+    }
 
     private static void assertKind(ItemKind kind, String descriptorId, String displayName, String what) {
         assertNotNull(kind, what + " must keep its item kind across the restart");
@@ -200,12 +281,13 @@ public class ItemScopeRestartTest {
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
         BatchControlMatrixAuthorizationStrategy strategy = new BatchControlMatrixAuthorizationStrategy();
         strategy.add(Jenkins.ADMINISTER, PermissionEntry.user("admin"));
-        for (String userId : new String[] {"u1", "u2", "a1"}) {
+        for (String userId : new String[] {"u1", "u2", "u3", "u4", "a1"}) {
             strategy.add(Jenkins.READ, PermissionEntry.user(userId));
             strategy.add(Item.READ, PermissionEntry.user(userId));
         }
-        strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u1"));
-        strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u2"));
+        for (String userId : new String[] {"u1", "u2", "u3", "u4"}) {
+            strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user(userId));
+        }
         strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
         r.jenkins.setAuthorizationStrategy(strategy);
         r.jenkins.save();

@@ -38,6 +38,8 @@ import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.matrixauth.inheritance.NonInheritingStrategy;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
+import jenkins.branch.OrganizationFolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -60,7 +62,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * item; wherever a window or request scope is shown, an element carries
  * {@code data-batch-control-item-kind="<descriptor id>"} with the kind's display name; refusal
  * pages link to the prefill URL. Matrix rows T-08-118 .. T-08-122 and T-08-124 (note 260); the
- * job and folder entry points are T-UI-10/15 and T-UI-98, the move refusal page T-SEC-72.
+ * job and folder entry points are T-UI-10/15, T-UI-98 and T-UI-112, the move refusal page T-SEC-72.
+ * Note 262 adds the item-group notice on the approval page (T-08-138, D-71a) and the kind's icon
+ * in the item check and the lists (T-08-139/140, spec-review-S6 M-1).
  *
  * <p>Users: g1 (RequestGrant), n1 (ViewHistory only: a Batch Control user without the permission
  * to request), a1 (the approver, no RequestGrant), p0 (no Batch Control permission), u3
@@ -279,7 +283,161 @@ public class ItemScopeUiTest {
         assertEquals("veto-u3", scopeValue((HtmlPage) form), "the form must be filled with the job");
     }
 
+    /**
+     * T-08-138 (SPEC 8 line 170, D-71a ruling 5, security-34 S-34-02): the approval page of a
+     * CONFIGURE request whose item is an item group states that the group's settings apply to the
+     * items inside it, and for a multibranch project or an organization folder that reconfiguring it
+     * can create or delete its generated items. g1's pending CONFIGURE requests on the folder
+     * {@code team}, the multibranch project {@code mb} and the organization folder {@code org}: the
+     * designated approver a1's detail page of each carries an element
+     * {@code [data-batch-control-notice="group-configure"]} whose text speaks of the items inside;
+     * for {@code mb} and {@code org} it also speaks of creating and deleting. Guard: the detail page
+     * of g1's CONFIGURE request on the job {@code batch-x} carries no such element (the page
+     * itself opens and names the job). The wording is not pinned beyond those words.
+     */
+    @Test
+    public void t_08_138_configureRequestOnAnItemGroupWarnsTheApprover() throws Exception {
+        j.jenkins.createProject(WorkflowMultiBranchProject.class, "mb");
+        j.jenkins.createProject(OrganizationFolder.class, "org");
+        String onFolder = request("team", GrantAction.CONFIGURE).getId();
+        String onMultibranch = request("mb", GrantAction.CONFIGURE).getId();
+        String onOrganization = request("org", GrantAction.CONFIGURE).getId();
+        String onJob = request("batch-x", GrantAction.CONFIGURE).getId();
+
+        for (String[] c : new String[][] {{onFolder, "team", "no"}, {onMultibranch, "mb", "yes"}, {onOrganization, "org", "yes"}}) {
+            HtmlPage detail = UsabilityFixtures.htmlPage(j, "a1", "batch-control/grants/" + c[0] + "/");
+            assertEquals(200, detail.getWebResponse().getStatusCode(), "a1 must open the request on " + c[1]);
+            DomNode notice = detail.querySelector(GROUP_NOTICE);
+            assertNotNull(notice, "D-71a: the approval page of a CONFIGURE request on the item group " + c[1] + " must carry "
+                    + GROUP_NOTICE + ": " + excerpt(detail.asNormalizedText()));
+            String text = notice.asNormalizedText();
+            assertTrue(INSIDE.matcher(text).find(), "the notice on " + c[1] + " must say that the group's settings apply to the items"
+                    + " inside it: " + text);
+            if ("yes".equals(c[2])) {
+                assertTrue(CREATE_WORD.matcher(text).find() && DELETE_WORD.matcher(text).find(), "the notice on the computed folder "
+                        + c[1] + " must say that reconfiguring it can create or delete its generated items: " + text);
+            }
+        }
+
+        HtmlPage jobDetail = UsabilityFixtures.htmlPage(j, "a1", "batch-control/grants/" + onJob + "/");
+        assertEquals(200, jobDetail.getWebResponse().getStatusCode(), "guard: a1 opens the request on the job");
+        assertTrue(jobDetail.asNormalizedText().contains("batch-x"), "guard: the job request's page names the job");
+        assertTrue(jobDetail.querySelectorAll(GROUP_NOTICE).isEmpty(), "a CONFIGURE request on a job carries no item-group notice");
+    }
+
+    /**
+     * T-08-139 (SPEC 8 line 171 "The request screens show the item's kind with its icon",
+     * spec-review-S6 M-1): the request form's item check answers, for the folder {@code team}, the
+     * Freestyle job {@code batch-x} and the Pipeline {@code pipe-x}, an ok answer whose markup puts
+     * an {@code svg} icon before the text, and whose text content (outside the icon) is exactly
+     * {@code <kind display name> '<full name>'}. The full name stays escaped: for a job whose name
+     * carries quotes and attribute-like text, the answer's text is exactly the kind and that name,
+     * and no tag of the answer gains an attribute from it.
+     */
+    @Test
+    public void t_08_139_itemCheckShowsTheKindIconBeforeTheText() throws Exception {
+        assertIconThenText("team", "Folder 'team'");
+        assertIconThenText("batch-x", "Freestyle project 'batch-x'");
+        assertIconThenText("pipe-x", "Pipeline 'pipe-x'");
+
+        j.createFreeStyleProject(HOSTILE);
+        assertIconThenText(HOSTILE, "Freestyle project '" + HOSTILE + "'");
+        JenkinsRule.WebClient wc = UsabilityFixtures.clientNoJs(j, "g1");
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(CHECK), HttpMethod.POST);
+        request.setRequestParameters(List.of(new NameValuePair("value", HOSTILE), new NameValuePair("scopeFullName", HOSTILE)));
+        Page parsed = wc.getPage(request);
+        assertTrue(parsed instanceof HtmlPage, "fixture: the check answer parses as HTML, got " + parsed.getWebResponse().getContentType());
+        for (org.htmlunit.html.HtmlElement e : ((HtmlPage) parsed).getHtmlElementDescendants()) {
+            assertFalse(e.hasAttribute("onmouseover") || e.hasAttribute("data-injected"),
+                    "the item name must not inject attributes, found on <" + e.getTagName() + ">: " + excerpt(e.asXml()));
+        }
+    }
+
+    /**
+     * T-08-140 (SPEC 8 line 171, spec-review-S6 M-1): on the grants page's pending, active and ended
+     * lists and on the request's detail page, the element
+     * {@code [data-batch-control-item-kind=<descriptor id>]} in the row of the item contains an
+     * {@code svg} icon (the T-08-122 fixture: pending {@code batch-x} and {@code team}, active
+     * {@code pipe-x}, ended {@code team/inner}).
+     */
+    @Test
+    public void t_08_140_listsAndDetailPageShowTheKindIcon() throws Exception {
+        String pendingJob = request("batch-x", GrantAction.CONFIGURE).getId();
+        request("team", GrantAction.CREATE);
+        String active = request("pipe-x", GrantAction.CONFIGURE).getId();
+        assertSuccess(decideGrant(j, "a1", active, "approve", "ok"), "fixture: a1 approves pipe-x");
+        String ended = request("team/inner", GrantAction.CONFIGURE).getId();
+        assertSuccess(decideGrant(j, "a1", ended, "reject", "not this week"), "fixture: a1 rejects team/inner");
+
+        HtmlPage list = UsabilityFixtures.htmlPage(j, "g1", "batch-control/grants/");
+        assertKindIcon(list, "table[data-batch-control-list=pending]", FREESTYLE_ID, "batch-x");
+        assertKindIcon(list, "table[data-batch-control-list=pending]", FOLDER_ID, "team");
+        assertKindIcon(list, "table[data-batch-control-list=active]", PIPELINE_ID, "pipe-x");
+        assertKindIcon(list, "table[data-batch-control-list=ended]", FREESTYLE_ID, "team/inner");
+
+        HtmlPage detail = UsabilityFixtures.htmlPage(j, "a1", "batch-control/grants/" + pendingJob + "/");
+        assertEquals(200, detail.getWebResponse().getStatusCode(), "a1 must open the detail page");
+        assertKindIcon(detail, "#main-panel", FREESTYLE_ID, "batch-x");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    static final String GROUP_NOTICE = "[data-batch-control-notice=\"group-configure\"]";
+    private static final Pattern INSIDE = Pattern.compile("(?i)\\b(?:inside|within|contain(?:s|ed)?|below|beneath|under)\\b");
+    private static final Pattern CREATE_WORD = Pattern.compile("(?i)\\bcreat");
+    private static final Pattern DELETE_WORD = Pattern.compile("(?i)\\bdelet");
+    /** Allowed by Jenkins' item name check, able to break out of an attribute if written unescaped (as MoveRefusalPageTest). */
+    static final String HOSTILE = "x\"onmouseover='alert(1)' data-injected=\"1";
+
+    /**
+     * The check answer for {@code name} is ok; its raw markup has an {@code <svg} element with no
+     * visible text before it, and the visible text outside every svg equals {@code expectedText}.
+     * Returns the raw answer.
+     */
+    private String assertIconThenText(String name, String expectedText) throws Exception {
+        WebResponse r = check("g1", name);
+        String raw = r.getContentAsString();
+        assertEquals(200, r.getStatusCode(), "the check of " + name + " must answer 200: " + excerpt(raw));
+        assertEquals("ok", kind(r), "the check of " + name + " must be ok: " + excerpt(raw));
+        int svg = raw.indexOf("<svg");
+        assertTrue(svg >= 0, "M-1: the check answer for " + name + " must carry the kind's icon (an svg): " + excerpt(raw));
+        assertEquals("", visible(raw.substring(0, svg)), "M-1: the icon must come before the text in the answer for " + name
+                + ": " + excerpt(raw));
+        String outsideIcons = raw.replaceAll("(?s)<svg\\b.*?</svg>", " ").replaceAll("<svg\\b[^>]*/>", " ");
+        assertEquals(expectedText, visible(outsideIcons), "the text of the answer for " + name + " must stay exactly "
+                + expectedText + ": " + excerpt(raw));
+        return raw;
+    }
+
+    /** Visible text of a markup fragment: tags removed, entities decoded, whitespace collapsed. */
+    private static String visible(String html) {
+        String s = html.replaceAll("<[^>]*>", " ")
+                .replace("&#039;", "'").replace("&#39;", "'").replace("&apos;", "'").replace("&quot;", "\"").replace("&#34;", "\"")
+                .replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        return s.replaceAll("\\s+", " ").trim();
+    }
+
+    /** Some {@code [data-batch-control-item-kind=<id>]} element in the row naming {@code fullName} contains an svg. */
+    private static void assertKindIcon(HtmlPage page, String containerSelector, String id, String fullName) {
+        DomNode container = page.querySelector(containerSelector);
+        assertNotNull(container, "the page must carry " + containerSelector + ": " + excerpt(page.asNormalizedText()));
+        List<String> seen = new ArrayList<>();
+        for (DomNode n : container.querySelectorAll("[data-batch-control-item-kind=\"" + id + "\"]")) {
+            DomElement e = (DomElement) n;
+            DomNode row = e;
+            while (row != null && !(row instanceof DomElement d && "tr".equals(d.getTagName()))) {
+                row = row.getParentNode();
+            }
+            String rowText = (row == null ? container : row).asNormalizedText();
+            boolean icon = !e.getElementsByTagName("svg").isEmpty();
+            seen.add(icon + " | " + rowText);
+            if (icon && rowText.contains(fullName)) {
+                return;
+            }
+        }
+        throw new AssertionError(containerSelector + ": the kind element (data-batch-control-item-kind=\"" + id + "\") next to "
+                + fullName + " must contain an svg icon (M-1); elements with that kind (has svg | row): " + seen);
+    }
 
     private static GrantRequest request(String fullName, GrantAction... actions) {
         try (ACLContext ignored = ACL.as2(User.getById("g1", true).impersonate2())) {
