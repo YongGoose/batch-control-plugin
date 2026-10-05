@@ -105,6 +105,8 @@ public final class IncidentService {
         Incident incident = new Incident(Ids.newId(), runId, run.getParent().getFullName(),
                 result, BatchClock.now());
         incident.setParameters(maskedParameters(run));
+        // D-72b (6): the build's own timestamp, so a rerun reuses the values of this build only.
+        incident.setRunTimestampMillis(run.getTimeInMillis());
         incident.setLogTail(maskedLogTail(run));
         incident.addTransition(new IncidentTransition(IncidentStatus.OPEN,
                 Jenkins.getAuthentication2().getName(), BatchClock.now(), null));

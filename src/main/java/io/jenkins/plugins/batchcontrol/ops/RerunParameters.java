@@ -20,10 +20,12 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.kohsuke.accmod.Restricted;
@@ -44,6 +46,14 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>Every other value is reused as the build received it.</li>
  *   <li>When the build no longer exists nothing can be recovered from it, unless the failed run
  *       had no parameters.</li>
+ *   <li>D-72b (6), security-35 S-35-06: a build with the incident's number that is not the
+ *       incident's own run (a job deleted and re-created under the same name has its own #n) is
+ *       treated like a deleted build. The incident records the failed build's own timestamp
+ *       ({@code Run#getTimeInMillis}, kept by Jenkins in the build); a build is the incident's run
+ *       only when its timestamp is the recorded one. An incident stored before the timestamp was
+ *       recorded cannot confirm its build, so its build is not used either.</li>
+ *   <li>D-72b (1), security-35 S-35-01: a failed run that holds a parameter name more than once
+ *       is refused with {@link IllegalArgumentException}; its values are never carried.</li>
  * </ul>
  *
  * <p>When a value cannot be recovered, {@link RerunNeedsFormException} carries the values the
@@ -66,15 +76,21 @@ final class RerunParameters {
      * @throws RerunNeedsFormException when a value cannot be recovered
      */
     static List<ParameterValue> recover(Job<?, ?> job, Incident incident) {
-        Run<?, ?> build = failedRun(job, incident.getRunId());
+        Run<?, ?> found = failedRun(job, incident.getRunId());
+        Run<?, ?> build = found != null && isIncidentRun(found, incident) ? found : null;
+        if (found != null && build == null) {
+            LOGGER.info(() -> "Build " + found.getExternalizableId() + " is not the failed run of incident "
+                    + incident.getId() + " (a different build with the same number); its values are not reused");
+        }
         if (build == null) {
             Map<String, String> recorded = incident.getParameters();
             if (recorded.isEmpty()) {
                 return new ArrayList<>();
             }
             throw new RerunNeedsFormException("The failed run " + incident.getRunId()
-                    + " no longer exists, so its parameter values cannot be reused; request the rerun on the"
-                    + " job's Request Run form.", prefillFromRecord(job, recorded));
+                    + " no longer exists (it was deleted, or its job was re-created), so its parameter values"
+                    + " cannot be reused; request the rerun on the job's Request Run form.",
+                    prefillFromRecord(job, recorded));
         }
         ParametersAction action = build.getAction(ParametersAction.class);
         List<ParameterValue> original = new ArrayList<>();
@@ -83,6 +99,14 @@ final class RerunParameters {
                 if (value != null) {
                     original.add(value);
                 }
+            }
+        }
+        Set<String> names = new HashSet<>();
+        for (ParameterValue value : original) {
+            if (!names.add(value.getName())) {
+                throw new IllegalArgumentException("Parameter '" + value.getName() + "' occurs more than once in the"
+                        + " failed run " + incident.getRunId() + ", so its values cannot be reused for a rerun;"
+                        + " request the run on the job's Request Run form instead.");
             }
         }
         Map<ParameterValue, Path> coreCopies = new IdentityHashMap<>();
@@ -132,6 +156,15 @@ final class RerunParameters {
         return new RerunNeedsFormException("The value of parameter(s) " + String.join(", ", lost)
                 + " of the failed run " + incident.getRunId() + " can no longer be recovered; request the rerun"
                 + " on the job's Request Run form and provide them again.", prefill);
+    }
+
+    /**
+     * D-72b (6): whether {@code build} is the failed run of {@code incident}: its own timestamp is
+     * the one the incident recorded. Both come from the build (never from the plugin clock).
+     */
+    private static boolean isIncidentRun(Run<?, ?> build, Incident incident) {
+        Long recorded = incident.getRunTimestampMillis();
+        return recorded != null && recorded == build.getTimeInMillis();
     }
 
     /** The failed run named by {@code runId} ({@code <job full name>#<number>}), or {@code null}. */

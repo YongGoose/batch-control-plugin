@@ -46,7 +46,8 @@ public final class ParameterDisplay {
     /**
      * The masked display map of {@code values}, by parameter name in submission order. Values
      * without a name are left out; with a repeated name the first value wins, as
-     * {@code ParametersAction#getParameter} reads it.
+     * {@code ParametersAction#getParameter} reads it (a run request refuses repeated names before
+     * this is derived, D-72b (1); run records and incidents mask a build's own values).
      */
     public static Map<String, String> masked(@CheckForNull Collection<? extends ParameterValue> values) {
         Map<String, String> display = new LinkedHashMap<>();
@@ -75,6 +76,29 @@ public final class ParameterDisplay {
             return SecretMasker.MASK;
         }
         return raw == null ? "" : String.valueOf(raw);
+    }
+
+    /**
+     * D-72b (2): the text a non-file value stores, which the length and character limits apply to:
+     * the plaintext of a {@link Secret} (a password included, although it is displayed masked),
+     * otherwise {@code String.valueOf(value.getValue())}, {@code ""} for {@code null}. A file
+     * value has none ({@code null}): its content, Base64 included, is bounded by the body cap only.
+     * {@code null} as well when the value cannot be read as text.
+     */
+    @CheckForNull
+    public static String storedText(ParameterValue value) {
+        if (isFile(value)) {
+            return null;
+        }
+        try {
+            Object raw = value.getValue();
+            if (raw instanceof Secret) {
+                return ((Secret) raw).getPlainText();
+            }
+            return raw == null ? "" : String.valueOf(raw);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** Whether {@code value} is a file value (see the class description). */

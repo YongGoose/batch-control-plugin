@@ -218,19 +218,28 @@ from scripts.
     protection core gives them in a build's `build.xml`, and every screen, CSV,
     history record, run record and incident shows them as `********`. A file
     shows only as `[file] <original file name>`, never its content, its Base64
-    or a server path. An incident rerun reuses the failed run's own values the
-    same way, original secrets included: a core file is recreated from the copy
-    the build keeps, and a `base64File` value carries its content. Some values
-    cannot be recovered: a `stashedFile`, whose stash the build clears when it
-    completes, a core file whose copy is gone, and every value of a build that
-    has been deleted. A rerun that cannot recover all of its values creates no
-    request. Instead it opens the job's Request Run form with the recoverable
-    non-sensitive values filled in, which travel in the URL as described in
-    item 48, and the files and secrets have to be provided again. A request
-    submitted from that form is linked to the incident only after the server
-    has validated the incident reference again (the incident exists, belongs to
-    that job, and the submitter holds `ViewHistory`), so a successful run still
-    records `resolvedByRunId` (D-72a).
+    or a server path. The typed values stay in the request file only until the
+    approved run starts or the request ends; after that the masked values
+    remain as the record (D-72b, item 32). An incident rerun reuses the failed
+    run's own values the same way, original secrets included: a core file is
+    recreated from the copy the build keeps, and a `base64File` value carries
+    its content. It takes values only from the incident's own build. A build
+    that is not that run, such as the build with the same number in a job that
+    was deleted and re-created under the same name, is treated like a deleted
+    build, and its values are not used (D-72b). Some values cannot be
+    recovered from the build: a `stashedFile`, whose stash the build clears
+    when it completes, and a core file whose copy is gone. A rerun that cannot
+    recover all of its values creates no request. Instead it opens the job's
+    Request Run form with the build's recoverable non-sensitive values filled
+    in. Nothing can be recovered from a deleted build, so for it the form is
+    filled in with the non-sensitive values recorded on the incident instead;
+    secrets and files are recorded only masked, so they are never filled in.
+    These values travel in the URL as described in item 48, and the files and
+    secrets have to be provided again. A request submitted from that form is
+    linked to the incident only after the server has validated the incident
+    reference again (the incident exists, belongs to that job, and the
+    submitter holds `ViewHistory`), so a successful run still records
+    `resolvedByRunId` (D-72a).
 17. **Stored configuration snapshots are not masked.** The diff shown in a change
     record is masked, but `batch-control/snapshots/<job>.xml` keeps the raw
     `config.xml`. Secrets inside it are Jenkins-encrypted exactly as they are in
@@ -330,20 +339,36 @@ from scripts.
     their pending requests, and they have to file them again.
 31. **No rate limiting, and the instance-wide upload limit is Jenkins' own.**
     There is a size cap on a reason (4,000 characters) and on each parameter
-    value as it is displayed (10,000 characters). Because a password is
-    displayed as `********` and a file as `[file] <original file name>`, that
-    cap bounds text values but not the size of a secret or a file. The body of
-    a run request submission is capped at 100 MB, configurable in bytes with
-    the system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
+    value a run request stores (10,000 characters), the plaintext of a password
+    or other secret included, although it is displayed as `********` (D-72b).
+    The content of a file, the Base64 of a `base64File` value included, is
+    bounded only by the body cap below. A run request names each parameter at
+    most once: a submission that repeats a name is refused with a field error
+    before anything is stored. A parameter value containing a character that
+    XML 1.0 cannot store, such as a control character other than tab, line feed
+    and carriage return, is refused with a field error as well, and a save that
+    fails anyway leaves no temporary file behind (D-72b). The body of a run
+    request submission is capped at 100 MB, configurable in bytes with the
+    system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
     because requesting a run does not require `Item/Build` (D-38a). The cap is
     judged from the declared `Content-Length` before Batch Control reads the
-    form, and a multipart or chunked body that declares no length is refused as
-    well. An over-size submission is answered with HTTP 413 and creates nothing
-    and keeps nothing in JENKINS_HOME. It does not prevent the upload itself:
-    Jenkins parses a multipart body posted under a job URL into its temporary
-    upload directory while it dispatches the URL, before any plugin code runs,
-    and keeps that directory until the JVM exits (D-72a). The instance-wide
-    limit on such uploads is Stapler's
+    form. A body that declares no length, a chunked one for example, is judged
+    by the actual size of what Jenkins parsed from it, the sum of its parts
+    (D-72b). An over-size submission is answered with HTTP 413, and Batch
+    Control creates nothing and keeps nothing in JENKINS_HOME. It does not
+    prevent the upload itself: Jenkins parses a multipart body posted under a
+    job URL while it dispatches the URL, before any plugin code runs (D-72a),
+    into a new `jenkins-stapler-uploads*` directory under `java.io.tmpdir`.
+    Jenkins only marks that directory for deletion when the JVM exits, and
+    Java does not delete a directory that still holds files, so the uploaded
+    parts written there stay, after Jenkins has stopped as well, until the
+    operating system or an administrator removes them. A core `file`
+    parameter leaves its upload there for every accepted submission too, on
+    Jenkins' own build form as on Batch Control's, because core copies the
+    upload and does not delete Stapler's part (the file-parameters plugin's
+    values delete theirs). If `java.io.tmpdir` lies inside JENKINS_HOME, these
+    leftovers are in JENKINS_HOME as well. The instance-wide limit on such
+    uploads is Stapler's
     `org.kohsuke.stapler.RequestImpl.FILEUPLOAD_MAX_SIZE` system property, the
     total size in bytes of one `multipart/form-data` request, which is
     unlimited (`-1`) by default. It applies to every multipart form Stapler
@@ -356,31 +381,42 @@ from scripts.
     a single store lock.
 32. **Performance at volume is unmeasured.** The history, dashboard and
     change-record screens read a whole month bucket into memory on every page
-    load, the incident list opens one file per incident, and run and grant
-    request files are never pruned while the Run Requests and Grants screens
-    read all of them on every page load (the expiry job, every minute, loads
-    only the open ones). SPEC item 6's target of 5,000 runs a day has
-    therefore not been measured, and it is not expected to hold at that scale
-    until the store gains an index. File parameters add to this. The
-    file-parameters plugin's `base64File` keeps the file's content,
+    load, the incident list opens one file per incident, and the Run Requests
+    and Grants screens read every run and grant request file on every page
+    load (the expiry job, every minute, loads only the open ones). Request
+    files are kept until retention deletes the closed requests last active
+    before the first kept month (`retentionMonths`, 24 by default), so up to
+    that age every one of them is read. SPEC item 6's target of 5,000 runs a
+    day has therefore not been measured, and it is not expected to hold at
+    that scale until the store gains an index. File parameters add to this.
+    The file-parameters plugin's `base64File` keeps the file's content,
     Base64-encoded, inside the parameter value, so a run request with such a
     parameter carries the whole file in its `requests/run/<id>.xml`, about a
-    third larger than the file. Batch Control does not copy it elsewhere, but
-    because request files are not pruned, storage grows with every such
-    upload, and the Run Requests screen reads those larger files on every page
-    load. Core `file` and `stashedFile` content stays in its own directory
-    under JENKINS_HOME (`fileParameterValueFiles/`,
-    `stashedFileParameterValueFiles/`) until a build takes it over. Jenkins
-    core cleans up such a file only for a value that reached the queue (when
-    its queue item is cancelled, for example) and never sweeps
-    `$JENKINS_HOME/fileParameterValueFiles/` itself, so the file of a value
-    that never reaches the queue stays there unless someone disposes of it.
-    Batch Control disposes of the files of a run request that ends without a
-    run (rejected, cancelled, expired, invalidated, or approved but impossible
-    to queue) and of a person's own direct build that run control refuses,
-    through any of core's channels: the build form, the parameters dialog,
-    `build` and `buildWithParameters` over HTTP, the CLI, and a build token.
-    It leaves two kinds of refused submission alone: a refused re-run that
+    third larger than the file. Batch Control does not copy it elsewhere, and
+    it keeps a request's typed values only as long as they are needed: they
+    are removed from the request file when the approved run starts or the
+    request ends (rejected, cancelled, expired or invalidated), and the masked
+    display values stay as the record (D-72b). The screens and the periodic
+    jobs read requests without loading the typed values. Batch Control's
+    storage therefore grows with every open request that carries such a file,
+    not with every such upload ever made. Core `file` and `stashedFile`
+    content stays in its own directory under JENKINS_HOME
+    (`fileParameterValueFiles/`, `stashedFileParameterValueFiles/`) until a
+    build takes it over. Jenkins core cleans up such a file only for a value
+    that reached the queue (when its queue item is cancelled, for example)
+    and never sweeps `$JENKINS_HOME/fileParameterValueFiles/` itself, so the
+    file of a value that never reaches the queue stays there unless someone
+    disposes of it. Batch Control disposes of the files of a run request that
+    ends without a run (rejected, cancelled, expired, invalidated, or approved
+    but impossible to queue) and of a person's own direct build that run
+    control refuses, through any of core's channels: the build form, the
+    parameters dialog, `build` and `buildWithParameters` over HTTP, the CLI,
+    and a build token. An approved run that never ran counts as impossible to
+    queue also when its queue item was cancelled, in which case Batch Control
+    does not submit it again when Jenkins restarts, and when another plugin's
+    queue handler refused it after Batch Control's gate had accepted it; the
+    files of such a run are disposed of when its request ends (D-72b). Batch
+    Control leaves two kinds of refused submission alone: a refused re-run that
     uploads a new file (for example from the rebuild plugin's parameters
     page), and a refused unattended submission that creates file values (for
     example one from parameterized-trigger). Batch Control cannot tell the
@@ -679,6 +715,21 @@ code does on purpose.
     plain strategy**, is recorded. Changing the authorization strategy
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
+
+<!-- Item 51 was added after 44-50 and sits here by topic. The comment ends the list so that it renders as 51, not 44. -->
+
+51. **A run request whose stored values do not match what the approver sees
+    cannot be approved.** A run request keeps the submitted parameter values
+    with their types (D-72, item 16), and the approved build must never
+    receive values other than the ones the approver saw. Approval, and the
+    submission of an approved run, are therefore refused for a request whose
+    stored values repeat a parameter name, name different parameters than the
+    request shows, or include a value Jenkins can no longer load, for example
+    because the plugin that provides that parameter type was removed or
+    downgraded while the request was open (D-72b). A request file written
+    before typed values were introduced holds only the masked display values.
+    It is not converted, as earlier grant files are not (D-69), and it cannot
+    be approved. In each case the requester has to submit the run again.
 
 ## Moving items
 

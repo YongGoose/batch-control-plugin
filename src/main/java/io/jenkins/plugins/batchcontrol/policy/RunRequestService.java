@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.policy;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Action;
 import hudson.model.CauseAction;
 import hudson.model.Item;
@@ -31,6 +32,7 @@ import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import io.jenkins.plugins.batchcontrol.store.Store;
+import io.jenkins.plugins.batchcontrol.store.XmlChars;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -68,7 +70,11 @@ public final class RunRequestService {
 
     private static final Logger LOGGER = Logger.getLogger(RunRequestService.class.getName());
 
-    /** D-22 size limits: reason and per-parameter display value (D-72). */
+    /**
+     * D-22 size limits: the reason, and each stored parameter value (D-72b (2): the stored text,
+     * a secret's plaintext included, and its display text; a file's content is bounded by the
+     * body cap only).
+     */
     private static final int MAX_REASON_LENGTH = 4000;
     private static final int MAX_PARAMETER_VALUE_LENGTH = 10000;
 
@@ -93,12 +99,15 @@ public final class RunRequestService {
 
     // ---------------------------------------------------------------- read API
 
-    /** Loads a request by id, or {@code null}. */
+    /**
+     * Loads a request by id, or {@code null}. D-72b (5): read without its typed values (they are
+     * neither parsed nor deserialized), which is all a screen, listing or listener needs.
+     */
     public RunRequest load(String id) {
         return store.loadRunRequest(id);
     }
 
-    /** All stored requests, in creation order. */
+    /** All stored requests, in creation order, each read without its typed values (D-72b (5)). */
     public List<RunRequest> list() {
         return store.listRunRequests();
     }
@@ -304,8 +313,14 @@ public final class RunRequestService {
     /**
      * Creates a PENDING run request holding the submitted typed values (D-72), linked to an
      * incident when {@code incidentId} is given. The masked display map is derived from the values
-     * here, once; the per-value length limit (D-22) applies to it. The approved build is
-     * scheduled with the values unchanged.
+     * here, once. The approved build is scheduled with the values unchanged.
+     *
+     * <p>D-72b (1)(2), security-35 S-35-01/03: before anything is stored, each parameter name may
+     * occur once, every value has a name, every stored text (a secret's plaintext included) and
+     * every display text obeys the 10,000-character limit, and names, texts and the reason hold
+     * only characters XML 1.0 can store ({@link XmlChars}); otherwise
+     * {@link IllegalArgumentException} with a message naming the parameter (or the reason), so the
+     * form can show it next to the field.
      *
      * <p>SPEC item 11, D-72a: a linked request names an existing incident of {@code job} (else
      * {@link IllegalArgumentException}, nothing stored) and is listed among the incident's rerun
@@ -328,14 +343,8 @@ public final class RunRequestService {
             checkCanRequest(job);
             String requester = Jenkins.getAuthentication2().getName();
             checkReason(reason);
+            checkValues(submitted);
             Map<String, String> display = ParameterDisplay.masked(submitted);
-            for (Map.Entry<String, String> entry : display.entrySet()) {
-                String value = entry.getValue();
-                if (value != null && value.length() > MAX_PARAMETER_VALUE_LENGTH) {
-                    throw new IllegalArgumentException("Parameter '" + entry.getKey()
-                            + "' exceeds " + MAX_PARAMETER_VALUE_LENGTH + " characters.");
-                }
-            }
             List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
 
             request = RunRequest.create(job.getFullName(), submitted, display, reason,
@@ -385,6 +394,109 @@ public final class RunRequestService {
             throw new IllegalArgumentException("The reason must not exceed "
                     + MAX_REASON_LENGTH + " characters.");
         }
+        int bad = XmlChars.firstInvalid(reason);
+        if (bad >= 0) {
+            throw new IllegalArgumentException("The reason contains a character that cannot be stored ("
+                    + XmlChars.describe(reason, bad) + "); remove it and submit again.");
+        }
+    }
+
+    /**
+     * D-72b (2): a decision comment holds only characters XML 1.0 can store (it is written into
+     * the request file). The message names the comment, so the form shows it next to that field.
+     */
+    private static void checkComment(String comment) {
+        int bad = XmlChars.firstInvalid(comment);
+        if (bad >= 0) {
+            throw new IllegalArgumentException("The comment contains a character that cannot be stored ("
+                    + XmlChars.describe(comment, bad) + "); remove it and submit again.");
+        }
+    }
+
+    /**
+     * D-72b (1)(2), security-35 S-35-01/02/03: the checks on the typed values of a new request,
+     * made before anything is stored. Each message starts with "Parameter" and names it, so the
+     * form maps it to its parameters field.
+     */
+    private static void checkValues(List<ParameterValue> values) {
+        Set<String> names = new HashSet<>();
+        for (ParameterValue value : values) {
+            if (value == null) {
+                continue; // dropped by RunRequest.create, never stored
+            }
+            String name = value.getName();
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("Parameter values must have a name; one has none.");
+            }
+            int badName = XmlChars.firstInvalid(name);
+            if (badName >= 0) {
+                throw new IllegalArgumentException("A parameter name contains a character that cannot be stored ("
+                        + XmlChars.describe(name, badName) + ").");
+            }
+            if (!names.add(name)) {
+                throw new IllegalArgumentException("Parameter '" + name + "' was submitted more than once;"
+                        + " give each parameter one value.");
+            }
+            checkText(name, ParameterDisplay.text(value));
+            checkText(name, ParameterDisplay.storedText(value));
+        }
+    }
+
+    private static void checkText(String name, String text) {
+        if (text == null) {
+            return;
+        }
+        if (text.length() > MAX_PARAMETER_VALUE_LENGTH) {
+            throw new IllegalArgumentException("Parameter '" + name
+                    + "' exceeds " + MAX_PARAMETER_VALUE_LENGTH + " characters.");
+        }
+        int bad = XmlChars.firstInvalid(text);
+        if (bad >= 0) {
+            throw new IllegalArgumentException("Parameter '" + name + "' contains a character that cannot be stored ("
+                    + XmlChars.describe(text, bad) + "); remove it and submit again.");
+        }
+    }
+
+    /**
+     * D-72b (1)(3), security-35 S-35-01/04, S7 m-4: why the stored typed values of {@code request}
+     * (read with them) cannot be scheduled, or {@code null} when they can. The build must receive
+     * exactly the values the approver saw, so it fails closed when:
+     * <ul>
+     *   <li>the request has parameters but no typed values: it was stored before D-72 and is not
+     *       converted (a request without parameters is fine);</li>
+     *   <li>a stored value could not be loaded (its class is gone, so XStream dropped it or left
+     *       {@code null}), has no name, or repeats a name;</li>
+     *   <li>the typed names differ from the names of the display map.</li>
+     * </ul>
+     */
+    @CheckForNull
+    static String valuesProblem(RunRequest request) {
+        Map<String, String> display = request.getParameters();
+        if (!request.holdsTypedValues()) {
+            return display.isEmpty() ? null
+                    : "Request " + request.getId() + " was stored before Batch Control kept the submitted parameter"
+                    + " values with their types, and it is not converted, so it cannot be approved or run."
+                    + " Reject it and ask the requester to submit the run again.";
+        }
+        Set<String> names = new java.util.LinkedHashSet<>();
+        String detail = null;
+        for (ParameterValue value : request.parameterValues()) {
+            if (value == null || value.getName() == null) {
+                detail = "a stored value could not be loaded";
+                break;
+            }
+            if (!names.add(value.getName())) {
+                detail = "parameter '" + value.getName() + "' is stored more than once";
+                break;
+            }
+        }
+        if (detail == null && !names.equals(display.keySet())) {
+            detail = "the stored names " + names + " differ from the names shown " + display.keySet();
+        }
+        return detail == null ? null
+                : "The stored parameter values of request " + request.getId() + " do not match the values shown ("
+                + detail + "), so it cannot be approved or run: the build must receive exactly the values the"
+                + " approver saw. Reject it and ask the requester to submit the run again.";
     }
 
     // ---------------------------------------------------------------- decisions (SPEC 3, 5)
@@ -394,8 +506,14 @@ public final class RunRequestService {
      * approver holding the Approve permission (or the admin self-approval path). The status is
      * committed to APPROVED before submission and is never rolled back by a submission failure
      * (quiet-down tolerance); startup recovery and expiry handle stragglers.
+     *
+     * <p>D-72b (1)(3): the stored typed values are read and checked ({@link #valuesProblem}) before
+     * the APPROVED commit; a request whose values do not match what the approver saw, or that was
+     * stored before D-72 with parameters, is refused with {@link IllegalStateException} and stays
+     * PENDING (it can still be rejected), and nothing is scheduled.
      */
     public RunRequest approve(String id, String comment) {
+        checkComment(comment);
         RunRequest request;
         lock.lock();
         try {
@@ -412,8 +530,7 @@ public final class RunRequestService {
                 String reason = EndReasons.pendingExpired();
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(reason);
-                persist(request);
-                disposeFiles(request);
+                persistEnded(request, true);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Request " + id
                         + " passed its pending timeout and is now EXPIRED.");
@@ -423,6 +540,13 @@ public final class RunRequestService {
             if (jobDisabled(request.getJobFullName())) {
                 throw new IllegalStateException("The job '" + request.getJobFullName() + "' is disabled; enable it"
                         + " first, then approve. You can still reject the request.");
+            }
+            // D-72b (1)(3): the values the build would receive, read and checked before the commit.
+            request = requireWithValues(id);
+            String problem = valuesProblem(request);
+            if (problem != null) {
+                LOGGER.warning(() -> "Refused to approve run request " + id + ": " + problem);
+                throw new IllegalStateException(problem);
             }
             request.setStatus(RequestStatus.APPROVED);
             request.setDecidedAt(now);
@@ -456,6 +580,7 @@ public final class RunRequestService {
         if (comment == null || comment.trim().isEmpty()) {
             throw new IllegalArgumentException("A comment is required to reject a request.");
         }
+        checkComment(comment);
         RunRequest request;
         lock.lock();
         try {
@@ -469,8 +594,7 @@ public final class RunRequestService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
-            persist(request);
-            disposeFiles(request);
+            persistEnded(request, true);
         } finally {
             lock.unlock();
         }
@@ -497,8 +621,7 @@ public final class RunRequestService {
             // Manage holder), in the same fields a decision uses.
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
-            persist(request);
-            disposeFiles(request);
+            persistEnded(request, true);
             // D-54: the approvers (and the requester, when a Manage holder cancelled) are told.
             NotificationDispatcher.runEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
@@ -603,16 +726,17 @@ public final class RunRequestService {
                 String reason = EndReasons.approvedNotStarted();
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
-                persist(request);
                 // D-72: this submission is refused, so the values never reach the queue (the
                 // ticket is unclaimed: checked above).
-                disposeFiles(request);
+                persistEnded(request, true);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                 LOGGER.warning(() -> "Refusing approval marker of request " + requestId
                         + ": the approved-run timeout passed before submission (now EXPIRED)");
                 return false;
             }
             request.setQueuedAt(now);
+            // The light read keeps the stored typed values as they are (no deserialization here,
+            // under the queue lock); they stay until the run starts (D-72b (5)).
             persist(request);
             return true;
         } finally {
@@ -653,7 +777,11 @@ public final class RunRequestService {
                         + " on job '" + jobFullName + "' - " + reason);
     }
 
-    /** Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). */
+    /**
+     * Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). D-72b (5):
+     * the typed values are removed from the request file now; the build has its own copy and owns
+     * the files, and the masked display map stays as the record.
+     */
     public void markExecuted(String requestId, String runId) {
         lock.lock();
         try {
@@ -666,7 +794,7 @@ public final class RunRequestService {
                 request.setExecutedRunId(runId);
                 // Retention measures a request's last activity from this (security-10 S-09).
                 request.setExecutedAt(BatchClock.now());
-                persist(request);
+                persistEnded(request, false);
             }
         } finally {
             lock.unlock();
@@ -709,8 +837,7 @@ public final class RunRequestService {
                     String reason = EndReasons.pendingExpired();
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(reason);
-                    persist(request);
-                    disposeFiles(request);
+                    persistEnded(request, true);
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (pending timeout)");
@@ -719,15 +846,17 @@ public final class RunRequestService {
                         && !queuedRequestIds.contains(request.getId())
                         && ticketNotFresherThan(request, queueSnapshotAt)
                         && approvedExpired(request, now)) {
-                    String reason = EndReasons.approvedNotStarted();
+                    boolean cancelled = request.getQueueCancelledAt() != null;
+                    String reason = cancelled ? EndReasons.approvedRunCancelled() : EndReasons.approvedNotStarted();
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
-                    persist(request);
-                    // D-72: not in the queue and never executed; a claimed ticket means the queue
-                    // took the values (a cancelled queue item disposes of them itself).
-                    if (request.getQueuedAt() == null) {
-                        disposeFiles(request);
-                    }
+                    // D-72: not in the queue and never executed. An unclaimed ticket (never queued,
+                    // or a submission refused after the gate claimed it, whose claim was released:
+                    // S7 M-1) means no build owns the values, so their files are disposed of. A
+                    // claimed ticket means the queue took them; when that queue item was cancelled
+                    // (D-72b (7)) the cancellation disposed of the files and the typed values were
+                    // removed then.
+                    persistEnded(request, request.getQueuedAt() == null);
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (approved-run timeout)");
@@ -823,12 +952,14 @@ public final class RunRequestService {
                     if (comment == null || comment.trim().isEmpty()) {
                         request.setDecisionComment(reason);
                     }
-                    persist(request);
                     // D-72: an approval already handed to the queue is cancelled there
                     // (RequestInvalidationListener), and the cancelled item disposes of its files.
-                    if (wasPending || request.getQueuedAt() == null && !queued.contains(request.getId())) {
-                        disposeFiles(request);
-                    }
+                    // A run that never reached the queue (S7 M-1 included: a claim released after a
+                    // later handler refused the submission) has its files disposed of here; a
+                    // cancelled queue item (D-72b (7)) already disposed of its own. The typed values
+                    // are removed either way (D-72b (5)).
+                    boolean notQueued = request.getQueuedAt() == null;
+                    persistEnded(request, wasPending || notQueued && !queued.contains(request.getId()));
                     NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
                     invalidated.add(request.getId());
                     LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
@@ -846,8 +977,11 @@ public final class RunRequestService {
      * Re-submits APPROVED, never-executed requests exactly once after a restart (SPEC item 4).
      * Idempotency (T-RT-17): a request whose marker is already sitting in the restored queue,
      * or whose build already exists, is skipped; otherwise its consumption ticket is re-issued
-     * and the request is submitted again. The approved-run timeout is judged from the recovery
-     * moment (SPEC item 7 exception), implemented by moving the request's expiry base forward.
+     * and the request is submitted again. D-72b (7), security-35 S-35-07: a request whose queue
+     * item was cancelled ({@link RunRequest#getQueueCancelledAt()}) is never submitted again; the
+     * approved-run timeout ends it and its files are disposed of then. The approved-run timeout
+     * is judged from the recovery moment (SPEC item 7 exception), implemented by moving the
+     * request's expiry base forward.
      *
      * <p>Ordering with the core queue restore: {@code Queue.init} (which restores
      * {@code queue.xml}) runs in the same {@code JOB_CONFIG_ADAPTED} initializer band as
@@ -880,6 +1014,11 @@ public final class RunRequestService {
             if (snapshot.getStatus() != RequestStatus.APPROVED || snapshot.getExecutedRunId() != null) {
                 continue;
             }
+            if (snapshot.getQueueCancelledAt() != null) {
+                LOGGER.info(() -> "Not recovering approved run request " + snapshot.getId()
+                        + ": its queue item was cancelled");
+                continue;
+            }
             Job<?, ?> job = jenkins.getItemByFullName(snapshot.getJobFullName(), Job.class);
             if (job == null) {
                 LOGGER.warning(() -> "Cannot recover run request " + snapshot.getId()
@@ -895,7 +1034,7 @@ public final class RunRequestService {
             try {
                 request = store.loadRunRequest(snapshot.getId());
                 if (request == null || request.getStatus() != RequestStatus.APPROVED
-                        || request.getExecutedRunId() != null) {
+                        || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null) {
                     continue;
                 }
                 // SPEC 7 exception: downtime does not count against approvedRunTimeoutMinutes.
@@ -907,8 +1046,16 @@ public final class RunRequestService {
                     // Re-issue the consumption ticket for exactly one recovery submission.
                     request.setQueuedAt(null);
                     persist(request);
+                    // The values the build receives (D-72), read for this submission only.
+                    request = requireWithValues(request.getId());
                     submit = true;
                 }
+            } catch (RuntimeException e) {
+                // One unreadable request must not stop the recovery of the others; it stays
+                // APPROVED and the approved-run timeout ends it.
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not recover approved run request "
+                        + snapshot.getId(), e);
+                continue;
             } finally {
                 lock.unlock();
             }
@@ -941,6 +1088,25 @@ public final class RunRequestService {
 
     private RunRequest require(String id) {
         RunRequest request = store.loadRunRequest(id);
+        if (request == null) {
+            throw new IllegalArgumentException("No such run request: " + id);
+        }
+        return request;
+    }
+
+    /**
+     * The request with its typed values (D-72), for checking and scheduling an approval. A file
+     * whose values cannot be read refuses with {@link IllegalStateException} (fail closed).
+     */
+    private RunRequest requireWithValues(String id) {
+        RunRequest request;
+        try {
+            request = store.loadRunRequestWithValues(id);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not read the stored values of run request " + id, e);
+            throw new IllegalStateException("The stored parameter values of request " + id
+                    + " could not be read, so it cannot be approved or run.", e);
+        }
         if (request == null) {
             throw new IllegalArgumentException("No such run request: " + id);
         }
@@ -986,6 +1152,14 @@ public final class RunRequestService {
      * the marker. A refused or failed submission leaves the request APPROVED (quiet-down
      * tolerance); expiry or recovery handle it later.
      *
+     * <p>{@code request} must be read with its typed values. D-72b (1), S-35-01/04: values that do
+     * not match what the approver saw ({@link #valuesProblem}) are never scheduled (fail closed,
+     * WARNING); the request stays APPROVED and the approved-run timeout ends it, disposing of its
+     * files. S7 M-1: when this submission is refused by a queue handler consulted after Batch
+     * Control's gate, the gate has already claimed the ticket although nothing was queued; the
+     * claim is released ({@link #releaseRefusedClaim}), so the request counts as never queued:
+     * startup recovery may still submit it, and when it ends its files are disposed of.
+     *
      * <p>#26: the job lookup is inside the SYSTEM2 block as well. Whether an approver may decide
      * is the approval policy's call alone; an approver holding only Item/Discover (lookup throws
      * AccessDeniedException) or no job permission at all (lookup returns null) must not turn a
@@ -1007,6 +1181,11 @@ public final class RunRequestService {
                         + " targets missing job '" + request.getJobFullName() + "'; not submitted");
                 return;
             }
+            String problem = valuesProblem(request);
+            if (problem != null) {
+                LOGGER.warning(() -> "Approved run request " + request.getId() + " was not submitted: " + problem);
+                return;
+            }
             List<Action> actions = new ArrayList<>();
             // D-72: the stored typed values, unchanged: original secrets and files included.
             List<ParameterValue> values = request.parameterValues();
@@ -1024,18 +1203,115 @@ public final class RunRequestService {
             if (item == null) {
                 LOGGER.info(() -> "Submission of approved run request " + request.getId()
                         + " was not scheduled; the request stays APPROVED");
+                if (request.getQueuedAt() == null) {
+                    releaseRefusedClaim(jenkins, request.getId());
+                }
             }
         }
     }
 
     /**
-     * D-72: {@code request} has just ended without a run (its end state is persisted), so the
-     * temporary files of its values are disposed of. Called only when the values were never handed
-     * to the queue; once they were, the queue and the build own the files.
+     * S7 M-1, D-72b (7): a submission of {@code requestId} whose ticket was unclaimed has just been
+     * refused ({@code scheduleBuild2} answered {@code null}, synchronously). If the request's ticket
+     * is now claimed, Batch Control's gate claimed it during that call and a queue handler
+     * consulted after the gate refused the submission, so nothing was queued and no build exists:
+     * the claim is released. Taken under the queue lock and then this service's lock, the order
+     * the gate uses; nothing is released while a queue item carries the request's marker, or once
+     * its run started or its queue item was cancelled.
      */
-    private static void disposeFiles(RunRequest request) {
-        ParameterFiles.dispose(request.parameterValues(),
-                "run request " + request.getId() + " (" + request.getStatus() + ")");
+    private void releaseRefusedClaim(Jenkins jenkins, String requestId) {
+        Queue.withLock(() -> {
+            if (queuedMarkerRequestIds(jenkins).contains(requestId)) {
+                return;
+            }
+            lock.lock();
+            try {
+                RunRequest request = store.loadRunRequest(requestId);
+                if (request == null || request.getStatus() != RequestStatus.APPROVED
+                        || request.getQueuedAt() == null || request.getExecutedRunId() != null
+                        || request.getQueueCancelledAt() != null) {
+                    return;
+                }
+                request.setQueuedAt(null);
+                persist(request);
+                LOGGER.warning(() -> "The approved run of request " + requestId + " was refused by another queue"
+                        + " handler after Batch Control accepted it; nothing was queued. The request stays APPROVED"
+                        + " until it runs after a restart or the approved-run timeout ends it.");
+            } finally {
+                lock.unlock();
+            }
+        });
+    }
+
+    /**
+     * D-72b (7), security-35 S-35-07: the queue item of the approved run of {@code requestId} for
+     * job {@code jobFullName} was cancelled, so that run will not happen. The cancellation is
+     * recorded on the APPROVED request: startup recovery never submits it again (its ticket stays
+     * claimed, so the queue gate refuses any other submission of it too), and the approved-run
+     * timeout ends it. The cancelled item's own parameter types have already deleted the
+     * temporary files it carried (core's and the file-parameters plugin's cancelled-item
+     * listeners, see {@link ParameterFiles}); the typed values, which nothing can use any more,
+     * are removed from the request file now (D-72b (5)). Called by the queue listener, as
+     * SYSTEM, while Jenkins holds the queue lock (lock order as for {@link #consumeMarker}).
+     * Never throws.
+     */
+    public void recordQueueCancelled(String requestId, String jobFullName) {
+        lock.lock();
+        try {
+            RunRequest request = store.loadRunRequest(requestId);
+            if (request == null || request.getStatus() != RequestStatus.APPROVED
+                    || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null
+                    || !request.getJobFullName().equals(jobFullName)) {
+                return;
+            }
+            request.setQueueCancelledAt(BatchClock.now());
+            // The queued values were the queue's to dispose of (done by the cancellation itself).
+            persistEnded(request, false);
+            LOGGER.info(() -> "The queue item of approved run request " + requestId
+                    + " was cancelled; it will not be submitted again");
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not record the cancelled queue item of run request "
+                    + requestId, e);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * D-72, D-72b (5): persists {@code request}, which has just ended or whose run has just
+     * started, without its typed values (the masked display map stays as the record). With
+     * {@code dispose} the request ended without a run and its values never reached the queue, so
+     * the temporary files of its values are disposed of after the end state is stored; once the
+     * values were handed to the queue, the queue and the build own the files.
+     */
+    private void persistEnded(RunRequest request, boolean dispose) {
+        List<ParameterValue> values = dispose ? storedValues(request) : List.of();
+        request.removeTypedValues();
+        persist(request);
+        if (!values.isEmpty()) {
+            ParameterFiles.dispose(values, "run request " + request.getId() + " (" + request.getStatus() + ")");
+        }
+    }
+
+    /**
+     * The typed values of {@code request} for disposal: its own when it was read with them,
+     * otherwise read from the store; empty when there are none or they cannot be read (logged).
+     */
+    private List<ParameterValue> storedValues(RunRequest request) {
+        try {
+            if (!request.holdsTypedValues()) {
+                return List.of();
+            }
+            if (!request.typedValuesOmitted()) {
+                return request.parameterValues();
+            }
+            RunRequest full = store.loadRunRequestWithValues(request.getId());
+            return full == null || !full.holdsTypedValues() ? List.of() : full.parameterValues();
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not read the typed values of run request "
+                    + request.getId() + " to dispose of their files", e);
+            return List.of();
+        }
     }
 
     /**
