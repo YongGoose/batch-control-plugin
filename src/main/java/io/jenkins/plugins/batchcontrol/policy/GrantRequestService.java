@@ -20,6 +20,7 @@ import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
@@ -167,9 +168,14 @@ public final class GrantRequestService {
             }
             CreateNamePattern.parse(pattern); // D-40: validated at submission
         }
-        ItemKind kind = checkScopeAtCreation(scope, actions);
+        Item item = checkScopeAtCreation(scope, actions);
+        ItemKind kind = ItemKind.of(item);
+        // D-71a (security-34 S-34-04): the stored scope is the canonical full name of the item the
+        // typed name resolved to (Jenkins resolves "ops/" or "OPS" to the item "ops"), so the window
+        // the approver sees is the one that confers, and it is matched by that exact name.
+        GrantScope canonical = GrantScope.item(item.getFullName());
 
-        GrantRequest request = GrantRequest.create(scope, kind, actions, durationMinutes, reason,
+        GrantRequest request = GrantRequest.create(canonical, kind, actions, durationMinutes, reason,
                 requester, designated, pattern);
         lock.lock();
         try {
@@ -183,7 +189,8 @@ public final class GrantRequestService {
 
     /**
      * The scope item of a new request (D-71): it must exist and be visible to the requester, be a
-     * top-level item, and each requested action must apply to its kind. Returns the kind to record.
+     * top-level item, and each requested action must apply to its kind. Returns the item, whose
+     * kind and canonical full name the request records (D-71a, S-34-04).
      *
      * <p>S-03: an empty full name is rejected. A root scope would be instance-wide, which SPEC
      * item 8 never defines; root-scope grants stay impossible until a deliberate DECISIONS entry
@@ -192,11 +199,11 @@ public final class GrantRequestService {
      * <p>The lookup is the requester's own: an item they cannot see is refused exactly like a
      * missing one ("No such item"), so the refusal discloses nothing.
      */
-    private static ItemKind checkScopeAtCreation(GrantScope scope, List<GrantAction> actions) {
+    private static Item checkScopeAtCreation(GrantScope scope, List<GrantAction> actions) {
         checkScopeName(scope);
         String fullName = scope.getFullName();
         Item item = findScopeItem(fullName);
-        if (item == null) {
+        if (item == null || item.getFullName() == null || item.getFullName().isEmpty()) {
             throw new IllegalArgumentException("No such item: '" + fullName + "'.");
         }
         ItemKind kind = ItemKind.of(item);
@@ -205,7 +212,7 @@ public final class GrantRequestService {
                     + "named by a permission window; name the job it belongs to.");
         }
         checkActionsApply(item, kind, actions);
-        return kind;
+        return item;
     }
 
     /** S-03 / S-13: the scope must name an item; there is no root-scope grant. */
@@ -270,15 +277,32 @@ public final class GrantRequestService {
      * approver who cannot see the item whether it still exists. The kind is only compared, and
      * named, for an item the approver can see.
      *
+     * <p>D-69, D-71: a request whose stored scope type is not {@code ITEM} (an earlier type, which
+     * loads without a type and is not converted) is refused with {@link IllegalStateException}.
+     *
+     * <p>D-71a: the scope must be the item's canonical full name (requests are stored with it,
+     * S-34-04), and the item's identity must be readable, since the grant is bound to it; a request
+     * that fails either is refused with {@link IllegalStateException} (only reached for an item the
+     * approver can see).
+     *
+     * @return the item the grant will be bound to
      * @throws IllegalArgumentException for an empty (root) scope, as at creation, or an item the
      *                                  approver cannot see
      * @throws IllegalStateException when the item is gone or its kind changed
      */
-    private static void checkScopeAtApproval(GrantRequest request) {
+    private static Item checkScopeAtApproval(GrantRequest request) {
         GrantScope scope = request.getScope();
+        String id = request.getId();
+        if (scope == null || scope.getType() != GrantScope.Type.ITEM) {
+            // D-69, D-71 (T-08-145): a request stored with an earlier scope type (JOB, FOLDER,
+            // FOLDER_ONLY) loads without a type and is not converted; approving it would create a
+            // window that confers nothing (or, converted silently, one the approver never saw).
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: it was stored with an"
+                    + " earlier scope type, which is not converted. Ask the requester to request a window on the"
+                    + " item again.");
+        }
         checkScopeName(scope);
         String fullName = scope.getFullName();
-        String id = request.getId();
         Item item = findScopeItem(fullName);
         if (item == null) {
             String unavailable = "Grant request " + id + " cannot be approved: no item named '" + fullName
@@ -306,6 +330,13 @@ public final class GrantRequestService {
             // Only reachable for a request stored without the creation-time check.
             throw new IllegalStateException("Grant request " + id + " cannot be approved. " + e.getMessage(), e);
         }
+        if (!fullName.equals(item.getFullName())) {
+            // Only reachable for a request stored before D-71a (S-34-04): the window would be matched
+            // by a name no item has.
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: it names '" + fullName
+                    + "', but the item's name is '" + item.getFullName() + "'. Ask the requester to request it again.");
+        }
+        return item;
     }
 
     /**
@@ -354,7 +385,7 @@ public final class GrantRequestService {
             // cannot confer anything should not turn on whether the request is still PENDING or the
             // caller happens to be its designated approver. Existence was already disclosed to any
             // caller by require(id) before this change, so nothing new leaks.
-            checkChangeControlEnabled("approved", request.getScope().getFullName());
+            checkChangeControlEnabled("approved", request.getScope() == null ? null : request.getScope().getFullName());
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
@@ -365,7 +396,15 @@ public final class GrantRequestService {
             // since been deleted or renamed), and approval is the last point where a bad scope
             // can still be stopped. Deliberately after checkDecision, so a non-approver learns
             // nothing about the scope's validity.
-            checkScopeAtApproval(request);
+            Item item = checkScopeAtApproval(request);
+            // D-71a (security-34 S-34-01, S-34-03): the grant is bound to the item it is approved for.
+            // Read fresh from disk (not cached), so the binding is the item's identity right now.
+            String identity = ItemIdentity.of(item.getRootDir());
+            if (identity == null) {
+                throw new IllegalStateException("Grant request " + id + " cannot be approved: the item '"
+                        + item.getFullName() + "' could not be identified on disk, so the window could not be bound"
+                        + " to it. Try again, or ask an administrator to check the item's directory.");
+            }
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
                 String reason = EndReasons.pendingExpired();
@@ -381,7 +420,7 @@ public final class GrantRequestService {
             request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
             store.saveGrantRequest(request);
-            Grant grant = Grant.createFor(request, now);
+            Grant grant = Grant.createFor(request, now, identity);
             // Registration persists the grant and makes it effective in the same critical
             // section, so approval and effectiveness are atomic.
             GrantService.get().register(grant);

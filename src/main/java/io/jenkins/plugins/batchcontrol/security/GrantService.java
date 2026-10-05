@@ -4,15 +4,16 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.init.InitMilestone;
 import hudson.init.Initializer;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
-import java.io.File;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -93,16 +94,54 @@ public final class GrantService {
 
     // ---------------------------------------------------------------- queries
 
+    /*
+     * D-71a (security-34 S-34-01, S-34-03): a window confers something only on the very item it was
+     * approved for. Every lookup below therefore matches in two steps:
+     *   1. in memory, under this monitor: active grants of the user whose scope is exactly the full
+     *      name (a copy is returned, so nothing below runs while the monitor is held);
+     *   2. outside the monitor, and only when step 1 found a candidate: the grant is bound to the
+     *      item (isBoundTo): the identity recorded at approval equals the item's current identity
+     *      (ItemIdentity, cached per item object) and, when recorded, the kind is the same.
+     * A grant without a recorded identity is bound to nothing and confers nothing.
+     *
+     * The lookups that take only a full name resolve the item currently at that name as the caller
+     * sees it (no SYSTEM switch; an item the caller cannot read gets nothing) and then match as
+     * above. They are for callers outside a permission check (tests, screens); the grant layer
+     * itself only uses the item forms, so no lookup is ever made from inside a permission check.
+     */
+
+    /**
+     * D-71a: whether {@code grant} is bound to {@code item}: an identity was recorded at approval
+     * and equals the item's current identity, and the item has the recorded kind (when one was
+     * recorded; S-34-03). The full name is not compared here; callers match it first.
+     */
+    public static boolean isBoundTo(Grant grant, @CheckForNull Item item) {
+        if (grant == null || item == null || grant.getScope() == null
+                || grant.getScope().getType() != GrantScope.Type.ITEM) {
+            // a stored scope of an earlier type (JOB, FOLDER, FOLDER_ONLY) loads without a type and
+            // is not converted (D-69, D-71): it is bound to nothing
+            return false;
+        }
+        String recorded = grant.getItemIdentity();
+        if (recorded == null) {
+            return false;
+        }
+        ItemKind kind = grant.getItemKind();
+        if (kind != null && !kind.matches(item)) {
+            return false;
+        }
+        return recorded.equals(ItemIdentity.of(item));
+    }
+
     /**
      * Whether {@code user} currently holds {@code permission} on the item named
      * {@code itemFullName} through an active grant. Only the three grantable item permissions
      * can ever match; any other permission returns {@code false} immediately.
      *
-     * <p>A window names exactly one item (D-71), so this is a match on the exact full name. For
-     * Item/Create the name is that of the group the new item is created in (core checks Create on
-     * the group's ACL). Whether the action can apply to the item's kind is decided when the request
-     * is submitted and approved; callers that hold the item check it again
-     * ({@link #findActiveDeleteGrant}, {@code GrantAwareACL}).
+     * <p>D-71a: the item currently at that name is resolved as the caller sees it, and the grant
+     * must be bound to it ({@link #hasActiveGrant(String, Item, Permission)}). Whether the action
+     * can apply to the item's kind is decided when the request is submitted and approved, and again
+     * by the grant layer ({@code GrantAwareACL}) and {@link #findActiveDeleteGrant}.
      */
     public boolean hasActiveGrant(String user, String itemFullName, Permission permission) {
         GrantAction action = GrantAction.fromPermission(permission);
@@ -110,24 +149,51 @@ public final class GrantService {
     }
 
     /**
-     * The first active grant of {@code user} whose scope is the item {@code itemFullName} and that
-     * includes {@code action}, or {@code null}. A {@code null} action matches any action (used by
-     * {@code ItemChangeListener} to link RENAME/MOVE change records to the grant in use).
+     * D-71a: whether {@code user} currently holds {@code permission} on {@code item} through an
+     * active grant naming exactly its full name and bound to it. For Item/Create, {@code item} is
+     * the group the new item is created in (core checks Create on the group's ACL), so the identity
+     * compared is the folder's.
+     */
+    public boolean hasActiveGrant(String user, @CheckForNull Item item, Permission permission) {
+        GrantAction action = GrantAction.fromPermission(permission);
+        return action != null && findActiveGrant(user, item, action) != null;
+    }
+
+    /**
+     * The first active grant of {@code user} whose scope is the item {@code itemFullName}, bound to
+     * the item currently at that name (D-71a), and that includes {@code action}, or {@code null}.
+     * A {@code null} action matches any action.
      *
-     * <p>For DELETE this matches by name only; callers holding the item use
+     * <p>For DELETE this does not look at the item's kind; callers holding the item use
      * {@link #findActiveDeleteGrant}, which also requires the item to be a job (D-71).
      */
     @CheckForNull
-    public synchronized Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
-        if (user == null || itemFullName == null) {
+    public Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
+        return findActiveGrant(user, itemFullName, resolve(itemFullName), action);
+    }
+
+    /**
+     * D-71a: the first active grant of {@code user} naming exactly {@code item}'s full name, bound
+     * to {@code item}, and including {@code action} ({@code null}: any action), or {@code null}.
+     */
+    @CheckForNull
+    public Grant findActiveGrant(String user, @CheckForNull Item item, @CheckForNull GrantAction action) {
+        return item == null ? null : findActiveGrant(user, item.getFullName(), item, action);
+    }
+
+    /**
+     * D-71a: as {@link #findActiveGrant(String, Item, GrantAction)} for a window naming
+     * {@code itemFullName} rather than the item's current full name: its name before a rename or
+     * move, whose window was the one in use (change records). The identity is still {@code item}'s.
+     */
+    @CheckForNull
+    public Grant findActiveGrant(String user, @CheckForNull String itemFullName, @CheckForNull Item item,
+                                 @CheckForNull GrantAction action) {
+        if (item == null) {
             return null;
         }
-        Instant now = BatchClock.now();
-        for (Grant grant : grants()) {
-            if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
-                    && (action == null || grant.getActions().contains(action))) {
+        for (Grant grant : named(user, itemFullName, action)) {
+            if (isBoundTo(grant, item)) {
                 return grant;
             }
         }
@@ -138,7 +204,8 @@ public final class GrantService {
      * D-71: the active DELETE window of {@code user} on {@code item}, or {@code null}. A window's
      * DELETE applies only to a job ({@link GrantScope#deleteAppliesTo}), so for any other item —
      * a folder, a multibranch project, an organization folder — this is {@code null} whatever
-     * windows exist: deleting such a group would delete its children as SYSTEM.
+     * windows exist: deleting such a group would delete its children as SYSTEM. D-71a: the window
+     * must be bound to the item.
      */
     @CheckForNull
     public Grant findActiveDeleteGrant(String user, @CheckForNull Item item) {
@@ -147,36 +214,46 @@ public final class GrantService {
 
     /**
      * As {@link #findActiveDeleteGrant(String, Item)} for the item under the name
-     * {@code itemFullName} (its name before a move, for example).
+     * {@code itemFullName} (its name before a move, for example); the identity is the item's.
      */
     @CheckForNull
     public Grant findActiveDeleteGrant(String user, @CheckForNull Item item, @CheckForNull String itemFullName) {
         if (!GrantScope.deleteAppliesTo(item)) {
             return null;
         }
-        return findActiveGrant(user, itemFullName, GrantAction.DELETE);
+        return findActiveGrant(user, itemFullName, item, GrantAction.DELETE);
     }
 
     /**
-     * Every active grant of {@code user} whose scope is the item {@code itemFullName} and that
-     * includes {@code action} (D-40: the CREATE check has to see all of them, since each may carry
-     * a different name restriction).
-     *
-     * <p>For {@link GrantAction#CREATE}, {@code itemFullName} is the item group the new item is
-     * created in (Item/Create is checked on the group's ACL), so a CREATE window confers Create in
-     * its own folder only, never in a nested folder or at the root (D-71).
+     * Every active grant of {@code user} whose scope is the item {@code itemFullName}, bound to
+     * the item currently at that name (D-71a), and that includes {@code action} (D-40: the CREATE
+     * check has to see all of them, since each may carry a different name restriction).
      */
-    public synchronized List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
+    public List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
+        return findActiveGrants(user, resolve(itemFullName), itemFullName, action);
+    }
+
+    /**
+     * D-71a: every active grant of {@code user} naming exactly {@code item}'s full name, bound to
+     * {@code item}, and including {@code action}.
+     *
+     * <p>For {@link GrantAction#CREATE}, {@code item} is the item group the new item is created in
+     * (Item/Create is checked on the group's ACL), so a CREATE window confers Create in its own
+     * folder only, never in a nested folder or at the root (D-71), and only while that folder is
+     * the one it was approved for (D-71a).
+     */
+    public List<Grant> findActiveGrants(String user, @CheckForNull Item item, GrantAction action) {
+        return findActiveGrants(user, item, item == null ? null : item.getFullName(), action);
+    }
+
+    private List<Grant> findActiveGrants(String user, @CheckForNull Item item, @CheckForNull String itemFullName,
+                                         GrantAction action) {
         List<Grant> found = new ArrayList<>();
-        if (user == null || itemFullName == null || action == null) {
+        if (item == null || action == null) {
             return found;
         }
-        Instant now = BatchClock.now();
-        for (Grant grant : grants()) {
-            if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
-                    && grant.getActions().contains(action)) {
+        for (Grant grant : named(user, itemFullName, action)) {
+            if (isBoundTo(grant, item)) {
                 found.add(grant);
             }
         }
@@ -185,14 +262,33 @@ public final class GrantService {
 
     /**
      * D-40: the first active Create grant of {@code user} conferring Create in the item group
-     * {@code itemFullName} whose name restriction (if any) allows {@code itemName}, or
-     * {@code null}.
+     * {@code itemFullName} (bound to the group currently at that name, D-71a) whose name
+     * restriction (if any) allows {@code itemName}, or {@code null}.
      */
     @CheckForNull
     public Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
+        return firstAllowing(findActiveGrants(user, itemFullName, GrantAction.CREATE), itemName);
+    }
+
+    /**
+     * D-40, D-71a: the first active Create grant of {@code user} on the item group {@code group}
+     * (named exactly and bound to it) whose name restriction (if any) allows {@code itemName}, or
+     * {@code null}. {@code null} for the Jenkins root, where no window exists (S-13).
+     */
+    @CheckForNull
+    public Grant findActiveCreateGrant(String user, @CheckForNull ItemGroup<?> group, String itemName) {
+        if (!(group instanceof Item)) {
+            return null;
+        }
+        return firstAllowing(findActiveGrants(user, (Item) group, GrantAction.CREATE), itemName);
+    }
+
+    /** The first grant whose name restriction allows {@code itemName}; never under this monitor (S-03). */
+    @CheckForNull
+    private static Grant firstAllowing(List<Grant> grants, String itemName) {
         // Not synchronized: the list is a copy, and a user-supplied pattern is never matched while
         // this monitor is held, since every permission check passes through it (security-08 S-03).
-        for (Grant grant : findActiveGrants(user, itemFullName, GrantAction.CREATE)) {
+        for (Grant grant : grants) {
             if (grant.allowsCreateName(itemName)) {
                 return grant;
             }
@@ -226,33 +322,45 @@ public final class GrantService {
     }
 
     /**
-     * D-35c: the active grant of {@code user} through whose Create the item {@code itemFullName}
-     * was created, or {@code null}. The item must still lie directly inside the grant's scope
-     * folder, matched by parent, not by name prefix (D-71). While such a
-     * grant is active its holder also holds Item/Read and Item/Configure on that item (see
-     * {@code GrantAwareACL}), so matrix-auth's creator listener finds the permissions already
-     * held and writes no permanent entry; the permissions end with the window. S-09: when the
-     * record carries the item's identity, the item at {@code itemRootDir} must still have it.
+     * D-35c: the active grant of {@code user} through whose Create {@code item} was created, or
+     * {@code null}. While such a grant is active its holder also holds Item/Read and
+     * Item/Configure on that item (see {@code GrantAwareACL}), so matrix-auth's creator listener
+     * finds the permissions already held and writes no permanent entry; the permissions end with
+     * the window.
+     *
+     * <p>The item must still lie directly inside the grant's scope folder, matched by parent, not by
+     * name prefix (D-71), and that folder must be the one the window was approved for (D-71a: named
+     * exactly and bound to it). S-09, D-71a: the identity recorded for the created item must be the
+     * item's current one; an item recorded without an identity is matched by nothing.
      */
     @CheckForNull
-    public synchronized Grant findCreatingGrant(String user, String itemFullName, @CheckForNull File itemRootDir) {
-        if (user == null || itemFullName == null) {
+    public Grant findCreatingGrant(String user, @CheckForNull Item item) {
+        return item == null ? null : findCreatingGrant(user, item.getFullName(), item);
+    }
+
+    /**
+     * As {@link #findCreatingGrant(String, Item)} for the record under the name
+     * {@code itemFullName} (its name before a rename, whose record was the one in use); the parent
+     * and the identities are {@code item}'s.
+     */
+    @CheckForNull
+    public Grant findCreatingGrant(String user, @CheckForNull String itemFullName, @CheckForNull Item item) {
+        if (item == null) {
             return null;
         }
-        Instant now = BatchClock.now();
-        String[] identity = new String[1];
-        boolean[] computed = new boolean[1];
-        Supplier<String> current = () -> {
-            if (!computed[0]) {
-                identity[0] = ItemIdentity.of(itemRootDir);
-                computed[0] = true;
-            }
-            return identity[0];
-        };
-        for (Grant grant : grants()) {
-            if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
-                    && grant.getScope().isParentOf(itemFullName)
+        List<Grant> candidates = creatingCandidates(user, itemFullName);
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        ItemGroup<?> parentGroup = item.getParent();
+        Item parent = parentGroup instanceof Item ? (Item) parentGroup : null;
+        if (parent == null) {
+            return null; // no root-scope grant exists (S-13)
+        }
+        Supplier<String> current = () -> ItemIdentity.of(item);
+        for (Grant grant : candidates) {
+            if (grant.getScope().includes(parent.getFullName())
+                    && isBoundTo(grant, parent)
                     && grant.hasCreated(itemFullName, current)) {
                 return grant;
             }
@@ -260,16 +368,74 @@ public final class GrantService {
         return null;
     }
 
+    /** Active grants of {@code user} recording {@code itemFullName} as created directly inside their scope (a copy). */
+    private synchronized List<Grant> creatingCandidates(String user, @CheckForNull String itemFullName) {
+        List<Grant> found = new ArrayList<>();
+        if (user == null || itemFullName == null) {
+            return found;
+        }
+        Instant now = BatchClock.now();
+        for (Grant grant : grants()) {
+            if (grant.isActiveAt(now)
+                    && user.equals(grant.getUser())
+                    && grant.getScope() != null
+                    && grant.getScope().isParentOf(itemFullName)
+                    && grant.hasCreated(itemFullName)) {
+                found.add(grant);
+            }
+        }
+        return found;
+    }
+
     /**
-     * The active grant that gives {@code user} Item/Configure on {@code itemFullName}: a grant
-     * with the CONFIGURE action covering the item, or a Create grant through which the user
-     * created it (D-35c). {@code null} if neither exists. Used by the D-35b guard to name the
-     * grant a violation came from.
+     * The active grant that gives {@code user} Item/Configure on {@code item}: a grant with the
+     * CONFIGURE action naming and bound to the item, or a Create grant through which the user
+     * created it (D-35c). {@code null} if neither exists. Used to name the grant a change or a
+     * violation came from (D-35b, SPEC item 9).
      */
     @CheckForNull
-    public synchronized Grant findConfigureGrant(String user, String itemFullName, @CheckForNull File itemRootDir) {
-        Grant grant = findActiveGrant(user, itemFullName, GrantAction.CONFIGURE);
-        return grant != null ? grant : findCreatingGrant(user, itemFullName, itemRootDir);
+    public Grant findConfigureGrant(String user, @CheckForNull Item item) {
+        Grant grant = findActiveGrant(user, item, GrantAction.CONFIGURE);
+        return grant != null ? grant : findCreatingGrant(user, item);
+    }
+
+    /**
+     * Active grants of {@code user} whose scope is exactly {@code itemFullName} and that include
+     * {@code action} ({@code null}: any), not yet matched against an item (a copy).
+     */
+    private synchronized List<Grant> named(String user, @CheckForNull String itemFullName,
+                                           @CheckForNull GrantAction action) {
+        List<Grant> found = new ArrayList<>();
+        if (user == null || itemFullName == null) {
+            return found;
+        }
+        Instant now = BatchClock.now();
+        for (Grant grant : grants()) {
+            if (grant.isActiveAt(now)
+                    && user.equals(grant.getUser())
+                    && grant.getScope() != null
+                    && grant.getScope().includes(itemFullName)
+                    && (action == null || grant.getActions().contains(action))) {
+                found.add(grant);
+            }
+        }
+        return found;
+    }
+
+    /**
+     * The item at {@code fullName} as the caller sees it, or {@code null} (none, not readable, or
+     * Item/Discover only). Never called from inside a permission check (see above).
+     */
+    @CheckForNull
+    private static Item resolve(@CheckForNull String fullName) {
+        if (fullName == null || fullName.isEmpty() || Jenkins.getInstanceOrNull() == null) {
+            return null;
+        }
+        try {
+            return Jenkins.get().getItemByFullName(fullName);
+        } catch (org.springframework.security.access.AccessDeniedException e) {
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- D-58a guarded items
@@ -768,26 +934,23 @@ public final class GrantService {
     }
 
     /**
-     * D-35c: notes that {@code user} created {@code itemFullName} through the Create of an active
-     * grant, persisting the grant. Called by {@code listener.CreatedItemGrantListener} only when the
-     * creation was not possible without the grant.
+     * D-35c: notes that {@code user} created {@code item} through the Create of an active grant,
+     * persisting the grant. Called by {@code listener.CreatedItemGrantListener} only when the
+     * creation was not possible without the grant. The Create window is the one on the item's
+     * parent folder whose name restriction admits the item's name (D-40, chosen outside the
+     * monitor, S-03), named exactly and bound to that folder (D-71a); the identity recorded is that
+     * of the item's directory (S-09).
      *
      * @return the grant that now records the item, or {@code null} when no active Create grant of
      *         {@code user} covers the item
      */
     @CheckForNull
-    public Grant recordCreatedItem(String user, String itemFullName, @CheckForNull String identity) {
-        // D-40: the grant whose name restriction admits the item (its name, not the full name),
-        // chosen outside the monitor (S-03), then recorded under it.
-        int slash = itemFullName.lastIndexOf('/');
-        String itemName = itemFullName.substring(slash + 1);
-        // The Create lookup takes the group the item was created in (D-71: the scope folder).
-        String group = GrantScope.parentOf(itemFullName);
-        Grant active = findActiveCreateGrant(user, group, itemName);
+    public Grant recordCreatedItem(String user, Item item) {
+        Grant active = findActiveCreateGrant(user, item.getParent(), item.getName());
         if (active == null) {
             return null;
         }
-        return recordCreatedItemIn(active.getId(), user, itemFullName, identity);
+        return recordCreatedItemIn(active.getId(), user, item.getFullName(), ItemIdentity.of(item.getRootDir()));
     }
 
     @CheckForNull
@@ -838,6 +1001,89 @@ public final class GrantService {
     }
 
     /**
+     * D-71a: the item {@code fullName} was deleted. Every active window naming it, or an item below
+     * it, is unbound from its item ({@link Grant#clearItemIdentity()}) for good, so it confers
+     * nothing on any item that comes to have that name later, whatever identity that item's
+     * directory gets: a file system may hand the deleted directory's inode number to the next
+     * directory it creates (Linux ext4, xfs), and NTFS keeps a re-created name's creation time for a
+     * while. Core fires {@code ItemListener.onDeleted} before it frees the name in the parent's item
+     * map ({@code Jenkins#onDeleted}, {@code AbstractFolder#onDeleted}), so no item can be created
+     * under that name before this has run.
+     *
+     * <p>The cached copy is unbound first, so the window stops conferring even if writing its file
+     * fails. The window stays listed as active until it ends or is revoked.
+     */
+    public synchronized void forgetDeletedItem(String fullName) {
+        unbindAt(fullName, "was deleted");
+    }
+
+    /**
+     * D-71a: the item {@code oldFullName} was renamed or moved to {@code newFullName} (also called
+     * for each item below a renamed or moved folder). Windows naming the old name, or an item below
+     * it, are unbound for good: a renamed item loses its window (fail-closed), also if it comes back
+     * to that name. Windows naming the new name are unbound too: their own item cannot be there (it
+     * left that name, or disappeared without Jenkins seeing it), so they must not apply to the item
+     * that arrived, whatever its identity.
+     */
+    public synchronized void forgetRelocatedItem(String oldFullName, String newFullName) {
+        unbindAt(oldFullName, "was renamed or moved");
+        unbindAt(newFullName, "is now the name of another item");
+    }
+
+    /**
+     * D-71a: an item was created (or copied) under {@code fullName}. A window still bound under that
+     * name belongs to an item that disappeared without Jenkins seeing it (deleted on disk and
+     * reloaded); it is unbound, so it never applies to the new item, whatever identity the new
+     * item's directory gets.
+     */
+    public synchronized void forgetNewItemName(String fullName) {
+        unbindAt(fullName, "is now the name of a new item");
+    }
+
+    /**
+     * D-71a: after all items are loaded at startup, unbinds every active window whose item no
+     * longer exists ({@code exists} is false for its full name): it was deleted while Jenkins was
+     * down, or a crash came between deleting it and handling the deletion.
+     */
+    public synchronized void unbindMissingItems(Predicate<String> exists) {
+        unbindWhere(scope -> !exists.test(scope), "no longer exists");
+    }
+
+    /** Unbinds the windows naming {@code fullName} or an item below it. */
+    private void unbindAt(@CheckForNull String fullName, String why) {
+        if (fullName == null || fullName.isEmpty()) {
+            return;
+        }
+        unbindWhere(scope -> scope.equals(fullName) || scope.startsWith(fullName + "/"), why);
+    }
+
+    /** Unbinds the active, still bound windows whose scope full name {@code affected} accepts. */
+    private void unbindWhere(Predicate<String> affected, String why) {
+        Instant now = BatchClock.now();
+        for (Grant cached : new ArrayList<>(grants())) {
+            String scope = cached.getScope() == null ? null : cached.getScope().getFullName();
+            if (!cached.isActiveAt(now) || cached.getItemIdentity() == null || scope == null || scope.isEmpty()
+                    || !affected.test(scope)) {
+                continue;
+            }
+            cached.clearItemIdentity(); // effective at once, whatever happens to the file
+            try {
+                Grant grant = store.loadGrant(cached.getId());
+                if (grant != null && grant.getItemIdentity() != null) {
+                    grant.clearItemIdentity();
+                    store.saveGrant(grant);
+                    replaceInCache(grant);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + cached.getId()
+                        + " as no longer applying to '" + scope + "'; it confers nothing until the next restart,"
+                        + " where it is unbound again", e);
+            }
+            LOGGER.info(() -> "Grant " + cached.getId() + " no longer applies: its item '" + scope + "' " + why);
+        }
+    }
+
+    /**
      * D-35c, S-09: drops from the created-items lists of active grants every item for which
      * {@code exists} is false. Called after all items are loaded (startup and reload), so a record
      * of an item deleted on disk while no listener saw it cannot confer anything on an item
@@ -874,6 +1120,36 @@ public final class GrantService {
             replaceInCache(grant);
             LOGGER.info(() -> "Grant " + grant.getId() + ": dropped created-item records of items "
                     + "that no longer exist");
+        }
+    }
+
+    /**
+     * D-71a: a new item was created under {@code fullName}; a created-item record under exactly
+     * that name belongs to an item that disappeared without a deletion event (deleted on disk and
+     * reloaded) and is dropped, so it never applies to the new item, whatever identity the new
+     * item's directory gets. Exact name only: a copied folder's children are created (and possibly
+     * recorded) before the folder's own creation event.
+     */
+    public synchronized void forgetStaleCreatedItem(String fullName) {
+        if (fullName == null || fullName.isEmpty()) {
+            return;
+        }
+        Instant now = BatchClock.now();
+        for (Grant cached : new ArrayList<>(grants())) {
+            if (!cached.isActiveAt(now) || !cached.hasCreated(fullName)) {
+                continue;
+            }
+            Grant grant = store.loadGrant(cached.getId());
+            if (grant == null) {
+                continue;
+            }
+            List<String> kept = grant.getCreatedItems();
+            kept.remove(fullName);
+            grant.setCreatedItems(kept); // drops the identity recorded for it too
+            store.saveGrant(grant);
+            replaceInCache(grant);
+            LOGGER.info(() -> "Grant " + grant.getId() + ": dropped the stale created-item record of '" + fullName
+                    + "', now the name of a new item");
         }
     }
 
@@ -1030,7 +1306,7 @@ public final class GrantService {
         store.saveGrant(grant);
         replaceInCache(grant);
         ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REVOKE,
-                grant.getScope().getFullName(), caller,
+                grant.getScope() == null ? null : grant.getScope().getFullName(), caller,
                 "Grant " + grant.getId() + " for user '" + grant.getUser() + "' ("
                         + grant.getScope() + ") " + detail);
         record.setGrantId(grant.getId());

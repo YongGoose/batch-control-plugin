@@ -94,7 +94,7 @@ final class MoveGuard {
             return null;
         }
         String user = a.getName();
-        Grant restricting = create ? null : restrictingGrant(user, destName, item.getName());
+        Grant restricting = create ? null : restrictingGrant(user, destination, item.getName());
         List<String> missing = new ArrayList<>();
         if (!delete) {
             missing.add("Item/Delete on '" + item.getFullName() + "'");
@@ -114,9 +114,9 @@ final class MoveGuard {
         }
         // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
+        // D-71a: windows bound to the item and to the destination folder respectively.
         Grant deleteWindow = GrantService.get().findActiveDeleteGrant(user, item);
-        Grant createWindow = destName.isEmpty() ? null
-                : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
+        Grant createWindow = GrantService.get().findActiveCreateGrant(user, destination, item.getName());
         List<String> windows = new ArrayList<>();
         if (deleteWindow != null) {
             windows.add("Delete on '" + item.getFullName() + "' from grant " + deleteWindow.getId());
@@ -334,16 +334,16 @@ final class MoveGuard {
     }
 
     /**
-     * The active CREATE grant of {@code user} on {@code groupFullName} whose name restriction alone
-     * refuses {@code name}, or {@code null} when no such grant exists (no grant at all, or one
-     * that admits the name).
+     * The active CREATE grant of {@code user} on {@code group} (named exactly and bound to it,
+     * D-71a) whose name restriction alone refuses {@code name}, or {@code null} when no such grant
+     * exists (no grant at all, or one that admits the name).
      */
     @CheckForNull
-    private static Grant restrictingGrant(String user, String groupFullName, String name) {
-        if (groupFullName.isEmpty()) {
+    private static Grant restrictingGrant(String user, ItemGroup<?> group, String name) {
+        if (!(group instanceof Item)) {
             return null; // no root-scope grant exists (S-13)
         }
-        List<Grant> grants = GrantService.get().findActiveGrants(user, groupFullName, GrantAction.CREATE);
+        List<Grant> grants = GrantService.get().findActiveGrants(user, (Item) group, GrantAction.CREATE);
         Grant first = null;
         for (Grant grant : grants) {
             if (grant.getCreateNamePattern() == null || grant.allowsCreateName(name)) {

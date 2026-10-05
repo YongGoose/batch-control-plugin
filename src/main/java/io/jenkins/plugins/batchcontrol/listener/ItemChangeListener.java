@@ -91,11 +91,11 @@ public class ItemChangeListener extends ItemListener {
         // a CONFIGURE or DELETE window on it, or the CREATE window it was created through (D-35c).
         String parent = GrantScope.parentOf(fullName);
         String oldFullName = parent.isEmpty() ? oldName : parent + "/" + oldName;
-        String grantId = ChangeRecording.activeGrantIdFor(user, oldFullName, null);
+        // D-71a: the window is bound to the item, whose identity a rename keeps.
+        String grantId = ChangeRecording.activeGrantIdFor(user, oldFullName, item, null);
         if (grantId == null) {
-            Grant creating = GrantService.get().findCreatingGrant(user, oldFullName,
-                    item instanceof AbstractItem ? ((AbstractItem) item).getRootDir() : null);
-            grantId = creating != null ? creating.getId() : ChangeRecording.activeGrantIdFor(user, fullName, null);
+            Grant creating = GrantService.get().findCreatingGrant(user, oldFullName, item);
+            grantId = creating != null ? creating.getId() : ChangeRecording.activeGrantIdFor(user, fullName, item, null);
         }
         record.setGrantId(grantId);
         Store.get().appendChangeRecord(record);
@@ -120,9 +120,11 @@ public class ItemChangeListener extends ItemListener {
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).
         String destination = parentOf(newFullName);
+        // D-71a: the Delete window is bound to the item (a move keeps its identity), the Create window
+        // to the destination folder, which is now the item's parent.
         Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item, oldFullName);
         Grant createGrant = destination.isEmpty() ? null
-                : GrantService.get().findActiveCreateGrant(user, destination, item.getName());
+                : GrantService.get().findActiveCreateGrant(user, item.getParent(), item.getName());
         StringBuilder detail = new StringBuilder("Moved from '").append(oldFullName)
                 .append("' to '").append(newFullName).append('\'');
         List<String> windows = new ArrayList<>();
@@ -138,7 +140,7 @@ public class ItemChangeListener extends ItemListener {
         ChangeRecord record = ChangeRecord.create(ChangeType.MOVE, newFullName, user, detail.toString());
         Grant primary = createGrant != null ? createGrant : deleteGrant;
         record.setGrantId(primary != null ? primary.getId()
-                : ChangeRecording.activeGrantIdFor(user, newFullName, null));
+                : ChangeRecording.activeGrantIdFor(user, newFullName, item, null));
         Store.get().appendChangeRecord(record);
     }
 

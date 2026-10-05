@@ -174,10 +174,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // or the CREATE window it was created through, D-35c), else any window naming the job.
             io.jenkins.plugins.batchcontrol.security.GrantService grants =
                     io.jenkins.plugins.batchcontrol.security.GrantService.get();
-            io.jenkins.plugins.batchcontrol.model.Grant grant = grants.findConfigureGrant(auth.getName(),
-                    job.getFullName(), job.getRootDir());
+            io.jenkins.plugins.batchcontrol.model.Grant grant = grants.findConfigureGrant(auth.getName(), job);
             if (grant == null) {
-                grant = grants.findActiveGrant(auth.getName(), job.getFullName(), null);
+                grant = grants.findActiveGrant(auth.getName(), job, null);
             }
             if (grant != null && !io.jenkins.plugins.batchcontrol.security.GrantLayer
                     .hasPermissionWithoutGrants(job, auth, hudson.model.Item.CONFIGURE)) {

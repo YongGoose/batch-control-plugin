@@ -36,6 +36,15 @@ public final class Grant {
     private final GrantScope scope;
     /** D-71: the kind of the scope item, copied from the request at approval ({@code null} if it had none). */
     private ItemKind itemKind;
+    /**
+     * D-71a (security-34 S-34-01, S-34-03): the identity of the scope item at approval, an opaque
+     * marker of its directory on disk ({@code security.ItemIdentity}). The grant confers something
+     * only on the item whose full name is the scope's and whose identity is this one, so a rename,
+     * move, swap or deletion and re-creation never re-points it. {@code null} when none was
+     * recorded (a grant built without one, or one whose item was deleted,
+     * {@link #clearItemIdentity()}): such a grant confers nothing.
+     */
+    private String itemIdentity;
     private final List<GrantAction> actions;
     private final long grantedAtMillis;
     private final long expiresAtMillis;
@@ -57,8 +66,8 @@ public final class Grant {
     /**
      * S-09: the identity of each created item (full name to an opaque marker of its directory on
      * disk, see {@code security.ItemIdentity}), so an item deleted and recreated under the same
-     * name by someone else is not taken for the created one. An item without an entry (grant files
-     * written before S-09, or no marker could be read) is matched by name alone.
+     * name by someone else is not taken for the created one. An item without an entry (no marker
+     * could be read) is matched by nothing (D-71a: fail-closed).
      */
     private Map<String, String> createdItemIdentities;
     /**
@@ -95,6 +104,14 @@ public final class Grant {
      * {@code [grantedAt, grantedAt + durationMinutes)}, and the id equals the request id.
      */
     public static Grant createFor(GrantRequest request, Instant grantedAt) {
+        return createFor(request, grantedAt, null);
+    }
+
+    /**
+     * As {@link #createFor(GrantRequest, Instant)}, bound to the scope item whose identity at
+     * approval is {@code itemIdentity} (D-71a). Without an identity the grant confers nothing.
+     */
+    public static Grant createFor(GrantRequest request, Instant grantedAt, String itemIdentity) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(grantedAt, "grantedAt");
         Grant grant = new Grant(request.getId(), request.getId(), request.getRequester(),
@@ -102,6 +119,7 @@ public final class Grant {
                 grantedAt.plus(Duration.ofMinutes(request.getDurationMinutes())));
         grant.createNamePattern = request.getCreateNamePattern();
         grant.itemKind = request.getItemKind();
+        grant.itemIdentity = itemIdentity == null || itemIdentity.isEmpty() ? null : itemIdentity;
         return grant;
     }
 
@@ -158,6 +176,24 @@ public final class Grant {
         return itemKind;
     }
 
+    /**
+     * D-71a: the identity of the scope item recorded at approval, or {@code null} when the grant
+     * is bound to no item (none recorded, or its item was deleted) and so confers nothing.
+     */
+    public String getItemIdentity() {
+        return itemIdentity;
+    }
+
+    /**
+     * D-71a: unbinds the grant from its item, after the item was deleted, so that it confers
+     * nothing on any item created later under the same name, even one whose directory happens to
+     * get the same identity (a file system that reuses inode numbers). Only
+     * {@code security.GrantService} calls this.
+     */
+    public void clearItemIdentity() {
+        this.itemIdentity = null;
+    }
+
     /** A defensive copy; the granted actions never change after creation. */
     public List<GrantAction> getActions() {
         return actions == null ? new ArrayList<>() : new ArrayList<>(actions);
@@ -208,15 +244,16 @@ public final class Grant {
 
     /**
      * Whether {@code itemFullName} was created through this grant's Create and is still the same
-     * item (S-09): when an identity was recorded for it, {@code currentIdentity} (evaluated only
-     * then) must return that identity.
+     * item (S-09, D-71a): an identity must have been recorded for it, and {@code currentIdentity}
+     * (evaluated only then) must return that identity. An item recorded without an identity is
+     * matched by nothing (fail-closed, D-71a).
      */
     public boolean hasCreated(String itemFullName, Supplier<String> currentIdentity) {
         if (!hasCreated(itemFullName)) {
             return false;
         }
         String recorded = createdItemIdentities == null ? null : createdItemIdentities.get(itemFullName);
-        return recorded == null || recorded.equals(currentIdentity.get());
+        return recorded != null && recorded.equals(currentIdentity.get());
     }
 
     /** S-09: the recorded identities of the created items (a copy; never {@code null}). */

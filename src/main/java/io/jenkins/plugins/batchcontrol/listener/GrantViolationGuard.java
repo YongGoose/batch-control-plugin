@@ -460,9 +460,8 @@ public class GrantViolationGuard extends SaveableListener {
      */
     @CheckForNull
     private static Grant namedGrant(String user, AbstractItem item) {
-        String fullName = item.getFullName();
-        Grant grant = GrantService.get().findConfigureGrant(user, fullName, item.getRootDir());
-        return grant != null ? grant : GrantService.get().findActiveGrant(user, fullName, null);
+        Grant grant = GrantService.get().findConfigureGrant(user, item);
+        return grant != null ? grant : GrantService.get().findActiveGrant(user, item, null);
     }
 
     private static String grantText(@CheckForNull Grant grant) {
@@ -807,7 +806,7 @@ public class GrantViolationGuard extends SaveableListener {
             if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
                 return null;
             }
-            return GrantService.get().findCreatingGrant(auth.getName(), item.getFullName(), item.getRootDir());
+            return GrantService.get().findCreatingGrant(auth.getName(), item);
         }
 
         private static void stripPayload(AbstractItem item, Grant grant) {

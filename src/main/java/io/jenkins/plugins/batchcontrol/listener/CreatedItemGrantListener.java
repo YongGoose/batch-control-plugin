@@ -1,21 +1,17 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import hudson.Extension;
-import hudson.model.AbstractItem;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
-import hudson.security.AccessControlled;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -46,8 +42,15 @@ public class CreatedItemGrantListener extends ItemListener {
 
     @Override
     public void onCreated(Item item) {
-        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()
-                || !GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy())) {
+        if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            return;
+        }
+        // D-71a: a created-item record still listed under the new item's name belongs to an item
+        // that disappeared without a deletion event (deleted on disk and reloaded). It is dropped
+        // before anything is recorded, so it never applies to the new item, whatever identity the
+        // new item's directory gets (an inode number reused by the file system).
+        GrantService.get().forgetStaleCreatedItem(item.getFullName());
+        if (!GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy())) {
             return;
         }
         Authentication auth = Jenkins.getAuthentication2();
@@ -58,18 +61,20 @@ public class CreatedItemGrantListener extends ItemListener {
         String fullName = item.getFullName();
         ItemGroup<? extends Item> parent = item.getParent();
         // Create lookups take the group the item was created in (D-71: a CREATE window confers
-        // Create in its own folder only).
-        String group = GrantScope.parentOf(fullName);
-        if (GrantService.get().findActiveGrants(user, group, GrantAction.CREATE).isEmpty()) {
+        // Create in its own folder only; D-71a: only while that folder is the one it was approved for).
+        if (!(parent instanceof Item)) {
+            return; // no window names the Jenkins root (S-13)
+        }
+        Item folder = (Item) parent;
+        if (GrantService.get().findActiveGrants(user, folder, GrantAction.CREATE).isEmpty()) {
             return;
         }
-        if (parent instanceof AccessControlled
-                && GrantLayer.hasPermissionWithoutGrants((AccessControlled) parent, auth, Item.CREATE)) {
+        if (GrantLayer.hasPermissionWithoutGrants(folder, auth, Item.CREATE)) {
             // The holder could create here without the grant: matrix-auth's native behaviour
             // (a permanent creator entry) is not Batch Control's to change.
             return;
         }
-        if (GrantService.get().findActiveCreateGrant(user, group, item.getName()) == null) {
+        if (GrantService.get().findActiveCreateGrant(user, parent, item.getName()) == null) {
             // D-40 defence in depth: the grant layer refuses a restricted Create before the item
             // exists (security.GrantAwareACL), so reaching this means the item came in through a
             // path that check did not see. It is not deleted here (that would take a SYSTEM
@@ -83,8 +88,7 @@ public class CreatedItemGrantListener extends ItemListener {
             Store.get().appendChangeRecord(record);
             return;
         }
-        Grant grant = GrantService.get().recordCreatedItem(user, fullName,
-                item instanceof AbstractItem ? ItemIdentity.of(((AbstractItem) item).getRootDir()) : null);
+        Grant grant = GrantService.get().recordCreatedItem(user, item);
         if (grant != null) {
             LOGGER.fine(() -> "Item '" + fullName + "' created by '" + user + "' through grant "
                     + grant.getId());
@@ -92,9 +96,11 @@ public class CreatedItemGrantListener extends ItemListener {
     }
 
     /**
-     * S-09: after all items are loaded (startup, reload), drops created-item records of items that
-     * no longer exist. Runs as SYSTEM at startup and as the reloading administrator otherwise, so
-     * every item is visible without switching authentication.
+     * S-09: after all items are loaded at startup, drops created-item records of items that no
+     * longer exist. Runs as SYSTEM, so every item is visible without switching authentication.
+     * Core does not fire this on "Reload Configuration from Disk"; a record left behind by an item
+     * that disappeared in a reload is dropped when another item is created under its name
+     * ({@link #onCreated}, D-71a).
      */
     @Override
     public void onLoaded() {

@@ -4,7 +4,9 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.security.ACL;
+import hudson.security.AccessControlled;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -12,8 +14,8 @@ import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
-import java.io.File;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -53,6 +55,17 @@ import org.springframework.security.core.Authentication;
  * that item: its descendants the holder did not create get nothing from it (D-35d), which is why
  * the delegate is always evaluated with the grant layer switched off (see {@link #hasPermission2}).
  *
+ * <p>D-71a (security-34 S-34-01, S-34-03): a window confers something only on the very item it
+ * was approved for: it must name this item's full name exactly <em>and</em> be bound to this item
+ * ({@link GrantService#isBoundTo}: the identity recorded at approval and the kind). A rename, move,
+ * swap or re-creation therefore never re-points a window; a renamed item loses its window
+ * (fail-closed). The identity is only looked at once an active window of the user names the item
+ * (an in-memory match), and is cached per item object ({@link ItemIdentity}), so the hot path does
+ * not touch the file system for the many items a page asks about. While change control is on, a
+ * window's Configure also does not allow renaming an item group that is not a job: renaming it
+ * renames everything inside it, which would re-point permissions matched by name elsewhere (a
+ * role-strategy pattern). See {@link #refuseGroupRename}.
+ *
  * <p>{@link #withoutGrants} evaluates a check with the grant layer switched off on the current
  * thread, which is how the listeners tell a permission that comes only from a grant from one the
  * installed strategy gives natively (D-35b, D-35c).
@@ -80,9 +93,19 @@ final class GrantAwareACL extends ACL {
     @CheckForNull
     private final String itemFullName;
 
-    /** The directory of the item this ACL guards (S-09 identity check); {@code null} with no item. */
+    /**
+     * The item this ACL guards; {@code null} with no item. D-71a: a window confers something only
+     * when it names this item's full name and is bound to this item ({@link GrantService#isBoundTo});
+     * for Item/Create this is the folder the new item is created in.
+     */
     @CheckForNull
-    private final File itemRootDir;
+    private final Item item;
+
+    /**
+     * D-71a: whether the item is an item group that is not a job ({@link GrantScope#isNonJobGroup}):
+     * while change control is on, a window's Configure does not allow renaming it.
+     */
+    private final boolean nonJobGroup;
 
     /**
      * D-71: whether a window's DELETE can apply to the item, i.e. it is a job
@@ -98,22 +121,26 @@ final class GrantAwareACL extends ACL {
      */
     private final boolean createApplies;
 
+    /**
+     * An ACL for an object grants never apply to (the root, a node, a computer). The full name is
+     * kept for the callers' symmetry; without an item no window can be bound, so nothing is
+     * conferred whatever it says.
+     */
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName) {
-        this(delegate, itemFullName, null, false, false);
+        this(delegate, itemFullName, null);
     }
 
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull AbstractItem item) {
-        this(delegate, item == null ? null : item.getFullName(), item == null ? null : item.getRootDir(),
-                GrantScope.deleteAppliesTo(item), GrantScope.createAppliesTo(item));
+        this(delegate, item == null ? null : item.getFullName(), item);
     }
 
-    private GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName,
-                          @CheckForNull File itemRootDir, boolean deleteApplies, boolean createApplies) {
+    private GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName, @CheckForNull Item item) {
         this.delegate = delegate;
         this.itemFullName = itemFullName;
-        this.itemRootDir = itemRootDir;
-        this.deleteApplies = deleteApplies;
-        this.createApplies = createApplies;
+        this.item = item;
+        this.deleteApplies = GrantScope.deleteAppliesTo(item);
+        this.createApplies = GrantScope.createAppliesTo(item);
+        this.nonJobGroup = GrantScope.isNonJobGroup(item);
     }
 
     /**
@@ -144,8 +171,8 @@ final class GrantAwareACL extends ACL {
             return true;
         }
         Decision decision = Decision.NONE;
-        if (itemFullName != null && !ACL.isAnonymous2(a) && !suspended()) {
-            decision = grantConfers(a.getName(), permission);
+        if (itemFullName != null && item != null && !ACL.isAnonymous2(a) && !suspended()) {
+            decision = grantConfers(a, permission);
             if (decision.confers) {
                 return true;
             }
@@ -169,6 +196,14 @@ final class GrantAwareACL extends ACL {
             if (refusal != null) {
                 throw refusal;
             }
+        }
+        if (!allowed && decision.groupRename) {
+            // D-71a: only core's own rename check (Item/Configure) is answered with the refusal; any
+            // other check this request makes on the item (EXTENDED_READ, say) is just not conferred.
+            if (permission == Item.CONFIGURE) {
+                refuseGroupRename(a, decision);
+            }
+            return false;
         }
         if (!allowed && decision.refusedName != null) {
             if (decision.recordable) {
@@ -206,9 +241,9 @@ final class GrantAwareACL extends ACL {
      */
     private static final class Decision {
         /** The grant layer confers the permission. */
-        static final Decision CONFERS = new Decision(true, null, null, null, false, null);
+        static final Decision CONFERS = new Decision(true, null, null, null, false, null, false);
         /** The grant layer does not confer it; the delegate decides. */
-        static final Decision NONE = new Decision(false, null, null, null, false, null);
+        static final Decision NONE = new Decision(false, null, null, null, false, null, false);
 
         final boolean confers;
         /** D-40: the refused new name, or {@code null} when no named creation/rename was refused. */
@@ -224,20 +259,34 @@ final class GrantAwareACL extends ACL {
         /** The operation that was refused; part of the merge key, so each operation is recorded. */
         @CheckForNull
         final String operation;
+        /**
+         * D-71a: a window would confer Configure on this item group, but the current request renames
+         * it, so the window answers nothing ({@link #refusedName} is the new name, possibly
+         * {@code null} when unknown; {@link #grant} is the window).
+         */
+        final boolean groupRename;
 
         private Decision(boolean confers, @CheckForNull String refusedName, @CheckForNull String groupFullName,
-                         @CheckForNull Grant grant, boolean recordable, @CheckForNull String operation) {
+                         @CheckForNull Grant grant, boolean recordable, @CheckForNull String operation,
+                         boolean groupRename) {
             this.confers = confers;
             this.refusedName = refusedName;
             this.groupFullName = groupFullName;
             this.grant = grant;
             this.recordable = recordable;
             this.operation = operation;
+            this.groupRename = groupRename;
         }
 
         static Decision refused(String itemName, String groupFullName, Grant grant, NewItemName context) {
             return new Decision(false, itemName, groupFullName, grant, context.isRecordable(),
-                    context.getOperation());
+                    context.getOperation(), false);
+        }
+
+        /** D-71a: the rename of an item group whose Configure would come from {@code grant}. */
+        static Decision groupRenameRefused(NewItemName context, Grant grant) {
+            return new Decision(false, context.getName(), null, grant, context.isRecordable(),
+                    context.getOperation(), true);
         }
 
         /** Plain-text explanation of the refusal for the holder (e2e-03 DEF-19). */
@@ -308,7 +357,7 @@ final class GrantAwareACL extends ACL {
      * {@link GrantService#hasActiveGrant} is still asked about this item only, and about the
      * grantable permission actually found on the chain.
      */
-    private Decision grantConfers(String user, Permission permission) {
+    private Decision grantConfers(Authentication a, Permission permission) {
         // S-15: the change-control switch is a kill switch. While it is off a grant confers
         // nothing, so the answer is the delegate's alone and the instance behaves exactly like the
         // strategy the administrator actually configured (CLAUDE.md: "a new feature does not change
@@ -323,6 +372,7 @@ final class GrantAwareACL extends ACL {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             return Decision.NONE;
         }
+        String user = a.getName();
         Decision result = Decision.NONE;
         boolean createdChecked = false;
         for (Permission p = permission; p != null; p = p.impliedBy) {
@@ -333,8 +383,15 @@ final class GrantAwareACL extends ACL {
                 // D-35c: Read and Configure on an item the holder created through an active Create
                 // grant. Looked up once per walk; the same enabled-link rule applies.
                 createdChecked = true;
-                Grant creating = GrantService.get().findCreatingGrant(user, itemFullName, itemRootDir);
+                Grant creating = GrantService.get().findCreatingGrant(user, item);
                 if (creating != null) {
+                    NewItemName groupRename = p == Item.CONFIGURE ? renameOfGroup(a) : null;
+                    if (groupRename != null) {
+                        // D-71a: no window's Configure renames an item group, the D-35c one included.
+                        // A CONFIGURE window on the same item answers nothing either (below).
+                        result = Decision.groupRenameRefused(groupRename, creating);
+                        continue;
+                    }
                     Decision rename = p == Item.CONFIGURE ? renameUnderRestriction(creating) : null;
                     if (rename == null) {
                         return Decision.CONFERS;
@@ -364,11 +421,125 @@ final class GrantAwareACL extends ACL {
                 // delete its children as SYSTEM without checking them.
                 continue;
             }
-            if (GrantService.get().hasActiveGrant(user, itemFullName, p)) {
-                return Decision.CONFERS;
+            // D-71a: the window must name this item and be bound to it (identity and kind).
+            Grant window = GrantService.get().findActiveGrant(user, item, GrantAction.fromPermission(p));
+            if (window == null) {
+                continue;
             }
+            if (p == Item.CONFIGURE) {
+                NewItemName groupRename = renameOfGroup(a);
+                if (groupRename != null) {
+                    // D-71a (security-34 S-34-01): renaming an item group renames everything inside
+                    // it, which re-points name-matched permissions (role-strategy patterns, other
+                    // windows' names); a window's Configure does not allow it. The installed
+                    // strategy's own Configure still decides underneath.
+                    if (!result.groupRename) {
+                        result = Decision.groupRenameRefused(groupRename, window);
+                    }
+                    continue;
+                }
+            }
+            return Decision.CONFERS;
         }
         return result;
+    }
+
+    /**
+     * D-71a: the context of the current request when it renames this item and this item is an
+     * item group that is not a job ({@link GrantScope#isNonJobGroup}), else {@code null}. Only for
+     * the current user's own check: a check about someone else during this request is not their
+     * rename. Read from the endpoint performing the rename (D-40a, {@link NewItemName#forRename}):
+     * core's {@code confirmRename} and its {@code checkNewName} validation; no other web, CLI or
+     * REST path renames an item for a non-administrator.
+     */
+    @CheckForNull
+    private NewItemName renameOfGroup(Authentication a) {
+        if (!nonJobGroup || itemFullName == null
+                || !a.getName().equals(Jenkins.getAuthentication2().getName())) {
+            return null;
+        }
+        return NewItemName.forRename(itemFullName);
+    }
+
+    /**
+     * D-71a: the current user's rename of this item group, whose Configure would come only from a
+     * window, was refused by the window layer and the installed strategy gives no Configure. Core
+     * then still allows the rename for a user with Item/Delete on the item and Item/Create in its
+     * parent ({@code AbstractItem#doCheckNewName}); no window confers Delete on an item group
+     * (D-71), so that takes the user's own Delete. When that path is open nothing is refused here
+     * and core decides. Otherwise the refusal is recorded as {@code GRANT_VIOLATION} (a real attempt
+     * only; repeats within a minute merged, D-73) and answered with the explanation: a field message
+     * for {@code checkNewName}, a plain HTTP 400 page for {@code confirmRename}.
+     */
+    private void refuseGroupRename(Authentication a, Decision decision) {
+        ACL parentAcl = delegate;
+        Item renamed = item;
+        if (renamed == null) {
+            return;
+        }
+        boolean nativeDelete = parentAcl != null && withoutGrants(() -> parentAcl.hasPermission2(a, Item.DELETE));
+        if (nativeDelete) {
+            ItemGroup<?> parent = renamed.getParent();
+            if (!(parent instanceof AccessControlled)
+                    || ((AccessControlled) parent).getACL().hasPermission2(a, Item.CREATE)) {
+                return; // core's Delete-and-Create path is open: core decides
+            }
+        }
+        String user = a.getName();
+        String kind = describeKind(renamed);
+        String explanation = groupRenameExplanation(itemFullName, kind);
+        if (decision.recordable) {
+            recordGroupRename(user, kind, decision);
+        }
+        if (NewItemName.isValidationOperation(decision.operation)) {
+            throw NameRestrictionValidation.validation(explanation);
+        }
+        if (NewItemName.isWebChangeOperation(decision.operation)) {
+            throw NameRestrictionValidation.refusal(explanation + " Nothing was renamed.");
+        }
+    }
+
+    /**
+     * D-71a: what the user is told when a window's Configure does not allow renaming an item group
+     * (plain text; escaped where it is rendered).
+     */
+    static String groupRenameExplanation(String fullName, String kind) {
+        return "Renaming '" + fullName + "' (" + kind + ") is not allowed: while change control is on, a permission"
+                + " window does not allow renaming a folder, multibranch project or organization folder, because that"
+                + " also renames every item inside it. Renaming it needs your own Item/Configure on it, or an"
+                + " administrator.";
+    }
+
+    /** D-71a, D-73: the refused rename of an item group, merged with its repeats for a minute. */
+    private void recordGroupRename(String user, String kind, Decision decision) {
+        String target = itemFullName;
+        Grant window = decision.grant;
+        if (target == null) {
+            return;
+        }
+        String newName = decision.refusedName == null ? "?" : decision.refusedName;
+        boolean written;
+        try {
+            written = BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
+                    "rename-group " + target + " " + newName, target, user,
+                    "Refused to rename '" + target + "' (" + kind + ") to '" + newName + "' for '" + user + "': while"
+                            + " change control is on, a permission window does not allow renaming a folder,"
+                            + " multibranch project or organization folder; Item/Configure on it comes only from "
+                            + (window == null ? "a permission window" : "grant " + window.getId()),
+                    window == null ? null : window.getId());
+        } catch (RuntimeException e) {
+            // The refusal stands whatever happens to the record.
+            LOGGER.log(Level.WARNING, "Could not record the refused rename of '" + target + "'", e);
+            written = true; // no record: the refusal must at least reach the log
+        }
+        LOGGER.log(written ? Level.INFO : Level.FINE, () -> "Refused to rename '" + target + "' to '" + newName
+                + "' for '" + user + "': a permission window does not allow renaming an item group");
+    }
+
+    /** The item's kind as shown to the user, for example "Folder" or "Multibranch Pipeline". */
+    private static String describeKind(Item renamed) {
+        ItemKind kind = ItemKind.of(renamed);
+        return kind == null ? "item group" : kind.getDisplayName();
     }
 
     /**
@@ -387,7 +558,8 @@ final class GrantAwareACL extends ACL {
             // computed folder) it confers nothing, whatever the stored grant says.
             return Decision.NONE;
         }
-        List<Grant> grants = GrantService.get().findActiveGrants(user, itemFullName, GrantAction.CREATE);
+        // D-71a: the windows must name this folder and be bound to it (the folder's identity).
+        List<Grant> grants = GrantService.get().findActiveGrants(user, item, GrantAction.CREATE);
         if (grants.isEmpty()) {
             return Decision.NONE;
         }

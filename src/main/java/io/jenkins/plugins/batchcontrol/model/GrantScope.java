@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.model;
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.Job;
 import hudson.model.ModifiableItemGroup;
 import java.util.Objects;
@@ -118,6 +119,17 @@ public final class GrantScope {
      */
     public static boolean deleteAppliesTo(@CheckForNull Item item) {
         return item instanceof Job;
+    }
+
+    /**
+     * D-71a: whether {@code item} is an item group that is not a job (a folder, a multibranch
+     * project, an organization folder). Renaming such a group renames every item inside it, so
+     * while change control is on a window's Configure does not allow renaming it. A job that is
+     * also an item group (a multi-configuration or Maven project) is a job: its sub-items are part
+     * of it and no window can name them.
+     */
+    public static boolean isNonJobGroup(@CheckForNull Item item) {
+        return item instanceof ItemGroup && !(item instanceof Job);
     }
 
     @Override
