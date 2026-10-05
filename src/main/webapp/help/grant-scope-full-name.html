@@ -1,15 +1,18 @@
 <div>
   The full name of the <b>one</b> job or folder the permission window is for, for example
   <code>team/batch/nightly-report</code> or <code>team/batch</code>. A job or folder of any kind
-  can be named (a Pipeline, a Freestyle project, a folder, a Multibranch Pipeline, ...); once the
-  name is recognised, its kind is shown below the field.
+  can be named (a Pipeline, a Freestyle project, a folder, a Multibranch Pipeline, ...), but not a
+  part of a job such as a configuration of a multi-configuration project; once the name is
+  recognised, its kind is shown below the field.
   <p>
-    The window covers that item only. It gives nothing on any other item, not even on the jobs and
-    folders inside a folder: to change a job in a folder, request a window for that job.
+    The window grants permissions on that item only, and on no other item: to change a job in a
+    folder, request a window for that job. A folder's own settings still affect the items inside
+    it, though (for example implicitly loaded Pipeline libraries), and reconfiguring a Multibranch
+    Pipeline or organization folder can create or delete the items it generates.
   </p>
   <ul>
     <li><b>Configure</b>: the item's own configuration. For a job, the job; for a folder, the
-      folder's settings, not the items inside it.</li>
+      folder's settings, which the items inside it may use.</li>
     <li><b>Create</b>: only for a regular folder (not a job, a Multibranch Pipeline or an
       organization folder). It lets you create new items directly inside that folder, not inside a
       folder nested in it.</li>
@@ -18,6 +21,10 @@
       delete everything inside it; ask an administrator.</li>
   </ul>
   <p>
-    Renaming needs Configure on the item, or else Delete on it and Create in its folder.
+    A window stays with the item it was approved for: once that item is renamed or moved, the
+    window no longer applies. Renaming a job needs Configure on it, or else Delete on it and Create
+    in its folder. Renaming a folder, Multibranch Pipeline or organization folder needs an
+    administrator (or standing Configure permission on it); a window is not enough, because
+    renaming it renames everything inside it.
   </p>
 </div>

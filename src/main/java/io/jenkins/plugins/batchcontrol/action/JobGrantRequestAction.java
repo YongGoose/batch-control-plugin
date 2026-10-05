@@ -110,6 +110,9 @@ public class JobGrantRequestAction implements Action {
      * menu escapes the event URL a second time, so {@code &} arrived as {@code &amp;} and the
      * browser sent {@code amp;scopeFullName}, leaving the job unfilled. D-71: a window names one
      * item and there is no scope type, so the full name is the only parameter the form needs.
+     * spec-review-S6 m-5: there is no {@code actions} parameter either; the form preselects
+     * CONFIGURE for a job ({@code GrantsSection#isPrefillAction}). This is the entry's one URL
+     * form, shared with {@link FolderGrantRequestAction}.
      *
      * <p>No routing is added under {@code /job/<name>/}: a name containing {@code ../} never
      * matches a URL token. The full name is passed through {@link Util#rawEncode} because

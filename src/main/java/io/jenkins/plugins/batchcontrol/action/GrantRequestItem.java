@@ -2,13 +2,19 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
+import hudson.model.Descriptor;
 import hudson.model.Failure;
+import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.Job;
 import hudson.model.ModelObject;
+import hudson.model.TopLevelItemDescriptor;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -21,6 +27,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
@@ -205,6 +212,52 @@ public class GrantRequestItem implements ModelObject {
             return false;
         }
         return SystemBuildCheck.buildsMayRunAsSystem();
+    }
+
+    // ---------------------------------------------------------------- item groups (D-71a)
+
+    /**
+     * D-71a (5), security-34 S-34-02: whether this page states that the settings of the item group
+     * the request names reach the items inside it. For a request that includes CONFIGURE on an
+     * item group that is not a job (a folder, a multibranch project, an organization folder; a
+     * multi-configuration project is a job, its configurations are part of it), shown to a
+     * designated approver and to the requester, whatever the request's status: a window on the
+     * group confers nothing on its children (D-71), but the group's own configuration (for example
+     * an implicitly loaded Pipeline library, or a computed folder's sources) still affects them,
+     * and the decision and the request should be made knowing it.
+     *
+     * <p>Decided from the kind recorded with the request (its descriptor's item class), or else
+     * from the current item as the viewer may see it ({@link Visibility#findVisibleItem}); either
+     * saying "group" is enough. The page already shows that kind next to the name, so the notice
+     * discloses nothing more about the item.
+     */
+    public boolean isShowGroupConfigureNotice() {
+        if (request.getActions() == null || !request.getActions().contains(GrantAction.CONFIGURE)) {
+            return false;
+        }
+        if (!isOwnedByCurrentUser() && !request.isDesignatedApprover(Jenkins.getAuthentication2().getName())) {
+            return false;
+        }
+        return recordedKindIsGroup()
+                || (request.getScope() != null && isGroup(Visibility.findVisibleItem(request.getScope().getFullName())));
+    }
+
+    /** Whether the kind recorded with the request is an item group that is not a job. */
+    private boolean recordedKindIsGroup() {
+        ItemKind kind = request.getItemKind();
+        if (kind == null) {
+            return false;
+        }
+        Descriptor<?> descriptor = Jenkins.get().getDescriptor(kind.getDescriptorId());
+        if (!(descriptor instanceof TopLevelItemDescriptor)) {
+            return false; // the plugin of that kind is not installed now; the current item decides
+        }
+        Class<?> type = descriptor.clazz;
+        return ItemGroup.class.isAssignableFrom(type) && !Job.class.isAssignableFrom(type);
+    }
+
+    private static boolean isGroup(@CheckForNull Item item) {
+        return item instanceof ItemGroup && !(item instanceof Job);
     }
 
     // ---------------------------------------------------------------- screen access (Jelly)
