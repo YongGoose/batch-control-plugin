@@ -27,7 +27,6 @@ import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.KindIcon;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import io.jenkins.plugins.batchcontrol.ui.WindowBinding;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
@@ -114,9 +113,6 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Per-request cache of every stored grant by id. */
     private Map<String, Grant> grantsById;
-
-    /** Per-request cache of the grant layer's copies of the active windows (D-71a display). */
-    private Map<String, Grant> effectiveActive;
 
     @Override
     public Object getTarget() {
@@ -639,6 +635,11 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * of a request table that repeated the window tables.
      *
      * <p>A window whose request is no longer stored is listed on its own, without a detail link.
+     *
+     * <p>D-74: a row with a window names the window's item ({@link Grant#getScope()}), not the
+     * name the request was made for: an open window follows its item when an administrator (or a
+     * user with their own permissions) renames or moves it, and an ended one keeps the name its
+     * item had when it ended.
      */
     public static final class Row {
 
@@ -668,7 +669,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             this.request = request;
             this.grant = grant;
             this.id = request.getId();
-            this.scope = request.getScope();
+            this.scope = grant != null && grant.getScope() != null ? grant.getScope() : request.getScope();
             this.itemKind = request.getItemKind() != null || grant == null
                     ? request.getItemKind() : grant.getItemKind();
             this.actions = request.getActions();
@@ -884,28 +885,6 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return items == null
                 ? ""
                 : items.stream().map(String::valueOf).collect(Collectors.joining(", "));
-    }
-
-    /**
-     * D-71a, D-71b: whether the open window of an Active row still applies to its item. A window
-     * whose item was renamed, moved or deleted stays listed (and revocable) until it ends, but the
-     * row says it no longer applies instead of showing the remaining time ({@link WindowBinding};
-     * display only, nothing changes).
-     */
-    public boolean isWindowBound(Row row) {
-        Grant grant = row.grant;
-        if (grant == null) {
-            return false;
-        }
-        if (effectiveActive == null) {
-            effectiveActive = WindowBinding.effectiveActive();
-        }
-        return WindowBinding.isBound(grant, effectiveActive.get(grant.getId()));
-    }
-
-    /** Jelly: the Active row text of a window that no longer applies. */
-    public String getUnboundLabel() {
-        return WindowBinding.UNBOUND_LABEL;
     }
 
     // ---------------------------------------------------------------- helpers

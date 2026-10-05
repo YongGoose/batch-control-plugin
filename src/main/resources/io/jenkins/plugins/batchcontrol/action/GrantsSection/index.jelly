@@ -4,10 +4,9 @@
      core's dialog from the app bar; the old prefill links of this page (?scopeFullName=, ?from=)
      are redirected to the form page (GrantsSection#getLegacyFormQuery). Backlog #89: short cells
      do not wrap at 1280 px, only free text does. D-71: the Scope column shows the one item a
-     request or window names, with its kind (tags/scopeItem.jelly). D-71a/D-71b: an open window
-     whose item was renamed, moved or deleted stays listed (and revocable) until it ends, but its
-     Remaining cell says it no longer applies (data-batch-control-window-state="unbound"; a window
-     that still applies is "bound"). Display only (GrantsSection#isWindowBound). -->
+     request or window names, with its kind (tags/scopeItem.jelly). D-74: a row with a window names
+     the window's item, which follows the item when it is renamed or moved; deleting the item ends
+     the window, so an active window simply shows its remaining time. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="legacyQuery" value="${it.legacyFormQuery}"/>
@@ -116,14 +115,7 @@
                   <td class="batch-control-nowrap"><code>${it.createNameLabel(r)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
                   <td><j:forEach var="part" items="${it.formatParts(g.expiresAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
-                  <j:choose>
-                    <j:when test="${it.isWindowBound(r)}">
-                      <td style="white-space: nowrap;" data-batch-control-window-state="bound">${it.remaining(g.expiresAt)}</td>
-                    </j:when>
-                    <j:otherwise>
-                      <td data-batch-control-window-state="unbound">${it.unboundLabel}</td>
-                    </j:otherwise>
-                  </j:choose>
+                  <td class="batch-control-nowrap">${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
                     <td class="batch-control-nowrap">
                       <l:confirmationLink class="jenkins-button jenkins-button--tertiary jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
