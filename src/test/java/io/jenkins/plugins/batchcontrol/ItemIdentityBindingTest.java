@@ -42,30 +42,35 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 8 (D-71a, security-34 S-34-01/03/04, spec-review-S6 m-1): "a window confers something
- * only on the very item it was approved for: the grant records the item's identity at approval
- * and matches only when both the full name and the identity match, so renaming, moving, swapping
- * or re-creating items never makes a window (or several windows combined) reach a different item;
- * while change control is on, renaming an item group (folder, multibranch project, organization
- * folder) whose Configure comes only from a window is refused and recorded as GRANT_VIOLATION (the
- * same as a refused move, D-73 coalescing applies). The stored scope is the item's canonical full
- * name, whatever spelling was typed." And line 168: "Renaming follows core's rule: Configure on the
- * item (one CONFIGURE window on it), or else both Delete on it and Create in its parent." Matrix
- * rows T-08-130, T-08-131, T-08-133 .. T-08-137, T-08-146, T-08-147 (note 262) and T-08-154
- * (note 264, the folder rename refusal's field check and page); the role-strategy variant of
- * S-34-01 is T-08-132 ({@link ItemIdentityRoleStrategyTest}), the D-71b item events are
- * {@link ItemBindingEventsTest}.
+ * SPEC item 8 (D-71a, D-71c, security-34 S-34-01/03/04, security-36 S-36-01/02, spec-review-S6
+ * m-1): "a window confers something only on the very item it was approved for: the grant records
+ * the item's identity at approval and matches only when both the full name and the identity match,
+ * so renaming, moving, swapping or re-creating items never makes a window (or several windows
+ * combined) reach a different item; while change control is on, no window allows renaming any item
+ * (job or folder of any kind) -- neither a CONFIGURE window nor DELETE and CREATE windows combined;
+ * a rename needs an administrator or the user's own permissions, and a refused rename (whatever URL
+ * form reaches core's rename endpoints) is recorded as GRANT_VIOLATION (D-71c) (the same as a
+ * refused move, D-73 coalescing applies). The stored scope is the item's canonical full name,
+ * whatever spelling was typed." Matrix rows T-08-130, T-08-131, T-08-133 .. T-08-137, T-08-146,
+ * T-08-147 (note 262), T-08-154 (note 264, the rename refusal's field check and page) and
+ * T-08-134 (rewritten), T-08-156, T-08-159 .. T-08-163 (note 266, D-71c); the role-strategy rows
+ * T-08-132, T-08-157 and T-08-158 are in {@link ItemIdentityRoleStrategyTest}, the D-71b item
+ * events in {@link ItemBindingEventsTest}.
  *
  * <p>Layout (security-34 Probe A): folder {@code ops} with the job {@code ops/prod}, folder
  * {@code sandbox} with the job {@code sandbox/prod}, folder {@code dest}; every description is
  * "base". Batch Control matrix strategy, change control on. u1 and u2 hold Overall/Read, Item/Read
  * and RequestGrant only; a1 approves; c1 holds a standing Item/Configure (no window); admin holds
- * Overall/Administer. Windows are requested through the form contract and approved by a1. What a
- * window confers is measured on the item's own ACL and through HTTP saves, never through a
- * name-based service query, because a name alone is what D-71a stops trusting.
+ * Overall/Administer. For the D-71c rows on core's second rename path (Delete on the item plus
+ * Create in its parent), d1 holds a standing Item/Delete, k1 a standing Item/Create and dc1 both,
+ * each with RequestGrant and without Configure. Windows are requested through the form contract
+ * and approved by a1. What a window confers is measured on the item's own ACL and through HTTP
+ * saves, never through a name-based service query, because a name alone is what D-71a stops
+ * trusting.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-71a/D-73, docs/reports/security-34.md,
- * docs/reports/spec-review-S6.md and docs/TEST-MATRIX.md only (no src/main knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-71a/D-71c/D-73, docs/reports/security-34.md,
+ * docs/reports/security-36.md, docs/reports/spec-review-S6.md and docs/TEST-MATRIX.md only (no
+ * src/main knowledge).
  */
 @WithJenkins
 public class ItemIdentityBindingTest {
@@ -91,6 +96,15 @@ public class ItemIdentityBindingTest {
         strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user("u2"));
         strategy.add(BatchControlPermissions.APPROVE, PermissionEntry.user("a1"));
         strategy.add(Item.CONFIGURE, PermissionEntry.user("c1")); // standing Configure, no window
+        for (String userId : new String[] {"d1", "k1", "dc1"}) { // core's second rename path, D-71c rows
+            strategy.add(Jenkins.READ, PermissionEntry.user(userId));
+            strategy.add(Item.READ, PermissionEntry.user(userId));
+            strategy.add(BatchControlPermissions.REQUEST_GRANT, PermissionEntry.user(userId));
+        }
+        strategy.add(Item.DELETE, PermissionEntry.user("d1")); // standing Delete only
+        strategy.add(Item.CREATE, PermissionEntry.user("k1")); // standing Create only
+        strategy.add(Item.DELETE, PermissionEntry.user("dc1")); // standing Delete and Create
+        strategy.add(Item.CREATE, PermissionEntry.user("dc1"));
         j.jenkins.setAuthorizationStrategy(strategy);
 
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
@@ -217,27 +231,36 @@ public class ItemIdentityBindingTest {
     }
 
     /**
-     * T-08-134 (SPEC 8 line 168 rename sentence, spec-review-S6 m-1, D-71a ruling 2 "Renaming a job
-     * with a CONFIGURE window stays allowed"): u1's CONFIGURE window on the pre-existing job
-     * {@code ops/prod} lets u1 rename it (core's Configure branch) to {@code ops/prod2}; no
-     * GRANT_VIOLATION is recorded. Afterwards the window no longer applies to the renamed job (a
-     * renamed item loses its window, D-71a): u1 holds no Configure on {@code ops/prod2} and its save
-     * is 403. Guard: before the rename u1 configured the job. The folder half of m-1 is T-08-130.
+     * T-08-134 (SPEC 8 line 169, D-71c ruling 1, which supersedes D-71a ruling 2 "Renaming a job
+     * with a CONFIGURE window stays allowed"; security-36 S-36-02; spec-review-S6 m-1): u1's
+     * CONFIGURE window on the pre-existing job {@code ops/prod} does not let u1 rename it. The
+     * rename to {@code prod2} ({@code confirmRename}) answers 400 with the D-71c refusal
+     * ("Renaming 'ops/prod' (Freestyle project) is not allowed: while change control is on, a
+     * permission window does not allow renaming a job or folder" and "Nothing was renamed."), the
+     * job keeps its name, nothing carries {@code ops/prod2}, and exactly one GRANT_VIOLATION names u1
+     * and {@code ops/prod}. Guards: before the rename the window conferred Configure on the job, and
+     * after the refusal it still does (u1's save 200), so the refusal is about the rename, not about
+     * a window that confers nothing. The folder half of m-1 is T-08-130.
      */
     @Test
-    public void t_08_134_configureWindowOnAJobAllowsRenamingIt() throws Exception {
+    public void t_08_134_configureWindowOnAJobDoesNotAllowRenamingIt() throws Exception {
         openWindow("u1", "ops/prod", "CONFIGURE");
         assertTrue(can("u1", opsProd, Item.CONFIGURE), "guard: before the rename the window confers Configure on ops/prod");
         int violationsBefore = records(ChangeType.GRANT_VIOLATION).size();
 
-        assertSuccess(rename("u1", opsProd, "prod2"), "u1 renaming the job ops/prod through its CONFIGURE window");
-        assertNotNull(j.jenkins.getItemByFullName("ops/prod2"), "the job must carry the new name");
-        assertNull(j.jenkins.getItemByFullName("ops/prod"), "the old name must be free");
-        assertEquals(violationsBefore, records(ChangeType.GRANT_VIOLATION).size(), "the permitted job rename records no violation");
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", opsProd, "prod2"), "ops/prod", "Freestyle project",
+                "u1 renaming the job ops/prod with Configure only from its CONFIGURE window");
+        assertNotNull(j.jenkins.getItemByFullName("ops/prod"), "the refused rename must leave the job under its name");
+        assertNull(j.jenkins.getItemByFullName("ops/prod2"), "no item may carry the new name");
+        assertEquals("ops/prod", opsProd.getFullName());
+        List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(violationsBefore + 1, violations.size(), "the refused rename is recorded once as GRANT_VIOLATION, got " + violations);
+        ChangeRecord rec = violations.get(violations.size() - 1);
+        assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION names u1");
+        assertTrue(mentions(rec, "ops/prod"), "the GRANT_VIOLATION names the job ops/prod: " + describe(rec));
 
-        assertFalse(can("u1", opsProd, Item.CONFIGURE), "D-71a: the window does not follow the job to ops/prod2");
-        assertEquals(403, postConfigXml("u1", opsProd, "after-rename"), "u1's save of ops/prod2 must be refused");
-        assertEquals("base", reload(opsProd).getDescription());
+        assertTrue(can("u1", opsProd, Item.CONFIGURE), "guard: the window still confers Configure on ops/prod after the refusal");
+        assertEquals(200, postConfigXml("u1", opsProd, "after-refusal"), "guard: u1 still saves ops/prod through the window");
     }
 
     /**
@@ -380,23 +403,25 @@ public class ItemIdentityBindingTest {
     }
 
     /**
-     * T-08-154 (D-71a ruling 2, SPEC 8 line 169; the refusal's screens, ui-dev contract; usability
-     * line: a refusal names what is refused in plain words): u1 holds CONFIGURE windows on the
-     * folder {@code sandbox} and on the job {@code sandbox/prod}. The rename page's field check
-     * ({@code GET job/sandbox/checkNewName?newName=sandbox-old}) answers 200 with an error that
-     * reads "Renaming 'sandbox' (Folder) is not allowed"; the rename itself ({@code POST
+     * T-08-154 (D-71a ruling 2, D-71c ruling 1, SPEC 8 line 169; the refusal's screens, ui-dev
+     * contract; usability line: a refusal names what is refused in plain words): u1 holds CONFIGURE
+     * windows on the folder {@code sandbox} and on the job {@code sandbox/prod}. The rename page's
+     * field check ({@code GET job/sandbox/checkNewName?newName=sandbox-old}) answers 200 with an
+     * error that reads "Renaming 'sandbox' (Folder) is not allowed: while change control is on, a
+     * permission window does not allow renaming a job or folder"; the rename itself ({@code POST
      * confirmRename} from a browser, Accept text/html) answers 400 with a page whose text reads the
      * same and "Nothing was renamed."; nothing is renamed. The one GRANT_VIOLATION of that refused
-     * POST is T-08-130's (same fixture and request), not repeated here. Guards: the same field check
-     * by c1 (standing Item/Configure) and u1's field check of a rename of the job
-     * {@code sandbox/prod} (allowed by its CONFIGURE window, core's rule) are not errors and say
-     * nothing is not allowed.
+     * POST is T-08-130's (same fixture and request), not repeated here. Since D-71c u1's field check
+     * of a rename of the job {@code sandbox/prod} is the same refusal for the job ("Renaming
+     * 'sandbox/prod' (Freestyle project) is not allowed: ..."; before D-71c it was the guard "no
+     * error", note 266). Guard: the same field check by c1 (standing Item/Configure) is no error and
+     * says nothing is not allowed.
      */
     @Test
-    public void t_08_154_folderRenameRefusalIsExplainedOnTheFieldAndThePage() throws Exception {
+    public void t_08_154_windowRenameRefusalIsExplainedOnTheFieldAndThePage() throws Exception {
         openWindow("u1", "sandbox", "CONFIGURE");
         openWindow("u1", "sandbox/prod", "CONFIGURE");
-        String refused = "Renaming 'sandbox' (Folder) is not allowed";
+        String refused = RenameRefusalFixtures.refusal("sandbox", "Folder");
 
         WebResponse check = ApproverFormFixtures.get(j, "u1", sandbox.getUrl() + "checkNewName?newName=sandbox-old");
         assertEquals(200, check.getStatusCode(), "the field check answers a validation result: " + ApproverFormFixtures.excerpt(check.getContentAsString()));
@@ -424,13 +449,223 @@ public class ItemIdentityBindingTest {
                 + ApproverFormFixtures.excerpt(standing.getContentAsString()));
         assertFalse(visible(standing.getContentAsString()).contains("not allowed"), "guard: c1 is not told the rename is not allowed");
         WebResponse jobCheck = ApproverFormFixtures.get(j, "u1", sandboxProd.getUrl() + "checkNewName?newName=prod2");
-        assertEquals(200, jobCheck.getStatusCode());
-        assertFalse("error".equals(validationKind(jobCheck)), "guard: renaming the job through its CONFIGURE window is no error: "
+        String jobRefused = RenameRefusalFixtures.refusal("sandbox/prod", "Freestyle project");
+        assertEquals(200, jobCheck.getStatusCode(), "the job's field check answers a validation result");
+        assertEquals("error", validationKind(jobCheck), "D-71c: renaming the job through its CONFIGURE window is an error: "
                 + ApproverFormFixtures.excerpt(jobCheck.getContentAsString()));
-        assertFalse(visible(jobCheck.getContentAsString()).contains("not allowed"), "guard: u1 is not told the job rename is not allowed");
+        assertTrue(visible(jobCheck.getContentAsString()).contains(jobRefused), "the job's field check must say '" + jobRefused + "': "
+                + visible(jobCheck.getContentAsString()));
+        assertNotNull(j.jenkins.getItemByFullName("sandbox/prod"), "the field check renames nothing");
+    }
+
+    /**
+     * T-08-156 (security-36 S-36-01, D-71c ruling 2, D-73): rename detection works on the decoded
+     * request path. u1 holds one approved CONFIGURE window on the folder {@code ops} (the T-08-130
+     * fixture). u1 POSTs, with a crumb, {@code job/ops/confirm%52ename?newName=sandbox2},
+     * {@code job/ops/%63onfirmRename?newName=sandbox3} and
+     * {@code job/ops/confirm%52ename/?newName=sandbox4} (Stapler decodes each to core's
+     * {@code confirmRename}). Each answers 400 with the D-71c refusal for 'ops' (Folder) and
+     * "Nothing was renamed.", {@code ops} and {@code ops/prod} keep their names, nothing exists at the
+     * new names, u1 holds no Configure on {@code ops/prod}, and each attempt adds one GRANT_VIOLATION
+     * naming u1 and {@code ops} (three new names, three records). The first form repeated at once is
+     * refused again and adds none (D-73: same user, item and new name within the minute). Guard,
+     * after the refusals: the window still confers Configure on {@code ops} (save 200).
+     */
+    @Test
+    public void t_08_156_encodedRenameEndpointsOnAFolderWindowAreRefused() throws Exception {
+        openWindow("u1", "ops", "CONFIGURE");
+        assertTrue(can("u1", ops, Item.CONFIGURE), "premise: the window confers Configure on ops");
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+        String[][] attempts = {
+            {"confirm%52ename", "sandbox2"}, {"%63onfirmRename", "sandbox3"}, {"confirm%52ename/", "sandbox4"},
+        };
+        int expected = before;
+        for (String[] attempt : attempts) {
+            String path = ops.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "ops", "Folder", "POST " + path);
+            assertNotNull(j.jenkins.getItemByFullName("ops"), path + " must leave the folder ops in place");
+            assertNotNull(j.jenkins.getItemByFullName("ops/prod"), path + " must leave ops/prod under its full name");
+            assertNull(j.jenkins.getItemByFullName(attempt[1]), "nothing may exist at " + attempt[1] + " after " + path);
+            assertFalse(can("u1", opsProd, Item.CONFIGURE), "u1 must hold no Configure on ops/prod after " + path);
+            expected++;
+            List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+            assertEquals(expected, violations.size(), path + " must be recorded once as GRANT_VIOLATION, got " + violations);
+            ChangeRecord rec = violations.get(violations.size() - 1);
+            assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION of " + path + " names u1");
+            assertTrue(mentions(rec, "ops"), "the GRANT_VIOLATION of " + path + " names the folder ops: " + describe(rec));
+        }
+
+        String repeat = ops.getUrl() + "confirm%52ename?newName=sandbox2";
+        RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", repeat), "ops", "Folder", "the repeated POST " + repeat);
+        assertEquals(expected, records(ChangeType.GRANT_VIOLATION).size(), "D-73: the same refused rename repeated within the minute adds no record");
+        assertNull(j.jenkins.getItemByFullName("sandbox2"));
+
+        assertEquals(200, postConfigXml("u1", ops, "changed-ops"), "guard: the window on ops still confers Configure on it");
+    }
+
+    /**
+     * T-08-159 (D-71c ruling 1, core's second rename path; security-36 S-36-02 fix direction (a)):
+     * u1 holds a CREATE window on the folder {@code ops} and a DELETE window on the job
+     * {@code ops/prod}, so u1 holds Item/Create in the parent and Item/Delete on the job, both only
+     * from windows, and no Configure. u1's {@code confirmRename} to {@code prod2} and core's
+     * {@code doRename} to {@code prod3} each answer 400 with the D-71c refusal for 'ops/prod'
+     * (Freestyle project) and "Nothing was renamed."; the job keeps its name, nothing carries either
+     * new name, and each attempt adds one GRANT_VIOLATION naming u1 and {@code ops/prod}. Guard,
+     * after the refusals: both windows still confer what they name.
+     */
+    @Test
+    public void t_08_159_deleteAndCreateWindowsDoNotRenameAJob() throws Exception {
+        openWindow("u1", "ops", "CREATE");
+        openWindow("u1", "ops/prod", "DELETE");
+        assertTrue(can("u1", ops, Item.CREATE), "premise: the CREATE window confers Item/Create in ops");
+        assertTrue(can("u1", opsProd, Item.DELETE), "premise: the DELETE window confers Item/Delete on ops/prod");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "premise: u1 holds no Configure on ops/prod");
+
+        assertSecondPathRenameRefused("u1");
+
+        assertTrue(can("u1", ops, Item.CREATE), "guard: the CREATE window still confers Item/Create in ops");
+        assertTrue(can("u1", opsProd, Item.DELETE), "guard: the DELETE window still confers Item/Delete on ops/prod");
+    }
+
+    /**
+     * T-08-160 (D-71c ruling 1): d1 holds a standing Item/Delete (no Configure, no Create) and a
+     * CREATE window on the folder {@code ops}; the window supplies the Create half of core's second
+     * rename path. d1's {@code confirmRename} of {@code ops/prod} to {@code prod2} and
+     * {@code doRename} to {@code prod3} are each refused with 400 and the D-71c refusal, nothing is
+     * renamed, and each attempt adds one GRANT_VIOLATION naming d1 and {@code ops/prod}.
+     */
+    @Test
+    public void t_08_160_ownDeleteAndACreateWindowDoNotRenameAJob() throws Exception {
+        assertTrue(can("d1", opsProd, Item.DELETE), "premise: d1's Item/Delete on ops/prod is standing");
+        assertFalse(can("d1", ops, Item.CREATE), "premise: d1 holds no Create of their own in ops");
+        openWindow("d1", "ops", "CREATE");
+        assertTrue(can("d1", ops, Item.CREATE), "premise: the CREATE window confers Item/Create in ops");
+        assertFalse(can("d1", opsProd, Item.CONFIGURE), "premise: d1 holds no Configure on ops/prod");
+
+        assertSecondPathRenameRefused("d1");
+    }
+
+    /**
+     * T-08-161 (D-71c ruling 1): k1 holds a standing Item/Create (no Configure, no Delete) and a
+     * DELETE window on the job {@code ops/prod}; the window supplies the Delete half of core's second
+     * rename path. k1's {@code confirmRename} to {@code prod2} and {@code doRename} to {@code prod3}
+     * are each refused with 400 and the D-71c refusal, nothing is renamed, and each attempt adds one
+     * GRANT_VIOLATION naming k1 and {@code ops/prod}.
+     */
+    @Test
+    public void t_08_161_aDeleteWindowAndOwnCreateDoNotRenameAJob() throws Exception {
+        assertTrue(can("k1", ops, Item.CREATE), "premise: k1's Item/Create in ops is standing");
+        assertFalse(can("k1", opsProd, Item.DELETE), "premise: k1 holds no Delete of their own on ops/prod");
+        openWindow("k1", "ops/prod", "DELETE");
+        assertTrue(can("k1", opsProd, Item.DELETE), "premise: the DELETE window confers Item/Delete on ops/prod");
+        assertFalse(can("k1", opsProd, Item.CONFIGURE), "premise: k1 holds no Configure on ops/prod");
+
+        assertSecondPathRenameRefused("k1");
+    }
+
+    /**
+     * T-08-162 (guards of T-08-134 and T-08-156 .. T-08-161; D-71c "a rename needs an administrator
+     * or the user's own permissions"): c1 (standing Item/Configure, no window) renames the job
+     * {@code ops/prod} to {@code prod-c1} ({@code confirmRename}); dc1 (standing Item/Delete and
+     * Item/Create, no Configure of their own) renames {@code sandbox/prod} to {@code prod-dc1} while
+     * also holding a CONFIGURE window on it (a window held next to sufficient standing permissions
+     * does not turn the rename into a refusal); the administrator renames the job (now
+     * {@code ops/prod-c1}) to {@code prod-admin} through core's {@code doRename} and the folder
+     * {@code dest} to {@code dest-admin} through {@code confirm%52ename}. Each answers a redirect
+     * (3xx), the items carry the new names, and no GRANT_VIOLATION is recorded.
+     */
+    @Test
+    public void t_08_162_standingPermissionsAndTheAdministratorStillRename() throws Exception {
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+
+        assertRedirect(rename("c1", opsProd, "prod-c1"), "c1 (standing Configure) renaming the job ops/prod");
+        assertEquals("ops/prod-c1", opsProd.getFullName(), "c1's rename goes through");
+
+        openWindow("dc1", "sandbox/prod", "CONFIGURE");
+        assertTrue(can("dc1", sandboxProd, Item.DELETE), "premise: dc1's Item/Delete on sandbox/prod is standing");
+        assertTrue(can("dc1", sandbox, Item.CREATE), "premise: dc1's Item/Create in sandbox is standing");
+        assertRedirect(rename("dc1", sandboxProd, "prod-dc1"), "dc1 (standing Delete and Create, plus a window) renaming sandbox/prod");
+        assertEquals("sandbox/prod-dc1", sandboxProd.getFullName(), "dc1's rename goes through");
+
+        assertRedirect(RenameRefusalFixtures.postPath(j, "admin", opsProd.getUrl() + "doRename?newName=prod-admin"),
+                "the administrator renaming ops/prod-c1 through doRename");
+        assertEquals("ops/prod-admin", opsProd.getFullName(), "the administrator's doRename goes through");
+        assertRedirect(RenameRefusalFixtures.postPath(j, "admin", dest.getUrl() + "confirm%52ename?newName=dest-admin"),
+                "the administrator renaming the folder dest through confirm%52ename");
+        assertEquals("dest-admin", dest.getFullName(), "the administrator's encoded rename goes through");
+
+        assertEquals(before, records(ChangeType.GRANT_VIOLATION).size(), "permitted renames record no violation");
+    }
+
+    /**
+     * T-08-163 (D-71c; CLAUDE.md "a new feature does not change existing Jenkins behaviour while the
+     * global switch is off"): with change control off, c1 (standing Item/Configure) renames the job
+     * {@code ops/prod} to {@code prod-off} through core's {@code doRename} and the folder
+     * {@code sandbox} to {@code sandbox-off} through {@code confirm%52ename}; both redirect and go
+     * through, and c1's field check is no error. u2 (no Configure, Delete or Create) renaming
+     * {@code ops} gets core's refusal (4xx) without the D-71c text, and nothing is renamed. No
+     * GRANT_VIOLATION is recorded.
+     */
+    @Test
+    public void t_08_163_switchOffRenamesAsInJenkins() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setChangeControlEnabled(false);
+        cfg.save();
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+
+        WebResponse check = ApproverFormFixtures.get(j, "c1", opsProd.getUrl() + "checkNewName?newName=prod-off");
+        assertEquals(200, check.getStatusCode());
+        assertFalse("error".equals(validationKind(check)), "c1's field check is no error with the switch off: "
+                + ApproverFormFixtures.excerpt(check.getContentAsString()));
+        assertRedirect(RenameRefusalFixtures.postPath(j, "c1", opsProd.getUrl() + "doRename?newName=prod-off"), "c1's doRename of ops/prod");
+        assertEquals("ops/prod-off", opsProd.getFullName(), "c1's doRename goes through with the switch off");
+        assertRedirect(RenameRefusalFixtures.postPath(j, "c1", sandbox.getUrl() + "confirm%52ename?newName=sandbox-off"),
+                "c1's encoded rename of the folder sandbox");
+        assertEquals("sandbox-off", sandbox.getFullName(), "c1's encoded rename goes through with the switch off");
+        assertNotNull(j.jenkins.getItemByFullName("sandbox-off/prod"), "the job inside follows");
+
+        WebResponse refused = rename("u2", ops, "ops-u2");
+        assertClientError(refused, "u2 (no permission) renaming ops with the switch off");
+        assertFalse(visible(refused.getContentAsString()).contains(RenameRefusalFixtures.REASON),
+                "core's refusal, not the D-71c text, with the switch off: " + ApproverFormFixtures.excerpt(refused.getContentAsString()));
+        assertNotNull(j.jenkins.getItemByFullName("ops"));
+        assertNull(j.jenkins.getItemByFullName("ops-u2"));
+
+        assertEquals(before, records(ChangeType.GRANT_VIOLATION).size(), "nothing is recorded with the switch off");
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * Core's second rename path by {@code user} on {@code ops/prod}: {@code confirmRename} to
+     * {@code prod2}, then {@code doRename} to {@code prod3}; each is the D-71c refusal, renames
+     * nothing and adds one GRANT_VIOLATION naming the user and {@code ops/prod}.
+     */
+    private void assertSecondPathRenameRefused(String user) throws Exception {
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        String[][] attempts = {{"confirmRename", "prod2"}, {"doRename", "prod3"}};
+        for (String[] attempt : attempts) {
+            String path = opsProd.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, user, path), "ops/prod", "Freestyle project",
+                    user + " POST " + path);
+            assertNotNull(j.jenkins.getItemByFullName("ops/prod"), path + " must leave ops/prod under its name");
+            assertNull(j.jenkins.getItemByFullName("ops/" + attempt[1]), "nothing may carry ops/" + attempt[1]);
+            expected++;
+            List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+            assertEquals(expected, violations.size(), user + "'s " + path + " must be recorded once as GRANT_VIOLATION, got " + violations);
+            ChangeRecord rec = violations.get(violations.size() - 1);
+            assertEquals(user, rec.getUser(), "the GRANT_VIOLATION names " + user);
+            assertTrue(mentions(rec, "ops/prod"), "the GRANT_VIOLATION names the job ops/prod: " + describe(rec));
+        }
+        assertEquals("ops/prod", opsProd.getFullName());
+    }
+
+    private static void assertRedirect(WebResponse r, String what) {
+        int code = r.getStatusCode();
+        assertTrue(code >= 300 && code < 400, what + " must answer a redirect (the rename went through), got HTTP " + code + ": "
+                + ApproverFormFixtures.excerpt(r.getContentAsString()));
+    }
+
 
     /** The FormValidation kind of a validation answer ({@code <div class=ok|warning|error>}), or "". */
     private static String validationKind(WebResponse r) {

@@ -58,7 +58,11 @@ import static org.junit.jupiter.api.Assertions.fail;
  * name is read only from the endpoint that performs the creation or rename, names over 255
  * characters are refused, a user-supplied pattern is matched under a time bound and never while
  * a global lock is held, a typing-time validation (GET) is refused without a record, and the
- * submitted name is matched as submitted (untrimmed). Matrix rows T-SEC-35 .. T-SEC-40.
+ * submitted name is matched as submitted (untrimmed). Matrix rows T-SEC-35 .. T-SEC-40. Since D-71c
+ * (SPEC item 8 line 169) no window allows renaming any job or folder while change control is on, so
+ * the matching-rename twins of T-SEC-35/36 are refusals now (note 266), and T-SEC-76 (security-36
+ * S-36-01) pins core's {@code doRename} and an encoded {@code confirmRename} on an item created under
+ * a restricted window.
  *
  * <p>Same set-up as {@link CreateNamePatternTest}: folder {@code team}, a window on that folder
  * (D-71: scope type ITEM) held by u1 (no Create/Configure/Delete of their own) under the Batch Control matrix strategy
@@ -99,13 +103,16 @@ public class CreateNameRestrictionSecurityTest {
     }
 
     /**
-     * T-SEC-35 (S-01): the holder's Configure on an item they created through a restricted Create
-     * grant (D-35c) does not let them rename it to a name outside the restriction. The rename is
-     * refused before anything changes and recorded as GRANT_VIOLATION; a rename to a matching
-     * name still works (falsifiability twin).
+     * T-SEC-35 (S-01; D-71c): the holder's Configure on an item they created through a restricted
+     * Create grant (D-35c) does not let them rename it to a name outside the restriction. The rename
+     * is refused before anything changes and recorded as GRANT_VIOLATION naming u1 and the attempted
+     * name. Since D-71c a rename to a matching name is refused too (before D-71c it was the twin that
+     * went through, note 266): 400 with the D-71c refusal for 'team/nightly-a' (Freestyle project),
+     * the item keeps its name, and it adds its own GRANT_VIOLATION naming u1 (a different new name is
+     * a different refusal, D-73).
      */
     @Test
-    public void t_sec_35_renameOfCreatedItemMustMatchTheRestriction() throws Exception {
+    public void t_sec_35_renameOfCreatedItemIsRefused() throws Exception {
         grant("/nightly-[a-z]+/", "CREATE");
         assertTrue(createByConfigXml("u1", "nightly-a") < 400, "fixture: creating the matching item must succeed");
         assertNotNull(team.getItem("nightly-a"), "fixture: team/nightly-a must exist");
@@ -120,11 +127,14 @@ public class CreateNameRestrictionSecurityTest {
         assertTrue("u1".equals(violations.get(0).getUser()) && mentions(violations.get(0), "evil-name"),
                 "the GRANT_VIOLATION must name u1 and the attempted name, was " + describe(violations.get(0)));
 
-        WebResponse allowed = rename("u1", "nightly-a", "nightly-b", null);
-        assertSuccess(allowed, "renaming the created item to a matching name");
-        assertNotNull(team.getItem("nightly-b"), "the matching rename must go through");
-        assertNull(team.getItem("nightly-a"));
-        assertEquals(1, records(ChangeType.GRANT_VIOLATION).size(), "the matching rename adds no violation");
+        WebResponse matching = rename("u1", "nightly-a", "nightly-b", null);
+        RenameRefusalFixtures.assertWindowRenameRefused(matching, "team/nightly-a", "Freestyle project",
+                "D-71c: renaming the created item to a matching name");
+        assertNull(team.getItem("nightly-b"), "D-71c: the matching rename must not go through either");
+        assertNotNull(team.getItem("nightly-a"), "the item keeps its name");
+        violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(2, violations.size(), "the refused matching rename is recorded once as GRANT_VIOLATION, got " + violations);
+        assertEquals("u1", violations.get(1).getUser(), "the second GRANT_VIOLATION names u1: " + describe(violations.get(1)));
     }
 
     /**
@@ -135,11 +145,13 @@ public class CreateNameRestrictionSecurityTest {
      * user without Configure on the item: Create in the parent plus Delete on the item. Since D-71
      * u1 holds them through two windows, the restricted CREATE on {@code team} and a DELETE on the
      * job {@code team/legacy}; before D-71 one FOLDER [CREATE, DELETE] window gave both, which can
-     * no longer be requested (note 260). The row does not claim that every rename needs two
-     * windows (Configure on the item suffices in core's other branch).
+     * no longer be requested (note 260). Since D-71c a window confers nothing for a rename, so the
+     * rename to a matching name ({@code nightly-ren}), the twin that went through before, is refused
+     * too: 400 with the D-71c refusal for 'team/legacy' (Freestyle project), {@code legacy} keeps its
+     * name, and it adds its own GRANT_VIOLATION (note 266).
      */
     @Test
-    public void t_sec_36_createAndDeleteRenameIgnoresASpoofedNameParameter() throws Exception {
+    public void t_sec_36_createAndDeleteRenameIsRefusedWhateverTheNameParameter() throws Exception {
         team.createProject(FreeStyleProject.class, "legacy");
         grant("/nightly-[a-z]+/", "CREATE");
         grantOn("team/legacy", "DELETE");
@@ -154,10 +166,49 @@ public class CreateNameRestrictionSecurityTest {
         assertTrue(mentions(violations.get(0), "evil-name"),
                 "the GRANT_VIOLATION must name the real new name, was " + describe(violations.get(0)));
 
-        WebResponse allowed = rename("u1", "legacy", "nightly-ren", null);
-        assertSuccess(allowed, "a Create+Delete rename to a matching name");
-        assertNotNull(team.getItem("nightly-ren"), "the matching rename must go through");
-        assertNull(team.getItem("legacy"));
+        WebResponse matching = rename("u1", "legacy", "nightly-ren", null);
+        RenameRefusalFixtures.assertWindowRenameRefused(matching, "team/legacy", "Freestyle project",
+                "D-71c: a Create+Delete rename (both from windows) to a matching name");
+        assertNull(team.getItem("nightly-ren"), "D-71c: the matching rename must not go through either");
+        assertNotNull(team.getItem("legacy"), "the item keeps its name");
+        violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(2, violations.size(), "the refused matching rename is recorded once as GRANT_VIOLATION, got " + violations);
+        assertEquals("u1", violations.get(1).getUser(), "the second GRANT_VIOLATION names u1: " + describe(violations.get(1)));
+    }
+
+    /**
+     * T-SEC-76 (security-36 S-36-01, the reopened security-08 S-01; D-40a, D-71c ruling 2): u1's
+     * CREATE window on {@code team} restricted to {@code /nightly-[a-z]+/}, and {@code team/nightly-a}
+     * created through it (D-35c Configure). u1 POSTs with a crumb
+     * {@code job/team/job/nightly-a/doRename?newName=prod2} (core's deprecated rename endpoint),
+     * {@code job/team/job/nightly-a/confirm%52ename?newName=prod3} (decoded by Stapler to
+     * {@code confirmRename}) and {@code doRename?newName=nightly-c} (a matching name, D-71c). Each
+     * answers 400 with the D-71c refusal for 'team/nightly-a' (Freestyle project), the job keeps its
+     * name, nothing carries the new name, and each attempt adds one GRANT_VIOLATION naming u1.
+     */
+    @Test
+    public void t_sec_76_doRenameAndEncodedConfirmRenameOfACreatedItemAreRefused() throws Exception {
+        grant("/nightly-[a-z]+/", "CREATE");
+        assertTrue(createByConfigXml("u1", "nightly-a") < 400, "fixture: creating the matching item must succeed");
+        assertNotNull(team.getItem("nightly-a"), "fixture: team/nightly-a must exist");
+        assertTrue(records(ChangeType.GRANT_VIOLATION).isEmpty(), "fixture: the permitted creation records no violation");
+
+        String[][] attempts = {{"doRename", "prod2"}, {"confirm%52ename", "prod3"}, {"doRename", "nightly-c"}};
+        int expected = 0;
+        for (String[] attempt : attempts) {
+            String path = team.getUrl() + "job/nightly-a/" + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "team/nightly-a",
+                    "Freestyle project", "POST " + path);
+            assertNotNull(team.getItem("nightly-a"), path + " must leave the job under its name");
+            assertNull(team.getItem(attempt[1]), "nothing may carry " + attempt[1] + " after " + path);
+            expected++;
+            List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+            assertEquals(expected, violations.size(), path + " must be recorded once as GRANT_VIOLATION, got " + violations);
+            ChangeRecord rec = violations.get(violations.size() - 1);
+            assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION of " + path + " names u1: " + describe(rec));
+            assertTrue(mentions(rec, "nightly-a") || mentions(rec, attempt[1]),
+                    "the GRANT_VIOLATION of " + path + " names the job or the attempted name: " + describe(rec));
+        }
     }
 
     /**

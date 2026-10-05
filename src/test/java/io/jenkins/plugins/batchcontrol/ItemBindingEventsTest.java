@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
+import hudson.ExtensionList;
 import hudson.model.AbstractItem;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -10,10 +11,14 @@ import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
+import io.jenkins.plugins.batchcontrol.ops.ExpiryPeriodicWork;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.List;
@@ -45,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * SPEC item 8 line 169 (D-71a): "a window confers something only on the very item it was approved
@@ -54,7 +60,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the windows on the old name (renaming back does not restore them) ...; creating or copying an
  * item unbinds windows bound under its name and drops stale D-35c records under that name; at
  * startup, windows whose item no longer exists are unbound" (ARCHITECTURE 4, binding paragraph).
- * Matrix rows T-08-148 .. T-08-150, T-08-152, T-08-153 and T-08-155 (note 264); the startup row
+ * Matrix rows T-08-148 .. T-08-150, T-08-152, T-08-153 and T-08-155 (note 264) and T-08-164
+ * (note 266: D-71c ruling 3, security-36 S-36-03, a failed unbinding write is retried); the startup row
  * T-08-151 is in {@link ItemScopeRestartTest}, the folder rename refusal's screens T-08-154 in
  * {@link ItemIdentityBindingTest}.
  *
@@ -389,6 +396,61 @@ public class ItemBindingEventsTest {
         FreeStyleProject mine2 = j.jenkins.getItemByFullName("team/mine2", FreeStyleProject.class);
         assertNotNull(mine2);
         assertTrue(can("u1", mine2, Item.CONFIGURE), "guard: D-35c still applies to an item u1 created through the window");
+    }
+
+    /**
+     * T-08-164 (security-36 S-36-03 (ii); D-71c ruling 3 "a failed write of an unbinding is
+     * retried"): u1's CONFIGURE windows on the jobs {@code gone} and {@code keep} are stored bound
+     * (premise). The grants directory and the {@code gone} window's file are made read-only and the
+     * administrator deletes {@code gone} (HTTP {@code doDelete}), so the unbinding cannot be written:
+     * the stored grant still records the identity (premise that the write failed). Write access is
+     * restored; the stored grant is unchanged until the expiry periodic work runs once
+     * ({@code ExpiryPeriodicWork.doRun()}, matrix note 2). Then it records no identity, and the window
+     * is still active (an unbound window stays until it ends or is revoked, D-71b). Guard: the window
+     * on {@code keep} is still stored bound. Skipped where this process can write despite the
+     * read-only bits (root, Windows), because the write failure cannot be produced there.
+     */
+    @Test
+    public void t_08_164_failedUnbindingWriteIsRetriedByThePeriodicWork() throws Exception {
+        FreeStyleProject gone = j.createFreeStyleProject("gone");
+        gone.setDescription("base");
+        String onGone = openWindow("gone");
+        String onKeep = openWindow("keep");
+        Path dir = j.jenkins.getRootDir().toPath().resolve("batch-control/grants");
+        Path stored = dir.resolve(onGone + ".xml");
+        assertTrue(Files.isRegularFile(stored), "premise (ARCHITECTURE 5): the window is stored at " + stored);
+        File dirFile = dir.toFile();
+        File storedFile = stored.toFile();
+        try {
+            assertTrue(storedFile.setWritable(false, false), "fixture: the stored grant made read-only");
+            assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
+            boolean enforced;
+            Path probe = dir.resolve("probe-" + System.nanoTime() + ".tmp");
+            try {
+                Files.createFile(probe);
+                Files.delete(probe);
+                enforced = false;
+            } catch (IOException expected) {
+                enforced = true;
+            }
+            assumeTrue(enforced && !Files.isWritable(stored), "the file system does not refuse writes to read-only files for this process");
+
+            assertSuccess(ApproverFormFixtures.post(j, "admin", gone.getUrl() + "doDelete", List.of()), "the administrator deletes gone");
+            assertNull(j.jenkins.getItemByFullName("gone"), "premise: gone is deleted");
+            assertTrue(storedBinding(j, onGone), "premise: the unbinding could not be written, the stored grant still records the identity");
+        } finally {
+            dirFile.setWritable(true);
+            storedFile.setWritable(true);
+        }
+        assertTrue(Files.isWritable(stored), "fixture: write access restored");
+        assertTrue(storedBinding(j, onGone), "premise: nothing has rewritten the stored grant before the periodic work runs");
+
+        ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
+
+        assertFalse(storedBinding(j, onGone), "D-71c (3): the periodic work retries the failed unbinding, the stored grant records no identity");
+        assertTrue(GrantService.get().listActive().stream().anyMatch(g -> onGone.equals(g.getId())),
+                "the window stays active (unbound) after the retry");
+        assertTrue(storedBinding(j, onKeep), "guard: the window on keep is still stored bound");
     }
 
     // ---------------------------------------------------------------- helpers
