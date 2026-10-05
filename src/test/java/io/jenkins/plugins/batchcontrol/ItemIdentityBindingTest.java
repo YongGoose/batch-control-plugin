@@ -42,20 +42,22 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 8 (D-71a, D-71c, security-34 S-34-01/03/04, security-36 S-36-01/02, spec-review-S6
- * m-1): "a window confers something only on the very item it was approved for: the grant records
- * the item's identity at approval and matches only when both the full name and the identity match,
- * so renaming, moving, swapping or re-creating items never makes a window (or several windows
- * combined) reach a different item; while change control is on, no window allows renaming any item
- * (job or folder of any kind) -- neither a CONFIGURE window nor DELETE and CREATE windows combined;
- * a rename needs an administrator or the user's own permissions, and a refused rename (whatever URL
- * form reaches core's rename endpoints) is recorded as GRANT_VIOLATION (D-71c) (the same as a
- * refused move, D-73 coalescing applies). The stored scope is the item's canonical full name,
+ * SPEC item 8 (D-71a, D-71c, D-74, security-34 S-34-01/03/04, security-36 S-36-01/02, security-38
+ * S-38-01/02, spec-review-S6 m-1): "a window applies to its item, not to a name: when an
+ * administrator or a user with their own permissions renames or moves the item (no window allows a
+ * rename, D-71c), the window follows it -- windows on the items below a renamed or moved folder follow
+ * too -- and deleting the item ends the window, as do creating a new item at the window's name and
+ * starting Jenkins after the item vanished; so renaming, moving, swapping or re-creating items never
+ * makes a window reach an item nobody approved. While change control is on, no window allows
+ * renaming any item (job or folder of any kind) -- neither a CONFIGURE window nor DELETE and CREATE
+ * windows combined; a refused rename, whatever URL form reaches core's rename endpoints, is recorded
+ * as GRANT_VIOLATION (D-73 coalescing applies). The stored scope is the item's canonical full name,
  * whatever spelling was typed." Matrix rows T-08-130, T-08-131, T-08-133 .. T-08-137, T-08-146,
- * T-08-147 (note 262), T-08-154 (note 264, the rename refusal's field check and page) and
- * T-08-134 (rewritten), T-08-156, T-08-159 .. T-08-163 (note 266, D-71c); the role-strategy rows
- * T-08-132, T-08-157 and T-08-158 are in {@link ItemIdentityRoleStrategyTest}, the D-71b item
- * events in {@link ItemBindingEventsTest}.
+ * T-08-147 (note 262; T-08-131 and T-08-146 converted for D-74 in note 270), T-08-154 (note 264),
+ * T-08-134 (rewritten), T-08-156, T-08-159 .. T-08-163 (note 266, D-71c) and T-08-180 .. T-08-184
+ * (note 270, security-38: trailing path segments after core's rename methods, the field check, the
+ * capped new name); the role-strategy rows T-08-132, T-08-157, T-08-158, T-08-185 and T-08-186 are
+ * in {@link ItemIdentityRoleStrategyTest}, the item events in {@link ItemBindingEventsTest}.
  *
  * <p>Layout (security-34 Probe A): folder {@code ops} with the job {@code ops/prod}, folder
  * {@code sandbox} with the job {@code sandbox/prod}, folder {@code dest}; every description is
@@ -65,12 +67,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Create in its parent), d1 holds a standing Item/Delete, k1 a standing Item/Create and dc1 both,
  * each with RequestGrant and without Configure. Windows are requested through the form contract
  * and approved by a1. What a window confers is measured on the item's own ACL and through HTTP
- * saves, never through a name-based service query, because a name alone is what D-71a stops
- * trusting.
+ * saves, never through a name-based service query; which item a window names is read from the
+ * service and the grants page ({@link WindowStateFixtures}).
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-71a/D-71c/D-73, docs/reports/security-34.md,
- * docs/reports/security-36.md, docs/reports/spec-review-S6.md and docs/TEST-MATRIX.md only (no
- * src/main knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-71a/D-71c/D-73/D-74, docs/reports/security-34.md,
+ * docs/reports/security-36.md, docs/reports/security-38.md, docs/reports/spec-review-S6.md and
+ * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class ItemIdentityBindingTest {
@@ -172,21 +174,25 @@ public class ItemIdentityBindingTest {
     }
 
     /**
-     * T-08-131 (S-34-01, D-71a ruling 1, identity binding): the same three windows; the
-     * administrator performs the probe's renames ({@code sandbox} to {@code sandbox-old}, then
-     * {@code ops} to {@code sandbox}), so the job formerly {@code ops/prod} is now named
-     * {@code sandbox/prod}, the name one of u1's windows carries. u1 holds no Configure on it, its
-     * save is 403 and it keeps "base"; nor on the folder now named {@code sandbox} (formerly
-     * {@code ops}, which u1's {@code sandbox} window names and u1's {@code ops} window was approved
-     * for); nor on the renamed originals {@code sandbox-old} and {@code sandbox-old/prod} (a window
-     * does not follow its item). Guard: before the renames u1 configured {@code sandbox/prod},
-     * {@code sandbox} and {@code ops}, and not {@code ops/prod}.
+     * T-08-131 (S-34-01 swap probe; D-74 "renaming, moving, swapping ... items never makes a window
+     * reach an item nobody approved"; converted from the D-71a identity binding, note 270): the same
+     * three windows (CONFIGURE on the folders {@code ops} and {@code sandbox} and on the job
+     * {@code sandbox/prod}). The administrator performs the probe's renames ({@code sandbox} to
+     * {@code sandbox-old}, then {@code ops} to {@code sandbox}), so the job formerly {@code ops/prod}
+     * now carries the name {@code sandbox/prod} that one of u1's windows was approved with. Each window
+     * travels with its item: the window approved for {@code ops} is active on the folder now named
+     * {@code sandbox} (and confers Configure on it), the window approved for {@code sandbox} is
+     * active on {@code sandbox-old}, the one approved for {@code sandbox/prod} on
+     * {@code sandbox-old/prod}, each conferring there. u1 gains nothing on the job that took the name
+     * {@code sandbox/prod} (formerly {@code ops/prod}): neither Configure nor EXTENDED_READ, its save
+     * 403, "base" kept. Guard: before the renames u1 configured {@code sandbox/prod}, {@code sandbox}
+     * and {@code ops}, and not {@code ops/prod}.
      */
     @Test
-    public void t_08_131_swappedNamesDoNotRepointWindows() throws Exception {
-        openWindow("u1", "ops", "CONFIGURE");
-        openWindow("u1", "sandbox", "CONFIGURE");
-        openWindow("u1", "sandbox/prod", "CONFIGURE");
+    public void t_08_131_swappedNamesMoveWindowsWithTheirItemsOnly() throws Exception {
+        String onOps = openWindow("u1", "ops", "CONFIGURE");
+        String onSandbox = openWindow("u1", "sandbox", "CONFIGURE");
+        String onSandboxProd = openWindow("u1", "sandbox/prod", "CONFIGURE");
         assertTrue(can("u1", sandboxProd, Item.CONFIGURE), "guard: before the renames u1 configures sandbox/prod");
         assertTrue(can("u1", sandbox, Item.CONFIGURE), "guard: before the renames u1 configures sandbox");
         assertTrue(can("u1", ops, Item.CONFIGURE), "guard: before the renames u1 configures ops");
@@ -198,13 +204,19 @@ public class ItemIdentityBindingTest {
         assertEquals("sandbox", ops.getFullName(), "premise: the folder formerly ops is now sandbox");
         assertEquals("sandbox-old/prod", sandboxProd.getFullName(), "premise: the original sandbox/prod is now sandbox-old/prod");
 
-        assertFalse(can("u1", opsProd, Item.CONFIGURE), "D-71a: the window on the name sandbox/prod must not reach the job formerly ops/prod");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "D-74: no window may reach the job that took the name sandbox/prod (formerly ops/prod)");
         assertFalse(can("u1", opsProd, Item.EXTENDED_READ), "nor its EXTENDED_READ");
         assertEquals(403, postConfigXml("u1", opsProd, "planted"), "u1's save of the job formerly ops/prod must be refused");
         assertEquals("base", reload(opsProd).getDescription(), "the job formerly ops/prod keeps its description");
-        assertFalse(can("u1", ops, Item.CONFIGURE), "D-71a: no window reaches the folder now named sandbox (formerly ops)");
-        assertFalse(can("u1", sandbox, Item.CONFIGURE), "D-71a: the window does not follow the folder renamed to sandbox-old");
-        assertFalse(can("u1", sandboxProd, Item.CONFIGURE), "D-71a: the window does not follow the job now at sandbox-old/prod");
+
+        WindowStateFixtures.assertActiveOn(j, "u1", onOps, "sandbox", "D-74: the window approved for ops travels with the folder, now sandbox");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandbox, "sandbox-old", "D-74: the window approved for sandbox travels to sandbox-old");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandboxProd, "sandbox-old/prod",
+                "D-74: the window approved for sandbox/prod travels with its job to sandbox-old/prod");
+        assertTrue(can("u1", ops, Item.CONFIGURE), "D-74: the window still confers on its folder (formerly ops, now sandbox)");
+        assertTrue(can("u1", sandbox, Item.CONFIGURE), "D-74: the window still confers on its folder, now sandbox-old");
+        assertTrue(can("u1", sandboxProd, Item.CONFIGURE), "D-74: the window still confers on its job, now sandbox-old/prod");
+        assertEquals(200, postConfigXml("u1", sandboxProd, "saved-after-swap"), "u1 saves the job approved for through its window");
     }
 
     /**
@@ -344,30 +356,81 @@ public class ItemIdentityBindingTest {
     }
 
     /**
-     * T-08-146 (coverage of D-71a "a renamed item loses its window"; SPEC 8 line 169 "renaming,
-     * moving ... never makes a window reach a different item"): u1 holds CONFIGURE windows on the
-     * jobs {@code ops/prod} and {@code sandbox/prod}. The administrator renames {@code ops/prod} to
-     * {@code ops/prod-renamed} and moves {@code sandbox/prod} into {@code dest}. u1 then holds no
-     * Configure on either job under its new name, and both saves are 403. Guard: before the rename
-     * and the move both windows conferred Configure.
+     * T-08-146 (D-74, SPEC 8 line 170 "when an administrator ... renames or moves the item ..., the
+     * window follows it -- windows on the items below a renamed or moved folder follow too";
+     * coverage inventory G-H3; converted from D-71a "a renamed item loses its window", note 270): u1
+     * holds CONFIGURE windows on the job {@code ops/prod}, the folder {@code sandbox} and the job
+     * {@code sandbox/prod}. The administrator renames {@code ops/prod} to {@code prod-renamed},
+     * renames the folder {@code sandbox} to {@code sandbox-renamed} (the job inside goes along),
+     * moves {@code sandbox-renamed/prod} into {@code dest} and back. Each window names its item's
+     * current full name ({@code ops/prod-renamed}, {@code sandbox-renamed},
+     * {@code sandbox-renamed/prod}), confers Configure on that item and u1's saves are 200; items the
+     * administrator then creates at the old names ({@code ops/prod}, a folder {@code sandbox} with a
+     * job {@code sandbox/prod}) get nothing (saves 403). u1's own rename of the followed job is still
+     * refused (D-71c: 400 with the refusal, one GRANT_VIOLATION, the job keeps its name). Guard:
+     * before the events all three windows conferred.
      */
     @Test
-    public void t_08_146_windowDoesNotFollowARenameOrMoveOfItsItem() throws Exception {
-        openWindow("u1", "ops/prod", "CONFIGURE");
-        openWindow("u1", "sandbox/prod", "CONFIGURE");
+    public void t_08_146_windowFollowsARenameOrMoveOfItsItem() throws Exception {
+        String onOpsProd = openWindow("u1", "ops/prod", "CONFIGURE");
+        String onSandbox = openWindow("u1", "sandbox", "CONFIGURE");
+        String onSandboxProd = openWindow("u1", "sandbox/prod", "CONFIGURE");
         assertTrue(can("u1", opsProd, Item.CONFIGURE), "guard: before the rename the window confers Configure on ops/prod");
+        assertTrue(can("u1", sandbox, Item.CONFIGURE), "guard: before the rename the window confers Configure on sandbox");
         assertTrue(can("u1", sandboxProd, Item.CONFIGURE), "guard: before the move the window confers Configure on sandbox/prod");
 
         assertSuccess(rename("admin", opsProd, "prod-renamed"), "fixture: the administrator renames ops/prod");
-        assertSuccess(ApproverFormFixtures.post(j, "admin", sandboxProd.getUrl() + "move/move",
-                List.of(new NameValuePair("destination", "/dest"))), "fixture: the administrator moves sandbox/prod into dest");
         assertEquals("ops/prod-renamed", opsProd.getFullName(), "premise: the job was renamed");
-        assertEquals("dest/prod", sandboxProd.getFullName(), "premise: the job was moved");
+        WindowStateFixtures.assertActiveOn(j, "u1", onOpsProd, "ops/prod-renamed", "D-74: the window follows the renamed job");
+        assertTrue(can("u1", opsProd, Item.CONFIGURE), "D-74: the window confers Configure on the renamed job");
+        assertEquals(200, postConfigXml("u1", opsProd, "after-rename"), "u1 saves the renamed job through the window");
 
-        assertFalse(can("u1", opsProd, Item.CONFIGURE), "the window must not follow the renamed job");
-        assertEquals(403, postConfigXml("u1", opsProd, "after-rename"), "u1's save of the renamed job must be refused");
-        assertFalse(can("u1", sandboxProd, Item.CONFIGURE), "the window must not follow the moved job");
-        assertEquals(403, postConfigXml("u1", sandboxProd, "after-move"), "u1's save of the moved job must be refused");
+        assertSuccess(rename("admin", sandbox, "sandbox-renamed"), "fixture: the administrator renames the folder sandbox");
+        assertEquals("sandbox-renamed/prod", sandboxProd.getFullName(), "premise: the job inside went along");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandbox, "sandbox-renamed", "D-74: the window follows the renamed folder");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandboxProd, "sandbox-renamed/prod",
+                "D-74: the window on the job below the renamed folder follows too");
+
+        assertSuccess(ApproverFormFixtures.post(j, "admin", sandboxProd.getUrl() + "move/move",
+                List.of(new NameValuePair("destination", "/dest"))), "fixture: the administrator moves sandbox-renamed/prod into dest");
+        assertEquals("dest/prod", sandboxProd.getFullName(), "premise: the job was moved");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandboxProd, "dest/prod", "D-74: the window follows the moved job");
+        assertTrue(can("u1", sandboxProd, Item.CONFIGURE), "D-74: the window confers Configure on dest/prod");
+        assertSuccess(ApproverFormFixtures.post(j, "admin", sandboxProd.getUrl() + "move/move",
+                List.of(new NameValuePair("destination", "/sandbox-renamed"))), "fixture: the administrator moves it back");
+        assertEquals("sandbox-renamed/prod", sandboxProd.getFullName(), "premise: the job is back in its folder");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandboxProd, "sandbox-renamed/prod", "D-74: the window follows the move back");
+
+        assertTrue(can("u1", sandbox, Item.CONFIGURE), "D-74: the window confers Configure on sandbox-renamed");
+        assertTrue(can("u1", sandboxProd, Item.CONFIGURE), "D-74: the window confers Configure on sandbox-renamed/prod");
+        assertEquals(200, postConfigXml("u1", sandbox, "after-folder-rename"), "u1 saves the renamed folder through the window");
+        assertEquals(200, postConfigXml("u1", sandboxProd, "after-move-back"), "u1 saves the job through the window");
+
+        FreeStyleProject newOpsProd;
+        Folder newSandbox;
+        FreeStyleProject newSandboxProd;
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator creates items at the old names
+            newOpsProd = ops.createProject(FreeStyleProject.class, "prod");
+            newOpsProd.setDescription("base");
+            newSandbox = j.jenkins.createProject(Folder.class, "sandbox");
+            newSandbox.setDescription("base");
+            newSandboxProd = newSandbox.createProject(FreeStyleProject.class, "prod");
+            newSandboxProd.setDescription("base");
+        }
+        for (AbstractItem item : new AbstractItem[] {newOpsProd, newSandbox, newSandboxProd}) {
+            assertFalse(can("u1", item, Item.CONFIGURE), "D-74: the new " + item.getFullName() + " at a window's old name gets nothing");
+            assertEquals(403, postConfigXml("u1", item, "planted"), "u1's save of the new " + item.getFullName() + " must be refused");
+        }
+        WindowStateFixtures.assertActiveOn(j, "u1", onOpsProd, "ops/prod-renamed", "guard: an item created at the old name leaves the window on its job");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandbox, "sandbox-renamed", "guard: an item created at the old name leaves the window on its folder");
+        WindowStateFixtures.assertActiveOn(j, "u1", onSandboxProd, "sandbox-renamed/prod", "guard: the window on the job inside stays too");
+
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", opsProd, "prod-by-u1"), "ops/prod-renamed", "Freestyle project",
+                "D-71c: u1 renaming the job its window followed");
+        assertEquals("ops/prod-renamed", opsProd.getFullName(), "the refused rename leaves the job under its name");
+        assertNull(j.jenkins.getItemByFullName("ops/prod-by-u1"), "nothing carries the new name");
+        assertEquals(before + 1, records(ChangeType.GRANT_VIOLATION).size(), "the refused rename is recorded once as GRANT_VIOLATION");
     }
 
     /**
@@ -634,6 +697,231 @@ public class ItemIdentityBindingTest {
         assertEquals(before, records(ChangeType.GRANT_VIOLATION).size(), "nothing is recorded with the switch off");
     }
 
+    // ================================================================ security-38 (note 270)
+
+    /**
+     * T-08-180 (security-38 S-38-01, D-71c ruling 2 "rename detection ... covers every core rename
+     * endpoint, so encoded forms cannot bypass it"; SPEC 8 line 170 "a refused rename, whatever URL
+     * form reaches core's rename endpoints, is recorded"): u1 holds one CONFIGURE window on the folder
+     * {@code ops} (the T-08-130 fixture). u1 POSTs, with a crumb, core's rename method followed by a
+     * trailing segment, which Stapler ignores after dispatching the method:
+     * {@code job/ops/confirmRename/extra}, {@code .../confirmRename/extra/},
+     * {@code .../confirm%52ename/extra}, {@code .../confirmRename//extra} and
+     * {@code .../confirmRename/%2E}, each with its own {@code newName}. Each answers 400 with the
+     * D-71c refusal for 'ops' (Folder) and "Nothing was renamed.", {@code ops} and {@code ops/prod}
+     * keep their names, nothing exists at the new name, u1 holds no Configure on {@code ops/prod},
+     * and each adds one GRANT_VIOLATION naming u1 and {@code ops}. Guards: after the refusals the
+     * window still confers Configure on {@code ops} (save 200); the administrator renames the folder
+     * {@code dest} through four of the same URL forms (each 3xx, the folder carries the new name, no
+     * GRANT_VIOLATION), so every form is a live rename endpoint of core; once the administrator
+     * revokes the window, u1 holds no Configure on {@code ops} or {@code ops/prod}.
+     */
+    @Test
+    public void t_08_180_trailingSegmentRenamesOfAFolderWindowAreRefused() throws Exception {
+        String onOps = openWindow("u1", "ops", "CONFIGURE");
+        assertTrue(can("u1", ops, Item.CONFIGURE), "premise: the window confers Configure on ops");
+        String[][] attempts = {
+            {"confirmRename/extra", "sandbox21"}, {"confirmRename/extra/", "sandbox22"}, {"confirm%52ename/extra", "sandbox23"},
+            {"confirmRename//extra", "sandbox24"}, {"confirmRename/%2E", "sandbox25"},
+        };
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        for (String[] attempt : attempts) {
+            String path = ops.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "ops", "Folder", "POST " + path);
+            assertNotNull(j.jenkins.getItemByFullName("ops"), path + " must leave the folder ops in place");
+            assertNotNull(j.jenkins.getItemByFullName("ops/prod"), path + " must leave ops/prod under its full name");
+            assertNull(j.jenkins.getItemByFullName(attempt[1]), "nothing may exist at " + attempt[1] + " after " + path);
+            assertFalse(can("u1", opsProd, Item.CONFIGURE), "u1 must hold no Configure on ops/prod after " + path);
+            expected = assertOneMoreViolation(expected, "u1", "ops", path);
+        }
+        assertEquals(200, postConfigXml("u1", ops, "changed-ops"), "guard: the window on ops still confers Configure on it");
+
+        String[][] adminForms = {
+            {"confirmRename/extra", "dest-a"}, {"confirm%52ename/extra", "dest-b"}, {"confirmRename//extra", "dest-c"}, {"confirmRename/%2E", "dest-d"},
+        };
+        for (String[] form : adminForms) {
+            String path = dest.getUrl() + form[0] + "?newName=" + form[1];
+            assertRedirect(RenameRefusalFixtures.postPath(j, "admin", path), "guard: the administrator's POST " + path);
+            assertEquals(form[1], dest.getFullName(), "guard: core renames through " + form[0]);
+        }
+        assertEquals(expected, records(ChangeType.GRANT_VIOLATION).size(), "guard: the administrator's renames record no violation");
+
+        assertSuccess(ApproverFormFixtures.post(j, "admin", "batch-control/grants/" + onOps + "/revoke", List.of()),
+                "fixture: the administrator revokes u1's window");
+        assertFalse(can("u1", ops, Item.CONFIGURE), "after the revocation u1 holds no Configure on ops");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "after the revocation u1 holds no Configure on ops/prod");
+    }
+
+    /**
+     * T-08-181 (security-38 S-38-01, job variants; D-71c rulings 1 and 2): u1 holds one CONFIGURE
+     * window on the job {@code ops/prod}. u1 POSTs {@code job/ops/job/prod/doRename/x},
+     * {@code .../do%52ename/x}, {@code .../confirmRename/x} and {@code .../doRename/%2E}, each with
+     * its own {@code newName}. Each answers 400 with the D-71c refusal for 'ops/prod' (Freestyle
+     * project) and "Nothing was renamed.", the job keeps its name, nothing exists at the new name,
+     * and each adds one GRANT_VIOLATION naming u1 and {@code ops/prod}. Guards: the window still
+     * confers (save 200); the administrator renames {@code sandbox/prod} through
+     * {@code doRename/x}, {@code do%52ename/x} and {@code doRename/%2E} (each 3xx and renamed, no
+     * GRANT_VIOLATION); after the revocation u1 holds no Configure on {@code ops/prod}.
+     */
+    @Test
+    public void t_08_181_trailingSegmentRenamesOfAJobWindowAreRefused() throws Exception {
+        String onProd = openWindow("u1", "ops/prod", "CONFIGURE");
+        assertTrue(can("u1", opsProd, Item.CONFIGURE), "premise: the window confers Configure on ops/prod");
+        String[][] attempts = {{"doRename/x", "prod-a"}, {"do%52ename/x", "prod-b"}, {"confirmRename/x", "prod-c"}, {"doRename/%2E", "prod-d"}};
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        for (String[] attempt : attempts) {
+            String path = opsProd.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "ops/prod", "Freestyle project",
+                    "POST " + path);
+            assertEquals("ops/prod", opsProd.getFullName(), path + " must leave the job under its name");
+            assertNull(j.jenkins.getItemByFullName("ops/" + attempt[1]), "nothing may carry ops/" + attempt[1] + " after " + path);
+            expected = assertOneMoreViolation(expected, "u1", "ops/prod", path);
+        }
+        assertEquals(200, postConfigXml("u1", opsProd, "after-refusals"), "guard: the window still confers Configure on ops/prod");
+
+        String[][] adminForms = {{"doRename/x", "prod-a1"}, {"do%52ename/x", "prod-a2"}, {"doRename/%2E", "prod-a3"}};
+        for (String[] form : adminForms) {
+            String path = sandboxProd.getUrl() + form[0] + "?newName=" + form[1];
+            assertRedirect(RenameRefusalFixtures.postPath(j, "admin", path), "guard: the administrator's POST " + path);
+            assertEquals("sandbox/" + form[1], sandboxProd.getFullName(), "guard: core renames through " + form[0]);
+        }
+        assertEquals(expected, records(ChangeType.GRANT_VIOLATION).size(), "guard: the administrator's renames record no violation");
+
+        assertSuccess(ApproverFormFixtures.post(j, "admin", "batch-control/grants/" + onProd + "/revoke", List.of()),
+                "fixture: the administrator revokes u1's window");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "after the revocation u1 holds no Configure on ops/prod");
+    }
+
+    /**
+     * T-08-182 (security-38 S-38-01, core's second rename path; D-71c ruling 1): u1 holds a CREATE
+     * window on the folder {@code ops} and a DELETE window on the job {@code ops/prod} (the T-08-159
+     * fixture). u1 POSTs {@code job/ops/job/prod/confirmRename/extra}, {@code .../doRename/x} and
+     * {@code .../confirm%52ename/x}, each with its own {@code newName}. Each answers 400 with the
+     * D-71c refusal for 'ops/prod' (Freestyle project), the job keeps its name, nothing exists at the
+     * new name, and each adds one GRANT_VIOLATION naming u1 and {@code ops/prod}. Guard, after the
+     * refusals: both windows still confer what they name.
+     */
+    @Test
+    public void t_08_182_trailingSegmentRenamesThroughDeleteAndCreateWindowsAreRefused() throws Exception {
+        openWindow("u1", "ops", "CREATE");
+        openWindow("u1", "ops/prod", "DELETE");
+        assertTrue(can("u1", ops, Item.CREATE), "premise: the CREATE window confers Item/Create in ops");
+        assertTrue(can("u1", opsProd, Item.DELETE), "premise: the DELETE window confers Item/Delete on ops/prod");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "premise: u1 holds no Configure on ops/prod");
+        String[][] attempts = {{"confirmRename/extra", "prod-e"}, {"doRename/x", "prod-f"}, {"confirm%52ename/x", "prod-g"}};
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        for (String[] attempt : attempts) {
+            String path = opsProd.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "ops/prod", "Freestyle project",
+                    "POST " + path);
+            assertEquals("ops/prod", opsProd.getFullName(), path + " must leave the job under its name");
+            assertNull(j.jenkins.getItemByFullName("ops/" + attempt[1]), "nothing may carry ops/" + attempt[1] + " after " + path);
+            expected = assertOneMoreViolation(expected, "u1", "ops/prod", path);
+        }
+        assertTrue(can("u1", ops, Item.CREATE), "guard: the CREATE window still confers Item/Create in ops");
+        assertTrue(can("u1", opsProd, Item.DELETE), "guard: the DELETE window still confers Item/Delete on ops/prod");
+    }
+
+    /**
+     * T-08-183 (security-38 S-38-01 for core's field check; D-71c ruling 2; the T-08-154 refusal
+     * surface): u1 holds CONFIGURE windows on the folder {@code ops} and the job
+     * {@code sandbox/prod}. {@code GET job/ops/checkNewName/x?newName=ops-new}, the same as a POST
+     * with a crumb, and {@code GET job/ops/check%4EewName/x?newName=ops-new2} each answer 200 with
+     * the field error "Renaming 'ops' (Folder) is not allowed: ..."; {@code GET
+     * job/sandbox/job/prod/checkNewName/x/?newName=prod-new} answers 200 with the error for
+     * 'sandbox/prod' (Freestyle project). None of them renames anything or adds a GRANT_VIOLATION
+     * (a field check is not an attempt). Guard: c1 (standing Item/Configure) gets no error from the
+     * same {@code checkNewName/x} on {@code ops}.
+     */
+    @Test
+    public void t_08_183_trailingSegmentFieldCheckShowsTheRefusalWithoutARecord() throws Exception {
+        openWindow("u1", "ops", "CONFIGURE");
+        openWindow("u1", "sandbox/prod", "CONFIGURE");
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+        String folderRefusal = RenameRefusalFixtures.refusal("ops", "Folder");
+
+        assertFieldRefusal(ApproverFormFixtures.get(j, "u1", ops.getUrl() + "checkNewName/x?newName=ops-new"), folderRefusal,
+                "GET checkNewName/x on the folder");
+        assertFieldRefusal(RenameRefusalFixtures.postPath(j, "u1", ops.getUrl() + "checkNewName/x?newName=ops-new"), folderRefusal,
+                "POST checkNewName/x on the folder");
+        assertFieldRefusal(ApproverFormFixtures.get(j, "u1", ops.getUrl() + "check%4EewName/x?newName=ops-new2"), folderRefusal,
+                "GET check%4EewName/x on the folder");
+        assertFieldRefusal(ApproverFormFixtures.get(j, "u1", sandboxProd.getUrl() + "checkNewName/x/?newName=prod-new"),
+                RenameRefusalFixtures.refusal("sandbox/prod", "Freestyle project"), "GET checkNewName/x/ on the job");
+
+        assertEquals(before, records(ChangeType.GRANT_VIOLATION).size(), "a field check is not recorded as GRANT_VIOLATION");
+        assertEquals("ops", ops.getFullName(), "the field checks rename nothing");
+        assertEquals("sandbox/prod", sandboxProd.getFullName(), "the field checks rename nothing");
+
+        WebResponse standing = ApproverFormFixtures.get(j, "c1", ops.getUrl() + "checkNewName/x?newName=ops-new");
+        assertEquals(200, standing.getStatusCode(), "guard: c1's field check answers a validation result");
+        assertFalse("error".equals(RenameRefusalFixtures.validationKind(standing)), "guard: c1's field check (standing Configure) is no error: "
+                + ApproverFormFixtures.excerpt(standing.getContentAsString()));
+        assertFalse(RenameRefusalFixtures.visible(standing.getContentAsString()).contains("not allowed"), "guard: c1 is not told the rename is not allowed");
+    }
+
+    /**
+     * T-08-184 (security-38 S-38-02; D-73 coalescing): u1 holds a CONFIGURE window on the folder
+     * {@code ops}. u1's rename of {@code ops} to a 6000-character new name is refused (400, the D-71c
+     * refusal) and adds one GRANT_VIOLATION whose detail is bounded: it starts with the attempted
+     * name but holds at most about 255 characters of it (it contains the name's first 200 characters,
+     * not its first 300) and is shorter than 1000 characters in all. The identical attempt repeated at
+     * once adds no record, nor does a 6000-character name that differs only in its last character
+     * (the merge key is the capped name). Guard: a refused rename to a short, different name adds its
+     * own record. {@code ops} keeps its name throughout.
+     */
+    @Test
+    public void t_08_184_longNewNameIsCappedInTheRecordAndItsMergeKey() throws Exception {
+        openWindow("u1", "ops", "CONFIGURE");
+        String longName = "abcdefghij".repeat(600);
+        assertEquals(6000, longName.length(), "fixture: a 6000-character new name");
+        int before = records(ChangeType.GRANT_VIOLATION).size();
+
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", ops, longName), "ops", "Folder", "u1 renaming ops to a 6000-character name");
+        List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(before + 1, violations.size(), "the refused rename is recorded once, got " + violations.size() + " new records");
+        ChangeRecord rec = violations.get(violations.size() - 1);
+        String detail = String.valueOf(rec.getDetail());
+        assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION names u1");
+        assertTrue(detail.contains(longName.substring(0, 200)), "S-38-02: the detail keeps the start of the attempted name: "
+                + ApproverFormFixtures.excerpt(detail));
+        assertFalse(detail.contains(longName.substring(0, 300)), "S-38-02: the detail must hold at most about 255 characters of the name, it holds "
+                + detail.length() + " characters");
+        assertTrue(detail.length() < 1000, "S-38-02: the detail must be bounded, it holds " + detail.length() + " characters");
+        assertTrue(String.valueOf(rec.getTarget()).length() < 1000, "S-38-02: the target must be bounded");
+
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", ops, longName), "ops", "Folder", "the identical attempt repeated");
+        assertEquals(before + 1, records(ChangeType.GRANT_VIOLATION).size(), "D-73: the identical attempt repeated within the minute adds no record");
+        String sameStart = longName.substring(0, longName.length() - 1) + "z";
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", ops, sameStart), "ops", "Folder", "a long name differing only at its end");
+        assertEquals(before + 1, records(ChangeType.GRANT_VIOLATION).size(),
+                "S-38-02: a long name that differs only after the cap shares the capped merge key and adds no record");
+
+        RenameRefusalFixtures.assertWindowRenameRefused(rename("u1", ops, "ops-short"), "ops", "Folder", "guard: a short, different name");
+        assertEquals(before + 2, records(ChangeType.GRANT_VIOLATION).size(), "guard: a different new name writes its own record");
+        assertEquals("ops", ops.getFullName(), "ops keeps its name");
+    }
+
+    /** One more GRANT_VIOLATION than {@code expected}, the newest naming {@code user} and {@code item}; returns the new count. */
+    private static int assertOneMoreViolation(int expected, String user, String item, String what) {
+        List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(expected + 1, violations.size(), what + " must be recorded once as GRANT_VIOLATION, got " + violations.size() + " (was "
+                + expected + ")");
+        ChangeRecord rec = violations.get(violations.size() - 1);
+        assertEquals(user, rec.getUser(), "the GRANT_VIOLATION of " + what + " names " + user);
+        assertTrue(mentions(rec, item), "the GRANT_VIOLATION of " + what + " names " + item + ": " + describe(rec));
+        return expected + 1;
+    }
+
+    /** A field check answered 200 with an error that reads {@code refusal}. */
+    private static void assertFieldRefusal(WebResponse check, String refusal, String what) {
+        assertEquals(200, check.getStatusCode(), what + " answers a validation result: " + ApproverFormFixtures.excerpt(check.getContentAsString()));
+        assertEquals("error", RenameRefusalFixtures.validationKind(check), what + " must be an error for u1: "
+                + ApproverFormFixtures.excerpt(check.getContentAsString()));
+        assertTrue(RenameRefusalFixtures.visible(check.getContentAsString()).contains(refusal), what + " must say '" + refusal + "': "
+                + RenameRefusalFixtures.visible(check.getContentAsString()));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /**
@@ -681,13 +969,14 @@ public class ItemIdentityBindingTest {
         return s.replaceAll("\\s+", " ").trim();
     }
 
-    /** Files a window on {@code fullName} through the form as {@code user}; a1 approves it. */
-    private void openWindow(String user, String fullName, String... actions) throws Exception {
+    /** Files a window on {@code fullName} through the form as {@code user}; a1 approves it. Returns the window's id. */
+    private String openWindow(String user, String fullName, String... actions) throws Exception {
         long before = GrantService.get().listActive().stream().filter(g -> user.equals(g.getUser())).count();
         String id = submitGrantOk(j, user, fullName, Arrays.asList(actions), 30, "maintenance of " + fullName, null, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval by a1");
         long after = GrantService.get().listActive().stream().filter(g -> user.equals(g.getUser())).count();
         assertEquals(before + 1, after, "fixture: " + user + " must hold one more active window");
+        return WindowStateFixtures.windowId(user, fullName);
     }
 
     /** {@code POST <item>/confirmRename} with {@code newName} (core's rename endpoint), redirects not followed. */
