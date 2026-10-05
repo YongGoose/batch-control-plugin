@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.security.DeletionAttribution;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
@@ -68,7 +69,9 @@ public class ItemChangeListener extends ItemListener {
         if (!ChangeRecording.isActive()) {
             return;
         }
-        String user = ChangeRecording.currentUser();
+        // SPEC 6: core deletes the items below a folder as SYSTEM; their DELETE records name the user
+        // who deleted the folder (SYSTEM only when SYSTEM started the deletion).
+        String user = DeletionAttribution.deletingUser(item);
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.DELETE, fullName, user, null);
         Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item);
