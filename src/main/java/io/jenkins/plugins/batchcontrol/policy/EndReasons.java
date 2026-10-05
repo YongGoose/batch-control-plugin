@@ -28,6 +28,16 @@ public final class EndReasons {
     }
 
     /**
+     * D-72b (7): an approved run request whose queue item was cancelled, so it did not start
+     * within the approved-run timeout and is never submitted again.
+     */
+    public static String approvedRunCancelled() {
+        int minutes = BatchControlGlobalConfiguration.get().getApprovedRunTimeoutMinutes();
+        return "Expired: approved but not started within " + minutes + (minutes == 1 ? " minute" : " minutes")
+                + "; its queued run was cancelled.";
+    }
+
+    /**
      * The decision comment of an expired request: the reason, followed by an approver's earlier
      * comment when there is one (it is kept, not replaced).
      */
