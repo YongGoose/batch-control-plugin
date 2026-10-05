@@ -89,7 +89,8 @@ renaming a job or folder of any kind, because permissions matched by full name
 follow a rename: renaming needs an administrator, or the user's own
 `Item/Configure` on the item, or their own `Item/Delete` on it plus
 `Item/Create` in its parent. A refused move or rename changes
-nothing, tells the user why and is recorded as a `GRANT_VIOLATION`. While run
+nothing, tells the user why and is recorded as a `GRANT_VIOLATION` (once per
+minute for the same attempt). While run
 control is also on, a job moved by a non-administrator arrives the way a newly
 created job does: not activated and locked, recorded as `HELD`, so it needs a
 new activation before it runs unattended again. The rule covers the folders
