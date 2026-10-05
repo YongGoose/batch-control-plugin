@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.ops;
 
+import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
@@ -11,14 +12,15 @@ import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.IncidentTransition;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
+import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Ids;
+import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.time.YearMonth;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -175,10 +177,15 @@ public final class IncidentService {
     // ---------------------------------------------------------------- rerun (SPEC item 11)
 
     /**
-     * Creates a rerun {@link RunRequest} prefilled with the incident's original (stored,
-     * sensitive-masked) parameters and links it both ways: {@code request.incidentId} and
+     * Creates a rerun {@link RunRequest} carrying the failed run's own parameter values (D-72:
+     * taken from the build's {@code ParametersAction}, original secrets and recoverable file
+     * values included) and links it both ways: {@code request.incidentId} and
      * {@code incident.rerunRequestIds}. The caller becomes the requester; permission and
      * approver checks are those of {@link RunRequestService#create}.
+     *
+     * @throws RerunNeedsFormException when a value of the failed run cannot be recovered (a
+     *         stashed file, a core file whose copy under the build is gone, a deleted build); no
+     *         request is created and the rerun continues on the job's Request Run form
      */
     public RunRequest rerun(String incidentId, String approver) {
         return rerun(incidentId, io.jenkins.plugins.batchcontrol.model.Approvers.of(approver));
@@ -209,11 +216,17 @@ public final class IncidentService {
             throw new IllegalArgumentException("The incident's job '" + incident.getJobFullName()
                     + "' no longer exists; a rerun cannot be requested.");
         }
+        // D-72: the permission checks of RunRequestService#create, made first, so a caller who may
+        // not request this run neither has the failed run's values read for them nor prefilled.
+        job.checkPermission(BatchControlPermissions.REQUEST);
+        job.checkPermission(Item.READ);
         String reason = "Rerun requested from incident " + incidentId
                 + " (failed run " + incident.getRunId() + ")";
+        List<ParameterValue> values = RerunParameters.recover(job, incident);
         // Created outside this service's lock: the request service takes its own lock and
-        // there is no call path back into this service from request creation.
-        RunRequest request = RunRequestService.get().create(job, incident.getParameters(),
+        // there is no call path back into this service from request creation. A refused
+        // creation disposes of the file copies made for it.
+        RunRequest request = RunRequestService.get().create(job, values,
                 reason, approvers, incidentId);
         lock.lock();
         try {
@@ -251,27 +264,13 @@ public final class IncidentService {
     // ---------------------------------------------------------------- capture helpers (D-19)
 
     /**
-     * The build's parameters as strings, sensitive values replaced by the mask. The plaintext
+     * The build's parameters in their masked display form ({@link ParameterDisplay}, D-72): a
+     * sensitive value is the mask, a file value {@code [file] <original file name>}. The plaintext
      * of a sensitive value never leaves this method.
      */
     public static Map<String, String> maskedParameters(Run<?, ?> run) {
-        Map<String, String> parameters = new LinkedHashMap<>();
         ParametersAction action = run.getAction(ParametersAction.class);
-        if (action == null) {
-            return parameters;
-        }
-        for (ParameterValue value : action.getParameters()) {
-            if (value == null) {
-                continue;
-            }
-            if (value.isSensitive()) {
-                parameters.put(value.getName(), SecretMasker.MASK);
-            } else {
-                Object raw = value.getValue();
-                parameters.put(value.getName(), raw == null ? "" : String.valueOf(raw));
-            }
-        }
-        return parameters;
+        return ParameterDisplay.masked(action == null ? null : action.getParameters());
     }
 
     /**

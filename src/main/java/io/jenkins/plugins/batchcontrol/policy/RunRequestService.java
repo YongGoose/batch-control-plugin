@@ -28,10 +28,12 @@ import io.jenkins.plugins.batchcontrol.queue.ApprovedRunAction;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
+import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -65,7 +67,7 @@ public final class RunRequestService {
 
     private static final Logger LOGGER = Logger.getLogger(RunRequestService.class.getName());
 
-    /** D-22 size limits: reason and per-parameter value. */
+    /** D-22 size limits: reason and per-parameter display value (D-72). */
     private static final int MAX_REASON_LENGTH = 4000;
     private static final int MAX_PARAMETER_VALUE_LENGTH = 10000;
 
@@ -168,6 +170,24 @@ public final class RunRequestService {
         return create(job, parameters, reason, Approvers.of(approver), incidentId);
     }
 
+    /** Typed-value form (D-72) of {@link #create(Job, Map, String, String)}. */
+    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
+                             String approver) {
+        return create(job, values, reason, Approvers.of(approver), null);
+    }
+
+    /** Typed-value form (D-72) of {@link #create(Job, Map, String, List)}. */
+    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
+                             List<String> approvers) {
+        return create(job, values, reason, approvers, null);
+    }
+
+    /** Typed-value form (D-72) of {@link #create(Job, Map, String, String, String)}. */
+    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
+                             String approver, String incidentId) {
+        return create(job, values, reason, Approvers.of(approver), incidentId);
+    }
+
     /**
      * Whether the current user could submit a run request for {@code job} (e2e-03 DEF-12, SPEC
      * section 6 usability): {@code BatchControl/Request} and {@code Item/Read} on the job (D-38a), the
@@ -264,20 +284,87 @@ public final class RunRequestService {
      * Creates a PENDING run request linked to an incident (SPEC item 11: a rerun request
      * carries {@code incidentId} so the run listener can auto-link a successful rerun back
      * to the incident). Every designated approver must pass the SPEC item 3 checks (D-37).
+     *
+     * <p>D-72: each string value becomes a typed value through the job's parameter definition
+     * ({@link SimpleParameterDefinition#createValue(String)}), or a {@link StringParameterValue}
+     * where the job defines no such simple parameter, and the request is created as by
+     * {@link #create(Job, List, String, List, String)}. A value the definition refuses (a choice
+     * outside its choices) is an {@link IllegalArgumentException}.
      */
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
                              List<String> approvers, String incidentId) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
-        // D-38a: Request is asked of the requested job (a grant on another job or folder does not
-        // count; a global grant is inherited).
-        job.checkPermission(BatchControlPermissions.REQUEST);
-        // D-38a: Item/Read on the job, not Item/Build. Request decides who may ask; the approver
-        // sees when the requester lacks Build (requesterLacksBuild). Checked before anything is
-        // stored; AccessDeniedException3 answers 403 on the web layer.
-        job.checkPermission(Item.READ);
-        String requester = Jenkins.getAuthentication2().getName();
+        checkCanRequest(job);
+        checkReason(reason);
+        return create(job, typedValues(job, parameters), reason, approvers, incidentId);
+    }
 
+    /**
+     * Creates a PENDING run request holding the submitted typed values (D-72), linked to an
+     * incident when {@code incidentId} is given. The masked display map is derived from the values
+     * here, once; the per-value length limit (D-22) applies to it. The approved build is
+     * scheduled with the values unchanged.
+     *
+     * <p>The request takes over the temporary files of the values' file parameters: when the
+     * request is refused (permission, reason, size, approvers) they are disposed of before the
+     * exception propagates ({@link ParameterFiles}).
+     */
+    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
+                             List<String> approvers, String incidentId) {
+        Objects.requireNonNull(job, "job");
+        Objects.requireNonNull(values, "values");
+        List<ParameterValue> submitted = new ArrayList<>(values);
+        RunRequest request;
+        boolean stored = false;
+        try {
+            checkCanRequest(job);
+            String requester = Jenkins.getAuthentication2().getName();
+            checkReason(reason);
+            Map<String, String> display = ParameterDisplay.masked(submitted);
+            for (Map.Entry<String, String> entry : display.entrySet()) {
+                String value = entry.getValue();
+                if (value != null && value.length() > MAX_PARAMETER_VALUE_LENGTH) {
+                    throw new IllegalArgumentException("Parameter '" + entry.getKey()
+                            + "' exceeds " + MAX_PARAMETER_VALUE_LENGTH + " characters.");
+                }
+            }
+            List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
+
+            request = RunRequest.create(job.getFullName(), submitted, display, reason,
+                    requester, designated);
+            if (incidentId != null) {
+                request.setIncidentId(incidentId);
+            }
+            lock.lock();
+            try {
+                persist(request);
+            } finally {
+                lock.unlock();
+            }
+            stored = true;
+        } finally {
+            if (!stored) {
+                ParameterFiles.dispose(submitted, "a refused run request for job '" + job.getFullName() + "'");
+            }
+        }
+        NotificationDispatcher.run(NotificationEvent.REQUEST_CREATED, request);
+        return request;
+    }
+
+    /**
+     * The permission checks of a run request submission (D-38a): {@code BatchControl/Request} on
+     * the requested job (a grant on another job or folder does not count; a global grant is
+     * inherited) and {@code Item/Read}, not {@code Item/Build}. Request decides who may ask; the
+     * approver sees when the requester lacks Build ({@link #requesterLacksBuild}). Checked before
+     * anything is stored; AccessDeniedException3 answers 403 on the web layer.
+     */
+    private static void checkCanRequest(Job<?, ?> job) {
+        job.checkPermission(BatchControlPermissions.REQUEST);
+        job.checkPermission(Item.READ);
+    }
+
+    private static void checkReason(String reason) {
         if (reason == null || reason.trim().isEmpty()) {
             throw new IllegalArgumentException("A reason is required to create a run request.");
         }
@@ -285,28 +372,6 @@ public final class RunRequestService {
             throw new IllegalArgumentException("The reason must not exceed "
                     + MAX_REASON_LENGTH + " characters.");
         }
-        for (Map.Entry<String, String> entry : parameters.entrySet()) {
-            String value = entry.getValue();
-            if (value != null && value.length() > MAX_PARAMETER_VALUE_LENGTH) {
-                throw new IllegalArgumentException("Parameter '" + entry.getKey()
-                        + "' exceeds " + MAX_PARAMETER_VALUE_LENGTH + " characters.");
-            }
-        }
-        List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
-
-        RunRequest request = RunRequest.create(job.getFullName(), parameters, reason,
-                requester, designated);
-        if (incidentId != null) {
-            request.setIncidentId(incidentId);
-        }
-        lock.lock();
-        try {
-            persist(request);
-        } finally {
-            lock.unlock();
-        }
-        NotificationDispatcher.run(NotificationEvent.REQUEST_CREATED, request);
-        return request;
     }
 
     // ---------------------------------------------------------------- decisions (SPEC 3, 5)
@@ -335,6 +400,7 @@ public final class RunRequestService {
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(reason);
                 persist(request);
+                disposeFiles(request);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                 throw new IllegalStateException("Request " + id
                         + " passed its pending timeout and is now EXPIRED.");
@@ -391,6 +457,7 @@ public final class RunRequestService {
             request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
             persist(request);
+            disposeFiles(request);
         } finally {
             lock.unlock();
         }
@@ -418,6 +485,7 @@ public final class RunRequestService {
             request.setDecidedAt(BatchClock.now());
             request.setDecidedBy(caller);
             persist(request);
+            disposeFiles(request);
             // D-54: the approvers (and the requester, when a Manage holder cancelled) are told.
             NotificationDispatcher.runEnded(NotificationEvent.CANCELLED, request, true, "Cancelled by " + caller);
             return request;
@@ -523,6 +591,9 @@ public final class RunRequestService {
                 request.setStatus(RequestStatus.EXPIRED);
                 request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
                 persist(request);
+                // D-72: this submission is refused, so the values never reach the queue (the
+                // ticket is unclaimed: checked above).
+                disposeFiles(request);
                 NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                 LOGGER.warning(() -> "Refusing approval marker of request " + requestId
                         + ": the approved-run timeout passed before submission (now EXPIRED)");
@@ -626,6 +697,7 @@ public final class RunRequestService {
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(reason);
                     persist(request);
+                    disposeFiles(request);
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (pending timeout)");
@@ -638,6 +710,11 @@ public final class RunRequestService {
                     request.setStatus(RequestStatus.EXPIRED);
                     request.setDecisionComment(EndReasons.withEarlierComment(reason, request.getDecisionComment()));
                     persist(request);
+                    // D-72: not in the queue and never executed; a claimed ticket means the queue
+                    // took the values (a cancelled queue item disposes of them itself).
+                    if (request.getQueuedAt() == null) {
+                        disposeFiles(request);
+                    }
                     NotificationDispatcher.runEnded(NotificationEvent.EXPIRED, request, false, reason);
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (approved-run timeout)");
@@ -705,6 +782,9 @@ public final class RunRequestService {
      */
     public List<String> invalidateForJob(String oldFullName, String reason) {
         List<String> invalidated = new ArrayList<>();
+        // D-72: read before this service's lock is taken (lock order with the queue).
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        Set<String> queued = jenkins == null ? new HashSet<>() : queuedMarkerRequestIds(jenkins);
         for (RunRequest snapshot : store.listOpenRunRequests()) {
             if (!oldFullName.equals(snapshot.getJobFullName())) {
                 continue;
@@ -731,6 +811,11 @@ public final class RunRequestService {
                         request.setDecisionComment(reason);
                     }
                     persist(request);
+                    // D-72: an approval already handed to the queue is cancelled there
+                    // (RequestInvalidationListener), and the cancelled item disposes of its files.
+                    if (wasPending || request.getQueuedAt() == null && !queued.contains(request.getId())) {
+                        disposeFiles(request);
+                    }
                     NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
                     invalidated.add(request.getId());
                     LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
@@ -899,9 +984,9 @@ public final class RunRequestService {
             return;
         }
         // ACL.SYSTEM2 switch: permission checks are complete (see method javadoc) — the
-        // requester's REQUEST + Item/Build at creation, the approver's ApprovalPolicy decision
-        // before the APPROVED commit. Lookup, parameter reconstruction and scheduling run as
-        // SYSTEM so none of them depends on the approver's access to the job.
+        // requester's REQUEST + Item/Read at creation (D-38a), the approver's ApprovalPolicy
+        // decision before the APPROVED commit. Lookup and scheduling run as SYSTEM so neither
+        // depends on the approver's access to the job.
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
             Job<?, ?> job = jenkins.getItemByFullName(request.getJobFullName(), Job.class);
             if (job == null) {
@@ -910,7 +995,8 @@ public final class RunRequestService {
                 return;
             }
             List<Action> actions = new ArrayList<>();
-            List<ParameterValue> values = parameterValues(job, request.getParameters());
+            // D-72: the stored typed values, unchanged: original secrets and files included.
+            List<ParameterValue> values = request.parameterValues();
             if (!values.isEmpty()) {
                 actions.add(new ParametersAction(values));
             }
@@ -929,8 +1015,22 @@ public final class RunRequestService {
         }
     }
 
-    /** Reconstructs typed parameter values through the job's parameter definitions. */
-    private static List<ParameterValue> parameterValues(Job<?, ?> job, Map<String, String> parameters) {
+    /**
+     * D-72: {@code request} has just ended without a run (its end state is persisted), so the
+     * temporary files of its values are disposed of. Called only when the values were never handed
+     * to the queue; once they were, the queue and the build own the files.
+     */
+    private static void disposeFiles(RunRequest request) {
+        ParameterFiles.dispose(request.parameterValues(),
+                "run request " + request.getId() + " (" + request.getStatus() + ")");
+    }
+
+    /**
+     * Converts string values to typed values through the job's parameter definitions (the
+     * service API's string form): a {@link SimpleParameterDefinition} creates the value, any
+     * other name becomes a {@link StringParameterValue}.
+     */
+    private static List<ParameterValue> typedValues(Job<?, ?> job, Map<String, String> parameters) {
         List<ParameterValue> values = new ArrayList<>();
         ParametersDefinitionProperty definitions = job.getProperty(ParametersDefinitionProperty.class);
         for (Map.Entry<String, String> entry : parameters.entrySet()) {

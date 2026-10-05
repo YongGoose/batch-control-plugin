@@ -1,9 +1,11 @@
 package io.jenkins.plugins.batchcontrol.model;
 
+import hudson.model.ParameterValue;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Ids;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,13 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 /**
  * A request to run a specific job with a fixed set of parameters (SPEC section 3).
  * Persisted as XStream XML at {@code requests/run/<id>.xml}.
+ *
+ * <p>D-72: the request keeps two forms of its parameters. {@code parameterValues} holds the
+ * submitted {@link ParameterValue} objects as XStream writes them (a {@code Secret} field in
+ * Jenkins' encrypted form); the approved build is scheduled with them unchanged. They are read
+ * only through {@link #parameterValues()}, which is deliberately not a getter, so neither Jelly
+ * nor Stapler can reach them. {@code parameters} is the masked display map derived from them once
+ * at submission ({@link #getParameters()}), the only form shown or written anywhere else.
  *
  * <p>Timestamps are persisted as epoch milliseconds ({@code long}) because the Jenkins XStream
  * class filter does not allow {@code java.time.Instant}; the accessors expose {@link Instant}.
@@ -71,6 +80,9 @@ public final class RunRequest {
 
     private final String id;
     private final String jobFullName;
+    /** D-72: the submitted typed values; {@code null} in files written before they existed. */
+    private final List<ParameterValue> parameterValues;
+    /** D-72: the masked display map derived from {@link #parameterValues} at submission. */
     private final Map<String, String> parameters;
     private final String reason;
     private final String requester;
@@ -105,10 +117,12 @@ public final class RunRequest {
     /** Human-readable history note for an INVALIDATED request (D-21: target renamed/moved). */
     private String invalidationReason;
 
-    private RunRequest(String id, String jobFullName, Map<String, String> parameters, String reason,
-                       String requester, List<String> approvers, RequestStatus status, Instant createdAt) {
+    private RunRequest(String id, String jobFullName, List<ParameterValue> parameterValues,
+                       Map<String, String> parameters, String reason, String requester, List<String> approvers,
+                       RequestStatus status, Instant createdAt) {
         this.id = id;
         this.jobFullName = jobFullName;
+        this.parameterValues = new ArrayList<>(parameterValues);
         this.parameters = new LinkedHashMap<>(parameters);
         this.reason = reason;
         this.requester = requester;
@@ -119,14 +133,32 @@ public final class RunRequest {
 
     /**
      * Creates a new PENDING request with a random UUID id (D-68) and its creation time
-     * from {@link BatchClock}.
+     * from {@link BatchClock}, holding the typed {@code values} and the masked display map
+     * {@code parameters} derived from them (D-72). Only {@code policy.RunRequestService} derives
+     * the map and calls this.
+     */
+    public static RunRequest create(String jobFullName, List<ParameterValue> values, Map<String, String> parameters,
+                                    String reason, String requester, List<String> approvers) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Objects.requireNonNull(values, "values");
+        Objects.requireNonNull(parameters, "parameters");
+        List<ParameterValue> present = new ArrayList<>(values.size());
+        for (ParameterValue value : values) {
+            if (value != null) {
+                present.add(value);
+            }
+        }
+        return new RunRequest(Ids.newRequestId(), jobFullName, present, parameters, reason, requester, approvers,
+                RequestStatus.PENDING, BatchClock.now());
+    }
+
+    /**
+     * Creates a new PENDING request that holds only a display map and no typed values (store
+     * fixtures); an approval of it runs the build without parameters.
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, List<String> approvers) {
-        Objects.requireNonNull(jobFullName, "jobFullName");
-        Objects.requireNonNull(parameters, "parameters");
-        return new RunRequest(Ids.newRequestId(), jobFullName, parameters, reason, requester, approvers,
-                RequestStatus.PENDING, BatchClock.now());
+        return create(jobFullName, List.of(), parameters, reason, requester, approvers);
     }
 
     /** Single-approver form, kept for callers written before D-37. */
@@ -151,9 +183,23 @@ public final class RunRequest {
         return jobFullName;
     }
 
-    /** A defensive copy; the stored parameters never change after creation. */
+    /**
+     * The masked display map (D-72): a sensitive value is {@code ********}, a file value
+     * {@code [file] <original file name>}. A defensive copy; it never changes after creation.
+     */
     public Map<String, String> getParameters() {
         return parameters == null ? new LinkedHashMap<>() : new LinkedHashMap<>(parameters);
+    }
+
+    /**
+     * D-72: the submitted typed values, unmodifiable and possibly empty, including original
+     * secrets and file values. For scheduling the approved build and disposing of its files
+     * only; never displayed. Deliberately not a bean getter, so Jelly property access and
+     * Stapler URL binding cannot reach it.
+     */
+    @Restricted(NoExternalUse.class)
+    public List<ParameterValue> parameterValues() {
+        return parameterValues == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(parameterValues));
     }
 
     public String getReason() {
