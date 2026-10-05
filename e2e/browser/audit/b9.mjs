@@ -51,7 +51,7 @@ await decide(g.url); const g3 = gidOf(g.url);
 v0 = (await viol()).length;
 const r3 = await addSelf('/job/team/job/app-1/configure', 'B9-03-1-adding-self');
 await sleep(1000); const e3 = await reqEntries('/job/team/job/app-1/'); const nv3 = (await viol()).length - v0;
-row('B9-03', { roles: 'requester (FOLDER team window)', V: 'n.a.', G: `${e3.length === 0 ? '✓' : '✗'} requester added himself on team/app-1 and saved (${r3.status}); entry removed`, R: '✗ silent, as B9-01 (DEF-35)', C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-adding-self' : '✗', defect: 'DEF-35 (new)' });
+row('B9-03', { roles: 'requester (window on the folder team)', V: 'n.a.', G: `${e3.length === 0 ? '✓' : '✗'} requester added himself on team/app-1 and saved (${r3.status}); entry removed`, R: '✗ silent, as B9-01 (DEF-35)', C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-adding-self' : '✗', defect: 'DEF-35 (new)' });
 await uiRevoke(g3);
 }
 // B9-04..06 under a CREATE window on team/ (plus a CONFIGURE window on the copy source for B9-06)

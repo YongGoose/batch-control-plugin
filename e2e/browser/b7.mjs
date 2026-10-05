@@ -121,11 +121,11 @@ steps.expiry = async () => {
 
 steps.folder = async () => {
   const rq = await login('requester'); const p = rq.page;
-  // B7-12 FOLDER CONFIGURE
+  // B7-12 CONFIGURE window on the folder team
   let g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: 'Folder-wide configure (B7-12).' });
   await decide(g.url);
-  log(L, `B7-12 FOLDER team CONFIGURE: team/app-1/configure -> ${await status('/job/team/job/app-1/configure', p)}; batch-cron/configure -> ${await status('/job/batch-cron/configure', p)}; team/configure -> ${await status('/job/team/configure', p)}`);
-  // B7-13/14 FOLDER CREATE without restriction
+  log(L, `B7-12 folder team CONFIGURE: team/app-1/configure -> ${await status('/job/team/job/app-1/configure', p)}; batch-cron/configure -> ${await status('/job/batch-cron/configure', p)}; team/configure -> ${await status('/job/team/configure', p)}`);
+  // B7-13/14 CREATE window on the folder team, no restriction
   g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: 'Create any job in team/ (B7-13).' });
   await decide(g.url);
   const gid = g.url.split('/grants/')[1].replace('/', '');

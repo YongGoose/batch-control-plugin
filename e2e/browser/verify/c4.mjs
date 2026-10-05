@@ -12,7 +12,7 @@ if (on('C-07')) {
   await Promise.all([p.waitForNavigation(), p.locator('#ok-button').click()]); await Promise.all([p.waitForNavigation(), p.locator('button[name="Submit"]').click()]);
   const own = await cfg('requester', `/job/team/job/app-c07-${T}/configure`); const other = await cfg('requester', '/job/team/job/app-1/configure'); const folder = await cfg('requester', '/job/team/configure');
   await uiRevoke(gidOf(g.url));
-  row('C-07', { roles: 'requester (FOLDER team CREATE window)', V: 'n.a.', G: `${own === 200 && other === 403 && folder === 403 ? '✓' : '✗'} own new job team/app-c07-${T} configure ${own}; descendant not created by him team/app-1 ${other}; the folder itself ${folder}`, R: '✓ core 403 on typed URLs (nothing offered)', C: 'n.a.', E: '✓ text' });
+  row('C-07', { roles: 'requester (CREATE window on the folder team)', V: 'n.a.', G: `${own === 200 && other === 403 && folder === 403 ? '✓' : '✗'} own new job team/app-c07-${T} configure ${own}; descendant not created by him team/app-1 ${other}; the folder itself ${folder}`, R: '✓ core 403 on typed URLs (nothing offered)', C: 'n.a.', E: '✓ text' });
 }
 if (on('C-11')) {
   const ad = await login('admin'); await ad.page.goto(`${BASE}/manage/configure`);

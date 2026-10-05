@@ -353,7 +353,7 @@ For a machine without Node.js: `r6/lib.py` is `extra/lib.mjs` ported to Python P
 Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
 `screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
 and the `prod/` folder (script console, arrangement only; JCasC drops the accounts' matrix entries
-on the next boot), `grants.py <user> <JOB|FOLDER> <full name> <ACTIONS> [minutes]` requests a
+on the next boot), `grants.py <user> <full name> <ACTIONS> [minutes]` requests a
 window over REST and has `approver-1` approve it, `move.py <id> <user> <source> <destination>
 <refused|moved>` drives the folders Move page (D-59), `s2*.py` role-strategy 918 pages, `s3.py`
 global matrix conversion, `s4*.py` new job page, `s5*.py` tab bar and destructive controls,
@@ -403,7 +403,7 @@ approver-2), `move.py MV mover1 prod/mv-job ops moved`, revoke the DELETE window
 (`POST /batch-control/grants/active/<id>/revoke`), `setup_grants.py b <id>` (pending 1-minute request), `s89.py`
 (grants tables at 1280 px; `TAG=-b` for a second pass), `s86.py <1-minute grant id>` / `s86b.py` (monitor sentence,
 Mark as reviewed, old URL), `s71.py`, `s74.py`, `s74b.py`, `s83.py` (on `prod/y`), `smoke.py` (after
-`grants.py requester JOB team/app-1 CONFIGURE 1`), `s85.py`, and last `d59b.py arrange|create|viol|cc <bool>` with
+`grants.py requester team/app-1 CONFIGURE 1`), `s85.py`, and last `d59b.py arrange|create|viol|cc <bool>` with
 `move.py` (D-59b: applies `casc/profile-role-naming.yaml` and role-strategy's role-based naming strategy; it
 replaces the matrix profile, so run it last or reset).
 
@@ -415,7 +415,7 @@ Round E2E-4 (backlog fixes #71-#91, 2026-10-03). `r9/lib.py` is `r8/lib.py` with
 `s73.py` the ListView `nightly`. One script per issue: `s71.py` (activation form at
 `<item>/batch-control-activation/`, D-64), `s72.py`/`s72b.py` (new job page card, classic page),
 `s73.py` (Request Change Permission through a view), `s74*.py`, `s75.py`, `s76.py` (badges against the
-admin's lists), `s83.py` (refusal links; run `grants.py mover1 FOLDER ops CREATE 60` first), `s85.py`,
+admin's lists), `s83.py` (refusal links; run `grants.py mover1 ops CREATE 60` first), `s85.py`,
 `s86.py`, `s87.py`, `s88.py`, `s89.py`; regression: `smoke.py` (needs a 1-minute CONFIGURE window on
 `team/app-1` for requester), `d38b.py`, `s3.py`, `r_role.py`, `checklist.py`, `c16.py`. The scripts
 create state and are not idempotent: run them once on a fresh JENKINS_HOME, in that order.

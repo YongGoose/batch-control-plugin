@@ -8,7 +8,7 @@ const tag = Date.now(); const T = String(tag).slice(-4);
 const gidOf = (u) => u.match(/(\d{8}-\d{6}-\w+)/)[1];
 const cfgStatus = async (u, p) => { const c = await login(u); const s = (await c.page.goto(BASE + p)).status(); await c.context.close(); return s; };
 const rq = await login('requester'); const p = rq.page;
-if (on('JOB')) {
+if (on('job') || on('JOB')) {
   // B7-02..B7-08
   const c0 = await cfgStatus('requester', '/job/batch-daily/configure');
   const g = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-02 ${tag}: edit the batch-daily description` });
@@ -22,7 +22,7 @@ if (on('JOB')) {
   const ap = await login('approver-1'); await ap.page.goto(g.url);
   const at = await mainText(ap.page);
   const s3 = await shot(ap.page, ['#main-panel table', 'form[name="approve"]'], 'B7-03-approver-detail', { pad: 8 });
-  row('B7-03', { roles: 'approver-1', V: `${await ap.page.locator('form[name="approve"]').count() ? '✓' : '✗'} decision form for the designated approver`, G: `${/Scope JOB: batch-daily/.test(at) && /Actions CONFIGURE/.test(at) && /Duration 15 minutes/.test(at) && /Requester requester/.test(at) ? '✓' : '✗'} one screen: scope, actions, duration, status, requester, approvers, reason, and what approving grants ("${((at.match(/Approving[^.]*\./) || at.match(/[^.]*grants [^.]*permission[^.]*\./i) || [''])[0]).slice(0, 110)}")`, R: 'n.a.', C: 'n.a.', E: s3 ? '✓ B7-03-approver-detail' : '✗' });
+  row('B7-03', { roles: 'approver-1', V: `${await ap.page.locator('form[name="approve"]').count() ? '✓' : '✗'} decision form for the designated approver`, G: `${/Scope Freestyle project batch-daily/.test(at) && /Actions CONFIGURE/.test(at) && /Duration 15 minutes/.test(at) && /Requester requester/.test(at) ? '✓' : '✗'} one screen: scope, actions, duration, status, requester, approvers, reason, and what approving grants ("${((at.match(/Approving[^.]*\./) || at.match(/[^.]*grants [^.]*permission[^.]*\./i) || [''])[0]).slice(0, 110)}")`, R: 'n.a.', C: 'n.a.', E: s3 ? '✓ B7-03-approver-detail' : '✗' });
   await ap.page.fill('form[name="approve"] textarea[name="comment"]', 'ok'); await Promise.all([ap.page.waitForLoadState('load'), ap.page.locator('form[name="approve"] button').first().click()]); await ap.context.close();
   await p.goto(`${BASE}/batch-control/grants/`);
   const ar = p.locator('table:has(th:has-text("Expires")) tbody tr', { hasText: gid }).first(); const art = (await ar.innerText()).replace(/\s+/g, ' ');
@@ -68,14 +68,14 @@ if (on('B7-09')) {
   row('B7-09', { roles: 'requester', V: 'n.a.', G: `${r && r.status() === 403 && before === after ? '✓' : '✗'} 1-minute window, configure open, Save after 75 s -> ${r && r.status()}, config unchanged`, R: `✗ core "${t.slice(0, 80)}" is the documented refusal (SPEC 8, D-33), but the compensating guidance SPEC 8 puts on the Grants screen is missing: the request still reads "${gt.slice(0, 90)}", no expired-window history, no re-request link (${reReq}) (DEF-18)`, C: 'n.a.', E: s && s2 ? '✓ B7-09-save-after-expiry, B7-10-grants-after-expiry' : '✗', defect: 'DEF-18 (known)' });
 }
 let folderGid;
-if (on('FOLDER')) {
-  // B7-12 FOLDER team CONFIGURE
+if (on('folder') || on('FOLDER')) {
+  // B7-12 folder team CONFIGURE
   const g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-12 ${tag}: folder window` });
   await decide(g.url, 'approve', 'ok');
   const a = await cfgStatus('requester', '/job/team/job/app-1/configure'), b = await cfgStatus('requester', '/job/team/configure'), c = await cfgStatus('requester', '/job/batch-cron/configure');
-  row('B7-12', { roles: 'requester', V: 'n.a.', G: `${a === 200 && b === 200 && c === 403 ? '✓' : '✗'} FOLDER team CONFIGURE: team/app-1 ${a}, team ${b}, batch-cron ${c}`, R: 'n.a.', C: 'n.a.', E: '✓ text' });
+  row('B7-12', { roles: 'requester', V: 'n.a.', G: `${a === 200 && b === 200 && c === 403 ? '✓' : '✗'} folder team CONFIGURE: team/app-1 ${a}, team ${b}, batch-cron ${c}`, R: 'n.a.', C: 'n.a.', E: '✓ text' });
   await uiRevoke(gidOf(g.url));
-  // B7-13 / B7-14 FOLDER team CREATE, no restriction
+  // B7-13 / B7-14 folder team CREATE, no restriction
   const g2 = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B7-13 ${tag}: create without restriction` });
   await decide(g2.url, 'approve', 'ok'); const gid2 = gidOf(g2.url);
   await p.goto(`${BASE}/job/team/`); await p.locator('#side-panel a:has-text("New Item")').click(); await p.waitForLoadState('load');

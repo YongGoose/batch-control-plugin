@@ -19,7 +19,7 @@ await f.locator('input[name="actions"][value="CONFIGURE"]').setChecked(true, { f
 await f.locator('textarea[name="reason"]').fill('verify: grant request left to expire');
 await f.locator('input[name="approvers"][value="approver-2"]').check({ force: true });
 await Promise.all([page.waitForLoadState('load'), f.locator('button[name="Submit"]').click()]);
-ids.grant = (page.url().match(/grants\/(\d{8}-\d{6}-\w+)/) || [])[1] || ((await text(page)).match(/(\d{8}-\d{6}-\w+)\s+JOB: fresh-secret\s+CONFIGURE[^\n]*PENDING/) || [])[1];
+ids.grant = (page.url().match(/grants\/([0-9a-f]{8}-[0-9a-f-]{27}|\d{8}-\d{6}-\w+)/) || [])[1]; // D-71: lands on the request's own page
 ids.at = new Date().toISOString();
 log('expiry setup', ids);
 fs.writeFileSync(`${OUT}/verify-expiry.json`, JSON.stringify(ids));

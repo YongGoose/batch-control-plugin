@@ -99,7 +99,7 @@ ids["g_pending_folder"] = grant_req("requester", "prod", ["CREATE"], 15, "New pr
 # --- changes under windows (a change record per save)
 r = api("requester", "/job/batch-daily/submitDescription", "POST", data={"description": "Daily batch (edited under window e2e-12)"})
 ids["change_desc_status"] = r.status_code
-r = api("requester", "/job/team/job/app-1/submitDescription", "POST", data={"description": "app-1 edited under FOLDER window"})
+r = api("requester", "/job/team/job/app-1/submitDescription", "POST", data={"description": "app-1 edited under the window on the folder team"})
 ids["change_desc2_status"] = r.status_code
 r = api("admin", "/job/ops/job/a/submitDescription", "POST", data={"description": "admin edit"})
 ids["change_admin_status"] = r.status_code

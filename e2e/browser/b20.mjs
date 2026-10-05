@@ -40,7 +40,7 @@ log(L, `B20-02 REST grant request while change control is off -> ${r2.status} "$
 await setGlobal(ad.page, { changeControlEnabled: true });
 const c3 = [(await rq.page.goto(`${BASE}/job/batch-daily/configure`)).status(), (await rq.page.goto(`${BASE}/job/team/job/app-1/configure`)).status()];
 await rq.page.goto(`${BASE}/batch-control/grants/`);
-const act = (await rq.page.locator('table:has(th:has-text("Expires")) tbody tr').allInnerTexts()).filter((t) => /B20|batch-daily|FOLDER: team/.test(t));
+const act = (await rq.page.locator('table:has(th:has-text("Expires")) tbody tr').allInnerTexts()).filter((t) => /B20|batch-daily|Folder team/.test(t));
 log(L, `B20-03 change control back on: requester configure ${c3}; active windows for the two ${JSON.stringify(act)}`);
 // B20-04 history content unchanged (only appended)
 const now = { changes: (await api('admin', '/batch-control/history/changes.csv')).text, requests: (await api('admin', '/batch-control/history/requests.csv')).text };

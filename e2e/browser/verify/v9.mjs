@@ -45,7 +45,7 @@ g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, 
 v0 = (await viol()).length; const nd3 = `folder window edit ${T}`;
 const r3 = await addSelf('/job/team/job/app-1/configure', nd3, 'B9-03-1-refusal-page');
 const e3 = await reqEntries('/job/team/job/app-1/'); const d3 = await desc('/job/team/job/app-1/'); const nv3 = (await viol()).length - v0;
-row('B9-03', { roles: 'requester (FOLDER team window)', V: 'n.a.', G: `${e3.length === 0 && d3 === nd3 ? '✓' : '✗'} entry removed on team/app-1, description kept`, R: `${r3.status === 403 && d48(r3.t, 'app-1') ? '✓' : '✗'} HTTP ${r3.status} "${r3.t.replace(/^.*?(The |Your )/, '$1').slice(0, 160)}"`, C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-refusal-page' : '✗' });
+row('B9-03', { roles: 'requester (window on the folder team)', V: 'n.a.', G: `${e3.length === 0 && d3 === nd3 ? '✓' : '✗'} entry removed on team/app-1, description kept`, R: `${r3.status === 403 && d48(r3.t, 'app-1') ? '✓' : '✗'} HTTP ${r3.status} "${r3.t.replace(/^.*?(The |Your )/, '$1').slice(0, 160)}"`, C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-refusal-page' : '✗' });
 await uiRevoke(g3);
 // B9-05 createItem payload, B9-06 copy
 g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify B9-05 ${T}` }); await decide(g.url);

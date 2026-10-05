@@ -26,7 +26,7 @@ if (on('expired')) {
   if (await again.count()) { await Promise.all([p.waitForLoadState('load'), again.click()]); pre = { kind: (await p.locator('[data-batch-control-item-kind]').count()) ? await p.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null, scope: await p.locator('input[name="scopeFullName"]').inputValue(), conf: await p.locator('input[name="actions"][value="CONFIGURE"]').isChecked() }; }
   ev(`V6 B7-09 ${r && r.status()} "${t.slice(0, 120)}" unchanged ${unchanged}; rows ${JSON.stringify(rowTxt)}; again ${JSON.stringify(pre)}; headings ${(et.match(/Ended Grants[^.]{0,40}/) || [''])[0]}`);
   row('B7-09', { roles: 'requester', V: 'n.a.', G: `${r && r.status() === 403 && unchanged ? '✓' : '✗'} Save after the 1-minute window ended -> ${r && r.status()}, config unchanged`, R: `${pre && pre.scope === 'batch-daily' ? '✓' : '✗'} core's "${t.slice(0, 70)}" (SPEC 8, D-33), and the Grants screen now carries the ended window with "Request again" (DEF-18 fixed): ${rowTxt.join(' || ').slice(0, 160)}`, C: 'n.a.', E: s1 && s2 ? '✓ B7-09-save-after-expiry, B7-10-ended-grant-request-again' : '✗' });
-  row('B7-10', { roles: 'requester', V: `${pre ? '✓' : '✗'} "Request again" offered on the ended window`, G: `${pre && pre.type === 'JOB' && pre.scope === 'batch-daily' && pre.conf ? '✓' : '✗'} the ended window is listed (${rowTxt.find((x) => /expired|ended|Expired/i.test(x)) ? 'status says so' : 'status: ' + (rowTxt[0] || '').slice(0, 60)}); Request again prefills ${JSON.stringify(pre)}`, R: 'n.a.', C: 'n.a.', E: s2 ? '✓ B7-10-ended-grant-request-again' : '✗' });
+  row('B7-10', { roles: 'requester', V: `${pre ? '✓' : '✗'} "Request again" offered on the ended window`, G: `${pre && /FreeStyleProject/.test(pre.kind || '') && pre.scope === 'batch-daily' && pre.conf ? '✓' : '✗'} the ended window is listed (${rowTxt.find((x) => /expired|ended|Expired/i.test(x)) ? 'status says so' : 'status: ' + (rowTxt[0] || '').slice(0, 60)}); Request again prefills ${JSON.stringify(pre)}`, R: 'n.a.', C: 'n.a.', E: s2 ? '✓ B7-10-ended-grant-request-again' : '✗' });
 }
 if (on('restrict')) {
   const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: `app-v${T}`, minutes: 15, reason: `Verify DEF-19 ${T}: exact name` });
@@ -95,7 +95,7 @@ if (on('mail')) {
   const m2 = await findMail(`to:requester@e2e.local subject:approved ${gid}`); const t2 = m2 ? await mailText(m2) : '';
   await uiRevoke(gid);
   ev(`V6 mail created:\n${t1}\napproved:\n${t2}`);
-  const has = (t) => /CREATE/.test(t) && /DELETE/.test(t) && /15 min/.test(t) && new RegExp(`app-m${T}`).test(t) && /FOLDER|Folder/.test(t);
+  const has = (t) => /CREATE/.test(t) && /DELETE/.test(t) && /15 min/.test(t) && new RegExp(`app-m${T}`).test(t) && /Folder/.test(t);
   row('B15-07', { roles: 'approver-1, requester', V: 'n.a.', G: `${m1 && m2 ? '✓' : '✗'} REQUEST_CREATED to approver-1 and APPROVED to requester`, R: 'n.a.', C: `${has(t1) && has(t2) ? '✓' : '✗'} both carry scope type, actions, duration and name restriction: "${t1.replace(/\s+/g, ' ').slice(0, 220)}" (DEF-24 ${has(t1) && has(t2) ? 'fixed' : 'open'})`, E: '✓ text (mail bodies in audit.log)' });
 }
 if (on('killswitch')) {

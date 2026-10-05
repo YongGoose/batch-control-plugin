@@ -235,12 +235,12 @@ rows['A-08'] = async () => {
     log(L, `A-08 ${theme} grants form selects: ${(await selectReport(page)).join(' | ')}`);
     // keyboard operability
     await scope.focus();
-    await page.keyboard.type('Fo');
+    await page.keyboard.type('3');
     const kb = await scope.inputValue();
-    await scope.selectOption('JOB');
+    await scope.selectOption('15');
     await page.locator('h2:has-text("New Grant Request")').click();
     await shot(page, [scope, dur, page.locator('input[name="scopeFullName"]')], `A-08-${theme}`, { pad: 20 });
-    log(L, `A-08 ${theme} keyboard type-ahead 'Fo' on focused Scope type -> ${kb}`);
+    log(L, `A-08 ${theme} keyboard type-ahead '3' on focused Duration -> ${kb}`);
     if (theme === 'dark') {
       await page.goto(`${BASE}/me/appearance/`);
       const def = page.locator('label:has-text("Default"), label:has-text("Light")').first();
