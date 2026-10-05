@@ -55,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * item 3 (D-29/D-37: only a designated approver decides, "a listed approver or an administrator
  * cannot decide instead"), item 7 ("cancelling is possible only for the requester or a Manage
  * holder") and section 6 (every state change is a POST with a permission check). Coverage
- * inventory G-M10, G-L10, G-L11 and G-L12; matrix rows T-SEC-77, T-02-123, T-02-124, T-03-27 and
+ * inventory G-M10, G-L10, G-L11 and G-L12; matrix rows T-SEC-77, T-02-124, T-02-125, T-03-27 and
  * T-07-11 (note 269).
  *
  * <p>Users: {@code u1} requester (Item/Read, Item/Build, BatchControl/Request), {@code a1}
@@ -149,7 +149,7 @@ public class PermissionBoundaryGapTest {
     }
 
     /**
-     * T-02-123 (G-L10): a1 (Approve only) and v1 (ViewHistory only) hold a Batch Control permission
+     * T-02-125 (G-L10): a1 (Approve only) and v1 (ViewHistory only) hold a Batch Control permission
      * but not Request (premise, through the job's ACL): the job's Request Run page, its dialog
      * fragment and its submit endpoint answer 404 to them (absent, not refused), nothing is stored,
      * and their job page does not link the Request Run page. Guard: u1 opens it (200) and is offered
@@ -157,7 +157,7 @@ public class PermissionBoundaryGapTest {
      * and is not part of this row; note 269.)
      */
     @Test
-    public void t_02_123_approverAndViewerFindNoRequestRunAction() throws Exception {
+    public void t_02_125_approverAndViewerFindNoRequestRunAction() throws Exception {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         String requestRun = UsabilityFixtures.stripQueryAndSlash(new URL(j.getURL(), job.getUrl() + "batch-control").toExternalForm());
         for (String user : new String[] {"a1", "v1"}) {

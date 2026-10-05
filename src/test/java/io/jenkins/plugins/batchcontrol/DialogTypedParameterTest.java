@@ -73,7 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code base64File} included, reaches the approved build exactly) through the request dialog of
  * SPEC item 8 (D-66: "requesting a run (the Request Run action) open[s] a dialog on the current
  * page; submitting it creates the request and leads to its detail page"). Coverage inventory
- * G-H1 (JenkinsRule part) and G-M12; matrix rows T-05-101 .. T-05-104 and T-05-108 (note 269).
+ * G-H1 (JenkinsRule part) and G-M12; matrix rows T-05-102 .. T-05-104, T-05-108 and T-05-111 (note 269).
  *
  * <p>The dialog is driven by {@link DialogFixtures}: the fragment
  * {@code job/<name>/batch-control/dialog} is inserted into the job page as core's dialog does and
@@ -115,14 +115,14 @@ public class DialogTypedParameterTest {
     }
 
     /**
-     * T-05-101 (G-H1): the dialog fragment of a job with a core file UPLOAD, a stashed file DATA, a
+     * T-05-111 (G-H1): the dialog fragment of a job with a core file UPLOAD, a stashed file DATA, a
      * Base64 file B64 and a string DATE carries one form that posts {@code multipart/form-data} to
      * the job's submit endpoint, with exactly one file control in the block of each file parameter
      * (three in all) and none in DATE's block. Guard: the fragment of a job with only a string
      * parameter has no file control, so the count measures the parameters.
      */
     @Test
-    public void t_05_101_dialogFragmentFormIsMultipartWithOneFileControlPerFileParameter() throws Exception {
+    public void t_05_111_dialogFragmentFormIsMultipartWithOneFileControlPerFileParameter() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("dialog-shape");
         addParameters(job, new FileParameterDefinition("UPLOAD", "core file"), new StashedFileParameterDefinition("DATA"),
                 new Base64FileParameterDefinition("B64"), new StringParameterDefinition("DATE", "2000-01-01"));
