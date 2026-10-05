@@ -15,17 +15,19 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <ul>
  *   <li>{@code onLocationChanged} (rename, move; core also reports it for every item below a renamed
  *       or moved folder): the windows naming the item now name its new full name
- *       ({@link GrantService#followItem}).</li>
+ *       ({@link GrantService#followItem}); a window already naming the new name, a window whose old
+ *       name another item has taken again, and a window whose file cannot be updated end instead
+ *       (S-39-02).</li>
  *   <li>{@code onDeleted}: the windows naming the deleted item, or an item below it, end
  *       ({@link GrantService#endWindowsOf}), revoked by the user who deleted it. Core deletes the
  *       items below a folder as SYSTEM; their windows are revoked by the user who deleted the folder,
  *       remembered from {@code onCheckDelete} while that folder's deletion is under way
  *       ({@link DeletionAttribution}; SPEC 6: the history names who did what).</li>
  *   <li>{@code onCreated} (and a copy, which core reports as a creation): a window still naming the
- *       new item's name belongs to an item that disappeared without an event, and ends
- *       ({@link GrantService#endWindowsOnNewItem}).</li>
- *   <li>{@code onLoaded} (startup): windows whose item no longer exists end
- *       ({@link GrantService#endWindowsOfMissingItems}).</li>
+ *       new item's name, in any letter case, belongs to an item that disappeared without an event,
+ *       and ends ({@link GrantService#endWindowsOnNewItem}).</li>
+ *   <li>{@code onLoaded} (startup): windows whose item no longer exists under exactly the name they
+ *       give end ({@link GrantService#endWindowsOfMissingItems}).</li>
  * </ul>
  *
  * <p>Renaming through a window is refused (D-71c), so a window holder cannot move windows onto
@@ -64,7 +66,7 @@ public final class WindowItemListener extends ItemListener {
     @Override
     public void onLocationChanged(Item item, String oldFullName, String newFullName) {
         try {
-            GrantService.get().followItem(oldFullName, newFullName);
+            GrantService.get().followItem(item, oldFullName, newFullName);
         } catch (RuntimeException e) {
             // Never fails the rename or move.
             LOGGER.log(Level.WARNING, "Could not update the permission windows of '" + oldFullName
@@ -75,7 +77,7 @@ public final class WindowItemListener extends ItemListener {
     @Override
     public void onDeleted(Item item) {
         try {
-            GrantService.get().endWindowsOf(item.getFullName(), DeletionAttribution.deletingUser(item));
+            GrantService.get().endWindowsOf(item, DeletionAttribution.deletingUser(item));
         } catch (RuntimeException e) {
             // Never fails the deletion.
             LOGGER.log(Level.WARNING, "Could not end the permission windows of the deleted item '"
@@ -89,8 +91,13 @@ public final class WindowItemListener extends ItemListener {
     public void onLoaded() {
         try {
             // Runs as SYSTEM at startup, so every item is visible without switching authentication.
+            // S-39-02: Jenkins finds an item under any letter case of its name; a window naming
+            // another spelling than the item's own full name is not about that item and ends.
             Jenkins jenkins = Jenkins.get();
-            GrantService.get().endWindowsOfMissingItems(name -> jenkins.getItemByFullName(name) != null);
+            GrantService.get().endWindowsOfMissingItems(name -> {
+                Item found = jenkins.getItemByFullName(name);
+                return found != null && name.equals(found.getFullName());
+            });
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not end the permission windows of items that no longer exist", e);
         }

@@ -105,7 +105,11 @@ public class CreatedItemGrantListener extends ItemListener {
     public void onLoaded() {
         if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             Jenkins jenkins = Jenkins.get();
-            GrantService.get().pruneCreatedItems(name -> jenkins.getItemByFullName(name) != null);
+            // S-39-02: an item found under another spelling of the recorded name is not the one recorded.
+            GrantService.get().pruneCreatedItems(name -> {
+                Item found = jenkins.getItemByFullName(name);
+                return found != null && name.equals(found.getFullName());
+            });
         }
     }
 
@@ -117,7 +121,7 @@ public class CreatedItemGrantListener extends ItemListener {
         GrantService.get().relocateChanged(oldFullName, newFullName);
         // With change control off every window was revoked (S-15), so no record can be active.
         if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
-            GrantService.get().relocateCreatedItem(oldFullName, newFullName);
+            GrantService.get().relocateCreatedItem(item, oldFullName, newFullName);
         }
     }
 

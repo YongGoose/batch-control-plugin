@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -232,6 +233,17 @@ public interface Store {
     RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months, Period period,
                                                Predicate<? super ChangeRecord> filter,
                                                int offset, int limit, int maxScanned);
+
+    /**
+     * S-39-03: every {@code GRANT_REVOKE} change record of a grant in {@code grantIds} with a time at
+     * or after {@code since}, newest first, for re-ending windows at startup (D-74). Bounded by time,
+     * not by a record count: the change log is read back only to the first record appended before
+     * {@code since}, and every record after it is read, however many there are. The page is
+     * {@linkplain RecordPage#isTruncated() truncated} when that could not be done completely.
+     *
+     * @throws java.io.UncheckedIOException when the change log cannot be read
+     */
+    RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds);
 
     /**
      * Persists a freshly opened incident: writes {@code incidents/<id>.xml} and appends the

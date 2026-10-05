@@ -805,6 +805,40 @@ public final class FileStore implements Store {
         return page;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The bounded page query with no record cap and no page limit: only the period bounds it, so
+     * it reads every line since {@code since} (and the lines inside the append-order slack before
+     * it), keeping only the matching records, which are few. It is truncated only when the bytes of
+     * skipped out-of-period lines exceed the page query's byte budget. No diff is attached.
+     */
+    @Override
+    public RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds) {
+        Objects.requireNonNull(since, "since");
+        Set<String> ids = Set.copyOf(grantIds);
+        Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
+                .thenComparing(ChangeRecord::getId).reversed();
+        return page(changesDir(), listMonthsSince(changesDir(), monthOf(since).minusMonths(1)), new Period(since, null),
+                K_AT, line -> line.optLong(K_AT), FileStore::changeRecordFromScanner, FileStore::changeRecordFromJson,
+                ChangeRecord::getAt,
+                r -> r.getType() == ChangeType.GRANT_REVOKE && r.getGrantId() != null && ids.contains(r.getGrantId()),
+                newestFirst, 0, Integer.MAX_VALUE, Integer.MAX_VALUE);
+    }
+
+    /** The months of the bucket files in {@code dir} from {@code first} on. */
+    private static List<YearMonth> listMonthsSince(Path dir, YearMonth first) {
+        List<YearMonth> months = new ArrayList<>();
+        for (Path file : listMonthFiles(dir)) {
+            Path name = file.getFileName();
+            YearMonth month = name == null ? null : parseMonthFileName(name.toString());
+            if (month != null && !month.isBefore(first)) {
+                months.add(month);
+            }
+        }
+        return months;
+    }
+
     private void attachDiff(ChangeRecord record) {
         record.setDiff(readTextOrNull(PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
     }

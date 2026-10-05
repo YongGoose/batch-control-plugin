@@ -30,6 +30,19 @@ public final class Grant {
     /** D-74: the revocation reason of a window whose item was deleted (or no longer exists). */
     public static final String REVOKED_ITEM_DELETED = "its item was deleted";
 
+    /**
+     * S-39-02: the revocation reason of a window that could not follow its renamed or moved item for
+     * certain (its file could not be updated, another item had already taken the old name again, or
+     * another item has just taken the name the window gives).
+     */
+    public static final String REVOKED_ITEM_NOT_FOLLOWED = "it could not follow its item";
+
+    /**
+     * S-39-03: the revocation reason of a window ended at startup because the change records could
+     * not all be read, so it could not be shown not to have ended before.
+     */
+    public static final String REVOKED_UNCONFIRMED = "its state could not be confirmed at startup";
+
     private final String id;
     private final String grantRequestId;
     private final String user;

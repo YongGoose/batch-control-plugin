@@ -414,6 +414,8 @@ public final class GrantRequestService {
             // Registration persists the grant and makes it effective in the same critical
             // section, so approval and effectiveness are atomic. D-74: on the item checked above,
             // under its name at registration (it follows a rename that happened meanwhile).
+            // D-71c (3), S-39-02: registration re-verifies that this item is still at its name;
+            // if it was deleted meanwhile, the window ends at once ("its item was deleted").
             GrantService.get().register(grant, item);
             LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
                     + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
