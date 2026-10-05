@@ -251,12 +251,29 @@ public class GrantRequestItem implements ModelObject {
      * discloses nothing more about the item.
      */
     public boolean isShowGroupConfigureNotice() {
+        return isConfigureNoticeAudience() && namesGroup();
+    }
+
+    /**
+     * D-71c (security-36 S-36-02, S-36-04): whether this page states that a Configure window does
+     * not allow renaming the item, for a CONFIGURE request whose item is not an item group (a job,
+     * or an item whose kind is no longer known), to the same audience as
+     * {@link #isShowGroupConfigureNotice()}, whose notice already says it for an item group.
+     */
+    public boolean isShowNoRenameNotice() {
+        return isConfigureNoticeAudience() && !namesGroup();
+    }
+
+    /** The request includes CONFIGURE and the viewer is its requester or a designated approver. */
+    private boolean isConfigureNoticeAudience() {
         if (request.getActions() == null || !request.getActions().contains(GrantAction.CONFIGURE)) {
             return false;
         }
-        if (!isOwnedByCurrentUser() && !request.isDesignatedApprover(Jenkins.getAuthentication2().getName())) {
-            return false;
-        }
+        return isOwnedByCurrentUser() || request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
+    }
+
+    /** The recorded kind, or else the current item as the viewer may see it, is an item group. */
+    private boolean namesGroup() {
         return recordedKindIsGroup()
                 || (request.getScope() != null && isGroup(Visibility.findVisibleItem(request.getScope().getFullName())));
     }

@@ -16,11 +16,13 @@
       inside it, so only an administrator can delete one of those;</li>
     <li>a folder, a multibranch project or an organization folder can be <b>moved</b> only by an
       administrator or a user with standing <code>Item/Delete</code> on it (and
-      <code>Item/Create</code> at the destination), since no window confers Delete on it; and it can
-      be <b>renamed</b> only by an administrator or a user with standing <code>Item/Configure</code>
-      on it, because renaming it renames everything inside it: a rename whose Configure comes from a
-      permission window alone is refused and recorded. A window stays with the item it was approved
-      for, so after a rename or move it no longer applies;</li>
+      <code>Item/Create</code> at the destination), since no window confers Delete on it;</li>
+    <li>no window allows <b>renaming</b> a job or folder of any kind: neither a Configure window
+      nor Delete and Create windows together. A rename needs an administrator, or the user's own
+      standing permissions: <code>Item/Configure</code> on the item, or <code>Item/Delete</code> on
+      it plus <code>Item/Create</code> in its parent. A rename that only a window would have allowed
+      is refused and recorded. A window stays with the item it was approved for, so after a rename
+      or move it no longer applies;</li>
     <li>an administrative monitor reports accounts that hold standing Create, Configure or Delete
       permissions outside the permission-window flow;</li>
     <li>the <b>Grants</b> screen is open, and the sidebar of each job and folder offers

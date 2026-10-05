@@ -6,14 +6,16 @@
       settings: the window gives no permission on the items inside the folder, but the folder's
       settings still affect them (for example implicitly loaded Pipeline libraries), and
       reconfiguring a Multibranch Pipeline or organization folder can create or delete the items
-      it generates. A Configure window on a folder, Multibranch Pipeline or organization folder
-      does not allow renaming it: that needs an administrator (or standing Configure permission
-      on it).</li>
+      it generates.</li>
     <li><b>Create</b>: create new items directly inside the folder. Applies only to a regular
       folder.</li>
     <li><b>Delete</b>: delete the job. Applies only to a job.</li>
   </ul>
   A request for Create or Delete on an item where it does not apply is refused when you submit it.
+  No window allows renaming a job or folder of any kind: neither a Configure window nor Delete and
+  Create windows together. A rename needs an administrator, or your own standing permissions:
+  Configure on the item, or Delete on it plus Create in its parent (the folder that contains it,
+  or Jenkins itself for a top-level item).
   A window applies only to the item it was approved for, and stops applying for good once that
   item is renamed, moved or deleted: renaming the item back, or creating a new item with the same
   name, does not restore it. Such a window is still listed until it ends or is revoked, marked as

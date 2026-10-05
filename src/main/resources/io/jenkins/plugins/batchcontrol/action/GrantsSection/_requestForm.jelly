@@ -11,8 +11,8 @@
      is the item's kind with its icon, or "No such item" for a missing or invisible item); the
      description says that a folder's own settings still reach its items (D-71a, S-34-02) and
      that the window stops applying for good once its item is renamed, moved or deleted (D-71a,
-     D-71b); the actions say where each applies, and that Configure on a folder, multibranch
-     project or organization folder does not include renaming it (D-71a (2)). The service refuses
+     D-71b); the actions say where each applies, and that no window includes renaming its item,
+     job or folder (D-71c). The service refuses
      an action that cannot apply at submission, and the refusal is shown next to the field it
      concerns. -->
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
@@ -57,7 +57,7 @@
           <bc:fieldError errors="${errors}" field="scopeFullName"/>
         </f:entry>
         <f:entry title="Actions"
-                 description="Configure: the item's own configuration (for a folder, multibranch project or organization folder, not renaming it). Create: new items directly inside a folder (folders only). Delete: the job (jobs only)."
+                 description="Configure: the item's own configuration. Create: new items directly inside a folder (folders only). Delete: the job (jobs only). No window allows renaming the item."
                  help="/plugin/batch-control/help/grant-actions.html">
           <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
                GrantsSection#doCreate reads with getParameterValues("actions"). -->
