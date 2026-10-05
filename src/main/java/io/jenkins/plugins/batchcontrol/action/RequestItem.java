@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import org.kohsuke.accmod.Restricted;
@@ -332,13 +333,20 @@ public class RequestItem implements ModelObject {
 
     // ---------------------------------------------------------------- state-changing endpoints
 
-    /** POST {@code approve?comment=...} — approver decision (comment optional). */
+    /**
+     * POST {@code approve?comment=...} — approver decision (comment optional). D-72b: a comment
+     * holding a character that cannot be stored is shown next to the comment; a request whose
+     * stored values do not match the displayed ones, or that was stored before D-72, is refused
+     * by the service ({@link IllegalStateException}) and its message shown above the form, like a
+     * failed save; the request stays pending.
+     */
     @RequirePOST
     public void doApprove(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter String comment)
             throws IOException, ServletException {
         Jenkins.get().checkPermission(BatchControlPermissions.APPROVE);
-        call(req, rsp, new FormErrors("approve"),
-                () -> RunRequestService.get().approve(request.getId(), comment), "comment", "comment");
+        FormErrors errors = new FormErrors("approve");
+        call(req, rsp, errors, () -> RunRequestService.get().approve(request.getId(), comment),
+                text -> fileDecisionRefusal(errors, text));
     }
 
     /** POST {@code reject?comment=...} — approver decision (service enforces non-empty comment). */
@@ -354,7 +362,7 @@ public class RequestItem implements ModelObject {
             return;
         }
         call(req, rsp, errors, () -> RunRequestService.get().reject(request.getId(), comment),
-                "comment", "comment");
+                text -> fileDecisionRefusal(errors, text));
     }
 
     /** POST {@code cancel} — authenticated users only; service enforces requester-or-Manage. */
@@ -406,13 +414,36 @@ public class RequestItem implements ModelObject {
      */
     private void call(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors,
                       Runnable serviceCall, String... keywords) throws IOException, ServletException {
+        call(req, rsp, errors, serviceCall, text -> errors.fromService(text, keywords));
+    }
+
+    /**
+     * As {@link #call(StaplerRequest2, StaplerResponse2, FormErrors, Runnable, String...)}, with
+     * {@code filer} deciding where the refusal's message goes on the form. The service's
+     * {@code StoreWriteException} (a failed save, nothing stored) is an
+     * {@link IllegalStateException}, so it is shown the same way, never as an error page.
+     */
+    private void call(StaplerRequest2 req, StaplerResponse2 rsp, FormErrors errors,
+                      Runnable serviceCall, Function<String, FormErrors> filer)
+            throws IOException, ServletException {
         try {
             serviceCall.run();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            refresh().renderRefusal(req, rsp, errors.fromService(e.getMessage(), keywords));
+            refresh().renderRefusal(req, rsp, filer.apply(e.getMessage()));
             return;
         }
         rsp.sendRedirect2(".");
+    }
+
+    /**
+     * D-72b: where a refused approval or rejection is shown. Only a message about the comment
+     * itself ("The comment contains ...", "A comment is required ...") goes next to the comment;
+     * everything else (values that do not match, a request stored before D-72, a failed save, a
+     * decision made meanwhile) above the form. Matched at the start of the message, because the
+     * values message quotes parameter names, which may contain the word.
+     */
+    private static FormErrors fileDecisionRefusal(FormErrors errors, String text) {
+        return errors.fromServiceStartingWith(text, "The comment ", "comment", "A comment ", "comment");
     }
 
     /**

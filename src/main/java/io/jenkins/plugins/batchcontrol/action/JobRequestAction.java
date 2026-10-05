@@ -10,6 +10,7 @@ import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
+import hudson.model.StringParameterValue;
 import hudson.security.Permission;
 import hudson.util.Secret;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -23,6 +24,8 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
+import io.jenkins.plugins.batchcontrol.store.StoreWriteException;
+import io.jenkins.plugins.batchcontrol.store.XmlChars;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dialogs;
@@ -34,9 +37,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import jenkins.model.Jenkins;
 import jenkins.model.menu.Group;
 import jenkins.model.menu.Semantic;
@@ -69,6 +74,9 @@ public class JobRequestAction implements Action {
 
     /** {@link FormErrors} name of the request form. */
     static final String FORM = "request";
+
+    /** D-72b: prefix of the {@link FormErrors} field of one parameter ({@link #parameterField}). */
+    static final String PARAMETER_FIELD_PREFIX = "parameter:";
 
     /**
      * D-72a: request attribute holding the incident reference {@link #doSubmit} validated, so a
@@ -235,8 +243,9 @@ public class JobRequestAction implements Action {
             ParameterDefinition shown = definition;
             if (value != null && !value.isSensitive() && !ParameterDisplay.isFile(value)
                     && !(value.getValue() instanceof Secret)) {
+                ParameterValue displayable = displayable(value);
                 try {
-                    shown = definition.copyWithDefaultValue(value);
+                    shown = displayable == null ? definition : definition.copyWithDefaultValue(displayable);
                 } catch (RuntimeException e) {
                     shown = definition; // a definition that cannot copy keeps its own default
                 }
@@ -244,6 +253,24 @@ public class JobRequestAction implements Action {
             refilled.add(shown == null ? definition : shown);
         }
         return refilled;
+    }
+
+    /**
+     * D-72b: {@code value} as the refused form may show it again. A string value holding a
+     * character XML cannot store comes back with that character as U+FFFD
+     * ({@link FormErrors#displayable}); another type of value holding one is not shown again
+     * ({@code null}: the definition keeps its default). The page never carries such a character.
+     */
+    @CheckForNull
+    private static ParameterValue displayable(ParameterValue value) {
+        String text = ParameterDisplay.storedText(value);
+        if (XmlChars.isStorable(text)) {
+            return value;
+        }
+        if (value instanceof StringParameterValue && text != null) {
+            return new StringParameterValue(value.getName(), FormErrors.displayable(text));
+        }
+        return null;
     }
 
     /** D-60: whether the form shows values carried from a refused build submission. */
@@ -462,6 +489,15 @@ public class JobRequestAction implements Action {
      * each defined parameter straight from the request the way core's
      * {@code ParametersDefinitionProperty#_doBuild} / {@code buildWithParameters} do, so the
      * stored values are complete either way.
+     *
+     * <p>D-72b: a parameter name submitted more than once in the {@code json} field is refused
+     * here, before the service sees any value, as a field error below that parameter
+     * ({@link #parameterField}); on the raw channel each definition reads its own field, and a
+     * definition that refuses a repeated field is reported the same way. The service's own
+     * refusals are filed by {@link #fileServiceRefusal}: a message about one of the job's
+     * parameters below it, the reason's next to the reason, and a failed save
+     * ({@link StoreWriteException}) above the form, always as the re-rendered form (HTTP 400),
+     * never an error page.
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -471,9 +507,12 @@ public class JobRequestAction implements Action {
         job.checkPermission(BatchControlPermissions.REQUEST);
         // D-38a: Item/Build is not required to request a run; the approval decides.
 
-        // D-72: the body size cap, from the headers alone, before anything reads the body
-        // (getParameter and getSubmittedForm parse a multipart body, file uploads included).
-        if (RequestBodyLimit.exceeds(req)) {
+        // D-72, D-72b (4): the body size cap, before this endpoint reads a single form value. A
+        // declared Content-Length decides from the headers alone and the body stays unread; a
+        // body without one (chunked) is judged by the size of what Jenkins already parsed while
+        // dispatching the URL (RequestBodyLimit#exceeds(HttpServletRequest, Job), which only
+        // measures the parts). Over the cap either way: 413, nothing created or kept.
+        if (RequestBodyLimit.exceeds(req, job)) {
             refuseOversizedBody(req, rsp);
             return;
         }
@@ -506,9 +545,11 @@ public class JobRequestAction implements Action {
                 } else {
                     parseParameters(req, formData, submitted);
                 }
+            } catch (ParameterRefusal e) {
+                // D-72b (1): a repeated name or a value the definition refused, below that parameter.
+                errors.field(e.parameter == null ? "parameters" : parameterField(e.parameter), e.getMessage());
             } catch (IllegalArgumentException | Failure e) {
-                errors.field("parameters", "A parameter value was refused"
-                        + (e.getMessage() == null ? "." : ": " + e.getMessage()));
+                errors.field("parameters", refusedValueMessage(e));
             }
             if (reason == null) {
                 errors.field("reason", "Enter a reason: the approvers decide on it.");
@@ -526,8 +567,8 @@ public class JobRequestAction implements Action {
                             + Util.rawEncode(request.getId()) + "/");
                     return;
                 } catch (IllegalArgumentException | IllegalStateException e) {
-                    errors.fromService(e.getMessage(), "reason", "reason", "approver", "approvers",
-                            "parameter", "parameters");
+                    // D-72b: StoreWriteException (a failed save) is an IllegalStateException too.
+                    fileServiceRefusal(errors, e);
                 }
             }
         } finally {
@@ -582,12 +623,94 @@ public class JobRequestAction implements Action {
         FormErrors errors = new FormErrors(FORM).withoutInput().message(
                 "The request was not submitted: it is larger than the limit of "
                 + sizeText(RequestBodyLimit.maxRequestBodyBytes())
-                + " for a run request (or does not declare its size). Nothing was saved, and what"
+                + " for a run request. Nothing was saved, and what"
                 + " you entered could not be kept. Fill in the form again with smaller files, or"
                 + " ask a Jenkins administrator to raise the limit.");
         errors.render(req, rsp, this,
                 Dialogs.fromDialogQuery(req) ? Dialogs.DIALOG_VIEW : "index.jelly",
                 HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+    }
+
+    /**
+     * D-72b: the {@link FormErrors} field of the parameter named {@code name}, whose message the
+     * form shows right below that parameter ({@code _form.jelly}). Not a getter on purpose: a
+     * one-argument getter would be bound to a URL.
+     */
+    public String parameterField(String name) {
+        return PARAMETER_FIELD_PREFIX + name;
+    }
+
+    /**
+     * D-72b: files a refusal of {@link RunRequestService#create} on the form. A failed save
+     * ({@link StoreWriteException}, nothing stored) goes above the form with its own message; a
+     * message about one of the job's parameters ({@code Parameter '<name>' ...}) below that
+     * parameter; any other message about parameters below the Parameters heading; the rest next
+     * to the reason or the approvers when it is about them, else above the form.
+     */
+    private void fileServiceRefusal(FormErrors errors, RuntimeException e) {
+        String text = e.getMessage();
+        if (e instanceof StoreWriteException) {
+            errors.message((text == null ? "The run request could not be saved; nothing was stored." : text)
+                    + " Submit the form again; if it keeps failing, ask a Jenkins administrator to check the"
+                    + " Jenkins log.");
+            return;
+        }
+        String parameter = parameterNamedBy(text);
+        if (parameter != null) {
+            errors.field(parameterField(parameter), text);
+        } else if (text != null && (text.startsWith("Parameter") || text.startsWith("A parameter"))) {
+            errors.field("parameters", text);
+        } else {
+            errors.fromService(text, "reason", "reason", "approver", "approvers", "parameter", "parameters");
+        }
+    }
+
+    /**
+     * The name of the job's parameter a service message starts with ({@code Parameter '<name>'}),
+     * the longest when several match, or {@code null}. Matched against the job's own definitions,
+     * so a quote inside a name cannot confuse it.
+     */
+    @CheckForNull
+    private String parameterNamedBy(@CheckForNull String text) {
+        if (text == null || !text.startsWith("Parameter '")) {
+            return null;
+        }
+        String found = null;
+        for (ParameterDefinition definition : definitions()) {
+            String name = definition.getName();
+            if (text.startsWith("Parameter '" + name + "'")
+                    && (found == null || name.length() > found.length())) {
+                found = name;
+            }
+        }
+        return found;
+    }
+
+    /** D-72b (1): the refusal of a parameter name submitted more than once. */
+    private static String repeatedNameMessage(String name) {
+        return "Parameter '" + name + "' was submitted more than once; give each parameter one value.";
+    }
+
+    /** N-01: the refusal of a value a parameter definition would not accept. */
+    private static String refusedValueMessage(RuntimeException e) {
+        return "A parameter value was refused" + (e.getMessage() == null ? "." : ": " + e.getMessage());
+    }
+
+    /**
+     * D-72b: the refusal of one parameter's submitted value (its name repeated, or a value its
+     * definition refused), filed below that parameter. Only ever thrown and caught inside
+     * {@link #doSubmit}; carries no stack trace.
+     */
+    private static final class ParameterRefusal extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String parameter;
+
+        ParameterRefusal(String parameter, String message) {
+            super(message, null, false, false);
+            this.parameter = parameter;
+        }
     }
 
     /** {@code bytes} as text for the size cap message: whole MB, KB or bytes, rounded down. */
@@ -608,9 +731,12 @@ public class JobRequestAction implements Action {
      * definition's {@code createValue}, file parameters reading their upload from the multipart
      * body) and adds the typed values to {@code submitted} (D-72: kept as they are, not flattened).
      *
-     * <p>Throws {@link Failure} for a parameter name the job does not define, and lets a
-     * definition's own {@link IllegalArgumentException} propagate for a value it refuses; the
-     * caller turns the latter into the same 400 as every other rejected submission (N-01).
+     * <p>Throws {@link Failure} for a parameter name the job does not define. D-72b (1): a name
+     * that occurs a second time is refused before its second value is created, and a
+     * definition's own {@link IllegalArgumentException} (or {@link Failure}) for a value it
+     * refuses is reported for that parameter; both as {@link ParameterRefusal}, which the caller
+     * turns into the same 400 as every other rejected submission (N-01). The values created
+     * before the refusal are in {@code submitted}, so the caller disposes of their files.
      */
     private void parseParameters(StaplerRequest2 req, JSONObject formData, List<ParameterValue> submitted) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
@@ -621,6 +747,7 @@ public class JobRequestAction implements Action {
         if (parameter == null) {
             return;
         }
+        Set<String> seen = new HashSet<>();
         for (Object entry : JSONArray.fromObject(parameter)) {
             if (!(entry instanceof JSONObject)) {
                 continue;
@@ -634,7 +761,15 @@ public class JobRequestAction implements Action {
             if (definition == null) {
                 throw new Failure("No such parameter definition: " + name);
             }
-            ParameterValue value = definition.createValue(req, jsonEntry);
+            if (!seen.add(name)) {
+                throw new ParameterRefusal(name, repeatedNameMessage(name));
+            }
+            ParameterValue value;
+            try {
+                value = definition.createValue(req, jsonEntry);
+            } catch (IllegalArgumentException | Failure e) {
+                throw new ParameterRefusal(name, refusedValueMessage(e));
+            }
             if (value != null) {
                 submitted.add(value);
             }
@@ -648,8 +783,13 @@ public class JobRequestAction implements Action {
      * {@code buildWithParameters} makes — falling back explicitly to
      * {@link ParameterDefinition#getDefaultParameterValue()} when the definition itself returns
      * {@code null} for a missing field, so the stored values are complete rather than empty. A
-     * definition's own {@link IllegalArgumentException} for a bad value propagates unchanged
-     * (N-01: caught by the caller's {@code try}).
+     * definition's own {@link IllegalArgumentException} for a bad value is reported for that
+     * parameter ({@link ParameterRefusal}, N-01: caught by the caller's {@code try}).
+     *
+     * <p>D-72b (1): each definition yields at most one value here, so no name can be stored twice.
+     * Whether a field repeated in the request is acceptable is the definition's call, as in core's
+     * {@code buildWithParameters} (core's own simple parameter types refuse it); when it refuses
+     * a repeated field, the message says that the parameter was submitted more than once.
      */
     private void parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
@@ -657,7 +797,15 @@ public class JobRequestAction implements Action {
             return;
         }
         for (ParameterDefinition definition : property.getParameterDefinitions()) {
-            ParameterValue value = definition.createValue(req);
+            String name = definition.getName();
+            ParameterValue value;
+            try {
+                value = definition.createValue(req);
+            } catch (IllegalArgumentException | Failure e) {
+                String[] raw = req.getParameterValues(name);
+                throw new ParameterRefusal(name, raw != null && raw.length > 1
+                        ? repeatedNameMessage(name) : refusedValueMessage(e));
+            }
             if (value == null) {
                 value = definition.getDefaultParameterValue();
             }

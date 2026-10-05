@@ -120,6 +120,9 @@
           <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
             <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
             <st:include it="${parameterDefinition}" page="index.jelly"/>
+            <!-- D-72b: a refusal of this parameter (a repeated name, a value its definition or the
+                 service refused) is shown right below it. -->
+            <bc:fieldError errors="${errors}" field="${it.parameterField(parameterDefinition.name)}"/>
           </j:forEach>
         </j:if>
       </j:otherwise>
