@@ -508,7 +508,17 @@ from scripts.
     but impossible to queue) and of a person's own direct build that run
     control refuses, through any of core's channels: the build form, the
     parameters dialog, `build` and `buildWithParameters` over HTTP, the CLI,
-    and a build token. When the queue item of an approved run is cancelled (by
+    and a build token. That disposal covers exactly two parameter types: core
+    `file` parameters, including another plugin's type built on core's file
+    parameter value (a subclass), and the file-parameters plugin's
+    `stashedFile`. Another plugin's parameter type that keeps its own
+    temporary file is not covered: when a request carrying such a value ends
+    without a run, Batch Control leaves that file alone, and it stays until an
+    administrator removes it. A `base64File` value keeps no separate file; its
+    content is in the request's values file, which is deleted as described
+    above (D-74). The file-parameters plugin is an optional dependency: Batch
+    Control works without it, and then core `file` is the only file parameter
+    type there is. When the queue item of an approved run is cancelled (by
     a user, by clearing the queue, or because its job was deleted), the
     cancelled item's own parameter values delete their files, as for any
     cancelled queue item, and Batch Control deletes the request's values file
