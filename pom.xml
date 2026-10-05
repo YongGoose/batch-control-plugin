@@ -219,15 +219,18 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <!-- D-72: run requests persist typed ParameterValue objects. Tests submit this
-           plugin's stashedFile and base64File parameters and read them back in a Pipeline
-           with withFileParameter / unstash inside node (core's file parameter needs no extra
-           dependency). unstash and readFile come from workflow-basic-steps, node from
-           workflow-durable-task-step (a required dependency of workflow-basic-steps).
-           Test-only: batch-control has no runtime dependency on file-parameters. -->
+      <!-- Optional compile dependency (D-74(2)): the store and policy code reference the
+           file-parameters types (AbstractFileParameterValue and its filename) directly,
+           behind an optional guard, instead of class-name checks and reflection. Batch Control
+           loads without the plugin; when it is installed it must be at least this version.
+           D-72: tests also submit this plugin's stashedFile and base64File parameters and
+           read them back in a Pipeline with withFileParameter / unstash inside node (core's
+           file parameter needs no extra dependency). unstash and readFile come from
+           workflow-basic-steps, node from workflow-durable-task-step (a required dependency
+           of workflow-basic-steps). -->
       <groupId>io.jenkins.plugins</groupId>
       <artifactId>file-parameters</artifactId>
-      <scope>test</scope>
+      <optional>true</optional>
     </dependency>
     <!-- Not BOM-managed; pinned to latest release supporting jenkins.baseline 2.568 (requiredCore 2.516.3). -->
     <dependency>

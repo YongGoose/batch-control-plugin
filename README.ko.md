@@ -132,6 +132,7 @@ Batch Control이 컴파일된 버전 이상이어야 하며, Jenkins가 플러�
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
+| `file-parameters` | 433.va_0b_80359d54d |
 
 이 중 하나라도 더 오래된 버전이 설치되어 있으면 그 플러그인을 업그레이드할 때까지 Batch Control이
 로드되지 않습니다. **Manage Jenkins → Plugins → Available**에서 설치하면 필요한 업그레이드를 함께

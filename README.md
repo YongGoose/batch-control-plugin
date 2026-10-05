@@ -220,6 +220,7 @@ Batch Control is compiled against, which Jenkins enforces when loading plugins:
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
+| `file-parameters` | 433.va_0b_80359d54d |
 
 If an older version of any of these is installed, Batch Control fails to load
 until that plugin is upgraded. Installing Batch Control from **Manage Jenkins →
