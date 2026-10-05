@@ -20,9 +20,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * comparison inside the policy services ({@code BatchClock}); this work only updates stored
  * statuses so overdue requests read EXPIRED. Tests invoke {@link #doRun()} directly.
  *
- * <p>The work is a no-op until {@link StartupRecovery} has completed for the current Jenkins
+ * <p>The request work is a no-op until {@link StartupRecovery} has completed for the current Jenkins
  * session: an APPROVED request from before a restart must be judged from the recovery moment
- * (SPEC item 7 exception), so it may not be expired before recovery has re-based it.
+ * (SPEC item 7 exception), so it may not be expired before recovery has re-based it. Writing the
+ * ends of permission windows that could not be written before (D-74) does not wait for it.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -39,11 +40,18 @@ public class ExpiryPeriodicWork extends PeriodicWork {
     // PeriodicWork callback, not an HTTP entry point.
     @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     public void doRun() {
-        if (!StartupRecovery.isCompletedForCurrentSession()) {
-            return;
-        }
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins == null) {
+            return;
+        }
+        // D-74: write the ends of permission windows whose grant file could not be written when they
+        // ended (they confer nothing meanwhile). Independent of startup recovery, and in its own try.
+        try {
+            io.jenkins.plugins.batchcontrol.security.GrantService.get().flushUnsavedEnds();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not write the ends of permission windows", e);
+        }
+        if (!StartupRecovery.isCompletedForCurrentSession()) {
             return;
         }
         // D-51a: close the refused re-run summaries whose window ended (their count record). First,
