@@ -179,12 +179,18 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-56 (MV-3): u1 holds a [CONFIGURE] window on the job {@code team/a}, native Move and
+     * T-SEC-56 (MV-3; D-74 "renaming, moving, swapping ... items never makes a window reach an item
+     * nobody approved"): u1 holds a [CONFIGURE] window on the job {@code team/a}, native Move and
      * native Create on {@code team} and {@code parking}, no Delete on either job. Moving
-     * {@code team/a} away is refused and recorded; with {@code team/a} moved away by the system,
-     * moving {@code prod/a} into its name is refused and recorded too. Twin: u2, holding native
-     * Delete on both jobs and the same Create, performs the swap (D-59: still possible for a user
-     * who could delete and recreate the jobs).
+     * {@code team/a} away is refused and recorded; with {@code team/a} moved into {@code parking} by
+     * the system, the window follows its job (active on {@code parking/a}, D-74), and moving
+     * {@code prod/a} into the freed name is refused and recorded too. Twin: u2, holding native Delete
+     * on both jobs and the same Create, performs the swap (D-59: still possible for a user who could
+     * delete and recreate the jobs), and u1's window does not reach the job that now carries the name
+     * {@code team/a}. Fixture order (note 270): u2's native Delete entries on {@code parking} and
+     * {@code prod} are added before the system move, because once the window has followed its job
+     * into {@code parking} that folder holds an item in a window's scope and its authorization is
+     * guarded (D-58a, D-58b (1)), so a later widening there would be reverted.
      */
     @Test
     public void t_sec_56_jobScopeGrantSwapByMovesIsRefusedWithoutDelete() throws Exception {
@@ -195,7 +201,10 @@ public class MoveChangeControlTest {
             folderPermission(team, userId, Item.CREATE);
             folderPermission(parking, userId, Item.CREATE);
         }
+        folderPermission(parking, "u2", Item.DELETE);
+        folderPermission(prod, "u2", Item.DELETE);
         grant("u1", "team/a", null, "CONFIGURE");
+        String windowId = WindowStateFixtures.windowId("u1", "team/a");
 
         // step 1: move the granted job away
         WebResponse away = move("u1", team.getItem("a"), parking);
@@ -209,6 +218,10 @@ public class MoveChangeControlTest {
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
             Items.move((FreeStyleProject) team.getItem("a"), parking);
         }
+        Item parked = parking.getItem("a");
+        assertNotNull(parked, "premise: the system moved team/a into parking");
+        WindowStateFixtures.assertActiveOn(j, "u1", windowId, "parking/a", "D-74: the window follows its job into parking");
+        assertTrue(has(parked, "u1", Item.CONFIGURE), "D-74: the window still confers Configure on its job, now parking/a");
         WebResponse in = move("u1", prod.getItem("a"), team);
         assertClientError(in, "u1 moving prod/a into the granted job's name without Delete on it");
         assertNotNull(prod.getItem("a"), "the refused move must leave prod/a in place");
@@ -218,12 +231,14 @@ public class MoveChangeControlTest {
         assertRecordNames(violations.get(1), "u1", "prod/a");
 
         // twin: u2 with Delete on both jobs can swap them back and forth
-        folderPermission(parking, "u2", Item.DELETE);
-        folderPermission(prod, "u2", Item.DELETE);
+        assertTrue(has(prod.getItem("a"), "u2", Item.DELETE), "premise: u2 holds Delete on prod/a");
         assertSuccess(move("u2", prod.getItem("a"), team), "twin: u2 moves prod/a into team");
         assertNotNull(team.getItem("a"));
         assertNull(prod.getItem("a"));
         assertEquals(2, records(ChangeType.GRANT_VIOLATION).size(), "u2's permitted move adds no violation");
+        assertFalse(has(team.getItem("a"), "u1", Item.CONFIGURE),
+                "D-74: u1's window does not reach the job that now carries the name team/a (formerly prod/a)");
+        WindowStateFixtures.assertActiveOn(j, "u1", windowId, "parking/a", "D-74: the window stays on its own job");
     }
 
     /**
