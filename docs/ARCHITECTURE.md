@@ -13,7 +13,7 @@
 |---|---|---|
 | 잡별 승인 설정 | `hudson.model.JobProperty` + `JobPropertyDescriptor` | `approvalRequired`, `blockTimer`, `blockUpstream`, `allowedUpstreamJobs` |
 | 실행 차단 | `hudson.model.Queue.QueueDecisionHandler#shouldSchedule(Task, List<Action>)` | `CauseAction`으로 원인 분류. 승인 투입은 `ApprovedRunAction`(마커)으로 통과. 차단 시 사용자 유래 Cause(UserIdCause·CLI·REST)는 `Failure` throw로 안내, Timer·SCM 등 무인 Cause는 `return false` + 로그 |
-| 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | 요청 저장 파라미터 그대로 |
+| 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | The `ParametersAction` holds the request's stored `ParameterValue` objects unchanged, original secrets and files included (D-72) |
 | 삭제 차단 | `ItemListener#onCheckDelete(Item)` → `throw new Failure(...)` | 변경 통제 on + 활성 Grant(DELETE) 없으면 거부 |
 | 변경 기록 | `ItemListener#onCreated/onDeleted/onRenamed/onLocationChanged` | 사후 훅. 현재 인증 `Jenkins.getAuthentication2()` 기록 |
 | 설정 diff | `SaveableListener#onChange(Saveable, XmlFile)` + 직전 스냅숏 보관 | 스냅숏은 `snapshots/<jobFullName>.xml`에 최신 1개만 |
@@ -71,7 +71,7 @@ GrantAwareACL extends ACL            (unchanged logic)
 
 - Every `getACL` overload the parent overrides is wrapped, so the parent's own per-item logic runs first underneath the grant layer. The root ACL carries no grant scope, so a subclass may leave `getRootACL` unwrapped, and matrix-auth's `getACL(ItemGroup)` resolves to an already wrapped item or root ACL (security-05 S-08).
 - Expiry: `hasActiveGrant` checks `expiresAt > now && revokedAt == null`. No timer, nothing written into the other plugin's data.
-- Scope: FOLDER scope matches the folder path prefix (the folder and everything below it), FOLDER_ONLY the folder itself and its direct items (D-65), JOB scope the exact full name. CREATE is checked on the folder's ACL, so only FOLDER-scope grants confer it. A Create grant also confers Configure on items its holder created inside the scope during the window (D-35c).
+- Scope (D-71, replaces D-65): a grant names exactly one item (scope type `ITEM`, a job or a folder of any kind) and matches only that item's exact full name, so it confers nothing on any other item, including the items inside a folder. CONFIGURE, and EXTENDED_READ through the `impliedBy` walk, is answered on the item's own ACL. Core checks CREATE on the parent's ACL, so a CREATE grant, which can exist only on a modifiable item group (a regular folder, not a job or a computed folder), admits creation directly inside that folder only, never in a nested folder. A DELETE grant can exist only on an item that is not an item group. Both restrictions are enforced when the request is submitted, from the item's kind. A Create grant also confers Configure on items its holder created through it during the window whose parent is the scope folder (D-35c), matched by parent, not by name prefix.
 - Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
 - Upgrade: none. The withdrawn generic wrapper `BatchControlAuthorizationStrategy` is removed without a load-time conversion; the plugin was never released (D-35e).
 - Migration: a security-page action copies a plain matrix-auth or role-strategy configuration into the subclass and back.
@@ -101,7 +101,9 @@ $JENKINS_HOME/batch-control/
 - Names (#17, #25): month bucket names and ids use `Locale.ROOT` ASCII digits and the plugin clock's zone. A shortened item file name is `prefix~sha256`; `encode` writes `~` as `%7E`, so a shortened name never equals a plain encoding. Pre-release file names (the old shortened form, non-ASCII month digits) are neither read nor migrated (D-43).
 - Retention also deletes closed requests and ended grants older than the first kept month.
 - Grant file fields (D-35c, D-58a): besides its window, a grant keeps two optional lists of item full names, `createdItems` (items created through it) and `changedItems` (items whose configuration was changed under it and not yet reviewed). Both are written only when non-empty, so older files load unchanged. `changedItems` follows renames and moves, loses an item when it is deleted or reviewed (an HTTP save by a native Item/Configure or Overall/Administer holder), and retention never deletes a grant file whose `changedItems` is non-empty. A run replayed under a grant carries an invisible marker action saved in its own `build.xml` by Jenkins (D-58c); Batch Control adds no file for it.
-- 비밀 마스킹: `hudson.model.PasswordParameterValue`와 `Secret` 타입은 `********`로 저장.
+- Run request file fields (D-72): `parameterValues` holds the submitted `ParameterValue` objects as XStream writes them, as core does in `build.xml`; a `PasswordParameterValue` and any other `Secret` field are written in Jenkins' encrypted form, never as plaintext. `parameters` is the masked string map derived once at submission, and it is the only form in which a request's parameters are displayed or written elsewhere (screens, CSV, history, run records, incidents). The approved build is scheduled with `parameterValues` unchanged. File content stays where each parameter type keeps it (core `$JENKINS_HOME/fileParameterValueFiles/`, file-parameters `stashedFileParameterValueFiles/`, Base64 inside the request XML); Batch Control copies none of it. When a request ends without a run (REJECTED, CANCELLED, EXPIRED, INVALIDATED, or the approved run could not be queued) Batch Control disposes of those temporary files; once the approved run is queued, the queue and the build own them.
+- Secret masking (D-72): Batch Control writes no plaintext secret. In every textual form (the request's `parameters` map, run records, CSV, incidents, diffs) a sensitive value (`ParameterValue#isSensitive()`, `hudson.model.PasswordParameterValue`, `Secret`) is `********`, and a file value appears only as `[file] <original file name>`, never its content, Base64 or a server path.
+- Grant request and grant file fields (D-71): `scope` is `{type: ITEM, fullName}`; `itemKind` records the item's kind at submission (descriptor id and display name), and a grant copies it from its request. Files with the earlier scope types `JOB`, `FOLDER` or `FOLDER_ONLY` are not converted (D-69).
 - 보관: `retentionMonths` 초과 월 파일 삭제 + ChangeRecord(RETENTION).
 - 잡 이름 인코딩: `/` → `%2F`, 기타 URL-safe 인코딩. 디코딩 시 경로 탈출(`..`) 검증.
 
@@ -128,6 +130,9 @@ $JENKINS_HOME/batch-control/
 사용자 → JobRequestAction(POST /job/X/batch-control/submit)
   → 권한 Request 확인 → RunRequestService.create(사유, 파라미터, 결재자)
   → 검증(결재자 목록, 자가 지정 금지, 사유 필수) → FileStore 저장(PENDING)
+  (D-72) After the permission check and before the form is read, the body size is checked against
+  maxRequestBodyBytes (default 100 MB). The stored request holds the typed ParameterValues and the
+  masked display map derived from them once.
 
 [결재]
 결재자 → BatchControlRootAction → RequestItem(POST /batch-control/requests/<id>/approve)
