@@ -209,11 +209,28 @@ from scripts.
     is stored and displayed verbatim** to anyone holding `ViewHistory`. Generic
     secret-pattern detection was deliberately rejected: it gives false confidence
     and still misses things.
-16. **A job with secret parameters cannot be rerun faithfully.** Request
-    parameters are masked before they are stored, so no plaintext secret is ever
-    written, but an approved run, and a rerun prefilled from an incident,
-    therefore submit the mask rather than the original value. Approval-based
-    execution of jobs with password parameters is not usable today.
+16. **An incident rerun can reuse only the parameter values its build still
+    holds.** A run request keeps the submitted parameter values with their
+    types (D-72), so the approved run receives exactly what was submitted: the
+    original value of a password or other sensitive parameter, and file
+    parameters, both core `file` and the file-parameters plugin's `stashedFile`
+    and `base64File`. Secrets are stored only in Jenkins' encrypted form, the
+    protection core gives them in a build's `build.xml`, and every screen, CSV,
+    history record, run record and incident shows them as `********`. A file
+    shows only as `[file] <original file name>`, never its content, its Base64
+    or a server path. An incident rerun reuses the failed run's own values the
+    same way, original secrets included: a core file is recreated from the copy
+    the build keeps, and a `base64File` value carries its content. Some values
+    cannot be recovered: a `stashedFile`, whose stash the build clears when it
+    completes, a core file whose copy is gone, and every value of a build that
+    has been deleted. A rerun that cannot recover all of its values creates no
+    request. Instead it opens the job's Request Run form with the recoverable
+    non-sensitive values filled in, which travel in the URL as described in
+    item 48, and the files and secrets have to be provided again. A request
+    submitted from that form is linked to the incident only after the server
+    has validated the incident reference again (the incident exists, belongs to
+    that job, and the submitter holds `ViewHistory`), so a successful run still
+    records `resolvedByRunId` (D-72a).
 17. **Stored configuration snapshots are not masked.** The diff shown in a change
     record is masked, but `batch-control/snapshots/<job>.xml` keeps the raw
     `config.xml`. Secrets inside it are Jenkins-encrypted exactly as they are in
@@ -311,19 +328,49 @@ from scripts.
     executing against a job under a different name. This is deliberate, but it
     means a rename during a busy approval queue silently costs the requesters
     their pending requests, and they have to file them again.
-31. **No rate limiting.** There is a size cap on a reason (4,000 characters) and
-    on each string parameter value (10,000 characters), but no per-user request
-    rate limit and no cap on concurrent pending requests; bulk-created requests
-    accumulate until the pending timeout clears them. Likewise nothing limits the
-    rate of configuration changes, so a burst of saves inside a window produces a
-    burst of diff and snapshot writes against a single store lock.
+31. **No rate limiting, and the instance-wide upload limit is Jenkins' own.**
+    There is a size cap on a reason (4,000 characters) and on each parameter
+    value as it is displayed (10,000 characters). Because a password is
+    displayed as `********` and a file as `[file] <original file name>`, that
+    cap bounds text values but not the size of a secret or a file. The body of
+    a run request submission is capped at 100 MB, configurable in bytes with
+    the system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
+    because requesting a run does not require `Item/Build` (D-38a). The cap is
+    judged from the declared `Content-Length` before Batch Control reads the
+    form, and a multipart or chunked body that declares no length is refused as
+    well. An over-size submission is answered with HTTP 413 and creates nothing
+    and keeps nothing in JENKINS_HOME. It does not prevent the upload itself:
+    Jenkins parses a multipart body posted under a job URL into its temporary
+    upload directory while it dispatches the URL, before any plugin code runs,
+    and keeps that directory until the JVM exits (D-72a). The instance-wide
+    limit on such uploads is Stapler's
+    `org.kohsuke.stapler.RequestImpl.FILEUPLOAD_MAX_SIZE` system property, the
+    total size in bytes of one `multipart/form-data` request, which is
+    unlimited (`-1`) by default. It applies to every multipart form Stapler
+    parses, not only Batch Control's, so leave room for the largest file
+    parameter your jobs legitimately take. Beyond these caps there is no
+    per-user request rate limit and no cap on concurrent pending requests;
+    bulk-created requests accumulate until the pending timeout clears them.
+    Likewise nothing limits the rate of configuration changes, so a burst of
+    saves inside a window produces a burst of diff and snapshot writes against
+    a single store lock.
 32. **Performance at volume is unmeasured.** The history, dashboard and
     change-record screens read a whole month bucket into memory on every page
     load, the incident list opens one file per incident, and run and grant
-    request files are never pruned and are all scanned every minute by the
-    expiry job. SPEC item 6's target of 5,000 runs a day has therefore not been
-    measured, and it is not expected to hold at that scale until the store gains
-    an index.
+    request files are never pruned while the Run Requests and Grants screens
+    read all of them on every page load (the expiry job, every minute, loads
+    only the open ones). SPEC item 6's target of 5,000 runs a day has
+    therefore not been measured, and it is not expected to hold at that scale
+    until the store gains an index. File parameters add to this. The
+    file-parameters plugin's `base64File` keeps the file's content,
+    Base64-encoded, inside the parameter value, so a run request with such a
+    parameter carries the whole file in its `requests/run/<id>.xml`, about a
+    third larger than the file. Batch Control does not copy it elsewhere, but
+    because request files are not pruned, storage grows with every such
+    upload, and the Run Requests screen reads those larger files on every page
+    load. Core `file` and `stashedFile` content stays in its own directory
+    (`fileParameterValueFiles/`, `stashedFileParameterValueFiles/`), and Batch
+    Control disposes of it when a request ends without a run.
 
 ## Before you switch either control on
 
@@ -681,7 +728,11 @@ code does on purpose.
     are defined, and one that would push the query over the cap is left out,
     while a later, shorter one may still fit. The form always opens; a field
     whose value was not carried starts at its default and has to be entered
-    again.
+    again. Files are not carried either: a file submitted with the refused
+    build does not reach the Request Run form (issue #115), and the form names
+    each file parameter and says to select the file again. The same URL
+    mechanism and caps apply when an incident rerun continues on the Request
+    Run form (item 16).
 50. **The request dialogs on the new job page use a beta core API.** On the
     new job page an action can open a dialog only through
     `Action#getEvent()` returning `DialogEvent`, which core 2.568.x marks

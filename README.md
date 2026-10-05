@@ -416,9 +416,14 @@ parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
 each with the last 100 console lines, and offers acknowledge, resolve, comment and
 a rerun request. The rerun request carries the failed build's original parameters
-as they were; they are fixed, not offered for editing. The rerun form has only
+as they were, password and file values included; they are fixed, not offered for
+editing. The rerun form has only
 the approver checkboxes: the reason is generated from the incident and cannot be
-typed in. Submitting it needs `BatchControl/Request` plus
+typed in. When a value can no longer be recovered from the build (a stashed
+file, which the build removes when it completes, or a deleted build), no request
+is created there: the job's Request Run form opens with the other values filled
+in, the requester provides files and passwords again, and the request submitted
+from it is still linked to the incident. Submitting a rerun needs `BatchControl/Request` plus
 `Item/Read` on the job, like any run request (`Item/Build` is not required), and
 the Incidents screen itself needs `BatchControl/ViewHistory`, so the user needs
 all three; the typical roles in step 3 give that combination only to administrators unless you
@@ -637,10 +642,18 @@ retry among them) are allowed, with a **Request activation** link.
 **Secrets survive only as far as detection reaches.** A stored incident log tail
 masks the build's own sensitive parameter values and Jenkins `Secret` plaintexts
 and nothing else, so a token echoed by a script, a stack trace or a third-party
-tool is kept and displayed verbatim. Request parameters, on the other hand, are
-masked before they are stored, which means no plaintext secret is ever written
-but an approved run submits the mask rather than the original value: jobs with
-password parameters cannot be run through approval today.
+tool is kept and displayed verbatim. Run request parameters are a different
+matter. A request keeps the submitted values with their types, so the approved
+run receives the original secret and the original file. That covers every
+parameter type, including core `file` and the file-parameters plugin's
+`stashedFile` and `base64File`. Secrets are stored only in Jenkins' encrypted
+form and shown everywhere as `********`; a file shows only as
+`[file] <original file name>`. An incident rerun can reuse only what the failed
+build still holds. When a file or another value is gone, it opens the Request Run
+form with the remaining values filled in, and files and secrets have to be
+provided again. A run request submission is capped at 100 MB, but the
+instance-wide upload limit is Jenkins' own; see
+[Limitations](docs/LIMITATIONS.md#records-and-screens) items 31 and 32.
 
 **`BatchControl/ViewHistory` is an instance-wide audit read.** The history
 screens, the dashboard and the CSV exports show every request and run, job names
