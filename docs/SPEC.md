@@ -202,6 +202,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 - 전역 설정: `incidentResults`(기본 [FAILURE, UNSTABLE]; ABORTED 추가 가능).
 - 수용 기준: 실행 원인과 무관하게(cron 포함) 해당 결과면 Incident가 생성된다.
 - 수용 기준: Incident 상태는 OPEN → ACKNOWLEDGED → RESOLVED, 각 전이에 사용자·시각·코멘트가 남는다.
+- Acceptance: acknowledging, resolving and commenting on an incident require `BatchControl/ViewHistory` (the permission that opens the Incidents screen); each is a POST with a crumb; a user without it gets 403 and nothing changes. (documents existing behaviour, coverage inventory G-H6)
 - Acceptance: "Request rerun" on an incident creates a RunRequest linked by `incidentId` that carries the failed run's own parameter values, including the original secret values and the file values that can still be recovered from the build. When a value cannot be recovered (for example a stashed file, which the build clears when it completes, or a deleted build), the rerun does not create the request directly: it opens the job's Request Run form prefilled with the recoverable non-sensitive values (secret values are never prefilled, as for D-60). (D-72) A request submitted from that prefilled form is linked to the incident only after the server re-validates the incident reference it carries (the incident exists, belongs to that job, and the submitter holds `BatchControl/ViewHistory`), so a successful run records `resolvedByRunId` as for a direct rerun. (D-72a)
 - 수용 기준: 연결된 재실행이 SUCCESS면 Incident에 `resolvedByRunId`가 자동 기록된다(상태 자동 변경은 하지 않음; 사람이 RESOLVED 처리).
 - 수용 기준: 콘솔 로그 마지막 100줄이 Incident에 발췌 저장된다.
