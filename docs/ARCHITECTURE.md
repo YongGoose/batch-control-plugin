@@ -130,8 +130,11 @@ $JENKINS_HOME/batch-control/
 사용자 → JobRequestAction(POST /job/X/batch-control/submit)
   → 권한 Request 확인 → RunRequestService.create(사유, 파라미터, 결재자)
   → 검증(결재자 목록, 자가 지정 금지, 사유 필수) → FileStore 저장(PENDING)
-  (D-72) After the permission check and before the form is read, the body size is checked against
-  maxRequestBodyBytes (default 100 MB). The stored request holds the typed ParameterValues and the
+  (D-72) After the permission check and before Batch Control reads the form, the declared body size
+  is checked against maxRequestBodyBytes (default 100 MB). Core may already have parsed a multipart
+  body into its temporary upload directory before any plugin code runs (URL dispatch under a job
+  reads request parameters); the cap guarantees that nothing is created or kept in JENKINS_HOME, and
+  the instance-wide upload limit is Stapler's FILEUPLOAD_MAX_SIZE system property (D-72a). The stored request holds the typed ParameterValues and the
   masked display map derived from them once.
 
 [결재]
