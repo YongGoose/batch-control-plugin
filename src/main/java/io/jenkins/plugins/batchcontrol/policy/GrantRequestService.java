@@ -2,6 +2,8 @@ package io.jenkins.plugins.batchcontrol.policy;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -255,10 +257,21 @@ public final class GrantRequestService {
     /**
      * S-13, D-71: re-validates a request's scope right before it becomes a live grant. Creation-time
      * validation does not bind a request that was persisted earlier, or whose item has since been
-     * deleted, renamed or replaced: approval is refused when no item exists at that name any more
-     * (or the approver cannot see it) or its kind differs from the one recorded at creation.
+     * deleted, renamed or replaced.
      *
-     * @throws IllegalArgumentException for an empty (root) scope, as at creation
+     * <ul>
+     *   <li>The item exists but the approver cannot see it (T-SEC-18, P-10: the decision may not be
+     *       made blind): {@link IllegalArgumentException}.</li>
+     *   <li>No item exists at that name any more, or its kind (descriptor id) differs from the one
+     *       recorded at creation (D-71): {@link IllegalStateException}.</li>
+     * </ul>
+     *
+     * <p>The first two cases share one message, so a page that shows the message does not tell an
+     * approver who cannot see the item whether it still exists. The kind is only compared, and
+     * named, for an item the approver can see.
+     *
+     * @throws IllegalArgumentException for an empty (root) scope, as at creation, or an item the
+     *                                  approver cannot see
      * @throws IllegalStateException when the item is gone or its kind changed
      */
     private static void checkScopeAtApproval(GrantRequest request) {
@@ -268,8 +281,12 @@ public final class GrantRequestService {
         String id = request.getId();
         Item item = findScopeItem(fullName);
         if (item == null) {
-            throw new IllegalStateException("Grant request " + id + " cannot be approved: no item named '"
-                    + fullName + "' exists any more.");
+            String unavailable = "Grant request " + id + " cannot be approved: no item named '" + fullName
+                    + "' exists any more, or you cannot see it.";
+            if (itemExists(fullName)) {
+                throw new IllegalArgumentException(unavailable);
+            }
+            throw new IllegalStateException(unavailable);
         }
         ItemKind recorded = request.getItemKind();
         ItemKind current = ItemKind.of(item);
@@ -291,6 +308,25 @@ public final class GrantRequestService {
         }
     }
 
+    /**
+     * D-71: whether any item exists at {@code fullName}, whoever may see it. Used only by
+     * {@link #checkScopeAtApproval} once the approver's own lookup came back empty, to tell an item
+     * that is gone (the world changed: {@link IllegalStateException}) from one the approver cannot
+     * see (the approver may not decide: {@link IllegalArgumentException}).
+     *
+     * <p>ACL.SYSTEM2 switch, with its reason: a caller-scoped lookup cannot tell a missing item from
+     * an invisible one, and that distinction is the whole question. The approver's permission checks
+     * are complete before this is reached ({@link ApprovalPolicy#checkDecision} in {@link #approve}:
+     * the caller is a designated approver holding BatchControl/Approve), the switch covers the one
+     * lookup only, and the item found is never returned or acted on: only its existence is used.
+     */
+    private static boolean itemExists(String fullName) {
+        // ACL.SYSTEM2 switch: the approver's permission checks are complete (see javadoc).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return Jenkins.get().getItemByFullName(fullName) != null;
+        }
+    }
+
     // ---------------------------------------------------------------- decisions (SPEC 3, 8)
 
     /**
@@ -302,9 +338,8 @@ public final class GrantRequestService {
      * <p>The stored scope is re-validated here (S-13, D-71): approval fails with
      * {@link IllegalStateException} if no item exists at the scope name any more or its kind
      * (descriptor id) differs from the one recorded at creation, and with
-     * {@link IllegalArgumentException} for a root scope. The lookup is caller-scoped like every
-     * other item lookup in this service: the approver must be able to see the scope item to
-     * approve a window on it.
+     * {@link IllegalArgumentException} for a root scope or an item the approver cannot see
+     * (T-SEC-18): the approver must be able to see the scope item to approve a window on it.
      *
      * @return the created, immediately effective {@link Grant}
      */

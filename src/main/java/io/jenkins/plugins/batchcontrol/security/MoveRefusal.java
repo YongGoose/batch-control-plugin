@@ -59,8 +59,9 @@ public class MoveRefusal extends Failure {
 
     /**
      * Whether the refusal lacks Item/Delete on the item and a Delete window on the item would supply
-     * it. {@code false} for an item no window can confer Delete on (an item group that is not a job,
-     * D-71): moving it needs an administrator, so no window is suggested.
+     * it. {@code false} when a missing part cannot come from any window: Delete on an item group
+     * that is not a job (D-71), or Create in the Jenkins root (no window names it) or in a group that
+     * is not a regular folder. Such a move needs an administrator, so no window is suggested.
      */
     public boolean isDeleteMissing() {
         return deleteMissing;

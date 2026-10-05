@@ -167,12 +167,26 @@ final class MoveGuard {
                 message.append('.');
             }
         }
+        // Missing parts no permission window can supply. Suggesting a window for one of them would
+        // lead to a request refused at submission (or to a window that still does not allow the
+        // move), so the message says an administrator must make the move and the refusal page
+        // offers no window at all.
+        List<String> noWindow = new ArrayList<>();
         if (!delete && !GrantScope.deleteAppliesTo(item)) {
-            // D-71: a window's Delete applies only to a job, so for a folder, multibranch project or
-            // organization folder no window can supply the missing Delete; suggesting one would lead
-            // to a request refused at submission. No window is offered on the refusal page either.
-            message.append(" No permission window confers Delete on '").append(item.getFullName())
-                    .append("': a window's Delete applies only to a job, so moving it needs an administrator.");
+            // D-71: a window's Delete applies only to a job, never to a folder, multibranch project
+            // or organization folder.
+            noWindow.add("Delete on '" + item.getFullName() + "', because a window's Delete applies only to a job");
+        }
+        if (!create && restricting == null && !createWindowPossible(destination)) {
+            // S-13: no window can name the Jenkins root; D-71: a window's Create applies only to a
+            // regular folder.
+            noWindow.add(destName.isEmpty()
+                    ? "Create in the Jenkins root, because a window names one job or folder and the Jenkins root is neither"
+                    : "Create in " + describe(destName) + ", because a window's Create applies only to a folder");
+        }
+        if (!noWindow.isEmpty()) {
+            message.append(" No permission window confers ").append(String.join(", nor ", noWindow))
+                    .append(", so an administrator must make this move.");
             return new MoveRefusal(message.toString(), item.getFullName(), destName, false, false);
         }
         if (toRequest.isEmpty()) {
@@ -340,6 +354,16 @@ final class MoveGuard {
             }
         }
         return first;
+    }
+
+    /**
+     * Whether a permission window can confer Item/Create in {@code destination}: never in the
+     * Jenkins root (no window names it, S-13), and elsewhere only in a group a window's CREATE
+     * applies to (a regular folder, D-71).
+     */
+    private static boolean createWindowPossible(ItemGroup<?> destination) {
+        return destination instanceof Item && !destination.getFullName().isEmpty()
+                && GrantScope.createAppliesTo((Item) destination);
     }
 
     private static String describe(String groupFullName) {
