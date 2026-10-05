@@ -7,7 +7,8 @@
       <!-- D-67: at most the 50 most recent runs; History lists the rest (filters, paging, CSV). -->
       <p class="jenkins-description">
         The ${it.limit} most recent builds of every job with cause, user, parameters, result and
-        duration, newest first. Secret parameter values are stored masked.
+        duration, newest first. Secret parameter values are stored masked, and file parameters
+        only by their file name.
       </p>
 
       <j:set var="links" value="${it.links}"/>

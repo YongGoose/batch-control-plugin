@@ -13,14 +13,17 @@ import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.IncidentStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
+import io.jenkins.plugins.batchcontrol.ops.RerunNeedsFormException;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -203,9 +206,16 @@ public class IncidentItem implements ModelObject {
 
     /**
      * POST {@code rerun} with the repeated {@code approvers} field (the single {@code approver}
-     * field the rerun form posts is read too) — creates a rerun {@link RunRequest} pre-filled
-     * with the original parameters and linked back to this incident, then redirects to the new
-     * request's detail page.
+     * field the rerun form posts is read too) — creates a rerun {@link RunRequest} carrying the
+     * failed run's own parameter values and linked back to this incident, then redirects to the
+     * new request's detail page.
+     *
+     * <p>D-72 (SPEC item 11): when a value of the failed run cannot be recovered
+     * ({@link RerunNeedsFormException}: a stashed file the build has cleared, a deleted build) no
+     * request is created; the answer is a 302 to the job's Request Run form,
+     * {@code <job>/batch-control/?p.<name>=<value>...&fromRerun=<incident id>}, carrying the
+     * recoverable non-sensitive values within the prefill caps ({@link RequestRunPrefill#rerunQuery});
+     * the form says that file and password values must be provided again.
      */
     @RequirePOST
     public void doRerun(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -249,6 +259,16 @@ public class IncidentItem implements ModelObject {
                 rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
                         + Util.rawEncode(created.getId()) + "/");
                 return;
+            } catch (RerunNeedsFormException e) {
+                // D-72: the service checked Request and Item/Read before reading the failed run;
+                // nothing was created. The prefill holds non-sensitive, non-file values only.
+                if (job != null) {
+                    rsp.sendRedirect(HttpServletResponse.SC_FOUND, req.getContextPath() + "/" + job.getUrl()
+                            + "batch-control/" + RequestRunPrefill.rerunQuery(job, e.getPrefill(), incident.getId()));
+                    return;
+                }
+                errors.message("The rerun could not be requested: the incident's job '"
+                        + incident.getJobFullName() + "' is not available.");
             } catch (IllegalArgumentException | IllegalStateException e) {
                 errors.fromService(e.getMessage(), "approver", "approvers");
             }

@@ -9,28 +9,37 @@ import hudson.model.Job;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
+import hudson.model.PasswordParameterDefinition;
 import hudson.security.Permission;
 import hudson.util.Secret;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.ops.IncidentService;
+import io.jenkins.plugins.batchcontrol.policy.ParameterFiles;
+import io.jenkins.plugins.batchcontrol.policy.RequestBodyLimit;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.SecretMasker;
+import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
+import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
+import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
+import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import jenkins.model.menu.Group;
 import jenkins.model.menu.Semantic;
@@ -63,6 +72,9 @@ public class JobRequestAction implements Action {
 
     /** {@link FormErrors} name of the request form. */
     static final String FORM = "request";
+
+    /** Shape of an incident id taken from a query string before it is looked up (D-72). */
+    private static final Pattern INCIDENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
 
     private final Job<?, ?> job;
 
@@ -195,7 +207,8 @@ public class JobRequestAction implements Action {
      * <p>e2e-03 DEF-09: when a submission is being refused, each definition whose value was
      * parsed is replaced by a copy defaulting to that value
      * ({@link ParameterDefinition#copyWithDefaultValue}), so the re-rendered form shows what the
-     * user entered. Sensitive values (password parameters) are never copied back into the page.
+     * user entered. Sensitive values (password parameters) and file values are never copied back
+     * into the page (D-72: the form says to provide them again, {@link #getReenterParameterNames}).
      */
     public List<ParameterDefinition> getParameterDefinitions() {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
@@ -219,7 +232,8 @@ public class JobRequestAction implements Action {
         for (ParameterDefinition definition : definitions) {
             ParameterValue value = byName.get(definition.getName());
             ParameterDefinition shown = definition;
-            if (value != null && !value.isSensitive() && !(value.getValue() instanceof Secret)) {
+            if (value != null && !value.isSensitive() && !ParameterDisplay.isFile(value)
+                    && !(value.getValue() instanceof Secret)) {
                 try {
                     shown = definition.copyWithDefaultValue(value);
                 } catch (RuntimeException e) {
@@ -236,6 +250,82 @@ public class JobRequestAction implements Action {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         return property != null && RequestRunPrefill.isPrefilled(property.getParameterDefinitions(),
                 org.kohsuke.stapler.Stapler.getCurrentRequest2());
+    }
+
+    /**
+     * The names of the job's parameters whose values the form never fills in, so the user provides
+     * them again (D-72, D-60): file parameters ({@link RequestRunPrefill#isFileDefinition}) and
+     * password parameters. Shown on a refused submission, on a refused direct build (D-60; files
+     * are not carried, issue #115) and on a rerun that continues here.
+     */
+    public List<String> getReenterParameterNames() {
+        List<String> names = new ArrayList<>();
+        for (ParameterDefinition definition : definitions()) {
+            if (RequestRunPrefill.isFileDefinition(definition)
+                    || definition instanceof PasswordParameterDefinition) {
+                names.add(definition.getName());
+            }
+        }
+        return names;
+    }
+
+    /** The names of the job's file parameters ({@link RequestRunPrefill#isFileDefinition}). */
+    public List<String> getFileParameterNames() {
+        List<String> names = new ArrayList<>();
+        for (ParameterDefinition definition : definitions()) {
+            if (RequestRunPrefill.isFileDefinition(definition)) {
+                names.add(definition.getName());
+            }
+        }
+        return names;
+    }
+
+    private List<ParameterDefinition> definitions() {
+        ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
+        return property == null ? Collections.emptyList() : property.getParameterDefinitions();
+    }
+
+    /**
+     * D-72 (SPEC item 11): the id of the incident whose rerun continues on this form, from
+     * {@value RequestRunPrefill#FROM_RERUN}{@code =<id>} on a GET, or {@code null}. Only an
+     * incident of this job that the viewer may see ({@code BatchControl/ViewHistory}, which the
+     * rerun itself needs) counts; anything else is ignored, so a crafted link shows no notice and
+     * reveals nothing. The form then says which values must be provided again; the values that
+     * could be recovered arrive as {@code p.<name>} like a refused build's (D-60).
+     */
+    @CheckForNull
+    public String getRerunIncidentId() {
+        StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
+        if (req == null || !"GET".equals(req.getMethod())
+                || !SectionAccess.hasAny(SectionAccess.history())) {
+            return null;
+        }
+        String id = req.getParameter(RequestRunPrefill.FROM_RERUN);
+        if (id == null || !INCIDENT_ID.matcher(id).matches()) {
+            return null;
+        }
+        Incident incident;
+        try {
+            incident = IncidentService.get().load(id);
+        } catch (IllegalArgumentException | UncheckedIOException e) {
+            return null;
+        }
+        return incident != null && job.getFullName().equals(incident.getJobFullName()) ? id : null;
+    }
+
+    /**
+     * The reason the form starts with on a rerun that continues here
+     * ({@link #getRerunIncidentId()}): the reason the rerun would have generated, editable;
+     * otherwise empty. No argument on purpose: Stapler would bind a one-argument getter to a URL.
+     */
+    public String getRerunReason() {
+        String incidentId = getRerunIncidentId();
+        if (incidentId == null) {
+            return "";
+        }
+        Incident incident = IncidentService.get().load(incidentId);
+        return incident == null ? "" : "Rerun requested from incident " + incidentId
+                + " (failed run " + incident.getRunId() + ")";
     }
 
     /** The refusal of the last submission on this request, or an empty one (DEF-09). */
@@ -290,8 +380,10 @@ public class JobRequestAction implements Action {
     /** Whether the page shows the "marked as reviewed" confirmation (constant text only). */
     public boolean isReviewedNotice() {
         // S-29-08: the parameter alone is not trusted; the notice only states what is true now.
+        // GET only: the redirect of doMarkReviewed. On a refused submission (a POST) reading a
+        // parameter would parse a multipart body, which a body over the D-72 cap must not be.
         StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
-        return req != null && "1".equals(req.getParameter("reviewed"))
+        return req != null && "GET".equals(req.getMethod()) && "1".equals(req.getParameter("reviewed"))
                 && !GrantService.get().isChangedUnderGrant(job);
     }
 
@@ -299,6 +391,21 @@ public class JobRequestAction implements Action {
      * POST {@code submit} — creates the run request and redirects to its detail page at
      * {@code /batch-control/requests/<id>/}. A refused submission re-renders the form with HTTP 400,
      * the message next to the field it concerns and the user's input kept (e2e-03 DEF-09).
+     *
+     * <p>D-72: the form posts {@code multipart/form-data}, so file parameters are uploaded with it,
+     * and the request keeps the submitted values with their types ({@link RunRequestService#create
+     * create(Job, List, String, List)}). Because requesting a run does not require
+     * {@code Item/Build} (D-38a), the body size is checked right after the permission checks and
+     * before this endpoint reads the body ({@link RequestBodyLimit}): a body over the cap is
+     * answered with HTTP 413 and the empty form; nothing of it is read here and nothing is created
+     * or kept. (Core's own dispatch to this URL may already have parsed a multipart body:
+     * {@code Job#getDynamic} builds the job's widgets and {@code HistoryWidget} reads a paging
+     * parameter. That happens for every URL under a job, before any plugin code, and is bounded
+     * only by Stapler's {@code org.kohsuke.stapler.RequestImpl.FILEUPLOAD_MAX_*} properties.)
+     * When the form's own
+     * checks refuse a submission, the temporary files of its file values are disposed of here
+     * ({@link ParameterFiles}); once the values are handed to the service, it disposes of them on
+     * its own refusals. The re-rendered form never shows a password or a file again.
      *
      * <p>N-01: {@link #parseParameters} is inside the {@code try} on purpose. A parameter
      * definition rejects a bad value by throwing {@link IllegalArgumentException} — a choice
@@ -313,7 +420,7 @@ public class JobRequestAction implements Action {
      * build time rather than the values the approver saw. {@link #parseRawParameters} now reads
      * each defined parameter straight from the request the way core's
      * {@code ParametersDefinitionProperty#_doBuild} / {@code buildWithParameters} do, so the
-     * stored map is complete either way.
+     * stored values are complete either way.
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -322,6 +429,13 @@ public class JobRequestAction implements Action {
         // D-38a: Request is checked on the requested job (assigned there, on a folder or globally).
         job.checkPermission(BatchControlPermissions.REQUEST);
         // D-38a: Item/Build is not required to request a run; the approval decides.
+
+        // D-72: the body size cap, from the headers alone, before anything reads the body
+        // (getParameter and getSubmittedForm parse a multipart body, file uploads included).
+        if (RequestBodyLimit.exceeds(req)) {
+            refuseOversizedBody(req, rsp);
+            return;
+        }
 
         // The rendered form posts a json blob (f:form) plus the raw fields; a script may post
         // the raw fields only. Both carry the same contract: reason, repeated approvers (D-37).
@@ -332,36 +446,49 @@ public class JobRequestAction implements Action {
         // e2e-03 DEF-09: every refusal of the user's input is shown on the form, next to the
         // field, with the input kept (FormErrors), instead of a bare "Error" page.
         FormErrors errors = new FormErrors(FORM);
-        List<String> approvers = List.of();
-        try {
-            approvers = ApproverInput.read(req, formData);
-        } catch (Failure e) {
-            errors.field("approvers", e.getMessage());
-        }
         List<ParameterValue> submitted = new ArrayList<>();
-        Map<String, String> parameters = null;
+        boolean handedOver = false;
         try {
-            parameters = formData == null
-                    ? parseRawParameters(req, submitted) : parseParameters(req, formData, submitted);
-        } catch (IllegalArgumentException | Failure e) {
-            errors.field("parameters", "A parameter value was refused"
-                    + (e.getMessage() == null ? "." : ": " + e.getMessage()));
-        }
-        if (reason == null) {
-            errors.field("reason", "Enter a reason: the approvers decide on it.");
-        }
-        if (approvers.isEmpty()) {
-            errors.field("approvers", "Check at least one approver.");
-        }
-        if (errors.isEmpty()) {
+            List<String> approvers = List.of();
             try {
-                RunRequest request = RunRequestService.get().create(job, parameters, reason, approvers);
-                rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
-                        + Util.rawEncode(request.getId()) + "/");
-                return;
-            } catch (IllegalArgumentException | IllegalStateException e) {
-                errors.fromService(e.getMessage(), "reason", "reason", "approver", "approvers",
-                        "parameter", "parameters");
+                approvers = ApproverInput.read(req, formData);
+            } catch (Failure e) {
+                errors.field("approvers", e.getMessage());
+            }
+            try {
+                if (formData == null) {
+                    parseRawParameters(req, submitted);
+                } else {
+                    parseParameters(req, formData, submitted);
+                }
+            } catch (IllegalArgumentException | Failure e) {
+                errors.field("parameters", "A parameter value was refused"
+                        + (e.getMessage() == null ? "." : ": " + e.getMessage()));
+            }
+            if (reason == null) {
+                errors.field("reason", "Enter a reason: the approvers decide on it.");
+            }
+            if (approvers.isEmpty()) {
+                errors.field("approvers", "Check at least one approver.");
+            }
+            if (errors.isEmpty()) {
+                // From here the service owns the values' temporary files, on a refusal too.
+                handedOver = true;
+                try {
+                    RunRequest request = RunRequestService.get().create(job, submitted, reason, approvers);
+                    rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
+                            + Util.rawEncode(request.getId()) + "/");
+                    return;
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    errors.fromService(e.getMessage(), "reason", "reason", "approver", "approvers",
+                            "parameter", "parameters");
+                }
+            }
+        } finally {
+            if (!handedOver) {
+                // D-72: refused by this form before the service saw the values (or parsing
+                // failed half-way): their uploaded files are not kept.
+                ParameterFiles.dispose(submitted, "a refused run request form for job '" + job.getFullName() + "'");
             }
         }
         // D-66: a refusal is shown where the form was, in the dialog or on this page.
@@ -369,24 +496,55 @@ public class JobRequestAction implements Action {
     }
 
     /**
+     * D-72: answers a submission whose body is over the cap with HTTP 413 and the request form,
+     * empty, with a message saying why: nothing of the body is read (the view never reads the
+     * submitted fields, {@link FormErrors#withoutInput()}), so no request is created and no
+     * uploaded file is stored. The dialog is recognised by its action's query string
+     * ({@link Dialogs#fromDialogQuery}), never by a body field.
+     */
+    private void refuseOversizedBody(StaplerRequest2 req, StaplerResponse2 rsp)
+            throws IOException, ServletException {
+        FormErrors errors = new FormErrors(FORM).withoutInput().message(
+                "The request was not submitted: it is larger than the limit of "
+                + sizeText(RequestBodyLimit.maxRequestBodyBytes())
+                + " for a run request (or does not declare its size). Nothing was saved, and what"
+                + " you entered could not be kept. Fill in the form again with smaller files, or"
+                + " ask a Jenkins administrator to raise the limit.");
+        errors.render(req, rsp, this,
+                Dialogs.fromDialogQuery(req) ? Dialogs.DIALOG_VIEW : "index.jelly",
+                HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+    }
+
+    /** {@code bytes} as text for the size cap message: whole MB, KB or bytes, rounded down. */
+    static String sizeText(long bytes) {
+        long mega = 1024L * 1024L;
+        if (bytes >= mega && bytes % mega == 0) {
+            return bytes / mega + " MB";
+        }
+        if (bytes >= 1024L && bytes % 1024L == 0) {
+            return bytes / 1024L + " KB";
+        }
+        return String.format(java.util.Locale.ROOT, "%,d bytes", bytes);
+    }
+
+    /**
      * Parses the {@code parameter} JSON array the same way core's
      * {@code ParametersDefinitionProperty._doBuild} does (each entry goes through the parameter
-     * definition's {@code createValue}), then flattens the values to strings.
+     * definition's {@code createValue}, file parameters reading their upload from the multipart
+     * body) and adds the typed values to {@code submitted} (D-72: kept as they are, not flattened).
      *
      * <p>Throws {@link Failure} for a parameter name the job does not define, and lets a
      * definition's own {@link IllegalArgumentException} propagate for a value it refuses; the
      * caller turns the latter into the same 400 as every other rejected submission (N-01).
      */
-    private Map<String, String> parseParameters(StaplerRequest2 req, JSONObject formData,
-                                                List<ParameterValue> submitted) {
-        Map<String, String> parameters = new LinkedHashMap<>();
+    private void parseParameters(StaplerRequest2 req, JSONObject formData, List<ParameterValue> submitted) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
-            return parameters;
+            return;
         }
         Object parameter = formData.opt("parameter");
         if (parameter == null) {
-            return parameters;
+            return;
         }
         for (Object entry : JSONArray.fromObject(parameter)) {
             if (!(entry instanceof JSONObject)) {
@@ -404,10 +562,8 @@ public class JobRequestAction implements Action {
             ParameterValue value = definition.createValue(req, jsonEntry);
             if (value != null) {
                 submitted.add(value);
-                parameters.put(value.getName(), flatten(value));
             }
         }
-        return parameters;
     }
 
     /**
@@ -416,16 +572,14 @@ public class JobRequestAction implements Action {
      * through {@link ParameterDefinition#createValue(StaplerRequest2)} — the same call core's
      * {@code buildWithParameters} makes — falling back explicitly to
      * {@link ParameterDefinition#getDefaultParameterValue()} when the definition itself returns
-     * {@code null} for a missing field, so the stored map is complete rather than empty. Values
-     * still go through {@link #flatten}, so secrets are masked exactly as for the JSON path, and a
+     * {@code null} for a missing field, so the stored values are complete rather than empty. A
      * definition's own {@link IllegalArgumentException} for a bad value propagates unchanged
      * (N-01: caught by the caller's {@code try}).
      */
-    private Map<String, String> parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted) {
-        Map<String, String> parameters = new LinkedHashMap<>();
+    private void parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
-            return parameters;
+            return;
         }
         for (ParameterDefinition definition : property.getParameterDefinitions()) {
             ParameterValue value = definition.createValue(req);
@@ -434,25 +588,7 @@ public class JobRequestAction implements Action {
             }
             if (value != null) {
                 submitted.add(value);
-                parameters.put(value.getName(), flatten(value));
             }
         }
-        return parameters;
-    }
-
-    /**
-     * Flattens a {@link ParameterValue} to the string that is stored on the request. Sensitive
-     * values (password parameters, {@link Secret}s) are masked and never stored in plaintext —
-     * see the slice report for the resulting limitation on reproducing password parameters.
-     */
-    private static String flatten(ParameterValue value) {
-        if (value.isSensitive()) {
-            return SecretMasker.MASK;
-        }
-        Object raw = value.getValue();
-        if (raw instanceof Secret) {
-            return SecretMasker.MASK;
-        }
-        return raw == null ? "" : String.valueOf(raw);
     }
 }

@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.FileParameterDefinition;
 import hudson.model.Job;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
@@ -40,12 +41,31 @@ import org.kohsuke.stapler.StaplerRequest2;
  * <p>A crafted link can only pre-fill a form the viewer may already open: the viewer still reads
  * and submits it, and every rendered value goes through the parameter definition's own view,
  * which escapes it.
+ *
+ * <p>D-72: an incident rerun whose failed run has a value that cannot be recovered continues on
+ * the same form ({@link #rerunQuery}): the recoverable non-sensitive values travel as
+ * {@value #PREFIX}{@code <name>} under the same caps, and {@value #FROM_RERUN}{@code =<incident id>}
+ * tells the form to say which values must be provided again. File parameters are never carried
+ * ({@link #isFileDefinition}); carrying them from a refused build is issue #115.
  */
 @Restricted(NoExternalUse.class)
 public final class RequestRunPrefill {
 
     /** Query parameter prefix of a pre-filled value (frozen name). */
     public static final String PREFIX = "p.";
+
+    /**
+     * D-72: query parameter naming the incident whose rerun continues on the Request Run form
+     * because a value of the failed run could not be recovered.
+     */
+    public static final String FROM_RERUN = "fromRerun";
+
+    /**
+     * Base class of the file-parameters plugin's definitions (stashedFile, base64File), matched by
+     * name because the plugin is optional and the class is not public.
+     */
+    static final String FILE_PARAMETERS_DEFINITION =
+            "io.jenkins.plugins.file_parameters.AbstractFileParameterDefinition";
 
     /** Longest value carried in the redirect URL. */
     static final int MAX_VALUE_LENGTH = 2000;
@@ -102,6 +122,55 @@ public final class RequestRunPrefill {
             carried.put(definition.getName(), text);
         }
         return carried;
+    }
+
+    /**
+     * D-72: the query of the Request Run form an incident rerun continues on when a value of the
+     * failed run could not be recovered ({@code RerunNeedsFormException}): the {@code prefill}
+     * values the job defines as carriable parameters, under the same caps as
+     * {@link #carriedValues} ({@value #MAX_VALUE_LENGTH} characters per value,
+     * {@value #MAX_QUERY_LENGTH} for the encoded {@value #PREFIX} part, definition order), then
+     * {@value #FROM_RERUN}{@code =<incidentId>}. A password parameter is never carried, whatever
+     * {@code prefill} holds.
+     */
+    public static String rerunQuery(Job<?, ?> job, Map<String, String> prefill, String incidentId) {
+        Map<String, String> carried = new LinkedHashMap<>();
+        ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
+        if (property != null && prefill != null) {
+            int queryLength = 0;
+            for (ParameterDefinition definition : property.getParameterDefinitions()) {
+                String text = prefill.get(definition.getName());
+                if (text == null || !isCarriable(definition) || text.length() > MAX_VALUE_LENGTH) {
+                    continue;
+                }
+                int added = 1 + encode(PREFIX + definition.getName()).length() + 1 + encode(text).length();
+                if (queryLength + added > MAX_QUERY_LENGTH) {
+                    continue;
+                }
+                queryLength += added;
+                carried.put(definition.getName(), text);
+            }
+        }
+        String query = toQuery(carried);
+        return query + (query.isEmpty() ? '?' : '&') + FROM_RERUN + '=' + encode(incidentId);
+    }
+
+    /**
+     * Whether {@code definition} takes a file: core's {@link FileParameterDefinition} or a
+     * definition of the file-parameters plugin (stashedFile, base64File; matched by class name,
+     * the plugin is optional). A file is never carried into the form; the user selects it again.
+     */
+    public static boolean isFileDefinition(@CheckForNull ParameterDefinition definition) {
+        if (definition instanceof FileParameterDefinition) {
+            return true;
+        }
+        for (Class<?> type = definition == null ? null : definition.getClass(); type != null;
+                type = type.getSuperclass()) {
+            if (FILE_PARAMETERS_DEFINITION.equals(type.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** {@code ?p.A=1&p.B=x} for the given values, or the empty string for none. */

@@ -51,6 +51,9 @@ public final class FormErrors {
     @CheckForNull
     private Object attachment;
 
+    /** False when the submission's input must not be read back (D-72: body over the size cap). */
+    private boolean inputKept = true;
+
     /** @param form the name of the form that was submitted ({@code reject}, {@code create}, ...) */
     public FormErrors(String form) {
         this.form = form;
@@ -91,6 +94,16 @@ public final class FormErrors {
         return this;
     }
 
+    /**
+     * D-72: the submission is refused without its input being read (its body is over the size
+     * cap, and reading a field would parse it), so the form is shown empty: {@link #value} and
+     * {@link #checked} return nothing and the view may use its defaults.
+     */
+    public FormErrors withoutInput() {
+        this.inputKept = false;
+        return this;
+    }
+
     /** Whether anything was refused. */
     public boolean isEmpty() {
         return fields.isEmpty() && message == null;
@@ -99,6 +112,14 @@ public final class FormErrors {
     /** The inverse of {@link #isEmpty()}, for Jelly. */
     public boolean isPresent() {
         return !isEmpty();
+    }
+
+    /**
+     * Whether the refused form is shown with the user's input ({@link #value}, {@link #checked}):
+     * something was refused and the input could be read ({@link #withoutInput()}).
+     */
+    public boolean isInputKept() {
+        return isPresent() && inputKept;
     }
 
     public String getForm() {
@@ -124,7 +145,7 @@ public final class FormErrors {
 
     /** What the user submitted in {@code field}; empty when nothing is being refused. */
     public String value(String field) {
-        if (isEmpty()) {
+        if (!isInputKept()) {
             return "";
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
@@ -133,7 +154,7 @@ public final class FormErrors {
 
     /** Whether {@code value} was among the submitted values of the repeated {@code field}. */
     public boolean checked(String field, String value) {
-        if (isEmpty()) {
+        if (!isInputKept()) {
             return false;
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
@@ -157,9 +178,18 @@ public final class FormErrors {
      */
     public void render(StaplerRequest2 req, StaplerResponse2 rsp, Object it, String view)
             throws IOException, ServletException {
+        render(req, rsp, it, view, HttpServletResponse.SC_BAD_REQUEST);
+    }
+
+    /**
+     * As {@link #render(StaplerRequest2, StaplerResponse2, Object, String)} with the HTTP status
+     * {@code status} (D-72: 413 for a body over the size cap).
+     */
+    public void render(StaplerRequest2 req, StaplerResponse2 rsp, Object it, String view, int status)
+            throws IOException, ServletException {
         req.setAttribute(ATTRIBUTE, this);
         RequestDispatcher dispatcher = req.getView(it, view);
-        rsp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+        rsp.setStatus(status);
         if (dispatcher == null) {
             // No view to return to: a plain-text refusal still says why.
             rsp.setContentType("text/plain;charset=UTF-8");
