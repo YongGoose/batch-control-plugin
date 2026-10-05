@@ -1,6 +1,6 @@
 """e2e-16: a run request keeps the submitted typed parameter values, for every type (D-72, D-72b; SPEC item 5).
 
-usage: python params.py [FDSEB413CRUVX]   rows: out/params.jsonl, shots: R16-PARAM-*.png
+usage: python params.py [FDSEB413CRUXY]   rows: out/params.jsonl, shots: R16-PARAM-*.png
 F  core `file` parameter (Freestyle r16-file) through the Request Run PAGE: UPLOAD file + SECRET password + NOTE
    string; approve; the approved build receives the exact uploaded bytes (sha) and the ORIGINAL secret (its sha), and
    the request detail shows `[file] UPLOAD`, `********` for the secret, NOTE in clear; no plaintext secret in the store
@@ -19,7 +19,10 @@ U  a value containing U+0000 (which XML cannot store) is refused with HTTP 400, 
 V  (part of F/S/X) the typed values live in requests/run/<id>.values.xml, the request file <id>.xml holds none and no
    plaintext secret; the values file is gone once the approved run started, and once a request is rejected or cancelled
    (D-74 (1), D-72b (5))
-X  temporary files are disposed of when a file request is rejected and when it is cancelled"""
+X  temporary files are disposed of when a file request is rejected and when it is cancelled
+Y  (after F/S/E/B) every text surface shows the file values only as `[file] <name>` and the secret only masked: the
+   History page, requests.csv and runs.csv (parameters column), the Dashboard: no file content, no Base64 text, no
+   plaintext secret, no server path (SPEC 5, D-72; coverage inventory G-M6/G-L8)"""
 import re
 import sys
 import time
@@ -32,7 +35,7 @@ from lib import (Session, api, gv, check, note, decide, text_of, J, BASE, SECRET
                  sha, make_file, fill_run_form, param_box, loc_id, tick, run_files, run_file_text)  # noqa: E402
 
 lib.LOGNAME[0] = "params"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "FDSEB413CRUX"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "FDSEB413CRUXY"
 REQ = "requester"
 MASK = "********"
 
@@ -307,6 +310,40 @@ def sec_C():
         set_cap("104857600")
 
 
+def sec_Y():
+    import base64 as _b
+    files = sorted((lib.OUT / "files").glob("b64-*.bin")) + sorted((lib.OUT / "files").glob("stashed-*.bin")) + \
+        sorted((lib.OUT / "files").glob("upload-*.bin"))
+    b64s = {f.name: _b.b64encode(f.read_bytes()).decode()[:32] for f in files}
+    markers = {f.name: f.read_bytes().split(b"\n", 1)[0].decode() for f in files}
+    # the CSV links as the History page renders them (its from/to range; a bare requests.csv answers the header only)
+    page = api("approver-1", "/batch-control/history/").text
+    links = {m.group(1): m.group(0).split('"')[1].replace("&amp;", "&") for m in re.finditer(r'href="((?:requests|runs)\.csv)\?[^"]*"', page)}
+    surfaces = {"requests.csv": "/batch-control/history/" + links.get("requests.csv", "requests.csv"),
+                "runs.csv": "/batch-control/history/" + links.get("runs.csv", "runs.csv"),
+                "history": "/batch-control/history/", "history requests": "/batch-control/history/?kind=requests",
+                "dashboard": "/batch-control/dashboard/"}
+    PATHS = re.compile(r"fileParameterValueFiles|stashedFileParameterValueFiles|/var/jenkins_home|jenkins-stapler-uploads")
+    for name, path in surfaces.items():
+        r = api("approver-1", path)
+        body = r.text if name.endswith(".csv") else text_of(r.text)
+        rows = [l for l in body.splitlines() if "r16-file" in l or "r16-stash" in l] if name.endswith(".csv") else [body]
+        joined = "\n".join(rows)
+        problems = {
+            "base64 text": [n for n, b in b64s.items() if b in joined],
+            "file content marker": [n for n, m in markers.items() if m in joined],
+            "plaintext secret": SECRET in joined,
+            "server path": PATHS.findall(joined)[:3],
+        }
+        shows_file = "[file] " in joined
+        check("Y", f"{name}: the r16 typed requests/runs show files only as [file] <name> and no content, Base64, plaintext "
+              "secret or server path", r.status_code == 200 and (shows_file or not name.endswith(".csv"))
+              and not any(problems.values()), status=r.status_code, url=path, rows=len(rows) if name.endswith(".csv") else None,
+              shows_file=shows_file, **{k: v for k, v in problems.items() if v})
+        if name.endswith(".csv"):
+            note("Y", f"{name} sample row", row=(rows[:1] or [""])[0][:400])
+
+
 def sec_R():
     job = "r16-file"
     reqs0 = set(requests_of(job))
@@ -363,6 +400,6 @@ if __name__ == "__main__":
     run_sections(list(dict.fromkeys(
         [c for c in [s for s in ["F", "D", "S", "E", "B"] if s in WANT]]
         + (["413"] if "4" in WANT or "413" in WANT else [])
-        + [c for c in ["C", "R", "U", "X"] if c in WANT])),
+        + [c for c in ["C", "R", "U", "X", "Y"] if c in WANT])),
         {"F": sec_F, "D": sec_D, "S": sec_S, "E": sec_E, "B": sec_B, "413": sec_413, "C": sec_C, "R": sec_R, "U": sec_U,
-         "X": sec_X})
+         "X": sec_X, "Y": sec_Y})
