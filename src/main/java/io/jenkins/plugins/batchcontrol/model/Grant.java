@@ -165,18 +165,6 @@ public final class Grant {
         this.scope = GrantScope.item(Objects.requireNonNull(newFullName, "newFullName"));
     }
 
-    /**
-     * Transitional, for the screens only (ui/WindowBinding) until they stop showing windows as
-     * "no longer applies": windows follow their item and are never unbound (D-74), so this is never
-     * {@code null} for a window on an item.
-     *
-     * @deprecated nothing is bound to a directory any more (D-74); to be removed with its last caller
-     */
-    @Deprecated
-    public String getItemIdentity() {
-        return scope == null ? null : scope.getFullName();
-    }
-
     /** A defensive copy; the granted actions never change after creation. */
     public List<GrantAction> getActions() {
         return actions == null ? new ArrayList<>() : new ArrayList<>(actions);

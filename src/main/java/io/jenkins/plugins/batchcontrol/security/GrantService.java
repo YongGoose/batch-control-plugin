@@ -107,18 +107,6 @@ public final class GrantService {
      */
 
     /**
-     * Transitional, for the screens only (ui/WindowBinding): whether {@code grant} names
-     * {@code item}. Windows follow their item (D-74), so there is no other binding to compare.
-     *
-     * @deprecated windows are matched by name only (D-74); to be removed with its last caller
-     */
-    @Deprecated
-    public static boolean isBoundTo(Grant grant, @CheckForNull Item item) {
-        return grant != null && item != null && grant.getScope() != null
-                && grant.getScope().includes(item.getFullName());
-    }
-
-    /**
      * Whether {@code user} currently holds {@code permission} on the item named
      * {@code itemFullName} through an active grant. Only the three grantable item permissions
      * can ever match; any other permission returns {@code false} immediately.
