@@ -61,8 +61,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Persistable security as in RestartRecoveryTest (a matrix strategy, the dummy realm), so the
  * second session sees the same users and permissions.
  *
- * <p>Written from docs/SPEC.md items 4 and 5, docs/DECISIONS.md D-72 and the frozen D-72 contract
- * only (no src/main knowledge).
+ * <p>Written from docs/SPEC.md items 4 and 5, docs/DECISIONS.md D-72 and D-74 and the frozen D-72
+ * contract only (no src/main knowledge).
  */
 public class TypedParameterRestartTest {
 
@@ -162,7 +162,8 @@ public class TypedParameterRestartTest {
     /**
      * T-05-82 (S-35-01/04, fail closed at submission): two requests (TARGET) are approved while the
      * queue refuses them before Batch Control's gate, so both are APPROVED and not queued; one
-     * request's file is then edited to hold a second typed TARGET ({@code production}). After a
+     * request's values file ({@code <id>.values.xml}, D-74) is then edited to hold a second typed
+     * TARGET ({@code production}). After a
      * restart, startup recovery submits the unedited one exactly once with its value (guard), and
      * never submits the edited one: no build (so no run with {@code production}), nothing queued,
      * not EXECUTED.
@@ -182,9 +183,10 @@ public class TypedParameterRestartTest {
             assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(guardId).getStatus(), "premise: approved, not queued");
             assertTrue(edited.getBuilds().isEmpty() && guard.getBuilds().isEmpty(), "premise: nothing ran before the restart");
 
-            TypedParameterFixtures.editRequestFile(r, requestId,
+            TypedParameterFixtures.editValuesFile(r, requestId,
                     xml -> TypedParameterFixtures.duplicateTypedValue(xml, "TARGET", "production"));
-            assertTrue(TypedParameterFixtures.requestXml(r, requestId).contains("production"), "premise: the edit is on disk");
+            assertTrue(TypedParameterFixtures.valuesXml(r, requestId).contains("production"),
+                    "premise: the edit is on disk, in the request's values file (D-74)");
         });
         session.then(r -> {
             r.waitUntilNoActivity();

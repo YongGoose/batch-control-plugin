@@ -129,7 +129,10 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
       item's parent being the window's folder, not by its name, and does not
       extend to renaming them (item 33).
     - `DELETE` applies only to a job, including multi-configuration and Maven
-      projects, whose sub-items are part of the job. No window confers
+      projects, whose sub-items are part of the job. Maven projects are
+      covered by the same rule, because a Maven project is a job, but no test
+      exercises them: the build has no `maven-plugin` test dependency (D-74).
+      No window confers
       `Item/Delete` on a folder, a multibranch project or an organization
       folder, because core deletes everything inside one as SYSTEM without
       checking those items. While change control is on, the delete veto
@@ -146,28 +149,28 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     (Jenkins resolves `team/` or `TEAM` to `team`, and the request records
     `team`).
 
-    Once approved, a window is bound to the item it was approved for, not to
-    its name (D-71a, D-71b). Approval records the item's identity (the file key
-    of its directory, or on Windows the directory's creation time in
-    milliseconds), and the window confers something only while the full name,
-    that identity and the kind all still match. Renaming, moving or deleting
-    the item ends the window for good, and so does renaming, moving or deleting
-    a folder above it: renaming the item back does not restore it, and no item
-    that later comes to have the name, whether created, copied, renamed or moved
-    there, gets it. No window can authorise the rename itself (item 33).
-    Swapping items or combining several windows
-    cannot make a window reach another item. A window ended this way stays
-    listed among the active windows, and can still be revoked, until its end
-    time, but it confers nothing: the Grants screen and the window's own page
-    show "No longer applies (the item was renamed, moved or deleted)" in place
-    of the remaining time, and the Jenkins log names the window. One gap
-    remains: an item directory replaced on disk outside Jenkins, followed by a
-    reload or a restart, fires no item event, and on a file system that hands
-    the new directory the old one's identity the window would apply to the
-    replacement. The precondition is file-system access to `$JENKINS_HOME`,
+    Once approved, a window applies to its item, not to a name (D-74). It
+    matches the item by its exact full name, and Jenkins' item events keep that
+    name current, as matrix-auth does for its item permissions. When an
+    administrator or a user with their own permissions renames or moves the
+    item, the window follows it to the new full name, and when a folder is
+    renamed or moved, the windows on the items inside it follow too. No window
+    can authorise the rename itself (item 33). Deleting the item ends its
+    windows, and deleting a folder ends the windows on everything inside it:
+    each is revoked, by the account that deleted the item, with the reason
+    "its item was deleted" and a `GRANT_REVOKE` record. Creating a new item at
+    a window's name ends that window the same way, since its own item must
+    have disappeared without a deletion event, and so does starting Jenkins
+    after the item has vanished, as if it had been deleted while Jenkins was
+    down. A window therefore either applies to its item, under whatever name
+    the item has now, or has ended; renaming, moving, swapping or re-creating
+    items, or combining several windows, cannot make a window reach an item
+    nobody approved. One gap remains: an item replaced on disk outside Jenkins,
+    followed by a reload, fires no item event, so a window naming it applies to
+    the replacement. The precondition is file-system access to `$JENKINS_HOME`,
     which is outside the plugin's reach anyway (item 5); the reload itself does
     not need `Overall/Administer`, because reloading a single item from disk
-    needs only `Item/Configure` on it (D-71b).
+    needs only `Item/Configure` on it.
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
@@ -288,10 +291,11 @@ from scripts.
     protection core gives them in a build's `build.xml`, and every screen, CSV,
     history record, run record and incident shows them as `********`. A file
     shows only as `[file] <original file name>`, never its content, its Base64
-    or a server path. The typed values stay in the request file only until the
-    approved run starts, the request ends, or the queue item of the approved
-    run is cancelled; after that the masked values remain as the record
-    (D-72b, item 32). An incident rerun reuses the failed
+    or a server path. The typed values are kept in a values file of their own,
+    `requests/run/<id>.values.xml`, only until the approved run starts, the
+    request ends, or the queue item of the approved run is cancelled; then
+    that file is deleted and the masked values remain as the record (D-72b,
+    D-74, item 32). An incident rerun reuses the failed
     run's own values the same way, original secrets included: a core file is
     recreated from the copy the build keeps, and a `base64File` value carries
     its content. It takes values only from the incident's own build: the
@@ -432,17 +436,19 @@ from scripts.
     request submission is capped at 100 MB, configurable in bytes with the
     system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
     because requesting a run does not require `Item/Build` (D-38a). The cap is
-    judged on what the request would keep, before anything is stored: the
-    content of each file value, the decoded size of each `base64File` value,
-    and the stored text of every other value, each with its name. A file value
-    whose size cannot be determined is refused (fail closed). The reason has
-    its own length limit above and is not counted. Two earlier checks are only
-    early filters: the declared `Content-Length`, judged from the headers
-    before Batch Control reads the form, and, for a body that declares no
-    length (a chunked one, for example), the size of what Jenkins parsed from
-    it that the submission can read, which counts as over the cap when it
-    cannot be measured (D-72b, security-37). A submission over the cap at any
-    of these checks is answered with HTTP 413, and Batch
+    checked in two stages (D-74). The first is only an early filter: the
+    declared `Content-Length`, judged from the headers alone before Batch
+    Control reads the form; a body that declares no length (a chunked one, for
+    example) passes it. The second, the one that counts, is judged on what the
+    request would keep, before anything is stored: each value, with its name,
+    counts as the larger of its own size and the size of the uploaded parts it
+    was created from. A core `file` value therefore counts as its file
+    content, a `base64File` value as its stored Base64 text, a `stashedFile`
+    value as the uploaded part it came from, and every other value as its
+    stored text. A value or uploaded part whose size cannot be determined is
+    refused (fail closed). The reason has its own length limit above and is
+    not counted. A submission over the cap at either stage is answered with
+    HTTP 413, and Batch
     Control creates nothing and keeps nothing in JENKINS_HOME. It does not
     prevent the upload itself: Jenkins parses a multipart body posted under a
     job URL while it dispatches the URL, before any plugin code runs (D-72a),
@@ -477,15 +483,18 @@ from scripts.
     that scale until the store gains an index. File parameters add to this.
     The file-parameters plugin's `base64File` keeps the file's content,
     Base64-encoded, inside the parameter value, so a run request with such a
-    parameter carries the whole file in its `requests/run/<id>.xml`, about a
-    third larger than the file. Batch Control does not copy it elsewhere, and
-    it keeps a request's typed values only as long as they are needed: they
-    are removed from the request file when the approved run starts, when the
+    parameter carries the whole file in its values file,
+    `requests/run/<id>.values.xml`, about a third larger than the file. A
+    request's typed values live only in that file, next to the request file
+    `requests/run/<id>.xml` (D-74). Batch Control does not copy the content
+    elsewhere, and it keeps a request's typed values only as long as they are
+    needed: the values file is deleted when the approved run starts, when the
     request ends (rejected, cancelled, expired or invalidated), or when the
     queue item of the approved run is cancelled, and the masked display values
-    stay as the record (D-72b). The screens, badges and periodic jobs never
-    load the typed values: they stop reading a request file where its typed
-    values begin. Batch Control's
+    in `<id>.xml` stay as the record (D-72b). The screens, badges, listings and
+    periodic jobs read only `<id>.xml` and never the values file; only
+    approving, submitting, recovering after a restart and disposing of a
+    request read it. Batch Control's
     storage therefore grows with every open request that carries such a file,
     not with every such upload ever made. Core `file` and `stashedFile`
     content stays in its own directory under JENKINS_HOME
@@ -499,11 +508,21 @@ from scripts.
     but impossible to queue) and of a person's own direct build that run
     control refuses, through any of core's channels: the build form, the
     parameters dialog, `build` and `buildWithParameters` over HTTP, the CLI,
-    and a build token. When the queue item of an approved run is cancelled (by
+    and a build token. That disposal covers exactly two parameter types: core
+    `file` parameters, including another plugin's type built on core's file
+    parameter value (a subclass), and the file-parameters plugin's
+    `stashedFile`. Another plugin's parameter type that keeps its own
+    temporary file is not covered: when a request carrying such a value ends
+    without a run, Batch Control leaves that file alone, and it stays until an
+    administrator removes it. A `base64File` value keeps no separate file; its
+    content is in the request's values file, which is deleted as described
+    above (D-74). The file-parameters plugin is an optional dependency: Batch
+    Control works without it, and then core `file` is the only file parameter
+    type there is. When the queue item of an approved run is cancelled (by
     a user, by clearing the queue, or because its job was deleted), the
     cancelled item's own parameter values delete their files, as for any
-    cancelled queue item, and Batch Control removes the typed values from the
-    request and never submits that run again, not when Jenkins restarts
+    cancelled queue item, and Batch Control deletes the request's values file
+    and never submits that run again, not when Jenkins restarts
     either. The request stays `APPROVED` until the approved-run timeout ends
     it as `EXPIRED`, with the reason `Expired: approved but not started within
     <N> minutes; its queued run was cancelled.` When another plugin's queue
@@ -555,12 +574,13 @@ code does on purpose.
     an administrator, or the user's own (standing) permissions under core's
     rule: `Item/Configure` on the item, or `Item/Delete` on it plus
     `Item/Create` in its parent. The reason is that permissions matched by
-    full name follow a rename. Windows are bound to their items and are not
-    carried along (item 11), but under role-strategy the holder's own item
-    roles match full names by pattern, so renaming a job into one of their
-    patterns, or a folder (which renames everything inside it), would give the
-    holder that role on it long after the window ended. Refusing the rename
-    closes that escalation. The cost: a user who renamed jobs through a
+    full name are re-pointed by a rename. Windows follow their item to its new
+    name (item 11), but under role-strategy the holder's own item roles match
+    full names by pattern, so renaming a job into one of their patterns, or a
+    folder (which renames everything inside it), would give the holder that
+    role on it long after the window ended. Refusing the rename closes that
+    escalation, and it also means a window holder cannot re-point windows by
+    swapping names. The cost: a user who renamed jobs through a
     `CONFIGURE` window now needs an administrator to do it, or their own
     standing permissions.
 
@@ -576,11 +596,12 @@ code does on purpose.
     within that minute go only to the Jenkins log (D-73). Renaming an item is
     therefore, like deleting or moving a folder (items 11 and 44), not
     something a permission window can authorise. When a rename does happen, it
-    is recorded as `RENAME`, ends the item's pending requests (item 30) and
-    ends every window on the item for good (item 11). A folder rename also
-    changes the full name of everything inside the folder, ends the pending
-    run requests of the jobs inside, produces one `MOVE` record per descendant
-    job (item 26) and ends every window on anything inside it.
+    is recorded as `RENAME`, ends the item's pending requests (item 30), and
+    the windows on the item follow it to the new name (item 11). A folder
+    rename also changes the full name of everything inside the folder, ends
+    the pending run requests of the jobs inside, produces one `MOVE` record
+    per descendant job (item 26), and the windows on anything inside it follow
+    to the new full names.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
@@ -850,8 +871,9 @@ code does on purpose.
     stored values repeat a parameter name, name different parameters than the
     request shows, or include a value Jenkins can no longer load, for example
     because the plugin that provides that parameter type was removed or
-    downgraded while the request was open, or whose stored values cannot be
-    read at all (D-72b). A request file written before typed values were
+    downgraded while the request was open, or whose values file
+    (`requests/run/<id>.values.xml`, item 32) is missing or cannot be read
+    at all (D-72b, D-74). A request file written before typed values were
     introduced holds only the masked display values. It is not converted, as
     earlier grant files are not (D-69), and if it has parameters it cannot be
     approved; a request without parameters is unaffected. A refused approval
@@ -888,9 +910,10 @@ code does on purpose.
     `Item/Delete` on two jobs can still swap them by moving them; such a user
     could already delete and recreate them, and with run control on the
     swapped jobs arrive locked and not activated, as recreated ones would. A
-    swap does not carry a window from one job to the other: moving a job
-    ends the windows on it, and a job moved into a window's item name does not
-    pick that window up (item 11, D-71a). With change control off, moves
+    swap does not carry a window from one job to the other: each window
+    follows its own job through every move, so a job moved into another
+    job's former name does not pick up that job's windows (item 11, D-74).
+    With change control off, moves
     behave exactly as in Jenkins.
 
     The rule governs the folders plugin's Move action, in the UI and over

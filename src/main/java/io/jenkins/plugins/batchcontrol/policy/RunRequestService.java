@@ -100,14 +100,14 @@ public final class RunRequestService {
     // ---------------------------------------------------------------- read API
 
     /**
-     * Loads a request by id, or {@code null}. D-72b (5): read without its typed values (they are
-     * neither parsed nor deserialized), which is all a screen, listing or listener needs.
+     * Loads a request by id, or {@code null}. Its typed values stay in their own file (D-74); a
+     * screen, listing or listener never needs them.
      */
     public RunRequest load(String id) {
         return store.loadRunRequest(id);
     }
 
-    /** All stored requests, in creation order, each read without its typed values (D-72b (5)). */
+    /** All stored requests, in creation order. */
     public List<RunRequest> list() {
         return store.listRunRequests();
     }
@@ -156,46 +156,10 @@ public final class RunRequestService {
 
     // ---------------------------------------------------------------- creation (SPEC 5, D-22)
 
-    /**
-     * Creates a PENDING run request for the given job. The requester is the current
-     * authentication; validation failures throw {@link IllegalArgumentException}.
-     */
-    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
-                             String approver) {
-        return create(job, parameters, reason, Approvers.of(approver), null);
-    }
-
-    /**
-     * Creates a PENDING run request designating an approver set (D-37); any member may decide.
-     * Same validation as {@link #create(Job, Map, String, List, String)}.
-     */
-    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
-                             List<String> approvers) {
-        return create(job, parameters, reason, approvers, null);
-    }
-
-    /** Single-approver form of {@link #create(Job, Map, String, List, String)}. */
-    public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
-                             String approver, String incidentId) {
-        return create(job, parameters, reason, Approvers.of(approver), incidentId);
-    }
-
-    /** Typed-value form (D-72) of {@link #create(Job, Map, String, String)}. */
+    /** Single-approver form of {@link #create(Job, List, String, List, String)}, without an incident. */
     public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
                              String approver) {
         return create(job, values, reason, Approvers.of(approver), null);
-    }
-
-    /** Typed-value form (D-72) of {@link #create(Job, Map, String, List)}. */
-    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
-                             List<String> approvers) {
-        return create(job, values, reason, approvers, null);
-    }
-
-    /** Typed-value form (D-72) of {@link #create(Job, Map, String, String, String)}. */
-    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
-                             String approver, String incidentId) {
-        return create(job, values, reason, Approvers.of(approver), incidentId);
     }
 
     /**
@@ -291,28 +255,29 @@ public final class RunRequestService {
     }
 
     /**
-     * Creates a PENDING run request linked to an incident (SPEC item 11: a rerun request
-     * carries {@code incidentId} so the run listener can auto-link a successful rerun back
-     * to the incident). Every designated approver must pass the SPEC item 3 checks (D-37).
-     *
-     * <p>D-72: each string value becomes a typed value through the job's parameter definition
+     * Creates a PENDING run request from string values, designating a single approver: each value
+     * becomes a typed value through the job's parameter definition
      * ({@link SimpleParameterDefinition#createValue(String)}), or a {@link StringParameterValue}
      * where the job defines no such simple parameter, and the request is created as by
      * {@link #create(Job, List, String, List, String)}. A value the definition refuses (a choice
-     * outside its choices) is an {@link IllegalArgumentException}.
+     * outside its choices) is an {@link IllegalArgumentException}. The requester is the current
+     * authentication.
      */
     public RunRequest create(Job<?, ?> job, Map<String, String> parameters, String reason,
-                             List<String> approvers, String incidentId) {
+                             String approver) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         checkCanRequest(job);
         checkReason(reason);
-        return create(job, typedValues(job, parameters), reason, approvers, incidentId);
+        return create(job, typedValues(job, parameters), reason, Approvers.of(approver), null);
     }
 
     /**
      * Creates a PENDING run request holding the submitted typed values (D-72), linked to an
-     * incident when {@code incidentId} is given. The masked display map is derived from the values
+     * incident when {@code incidentId} is given (SPEC item 11: the run listener links a successful
+     * rerun back to the incident). The requester is the current authentication; every designated
+     * approver must pass the SPEC item 3 checks (D-37); validation failures throw
+     * {@link IllegalArgumentException}. The masked display map is derived from the values
      * here, once. The approved build is scheduled with the values unchanged.
      *
      * <p>D-72b (1)(2), security-35 S-35-01/03: before anything is stored, each parameter name may
@@ -332,40 +297,58 @@ public final class RunRequestService {
      * request is refused (permission, reason, size, approvers) they are disposed of before the
      * exception propagates ({@link ParameterFiles}).
      *
-     * <p>security-37 S-37-01, D-72b (4): right after the permission checks, a request whose values
-     * would keep more than the body cap (file contents plus stored texts,
-     * {@link RequestBodyLimit#keptSize}) is refused with {@link RequestTooLargeException} (an
-     * {@link IllegalArgumentException}), its files disposed of and nothing stored. This holds for
-     * every overload and for an incident rerun, which all end here.
+     * <p>D-74 (2): right after the permission checks, a request whose values would keep more than
+     * the body cap ({@link RequestBodyLimit#keptSize}) is refused with
+     * {@link RequestTooLargeException} (an {@link IllegalArgumentException}), its files disposed of
+     * and nothing stored. This holds for every overload and for an incident rerun, which all end
+     * here; a caller without uploaded parts passes none.
      */
     public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
                              List<String> approvers, String incidentId) {
+        return create(job, values, Map.of(), reason, approvers, incidentId);
+    }
+
+    /**
+     * As {@link #create(Job, List, String, List, String)} for a web submission: {@code uploaded}
+     * maps a parameter name to the size of the uploaded parts its value was created from
+     * ({@link RequestBodyLimit#uploadedSize}), which the kept-size check counts for a value whose
+     * own size cannot be read (D-74 (2)).
+     */
+    public RunRequest create(Job<?, ?> job, List<ParameterValue> values, Map<String, Long> uploaded,
+                             String reason, List<String> approvers, String incidentId) {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(values, "values");
+        Objects.requireNonNull(uploaded, "uploaded");
         List<ParameterValue> submitted = new ArrayList<>(values);
         RunRequest request;
         boolean stored = false;
         try {
             checkCanRequest(job);
-            // security-37 S-37-01, D-72b (4): what the request would keep, measured on the values
-            // themselves, whatever the body that carried them; the web layer's body checks are an
-            // early filter only. Over the cap: RequestTooLargeException, files disposed of below.
-            RequestBodyLimit.checkKept(submitted);
+            // D-74 (2): what the request would keep, measured on the values and the uploaded parts
+            // they were created from; the declared Content-Length is an early filter only. Over the
+            // cap: RequestTooLargeException, files disposed of below.
+            RequestBodyLimit.checkKept(submitted, uploaded);
             String requester = Jenkins.getAuthentication2().getName();
             checkReason(reason);
             checkValues(submitted);
             Map<String, String> display = ParameterDisplay.masked(submitted);
             List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, job);
 
-            request = RunRequest.create(job.getFullName(), submitted, display, reason,
-                    requester, designated);
+            request = RunRequest.create(job.getFullName(), display, reason, requester, designated);
             if (incidentId != null) {
                 // SPEC item 11: only an incident of this job; the id stored is the incident's own.
                 request.setIncidentId(IncidentService.get().requireRerunTarget(incidentId, job).getId());
             }
+            List<ParameterValue> present = new ArrayList<>(submitted.size());
+            for (ParameterValue value : submitted) {
+                if (value != null) {
+                    present.add(value);
+                }
+            }
             lock.lock();
             try {
-                persist(request);
+                store.saveNewRunRequest(request, present);
+                requesterBuildCache.invalidate(request.getId());
             } finally {
                 lock.unlock();
             }
@@ -432,7 +415,7 @@ public final class RunRequestService {
         Set<String> names = new HashSet<>();
         for (ParameterValue value : values) {
             if (value == null) {
-                continue; // dropped by RunRequest.create, never stored
+                continue; // dropped before storing
             }
             String name = value.getName();
             if (name == null || name.isEmpty()) {
@@ -468,29 +451,23 @@ public final class RunRequestService {
     }
 
     /**
-     * D-72b (1)(3), security-35 S-35-01/04, S7 m-4: why the stored typed values of {@code request}
-     * (read with them) cannot be scheduled, or {@code null} when they can. The build must receive
+     * D-72b (1), security-35 S-35-01/04: why the stored typed values {@code values} of
+     * {@code request} cannot be scheduled, or {@code null} when they can. The build must receive
      * exactly the values the approver saw, so it fails closed when:
      * <ul>
-     *   <li>the request has parameters but no typed values: it was stored before D-72 and is not
-     *       converted (a request without parameters is fine);</li>
+     *   <li>the request has parameters but its values file is missing ({@code values} is
+     *       {@code null}; a request without parameters has none);</li>
      *   <li>a stored value could not be loaded (its class is gone, so XStream dropped it or left
      *       {@code null}), has no name, or repeats a name;</li>
      *   <li>the typed names differ from the names of the display map.</li>
      * </ul>
      */
     @CheckForNull
-    static String valuesProblem(RunRequest request) {
+    static String valuesProblem(RunRequest request, @CheckForNull List<ParameterValue> values) {
         Map<String, String> display = request.getParameters();
-        if (!request.holdsTypedValues()) {
-            return display.isEmpty() ? null
-                    : "Request " + request.getId() + " was stored before Batch Control kept the submitted parameter"
-                    + " values with their types, and it is not converted, so it cannot be approved or run."
-                    + " Reject it and ask the requester to submit the run again.";
-        }
         Set<String> names = new java.util.LinkedHashSet<>();
         String detail = null;
-        for (ParameterValue value : request.parameterValues()) {
+        for (ParameterValue value : values == null ? List.<ParameterValue>of() : values) {
             if (value == null || value.getName() == null) {
                 detail = "a stored value could not be loaded";
                 break;
@@ -501,7 +478,8 @@ public final class RunRequestService {
             }
         }
         if (detail == null && !names.equals(display.keySet())) {
-            detail = "the stored names " + names + " differ from the names shown " + display.keySet();
+            detail = values == null ? "the stored values are missing"
+                    : "the stored names " + names + " differ from the names shown " + display.keySet();
         }
         return detail == null ? null
                 : "The stored parameter values of request " + request.getId() + " do not match the values shown ("
@@ -517,14 +495,16 @@ public final class RunRequestService {
      * committed to APPROVED before submission and is never rolled back by a submission failure
      * (quiet-down tolerance); startup recovery and expiry handle stragglers.
      *
-     * <p>D-72b (1)(3): the stored typed values are read and checked ({@link #valuesProblem}) before
-     * the APPROVED commit; a request whose values do not match what the approver saw, or that was
-     * stored before D-72 with parameters, is refused with {@link IllegalStateException} and stays
-     * PENDING (it can still be rejected), and nothing is scheduled.
+     * <p>D-72b (1): the stored typed values are read and checked ({@link #valuesProblem}) before
+     * the APPROVED commit; a request whose values do not match what the approver saw, or whose
+     * values file is missing although it has parameters, is refused with
+     * {@link IllegalStateException} and stays PENDING (it can still be rejected), and nothing is
+     * scheduled.
      */
     public RunRequest approve(String id, String comment) {
         checkComment(comment);
         RunRequest request;
+        List<ParameterValue> values;
         lock.lock();
         try {
             request = require(id);
@@ -551,9 +531,9 @@ public final class RunRequestService {
                 throw new IllegalStateException("The job '" + request.getJobFullName() + "' is disabled; enable it"
                         + " first, then approve. You can still reject the request.");
             }
-            // D-72b (1)(3): the values the build would receive, read and checked before the commit.
-            request = requireWithValues(id);
-            String problem = valuesProblem(request);
+            // D-72b (1): the values the build would receive, read and checked before the commit.
+            values = requireValues(id);
+            String problem = valuesProblem(request, values);
             if (problem != null) {
                 LOGGER.warning(() -> "Refused to approve run request " + id + ": " + problem);
                 throw new IllegalStateException(problem);
@@ -570,7 +550,7 @@ public final class RunRequestService {
         }
         NotificationDispatcher.run(NotificationEvent.APPROVED, request);
         // Submission happens outside the lock; the queue gate claims the consumption ticket.
-        submitApproved(request);
+        submitApproved(request, values);
         RunRequest reloaded = load(id);
         return reloaded != null ? reloaded : request;
     }
@@ -745,8 +725,7 @@ public final class RunRequestService {
                 return false;
             }
             request.setQueuedAt(now);
-            // The light read keeps the stored typed values as they are (no deserialization here,
-            // under the queue lock); they stay until the run starts (D-72b (5)).
+            // The typed values stay in their own file until the run starts (D-72b (5), D-74).
             persist(request);
             return true;
         } finally {
@@ -789,8 +768,8 @@ public final class RunRequestService {
 
     /**
      * Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). D-72b (5):
-     * the typed values are removed from the request file now; the build has its own copy and owns
-     * the files, and the masked display map stays as the record.
+     * the typed values file is deleted now; the build has its own copy and owns the files, and the
+     * masked display map stays as the record.
      */
     public void markExecuted(String requestId, String runId) {
         lock.lock();
@@ -1040,6 +1019,7 @@ public final class RunRequestService {
             }
             boolean submit = false;
             RunRequest request = null;
+            List<ParameterValue> values = null;
             lock.lock();
             try {
                 request = store.loadRunRequest(snapshot.getId());
@@ -1057,7 +1037,7 @@ public final class RunRequestService {
                     request.setQueuedAt(null);
                     persist(request);
                     // The values the build receives (D-72), read for this submission only.
-                    request = requireWithValues(request.getId());
+                    values = requireValues(request.getId());
                     submit = true;
                 }
             } catch (RuntimeException e) {
@@ -1072,7 +1052,7 @@ public final class RunRequestService {
             if (submit) {
                 LOGGER.info("Recovering approved run request " + request.getId()
                         + " for job " + request.getJobFullName());
-                submitApproved(request);
+                submitApproved(request, values);
             }
         }
         if (loadedHere) {
@@ -1105,22 +1085,19 @@ public final class RunRequestService {
     }
 
     /**
-     * The request with its typed values (D-72), for checking and scheduling an approval. A file
-     * whose values cannot be read refuses with {@link IllegalStateException} (fail closed).
+     * The typed values of request {@code id} (D-72), for checking and scheduling an approval;
+     * {@code null} when it has no values file. A values file that cannot be read refuses with
+     * {@link IllegalStateException} (fail closed).
      */
-    private RunRequest requireWithValues(String id) {
-        RunRequest request;
+    @CheckForNull
+    private List<ParameterValue> requireValues(String id) {
         try {
-            request = store.loadRunRequestWithValues(id);
+            return store.loadRunRequestValues(id);
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.WARNING, "Could not read the stored values of run request " + id, e);
             throw new IllegalStateException("The stored parameter values of request " + id
                     + " could not be read, so it cannot be approved or run.", e);
         }
-        if (request == null) {
-            throw new IllegalArgumentException("No such run request: " + id);
-        }
-        return request;
     }
 
     private static boolean pendingExpired(RunRequest request, Instant now) {
@@ -1162,7 +1139,7 @@ public final class RunRequestService {
      * the marker. A refused or failed submission leaves the request APPROVED (quiet-down
      * tolerance); expiry or recovery handle it later.
      *
-     * <p>{@code request} must be read with its typed values. D-72b (1), S-35-01/04: values that do
+     * <p>{@code values} are the request's stored typed values. D-72b (1), S-35-01/04: values that do
      * not match what the approver saw ({@link #valuesProblem}) are never scheduled (fail closed,
      * WARNING); the request stays APPROVED and the approved-run timeout ends it, disposing of its
      * files. S7 M-1: when this submission is refused by a queue handler consulted after Batch
@@ -1175,7 +1152,7 @@ public final class RunRequestService {
      * AccessDeniedException) or no job permission at all (lookup returns null) must not turn a
      * committed approval into a 403 or a silently dropped run.
      */
-    private void submitApproved(RunRequest request) {
+    private void submitApproved(RunRequest request, @CheckForNull List<ParameterValue> values) {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins == null) {
             return;
@@ -1191,15 +1168,14 @@ public final class RunRequestService {
                         + " targets missing job '" + request.getJobFullName() + "'; not submitted");
                 return;
             }
-            String problem = valuesProblem(request);
+            String problem = valuesProblem(request, values);
             if (problem != null) {
                 LOGGER.warning(() -> "Approved run request " + request.getId() + " was not submitted: " + problem);
                 return;
             }
             List<Action> actions = new ArrayList<>();
             // D-72: the stored typed values, unchanged: original secrets and files included.
-            List<ParameterValue> values = request.parameterValues();
-            if (!values.isEmpty()) {
+            if (values != null && !values.isEmpty()) {
                 actions.add(new ParametersAction(values));
             }
             // D-37: the cause names the approver who decided (the first member for requests
@@ -1260,8 +1236,8 @@ public final class RunRequestService {
      * claimed, so the queue gate refuses any other submission of it too), and the approved-run
      * timeout ends it. The cancelled item's own parameter types have already deleted the
      * temporary files it carried (core's and the file-parameters plugin's cancelled-item
-     * listeners, see {@link ParameterFiles}); the typed values, which nothing can use any more,
-     * are removed from the request file now (D-72b (5)). Called by the queue listener, as
+     * listeners, see {@link ParameterFiles}); the typed values file, which nothing can use any
+     * more, is deleted now (D-72b (5)). Called by the queue listener, as
      * SYSTEM, while Jenkins holds the queue lock (lock order as for {@link #consumeMarker}).
      * Never throws.
      */
@@ -1289,37 +1265,38 @@ public final class RunRequestService {
 
     /**
      * D-72, D-72b (5): persists {@code request}, which has just ended or whose run has just
-     * started, without its typed values (the masked display map stays as the record). With
-     * {@code dispose} the request ended without a run and its values never reached the queue, so
-     * the temporary files of its values are disposed of after the end state is stored; once the
-     * values were handed to the queue, the queue and the build own the files.
+     * started, and deletes its typed values file (the masked display map stays as the record).
+     * With {@code dispose} the request ended without a run and its values never reached the queue,
+     * so the temporary files of its values are disposed of after the end state is stored; once the
+     * values were handed to the queue, the queue and the build own the files. The end state is
+     * stored first: a values file that cannot be deleted is logged and goes with the request at
+     * retention.
      */
     private void persistEnded(RunRequest request, boolean dispose) {
-        List<ParameterValue> values = dispose ? storedValues(request) : List.of();
-        request.removeTypedValues();
+        List<ParameterValue> values = dispose ? storedValues(request.getId()) : List.of();
         persist(request);
+        try {
+            store.deleteRunRequestValues(request.getId());
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not delete the parameter values of run request "
+                    + request.getId(), e);
+        }
         if (!values.isEmpty()) {
             ParameterFiles.dispose(values, "run request " + request.getId() + " (" + request.getStatus() + ")");
         }
     }
 
     /**
-     * The typed values of {@code request} for disposal: its own when it was read with them,
-     * otherwise read from the store; empty when there are none or they cannot be read (logged).
+     * The typed values of request {@code id} for disposal; empty when there are none or they cannot
+     * be read (logged).
      */
-    private List<ParameterValue> storedValues(RunRequest request) {
+    private List<ParameterValue> storedValues(String id) {
         try {
-            if (!request.holdsTypedValues()) {
-                return List.of();
-            }
-            if (!request.typedValuesOmitted()) {
-                return request.parameterValues();
-            }
-            RunRequest full = store.loadRunRequestWithValues(request.getId());
-            return full == null || !full.holdsTypedValues() ? List.of() : full.parameterValues();
+            List<ParameterValue> values = store.loadRunRequestValues(id);
+            return values == null ? List.of() : values;
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.WARNING, "Could not read the typed values of run request "
-                    + request.getId() + " to dispose of their files", e);
+                    + id + " to dispose of their files", e);
             return List.of();
         }
     }

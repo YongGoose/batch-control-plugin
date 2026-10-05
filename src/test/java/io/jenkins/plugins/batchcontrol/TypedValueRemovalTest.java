@@ -55,28 +55,31 @@ import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileDisplay
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileItem;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.readable;
-import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestFile;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.valuesFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 5, D-72b (5) (security-35 S-35-02): typed values are removed from the request file
- * when the approved run starts or the request ends (rejected, cancelled, expired, invalidated);
- * the masked display map stays as the record; listings and periodic work never load typed values.
- * Matrix rows T-05-83 .. T-05-86 (note 265).
+ * SPEC item 5, D-72b (5), D-74 (1) (security-35 S-35-02): typed values are removed when the
+ * approved run starts or the request ends (rejected, cancelled, expired, invalidated) by deleting
+ * the request's values file {@code requests/run/<id>.values.xml}; the masked display map in
+ * {@code requests/run/<id>.xml} stays as the record; listings and periodic work read only
+ * {@code <id>.xml} and never load typed values. Matrix rows T-05-83 .. T-05-86 (notes 265, 268).
  *
- * <p>"No longer holds the typed values" is measured on the file: none of the Base64 text of a
- * {@code base64File} value and no Jenkins-encrypted token that decrypts to the password, while the
- * display map ({@code ********}, {@code [file] <name>}, the plain value) is unchanged and the pages
- * still render it. Element names are not pinned. "When the approved run starts" is observed from
- * inside the build ({@link TypedParameterFixtures.RequestFileSnapshot}). "Never loaded" is observed
- * with a value type that counts its own deserialisation ({@link ProbeParameterValue}); no timing is
- * asserted.
+ * <p>"No longer holds the typed values" is measured on the files: the values file is gone, and no
+ * remaining file of the request holds the Base64 text of a {@code base64File} value or a
+ * Jenkins-encrypted token that decrypts to the password, while the display map ({@code ********},
+ * {@code [file] <name>}, the plain value) is unchanged and the pages still render it. Element names
+ * are not pinned. "When the approved run starts" is observed from inside the build
+ * ({@link TypedParameterFixtures.RequestFileSnapshot}). "Never loaded" is observed with a value
+ * type that counts its own deserialisation ({@link ProbeParameterValue}), which only the values
+ * file holds; no timing is asserted.
  *
- * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72 and D-72b, ARCHITECTURE section 5
- * and the Given/When/Then of docs/reports/security-35.md S-35-02 only (no src/main knowledge).
+ * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72, D-72b and D-74, ARCHITECTURE
+ * section 5 and the Given/When/Then of docs/reports/security-35.md S-35-02 only (no src/main
+ * knowledge).
  */
 @WithJenkins
 public class TypedValueRemovalTest {
@@ -120,10 +123,11 @@ public class TypedValueRemovalTest {
 
     /**
      * T-05-83: a typed request (password, {@code base64File}, string) is approved; read from inside
-     * the running build, the request file no longer holds the Base64 text or the encrypted
-     * password, and after the run neither does it; the display map and the detail page still show
-     * {@code ********}, {@code [file] payload.bin} and the plain value. Guard: the file held both
-     * before the approval, and the build received the original password.
+     * the running build, the values file is gone and the request file holds neither the Base64 text
+     * nor the encrypted password, and after the run neither does any file of the request; the
+     * display map and the detail page still show {@code ********}, {@code [file] payload.bin} and
+     * the plain value. Guard: the values file held both before the approval, and the build received
+     * the original password.
      */
     @Test
     public void t_05_83_typedValuesLeaveTheFileWhenTheApprovedRunStarts() throws Exception {
@@ -146,6 +150,8 @@ public class TypedValueRemovalTest {
 
         String during = TypedParameterFixtures.RequestFileSnapshot.SNAPSHOTS.get("strip-run#1");
         assertNotNull(during, "fixture: the build must have read the request file");
+        assertEquals("<missing>", TypedParameterFixtures.RequestFileSnapshot.SNAPSHOTS.get("strip-run#1:values"),
+                "the values file must be deleted once the approved run has started (D-72b (5), D-74)");
         assertAbsent("the request file while the approved run runs", during, List.of(base64.substring(0, 32)));
         assertFalse(decryptsTo(during, SECRET), "the request file while the approved run runs must not hold the encrypted secret");
         assertTrue(during.contains(fileDisplay("payload.bin")) && during.contains(PLAIN) && during.contains(MASK),
@@ -157,8 +163,9 @@ public class TypedValueRemovalTest {
 
     /**
      * T-05-84: typed requests that end without a run (rejected, cancelled, expired while pending,
-     * invalidated by a rename) no longer hold the Base64 text or the encrypted password; each
-     * display map and detail page still shows the masked values. Guard: each file held them before.
+     * invalidated by a rename) no longer hold the Base64 text or the encrypted password (the values
+     * file is gone); each display map and detail page still shows the masked values. Guard: each
+     * values file held them before.
      */
     @Test
     public void t_05_84_typedValuesLeaveTheFileWhenAPendingRequestEnds() throws Exception {
@@ -245,9 +252,9 @@ public class TypedValueRemovalTest {
     /**
      * T-05-86: with two pending typed requests holding a value that counts its own deserialisation,
      * the Run Requests list (requester and approver), the overview with its tab badge and the
-     * minute's expiry work (nothing due) load none of the typed values. The pages render: the list
-     * shows both requests and the approver's badge counts 2. Premise: reading the request file with
-     * Jenkins' XStream does load the value (the counter works).
+     * minute's expiry work (nothing due) load none of the typed values: they never read a values
+     * file. The pages render: the list shows both requests and the approver's badge counts 2.
+     * Premise: reading the values file with Jenkins' XStream does load the value (the counter works).
      */
     @Test
     public void t_05_86_listingsBadgeAndPeriodicWorkNeverLoadTypedValues() throws Exception {
@@ -265,8 +272,8 @@ public class TypedValueRemovalTest {
             }
         }
         ProbeParameterValue.LOADS.set(0);
-        Jenkins.XSTREAM2.fromXML(requestFile(j, ids[0]).toFile());
-        assertTrue(ProbeParameterValue.LOADS.get() > 0, "premise: reading the request file with Jenkins' XStream materialises the probe");
+        Jenkins.XSTREAM2.fromXML(valuesFile(j, ids[0]).toFile());
+        assertTrue(ProbeParameterValue.LOADS.get() > 0, "premise: reading the values file with Jenkins' XStream materialises the probe");
 
         ProbeParameterValue.LOADS.set(0);
         for (String user : new String[] {"u1", "a1"}) {
@@ -279,7 +286,8 @@ public class TypedValueRemovalTest {
         HtmlPage overview = UsabilityFixtures.htmlPage(j, "a1", "batch-control/");
         assertEquals("2", badge(overview, "requests"), "the designated approver's tab badge must count the 2 pending requests");
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
-        assertEquals(0, ProbeParameterValue.LOADS.get(), "listings, the badge and the periodic work must not load typed values (D-72b (5))");
+        assertEquals(0, ProbeParameterValue.LOADS.get(),
+                "listings, the badge and the periodic work must not load typed values: they read only <id>.xml (D-72b (5), D-74)");
         assertEquals(RequestStatus.PENDING, RunRequestService.get().load(ids[0]).getStatus());
     }
 

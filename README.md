@@ -62,10 +62,13 @@ cannot apply is refused when it is submitted. Every request shows the item's
 kind (Pipeline, Freestyle project, Folder, Multibranch Pipeline, Organization
 Folder, ...) next to its name, so the approver sees what kind of item they are
 deciding on, and approval is refused if the item is gone or its kind has
-changed since the request was made. An approved window is bound to that very
-item, not to its name: once the item is renamed, moved or deleted, the window
-ends for good, and no item that later has the name gets it, not even the same
-item renamed back. A window **adds** those
+changed since the request was made. An approved window applies to that item,
+not to its name: when an administrator or a user with their own permissions
+renames or moves the item, the window follows it (so do the windows on the
+items inside a renamed or moved folder), and deleting the item ends the window,
+as do creating a new item at the window's name and starting Jenkins after the
+item has vanished. Renaming, moving, swapping or re-creating items therefore
+never makes a window reach an item nobody approved. A window **adds** those
 permissions to whatever the user already has, for as long as it lasts; it never
 takes anything away and it imposes nothing on someone who holds the permission
 standing, which is what the "standing change permissions" monitor is for. Deleting
@@ -217,6 +220,7 @@ Batch Control is compiled against, which Jenkins enforces when loading plugins:
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
+| `file-parameters` | 433.va_0b_80359d54d |
 
 If an older version of any of these is installed, Batch Control fails to load
 until that plugin is upgraded. Installing Batch Control from **Manage Jenkins →
@@ -562,10 +566,14 @@ works only on a job. No window can delete or move a folder, a multibranch
 project or an organization folder, because core deletes everything inside one
 without checking it: while change control is on, deleting one needs an
 administrator, and moving one needs an administrator or standing `Item/Delete`
-on it. A window is bound to the item it was approved for, not to its name, so a
-rename, move or deletion ends it for good (renaming back does not restore it).
-One gap remains: an item directory replaced on disk outside Jenkins and then
-reloaded, which takes file-system access (reloading a single item needs only
+on it. A window applies to the item it was approved for, not to its name: it
+follows the item through a rename or move made by someone entitled to it
+(windows on the items inside a renamed or moved folder follow too), and it ends
+when the item is deleted (so do the windows on anything inside a deleted
+folder), when a new item is created at its name, or when Jenkins starts and the
+item is gone. One gap remains: an item replaced on disk outside Jenkins and
+then reloaded fires no item event, so a window naming it applies to the
+replacement. That takes file-system access (reloading a single item needs only
 `Item/Configure` on it, not `Overall/Administer`)
 ([item 11](docs/LIMITATIONS.md#the-authorization-strategy)).
 
@@ -594,8 +602,9 @@ cost: a user who renamed jobs with a `CONFIGURE` window now needs an
 administrator or their own permissions. Jenkins still shows **Rename** in the
 sidebar to a window holder; the refusal appears on the rename page, whatever
 URL form is used (including encoded ones and core's `doRename`), and is
-recorded as a `GRANT_VIOLATION` (once per minute for the same attempt). A
-rename made by someone entitled to it ends every window on the item, as above.
+recorded as a `GRANT_VIOLATION` (once per minute for the same attempt). When
+someone entitled to it renames an item, the item's windows follow it to the new
+name, as above.
 
 **On an item a grant has touched, only an administrator can widen
 authorization.** A Pipeline `properties` step saves its job's authorization

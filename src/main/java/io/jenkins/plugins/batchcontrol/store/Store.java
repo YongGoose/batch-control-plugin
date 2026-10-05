@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.ParameterValue;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -45,34 +47,51 @@ public interface Store {
     }
 
     /**
-     * Writes (or rewrites, on a status transition) the request XML atomically. A request read
-     * without its typed values ({@link RunRequest#typedValuesOmitted()}) is written with the stored
-     * values unchanged; one whose values were removed ({@link RunRequest#removeTypedValues()}) is
-     * written without them (D-72b (5)).
+     * Writes (or rewrites, on a status transition) the request XML {@code <id>.xml} atomically.
+     * Never touches the request's typed values (D-74).
      *
      * @throws StoreWriteException when it cannot be written; nothing is left behind
      */
     void saveRunRequest(RunRequest request);
 
     /**
-     * Loads a request by id without its typed values, or returns {@code null} if it does not exist
-     * (D-72b (5), security-35 S-35-02): every field but {@code parameterValues} is read, the values
-     * are neither parsed nor deserialized, and {@link RunRequest#parameterValues()} of the result
-     * refuses. The read for screens, badges, listings and periodic work.
+     * Stores a new request (D-72, D-74): {@code <id>.xml}, then its typed values in
+     * {@code <id>.values.xml} when there are any (a request without parameters has no values file).
+     * Each file is written atomically; when either cannot be written, neither is left behind.
+     *
+     * @throws StoreWriteException when it cannot be stored; nothing is left behind
+     */
+    void saveNewRunRequest(RunRequest request, List<ParameterValue> values);
+
+    /**
+     * Loads a request by id from {@code <id>.xml}, or returns {@code null} if it does not exist.
+     * Its typed values are never read here (D-74): this is the read for screens, badges, listings,
+     * listeners and periodic work.
      */
     RunRequest loadRunRequest(String id);
 
     /**
-     * Loads a request by id with its typed values (D-72), or returns {@code null}. Only for what
-     * needs the values: checking and scheduling an approval, and disposing of the values' files.
+     * The typed values of request {@code id} from {@code <id>.values.xml} (D-74), or {@code null}
+     * when there is no values file (the request has no parameters, or its values were deleted when
+     * its run started or it ended). Only for approving, submitting, recovering and disposing of a
+     * request. An element that could not be loaded may be {@code null}.
+     *
+     * @throws java.io.UncheckedIOException when the file exists but cannot be read
      */
-    RunRequest loadRunRequestWithValues(String id);
+    @CheckForNull
+    List<ParameterValue> loadRunRequestValues(String id);
 
-    /** Loads every stored run request without its typed values, sorted by creation time. */
+    /**
+     * Deletes the typed values of request {@code id} ({@code <id>.values.xml}), when the approved
+     * run starts or the request ends (D-72b (5), D-74); nothing happens when there are none.
+     */
+    void deleteRunRequestValues(String id);
+
+    /** Loads every stored run request, sorted by creation time. */
     List<RunRequest> listRunRequests();
 
     /**
-     * Loads the PENDING and APPROVED run requests only, without their typed values, sorted by
+     * Loads the PENDING and APPROVED run requests only, sorted by
      * creation time (#13). Served from the in-memory entity index, so closed requests are never
      * read; this is what the per-minute expiry work, startup recovery and rename invalidation
      * iterate.

@@ -6,9 +6,9 @@
 <j:jelly xmlns:j="jelly:core">
   <j:set var="windows" value="${it.windows}"/>
   <j:if test="${!empty(windows)}">
-    <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
+    <div class="jenkins-alert jenkins-alert-info jenkins-!-margin-top-3" role="status">
       <strong>Batch Control: you hold a Create permission window here.</strong>
-      <ul style="margin: 0.5rem 0;">
+      <ul class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-1">
         <j:forEach var="g" items="${windows}">
           <j:set var="allowed" value="${it.restriction(g)}"/>
           <li>
@@ -21,7 +21,7 @@
           </li>
         </j:forEach>
       </ul>
-      <p style="margin: 0;">
+      <p class="jenkins-!-margin-0">
         New Item refuses any other name while the window lasts; the window does not allow renaming.
       </p>
     </div>

@@ -78,18 +78,6 @@ public final class ItemKind {
         return iconClassName;
     }
 
-    /**
-     * Whether {@code item} currently has this kind (the same descriptor id). Cheap: only the
-     * descriptor id is read (D-71a calls this on the permission-check path).
-     */
-    public boolean matches(@CheckForNull Item item) {
-        if (!(item instanceof TopLevelItem)) {
-            return false;
-        }
-        TopLevelItemDescriptor descriptor = ((TopLevelItem) item).getDescriptor();
-        return descriptor != null && descriptorId.equals(descriptor.getId());
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) {

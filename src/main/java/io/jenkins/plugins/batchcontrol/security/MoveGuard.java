@@ -114,7 +114,7 @@ final class MoveGuard {
         }
         // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
-        // D-71a: windows bound to the item and to the destination folder respectively.
+        // The windows naming the item and the destination folder respectively.
         Grant deleteWindow = GrantService.get().findActiveDeleteGrant(user, item);
         Grant createWindow = GrantService.get().findActiveCreateGrant(user, destination, item.getName());
         List<String> windows = new ArrayList<>();
@@ -334,8 +334,8 @@ final class MoveGuard {
     }
 
     /**
-     * The active CREATE grant of {@code user} on {@code group} (named exactly and bound to it,
-     * D-71a) whose name restriction alone refuses {@code name}, or {@code null} when no such grant
+     * The active CREATE grant of {@code user} on {@code group} (named exactly) whose name
+     * restriction alone refuses {@code name}, or {@code null} when no such grant
      * exists (no grant at all, or one that admits the name).
      */
     @CheckForNull

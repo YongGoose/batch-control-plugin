@@ -3,7 +3,8 @@
      (ui.FormErrors) with the message next to the field or above the form it concerns and the
      input kept. Form targets are absolute because the refusal is rendered at the POST URL.
      D-71: the Scope row shows the one item the request names, with its kind
-     (tags/scopeItem.jelly). -->
+     (tags/scopeItem.jelly); D-74: once approved, its window's item, which follows the item when
+     it is renamed or moved (GrantRequestItem#getScope). -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Grant Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
@@ -28,7 +29,7 @@
         <tbody>
           <tr>
             <th style="text-align: left; width: 12rem;">Scope</th>
-            <td><bc:scopeItem fullName="${it.request.scope.fullName}" kind="${it.request.itemKind}"/></td>
+            <td><bc:scopeItem fullName="${it.scope.fullName}" kind="${it.request.itemKind}"/></td>
           </tr>
           <tr><th style="text-align: left;">Actions</th><td>${it.join(it.request.actions)}</td></tr>
           <j:if test="${it.request.createNamePattern != null}">
@@ -85,11 +86,9 @@
 
       <!-- R4-12: the window of an approved request, with Revoke for a holder of Batch
            Control/Manage (the rule of the Grants list's Revoke; GrantRequestItem#doRevoke and the
-           service re-check). A refused revoke is shown above the window. D-71a/D-71b: an open
-           window whose item was renamed, moved or deleted stays open and revocable until it ends,
-           but its State says it no longer applies (data-batch-control-window-state="unbound"; an
-           open window that still applies is "bound"; an ended one has no marker). Display only
-           (GrantRequestItem#isWindowBound). -->
+           service re-check). A refused revoke is shown above the window. D-74: an open window
+           applies to its item (renamed or moved, it follows; deleted, it ends), so its State is
+           the time left. -->
       <j:set var="window" value="${it.grant}"/>
       <j:if test="${window != null}">
         <h2>Permission Window</h2>
@@ -102,14 +101,11 @@
             <tr>
               <th style="text-align: left;">State</th>
               <j:choose>
-                <j:when test="${!it.windowOpen}">
-                  <td>${it.endedLabelOf(window)}</td>
-                </j:when>
-                <j:when test="${it.windowBound}">
-                  <td data-batch-control-window-state="bound">Open, ${it.remaining(window.expiresAt)} left</td>
+                <j:when test="${it.windowOpen}">
+                  <td>Open, ${it.remaining(window.expiresAt)} left</td>
                 </j:when>
                 <j:otherwise>
-                  <td data-batch-control-window-state="unbound">${it.unboundLabel}</td>
+                  <td>${it.endedLabelOf(window)}</td>
                 </j:otherwise>
               </j:choose>
             </tr>
@@ -170,9 +166,9 @@
         <h2>Decision</h2>
         <p class="jenkins-description">
           Approving immediately grants the requester the selected permissions on the requested
-          item for the requested duration. The window applies to this item only and stops
-          applying for good once the item is renamed, moved or deleted (renaming it back does not
-          restore it).
+          item for the requested duration. The window applies to this item only: it follows the
+          item when an administrator (or a user with their own permissions) renames or moves it,
+          and ends when the item is deleted.
         </p>
         <j:set var="approveErrors" value="${it.formErrors('approve')}"/>
         <j:set var="rejectErrors" value="${it.formErrors('reject')}"/>

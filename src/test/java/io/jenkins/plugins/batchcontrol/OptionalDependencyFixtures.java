@@ -40,19 +40,23 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Shared steps of the absence boots T-02-84..86 (dependency-01 M-3). This class runs inside a
- * {@code RealJenkinsExtension} JVM that lacks one or more optional plugins, so it references
- * core, test-harness, JDK and batch-control types only: no matrix-auth, role-strategy,
- * configuration-as-code, mailer or rebuild type, and no fixture class that links one.
+ * Shared steps of the absence boots T-02-84..86 and T-02-123 (dependency-01 M-3, D-74). This
+ * class runs inside a {@code RealJenkinsExtension} JVM that lacks one or more optional plugins, so
+ * it references core, test-harness, JDK and batch-control types only: no matrix-auth,
+ * role-strategy, configuration-as-code, mailer, rebuild or file-parameters type, and no fixture
+ * class that links one.
  *
- * <p>Written from docs/SPEC.md, docs/TEST-MATRIX.md and docs/reports/dependency-01.md only
- * (no src/main knowledge).
+ * <p>Written from docs/SPEC.md, docs/TEST-MATRIX.md, docs/reports/dependency-01.md and
+ * docs/DECISIONS.md D-74 only (no src/main knowledge).
  */
 final class OptionalDependencyFixtures {
 
-    /** The compile-time optional plugins named by dependency-01 section 2a. */
+    /**
+     * The compile-time optional plugins: the five named by dependency-01 section 2a and
+     * file-parameters, an optional dependency since D-74 (2) (note 271).
+     */
     static final String[] COMPILE_TIME_OPTIONAL = {
-        "matrix-auth", "role-strategy", "configuration-as-code", "mailer", "rebuild"
+        "matrix-auth", "role-strategy", "configuration-as-code", "mailer", "rebuild", "file-parameters"
     };
 
     /**

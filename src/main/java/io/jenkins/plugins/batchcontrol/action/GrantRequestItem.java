@@ -14,6 +14,7 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
@@ -28,7 +29,6 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
-import io.jenkins.plugins.batchcontrol.ui.WindowBinding;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
@@ -164,21 +164,15 @@ public class GrantRequestItem implements ModelObject {
     }
 
     /**
-     * D-71a, D-71b: whether the open window still applies to its item. A window whose item was
-     * renamed, moved or deleted stays open (and revocable) until it ends, but this page says it no
-     * longer applies instead of showing the remaining time ({@link WindowBinding}; display only).
+     * D-74: the item this page names. Once the request was approved, its window's item
+     * ({@link Grant#getScope()}): an open window follows its item when an administrator (or a user
+     * with their own permissions) renames or moves it, and an ended one keeps the name its item had
+     * when it ended. Before that (or without a stored window), the item the request was made for.
      */
-    public boolean isWindowBound() {
+    @CheckForNull
+    public GrantScope getScope() {
         Grant g = getGrant();
-        if (g == null) {
-            return false;
-        }
-        return WindowBinding.isBound(g, WindowBinding.effectiveActive().get(g.getId()));
-    }
-
-    /** Jelly: the State text of an open window that no longer applies. */
-    public String getUnboundLabel() {
-        return WindowBinding.UNBOUND_LABEL;
+        return g != null && g.getScope() != null ? g.getScope() : request.getScope();
     }
 
     /**
@@ -274,8 +268,9 @@ public class GrantRequestItem implements ModelObject {
 
     /** The recorded kind, or else the current item as the viewer may see it, is an item group. */
     private boolean namesGroup() {
+        GrantScope scope = getScope();
         return recordedKindIsGroup()
-                || (request.getScope() != null && isGroup(Visibility.findVisibleItem(request.getScope().getFullName())));
+                || (scope != null && isGroup(Visibility.findVisibleItem(scope.getFullName())));
     }
 
     /** Whether the kind recorded with the request is an item group that is not a job. */
