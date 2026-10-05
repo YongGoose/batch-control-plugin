@@ -4,16 +4,18 @@
      the descriptor id as data-batch-control-item-kind. A request stored without a kind (never one
      made through the form) shows the full name alone, without the attribute. Every value is
      escaped by default; the icon comes from the item's descriptor, recorded when the request was
-     made, and is decorative (the display name follows it as text). No script. -->
+     made, and is decorative (the display name follows it as text). No script. D-74: styled by
+     classes (the plugin stylesheet and core's utility classes), no inline style. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <st:documentation>
     The item a grant request or permission window names, with its kind.
     <st:attribute name="fullName" use="required">The item's full name.</st:attribute>
     <st:attribute name="kind">The recorded io.jenkins.plugins.batchcontrol.model.ItemKind, or null.</st:attribute>
   </st:documentation>
+  <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>
   <j:set var="bcItemKind" value="${attrs.kind}"/>
   <j:set var="bcItemIcon" value="${bcItemKind == null ? null : bcItemKind.iconClassName}"/>
   <!-- Written on one line so that the element's text is exactly "<kind> <full name>": the icon is
        spaced by a margin, and the one separator is an expression. -->
-  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}" style="white-space: nowrap;"><j:if test="${bcItemKind != null}"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span style="color: var(--text-color-secondary);${bcItemIcon != null ? ' margin-left: 0.3em;' : ''}">${bcItemKind.displayName}</span>${' '}</j:if><span>${attrs.fullName}</span></span>
+  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}" class="batch-control-nowrap"><j:if test="${bcItemKind != null}"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span class="jenkins-!-text-color-secondary${bcItemIcon != null ? ' jenkins-!-margin-left-1' : ''}">${bcItemKind.displayName}</span>${' '}</j:if><span>${attrs.fullName}</span></span>
 </j:jelly>

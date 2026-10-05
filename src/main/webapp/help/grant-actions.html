@@ -8,7 +8,19 @@
       reconfiguring a Multibranch Pipeline or organization folder can create or delete the items
       it generates.</li>
     <li><b>Create</b>: create new items directly inside the folder. Applies only to a regular
-      folder.</li>
+      folder. While Create is ticked, the optional <b>New job name restriction</b> limits which
+      new job the window lets you create:
+      <ul>
+        <li>An exact item name, for example <code>nightly-report</code>: only a job with exactly
+          that name can be created.</li>
+        <li>A Java regular expression between slashes, for example <code>/report-[0-9]+/</code>:
+          the expression must match the <em>whole</em> item name (the name of the new job itself,
+          not its folder path).</li>
+      </ul>
+      Leave it empty to allow any name in the folder. The restriction is checked when you submit
+      (an invalid expression is refused) and shown to the approver. It does not affect Configure
+      or Delete. An attempt to create a job with another name is refused and recorded as a grant
+      violation.</li>
     <li><b>Delete</b>: delete the job. Applies only to a job.</li>
   </ul>
   A request for Create or Delete on an item where it does not apply is refused when you submit it.
