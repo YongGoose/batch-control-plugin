@@ -331,6 +331,12 @@ public final class RunRequestService {
      * <p>The request takes over the temporary files of the values' file parameters: when the
      * request is refused (permission, reason, size, approvers) they are disposed of before the
      * exception propagates ({@link ParameterFiles}).
+     *
+     * <p>security-37 S-37-01, D-72b (4): right after the permission checks, a request whose values
+     * would keep more than the body cap (file contents plus stored texts,
+     * {@link RequestBodyLimit#keptSize}) is refused with {@link RequestTooLargeException} (an
+     * {@link IllegalArgumentException}), its files disposed of and nothing stored. This holds for
+     * every overload and for an incident rerun, which all end here.
      */
     public RunRequest create(Job<?, ?> job, List<ParameterValue> values, String reason,
                              List<String> approvers, String incidentId) {
@@ -341,6 +347,10 @@ public final class RunRequestService {
         boolean stored = false;
         try {
             checkCanRequest(job);
+            // security-37 S-37-01, D-72b (4): what the request would keep, measured on the values
+            // themselves, whatever the body that carried them; the web layer's body checks are an
+            // early filter only. Over the cap: RequestTooLargeException, files disposed of below.
+            RequestBodyLimit.checkKept(submitted);
             String requester = Jenkins.getAuthentication2().getName();
             checkReason(reason);
             checkValues(submitted);
