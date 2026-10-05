@@ -1,7 +1,6 @@
 package io.jenkins.plugins.batchcontrol.policy;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import hudson.model.Job;
 import hudson.model.ParameterValue;
 import hudson.util.Secret;
 import jakarta.servlet.ServletException;
@@ -72,14 +71,6 @@ public final class RequestBodyLimit {
      */
     public static boolean exceeds(HttpServletRequest req) {
         return req.getContentLengthLong() > maxRequestBodyBytes();
-    }
-
-    /**
-     * As {@link #exceeds(HttpServletRequest)}, for callers that pass the job; the declared length
-     * does not depend on it.
-     */
-    public static boolean exceeds(HttpServletRequest req, @CheckForNull Job<?, ?> job) {
-        return exceeds(req);
     }
 
     /**
