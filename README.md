@@ -81,9 +81,11 @@ if they hold `Item/Delete` on the item and `Item/Create` at the destination, eac
 either standing or from an active window, and a `CREATE` window's name
 restriction is matched against the moved item's name. For the same reason no
 window can authorise moving a folder of any kind: that needs an administrator, or
-a user who already holds `Item/Delete` on it standing. Nor can a window authorise
-renaming a folder, multibranch project or organization folder, because that
-renames everything inside it. A refused move changes
+a user who already holds `Item/Delete` on it standing. Nor can any window authorise
+renaming a job or folder of any kind, because permissions matched by full name
+follow a rename: renaming needs an administrator, or the user's own
+`Item/Configure` on the item, or their own `Item/Delete` on it plus
+`Item/Create` in its parent. A refused move or rename changes
 nothing, tells the user why and is recorded as a `GRANT_VIOLATION`. While run
 control is also on, a job moved by a non-administrator arrives the way a newly
 created job does: not activated and locked, recorded as `HELD`, so it needs a
@@ -437,7 +439,8 @@ is recognised; there is no scope type to choose, and each action says where it
 applies. The page of a `CONFIGURE` request on a folder, multibranch project or
 organization folder warns that the folder's settings apply to the items inside
 it, that reconfiguring a multibranch project or organization folder can create
-or delete its generated items, and that the window does not allow renaming it.
+or delete its generated items, and that the window does not allow renaming it;
+the page of a `CONFIGURE` request on a job states that rename rule alone.
 **Grants** shows pending window requests, the time left on
 an active window, the history of expired ones and a link to request another.
 **Activations** lists activation and hold requests, with the ones awaiting your
@@ -554,7 +557,8 @@ administrator, and moving one needs an administrator or standing `Item/Delete`
 on it. A window is bound to the item it was approved for, not to its name, so a
 rename, move or deletion ends it for good (renaming back does not restore it).
 One gap remains: an item directory replaced on disk outside Jenkins and then
-reloaded, which takes file-system access and `Overall/Administer`
+reloaded, which takes file-system access (reloading a single item needs only
+`Item/Configure` on it, not `Overall/Administer`)
 ([item 11](docs/LIMITATIONS.md#the-authorization-strategy)).
 
 **A `CONFIGURE` window confers whatever Jenkins implies from `Item/Configure`.**
@@ -567,21 +571,23 @@ that a non-administrator approved while being shown only the word `CONFIGURE`.
 `Run/Replay` is the one to know about: run control still refuses a replay of a job
 that requires approval, so it is not a way around the run gate there, but on a job
 without run control a window holder can replay a build with a modified Pipeline
-script. Renaming a job follows Jenkins' own rule: it needs `Item/Configure` on
-the job, or else both `Item/Delete` on it and `Item/Create` in its folder. So a
-`CONFIGURE` window lets its holder rename the job it names to any free name in
-the same folder. The rename is recorded with the window and ends it, so any
-further change under the new name needs a new window. While change control is
-on, a window's `CONFIGURE` does not allow renaming a folder, multibranch project
-or organization folder, since that would rename everything inside it and carry
-permissions matched by full name, such as role-strategy item roles, onto items
-nobody approved. Jenkins still shows **Rename** in such a folder's sidebar to
-the window holder; the refusal appears on the rename page and is recorded as a
-`GRANT_VIOLATION` (once per minute for the same attempt). Renaming one needs an
-administrator, the user's own `Item/Configure` on it, or the user's own
-`Item/Delete` on it plus `Item/Create` in its parent. Under a `CREATE` window
-with a name restriction, renames of what that window created are limited to
-matching names.
+script.
+
+**No window allows renaming a job or folder.** While change control is on,
+neither a `CONFIGURE` window nor `DELETE` and `CREATE` windows combined (core's
+other rename path) let their holder rename any item, and neither does the
+Configure a `CREATE` window's holder keeps on what they created through it. A
+rename needs an administrator, or the user's own `Item/Configure` on the item,
+or their own `Item/Delete` on it plus `Item/Create` in its parent. This closes
+an escalation: under role-strategy, item roles match full names by pattern, so
+a window holder who renamed a job, or a folder and everything inside it, into
+one of their own patterns would keep that role after the window ended. The
+cost: a user who renamed jobs with a `CONFIGURE` window now needs an
+administrator or their own permissions. Jenkins still shows **Rename** in the
+sidebar to a window holder; the refusal appears on the rename page, whatever
+URL form is used (including encoded ones and core's `doRename`), and is
+recorded as a `GRANT_VIOLATION` (once per minute for the same attempt). A
+rename made by someone entitled to it ends every window on the item, as above.
 
 **On an item a grant has touched, only an administrator can widen
 authorization.** A Pipeline `properties` step saves its job's authorization

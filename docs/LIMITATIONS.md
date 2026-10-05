@@ -119,13 +119,15 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
       request on a folder, multibranch project or organization folder states
       both points to the approver and the requester, together with the fact
       that the window does not allow renaming it (item 33; security-34
-      S-34-02).
+      S-34-02); the page of a `CONFIGURE` request on a job states that rename
+      rule alone (security-36 S-36-04).
     - `CREATE` applies only to a regular folder and allows creating items
       directly inside it: never at the Jenkins root, never inside a folder
       nested in it, and never inside a multibranch project or organization
       folder, whose children are generated (item 6). The Configure that the
       holder keeps on items created that way (D-35c) is matched by the created
-      item's parent being the window's folder, not by its name.
+      item's parent being the window's folder, not by its name, and does not
+      extend to renaming them (item 33).
     - `DELETE` applies only to a job, including multi-configuration and Maven
       projects, whose sub-items are part of the job. No window confers
       `Item/Delete` on a folder, a multibranch project or an organization
@@ -152,19 +154,20 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     the item ends the window for good, and so does renaming, moving or deleting
     a folder above it: renaming the item back does not restore it, and no item
     that later comes to have the name, whether created, copied, renamed or moved
-    there, gets it. Renaming a job with its own `CONFIGURE` window therefore
-    ends that window (item 33). Swapping items or combining several windows
+    there, gets it. No window can authorise the rename itself (item 33).
+    Swapping items or combining several windows
     cannot make a window reach another item. A window ended this way stays
     listed among the active windows, and can still be revoked, until its end
     time, but it confers nothing: the Grants screen and the window's own page
     show "No longer applies (the item was renamed, moved or deleted)" in place
     of the remaining time, and the Jenkins log names the window. One gap
-    remains: an item directory replaced on disk outside Jenkins, followed by
-    "Reload Configuration from Disk" or a restart, fires no item event, and on a
-    file system that hands the new directory the old one's identity the window
-    would apply to the replacement. Doing that takes file-system access to
-    `$JENKINS_HOME` and `Overall/Administer`, which are outside the plugin's
-    reach anyway (item 1, item 5).
+    remains: an item directory replaced on disk outside Jenkins, followed by a
+    reload or a restart, fires no item event, and on a file system that hands
+    the new directory the old one's identity the window would apply to the
+    replacement. The precondition is file-system access to `$JENKINS_HOME`,
+    which is outside the plugin's reach anyway (item 5); the reload itself does
+    not need `Overall/Administer`, because reloading a single item from disk
+    needs only `Item/Configure` on it (D-71b).
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
@@ -414,46 +417,43 @@ code does on purpose.
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
 
-    A `CONFIGURE` window on a job also lets its holder **rename** that job, to
-    any free name in the same folder. Renaming a job follows core's rule: it
-    needs `Item/Configure` on the job, or else both `Item/Delete` on it and
-    `Item/Create` in its folder, so one `CONFIGURE` window is enough. The rename
-    is recorded as `RENAME` with the window it was made under, like any rename
-    it ends the job's pending requests (item 30), and it ends the window itself
-    for good (item 11), so further changes under the new name need a new
-    window. An approver who wants to rule out renaming a job has no narrower
-    window to grant.
+    No window allows **renaming** an item (D-71c, security-36 S-36-01,
+    S-36-02; this replaces the folder-only refusal of D-71a). While change
+    control is on, renaming a job or a folder of any kind (including a
+    multibranch project or an organization folder) is refused whenever a
+    window would be what allows it: neither a `CONFIGURE` window on the item,
+    nor a `DELETE` window on it combined with a `CREATE` window on its parent
+    (core's other rename path), nor the Configure a `CREATE` window's holder
+    keeps on the items created through it (D-35c) is enough. Renaming needs
+    an administrator, or the user's own (standing) permissions under core's
+    rule: `Item/Configure` on the item, or `Item/Delete` on it plus
+    `Item/Create` in its parent. The reason is that permissions matched by
+    full name follow a rename. Windows are bound to their items and are not
+    carried along (item 11), but under role-strategy the holder's own item
+    roles match full names by pattern, so renaming a job into one of their
+    patterns, or a folder (which renames everything inside it), would give the
+    holder that role on it long after the window ended. Refusing the rename
+    closes that escalation. The cost: a user who renamed jobs through a
+    `CONFIGURE` window now needs an administrator to do it, or their own
+    standing permissions.
 
-    A folder is different (D-71a, security-34 S-34-01). While change control is
-    on, the `CONFIGURE` of a window does not allow renaming a folder, a
-    multibranch project or an organization folder. Renaming one renames
-    everything inside it. Windows are bound to their items and are not carried
-    along (item 11), but permissions matched by full name are: under
-    role-strategy the holder's own item roles match full names by pattern, so
-    renaming a folder into a pattern's reach would give the holder that role on
-    everything inside it, long after the window ended. Jenkins' sidebar still
-    shows **Rename** on such a folder to a window holder, because the window
-    does confer `Item/Configure` on it for everything else; the refusal appears on
-    the rename page itself, as a message under the new-name field while typing
-    and as a plain refusal page when the rename is submitted, and nothing is
-    renamed. A submitted attempt is recorded as `GRANT_VIOLATION`; the same
-    refused rename by the same user (same folder and new name) is recorded once
-    per minute, and repeats within that minute go only to the Jenkins log
-    (D-73). Core's other rename path is untouched: a user with their own
-    (standing) `Item/Delete` on the folder and `Item/Create` in its parent can
-    still rename it, and so can a user with standing `Item/Configure` on it or
-    an administrator. Renaming a folder of any kind is therefore, like
-    deleting or moving one (items 11 and 44), not something a permission window
-    can authorise. When such a rename does happen, it changes the full name of
-    everything inside the folder, ends the pending run requests of the jobs
-    inside, produces one `MOVE` record per descendant job (item 26) and ends
-    every window on the folder or on anything inside it (item 11).
-
-    A `CREATE` window with a name restriction narrows renames as well: renaming
-    a job its holder created through that window, or a rename that relies on
-    the window's Create permission on the folder, is allowed only to a name
-    that matches the restriction, and any other name is refused and recorded
-    as a violation.
+    Jenkins' sidebar still shows **Rename** to a window holder, because the
+    window does confer `Item/Configure` for everything else; the refusal
+    appears on the rename page itself, as a message under the new-name field
+    while typing and as a plain refusal page when the rename is submitted, and
+    nothing is renamed. Every core rename endpoint (`confirmRename`,
+    `doRename`, `checkNewName`) is checked on the decoded request path, so an
+    encoded URL form does not get past the refusal. A refused rename, by any
+    URL form, is recorded as `GRANT_VIOLATION`; the same refused rename by the
+    same user (same item and new name) is recorded once per minute, and repeats
+    within that minute go only to the Jenkins log (D-73). Renaming an item is
+    therefore, like deleting or moving a folder (items 11 and 44), not
+    something a permission window can authorise. When a rename does happen, it
+    is recorded as `RENAME`, ends the item's pending requests (item 30) and
+    ends every window on the item for good (item 11). A folder rename also
+    changes the full name of everything inside the folder, ends the pending
+    run requests of the jobs inside, produces one `MOVE` record per descendant
+    job (item 26) and ends every window on anything inside it.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
