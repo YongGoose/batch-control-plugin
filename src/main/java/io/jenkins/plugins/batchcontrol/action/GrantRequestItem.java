@@ -22,7 +22,6 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -151,7 +150,7 @@ public class GrantRequestItem implements ModelObject {
     @CheckForNull
     public Grant getGrant() {
         if (!grantLoaded) {
-            grant = request.getStatus() == RequestStatus.APPROVED ? Store.get().loadGrant(request.getId()) : null;
+            grant = request.getStatus() == RequestStatus.APPROVED ? GrantService.get().find(request.getId()) : null;
             grantLoaded = true;
         }
         return grant;
