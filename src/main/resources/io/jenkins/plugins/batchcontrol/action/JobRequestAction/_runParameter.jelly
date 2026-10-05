@@ -1,0 +1,24 @@
+<?jelly escape-by-default='true'?>
+<!-- T-06-103 (SPEC item 6, D-60; DEF-09): core's run parameter (`it` is the RunParameterDefinition)
+     as core's hudson/model/RunParameterDefinition/index.jelly renders it, with the same field
+     names, so the definition parses the submission as usual; the only difference is that the run
+     bcRunId (JobRequestAction#selectedRunId) is the selected option. Core's view lists the
+     project's builds without marking the definition's default, so a carried run would otherwise
+     show as the newest build. _form.jelly uses this page only when bcRunId is not the first run
+     listed. -->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <!-- As in core's parameter views: the name is escaped here, the description is the markup
+       formatter's output (SECURITY-353). -->
+  <j:set var="escapeEntryTitleAndDescription" value="false"/>
+  <f:entry title="${h.escape(it.name)}" description="${it.formattedDescription}">
+    <div class="jenkins-select" name="parameter">
+      <input type="hidden" name="name" value="${it.name}"/>
+      <select class="jenkins-select__input" name="runId">
+        <j:forEach var="run" items="${it.builds}">
+          <option value="${run.externalizableId}"
+                  selected="${run.externalizableId == bcRunId ? 'true' : null}">${run.fullDisplayName}</option>
+        </j:forEach>
+      </select>
+    </div>
+  </f:entry>
+</j:jelly>

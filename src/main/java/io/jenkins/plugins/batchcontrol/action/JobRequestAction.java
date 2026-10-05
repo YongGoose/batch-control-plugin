@@ -667,6 +667,17 @@ public class JobRequestAction implements Action {
     }
 
     /**
+     * T-06-103 (D-60, DEF-09): the run the form shows selected for the run parameter
+     * {@code definition}, or {@code null} to render the definition's own view
+     * ({@link RequestRunPrefill#selectedRunId}; core's view does not show a carried run). Not a
+     * getter on purpose, like {@link #parameterField}.
+     */
+    @CheckForNull
+    public String selectedRunId(ParameterDefinition definition) {
+        return RequestRunPrefill.selectedRunId(definition);
+    }
+
+    /**
      * D-72b: files a refusal of {@link RunRequestService#create} on the form. A failed save
      * ({@link StoreWriteException}, nothing stored) goes above the form with its own message; a
      * message about one of the job's parameters ({@code Parameter '<name>' ...}) below that

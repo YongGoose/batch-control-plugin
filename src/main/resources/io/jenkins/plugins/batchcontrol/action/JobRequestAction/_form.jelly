@@ -119,8 +119,19 @@
           </j:if>
           <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
             <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
-            <!-- #111: the definition's value page, as core's ParametersDefinitionProperty/contents.jelly. -->
-            <st:include it="${parameterDefinition}" page="${parameterDefinition.descriptor.valuePage}"/>
+            <!-- #111: the definition's value page, as core's ParametersDefinitionProperty/contents.jelly.
+                 T-06-103: core's run parameter view never selects its default, so a carried run
+                 (D-60) or a refused submission's run (DEF-09) is rendered by _runParameter.jelly
+                 with that run selected; bcRunId is null whenever core's view is right. -->
+            <j:set var="bcRunId" value="${it.selectedRunId(parameterDefinition)}"/>
+            <j:choose>
+              <j:when test="${bcRunId != null}">
+                <st:include it="${parameterDefinition}" page="_runParameter.jelly" from="${it}"/>
+              </j:when>
+              <j:otherwise>
+                <st:include it="${parameterDefinition}" page="${parameterDefinition.descriptor.valuePage}"/>
+              </j:otherwise>
+            </j:choose>
             <!-- D-72b: a refusal of this parameter (a repeated name, a value its definition or the
                  service refused) is shown right below it. -->
             <bc:fieldError errors="${errors}" field="${it.parameterField(parameterDefinition.name)}"/>
