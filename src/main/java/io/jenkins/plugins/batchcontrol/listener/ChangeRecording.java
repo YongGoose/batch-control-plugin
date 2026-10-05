@@ -39,8 +39,8 @@ final class ChangeRecording {
     }
 
     /**
-     * The id of the current user's active grant naming {@code itemFullName}, bound to {@code item}
-     * (D-71a), and matching the action, or {@code null} (SPEC item 9: link the grant when one
+     * The id of the current user's active grant naming {@code itemFullName} (with {@code item}
+     * present) and matching the action, or {@code null} (SPEC item 9: link the grant when one
      * covers the change, else {@code grantId=null}). {@code itemFullName} may be the item's name
      * before a rename or move. A {@code null} action matches any granted action.
      */
@@ -61,7 +61,7 @@ final class ChangeRecording {
         if (!(item.getParent() instanceof Item)) {
             return null; // no root-scope grant exists (S-13)
         }
-        // D-71a: the window must name the parent folder and be bound to it.
+        // The window must name the parent folder.
         Item group = (Item) item.getParent();
         Grant grant = GrantService.get().findActiveCreateGrant(user, item.getParent(), item.getName());
         if (grant == null) {

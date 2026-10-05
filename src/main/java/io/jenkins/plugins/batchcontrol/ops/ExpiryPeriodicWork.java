@@ -53,13 +53,6 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.WARNING, "Could not close the refused re-run summaries", e);
         }
-        // D-71c (security-36 S-36-03 (ii)): an unbinding whose file could not be written is
-        // written again here (it already confers nothing in memory). Its own try, like the above.
-        try {
-            io.jenkins.plugins.batchcontrol.security.GrantService.get().retryUnsavedUnbindings();
-        } catch (RuntimeException e) {
-            LOGGER.log(java.util.logging.Level.WARNING, "Could not retry the unbindings of permission windows", e);
-        }
         // Queue snapshot is taken outside the service lock (lock-order discipline): a request
         // whose approved submission is waiting in the queue is not "unsubmitted" and must not
         // expire while it waits for an executor. The snapshot instant is recorded first so the
