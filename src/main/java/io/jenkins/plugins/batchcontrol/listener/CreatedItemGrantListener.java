@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
@@ -56,9 +57,9 @@ public class CreatedItemGrantListener extends ItemListener {
         String user = auth.getName();
         String fullName = item.getFullName();
         ItemGroup<? extends Item> parent = item.getParent();
-        // Create lookups take the group the item was created in (D-65: a FOLDER_ONLY window
-        // confers Create in its folder only).
-        String group = fullName.lastIndexOf('/') < 0 ? "" : fullName.substring(0, fullName.lastIndexOf('/'));
+        // Create lookups take the group the item was created in (D-71: a CREATE window confers
+        // Create in its own folder only).
+        String group = GrantScope.parentOf(fullName);
         if (GrantService.get().findActiveGrants(user, group, GrantAction.CREATE).isEmpty()) {
             return;
         }

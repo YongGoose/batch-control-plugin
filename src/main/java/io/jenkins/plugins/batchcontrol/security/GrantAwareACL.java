@@ -4,7 +4,6 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
-import hudson.model.ItemGroup;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -12,6 +11,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.io.File;
 import java.util.List;
@@ -85,26 +85,35 @@ final class GrantAwareACL extends ACL {
     private final File itemRootDir;
 
     /**
-     * Whether the item is an item group (a folder, a multibranch project): a FOLDER_ONLY window
-     * confers no Delete on it (D-65). {@code true} when the item is unknown (fail-safe).
+     * D-71: whether a window's DELETE can apply to the item, i.e. it is a job
+     * ({@link GrantScope#deleteAppliesTo}). A folder, multibranch project or organization folder
+     * never gets Item/Delete from a window, whatever the stored grant says; {@code false} when the
+     * item is unknown (fail-safe).
      */
-    private final boolean itemIsGroup;
+    private final boolean deleteApplies;
+
+    /**
+     * D-71: whether a window's CREATE can apply to the item, i.e. it is a regular folder
+     * ({@link GrantScope#createAppliesTo}); {@code false} when the item is unknown (fail-safe).
+     */
+    private final boolean createApplies;
 
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName) {
-        this(delegate, itemFullName, null, true);
+        this(delegate, itemFullName, null, false, false);
     }
 
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull AbstractItem item) {
         this(delegate, item == null ? null : item.getFullName(), item == null ? null : item.getRootDir(),
-                item == null || item instanceof ItemGroup);
+                GrantScope.deleteAppliesTo(item), GrantScope.createAppliesTo(item));
     }
 
     private GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName,
-                          @CheckForNull File itemRootDir, boolean itemIsGroup) {
+                          @CheckForNull File itemRootDir, boolean deleteApplies, boolean createApplies) {
         this.delegate = delegate;
         this.itemFullName = itemFullName;
         this.itemRootDir = itemRootDir;
-        this.itemIsGroup = itemIsGroup;
+        this.deleteApplies = deleteApplies;
+        this.createApplies = createApplies;
     }
 
     /**
@@ -144,11 +153,9 @@ final class GrantAwareACL extends ACL {
         // D-35d (1): the parent's decision is taken with every grant layer switched off. matrix-auth
         // resolves an item without its own property through the parent folder's ACL, which is a
         // grant-aware ACL too; evaluated with grants on, a D-35c grant on a folder the holder
-        // created would reach every descendant through that inheritance, and a JOB-scope grant on
-        // a folder would widen to its children. Only this, the outermost layer, consults grants:
-        // FOLDER scope already matches descendants by path above (FOLDER_ONLY its direct items,
-        // D-65, which this keeps from reaching a nested folder's contents), and D-35c answers for exactly
-        // the items the holder created.
+        // created would reach every descendant through that inheritance, and a window on a folder
+        // would widen to its children. Only this, the outermost layer, consults grants: a window
+        // names exactly one item (D-71), and D-35c answers for exactly the items the holder created.
         ACL parent = delegate;
         boolean allowed = parent != null && withoutGrants(() -> parent.hasPermission2(a, permission));
         if (allowed && MoveGuard.isMovePermission(permission) && itemFullName != null && !suspended()
@@ -352,7 +359,12 @@ final class GrantAwareACL extends ACL {
                 }
                 continue;
             }
-            if (GrantService.get().hasActiveGrant(user, itemFullName, itemIsGroup, p)) {
+            if (p == Item.DELETE && !deleteApplies) {
+                // D-71: no window confers Delete on an item group that is not a job; core would
+                // delete its children as SYSTEM without checking them.
+                continue;
+            }
+            if (GrantService.get().hasActiveGrant(user, itemFullName, p)) {
                 return Decision.CONFERS;
             }
         }
@@ -370,6 +382,11 @@ final class GrantAwareACL extends ACL {
      *         named creation was refused only because of the restriction
      */
     private Decision createConfers(String user) {
+        if (!createApplies) {
+            // D-71: a CREATE window exists only on a regular folder; on anything else (a job, a
+            // computed folder) it confers nothing, whatever the stored grant says.
+            return Decision.NONE;
+        }
         List<Grant> grants = GrantService.get().findActiveGrants(user, itemFullName, GrantAction.CREATE);
         if (grants.isEmpty()) {
             return Decision.NONE;

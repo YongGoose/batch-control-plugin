@@ -16,6 +16,7 @@ import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.util.ArrayList;
 import java.util.List;
@@ -113,8 +114,7 @@ final class MoveGuard {
         }
         // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
-        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE,
-                item instanceof ItemGroup);
+        Grant deleteWindow = GrantService.get().findActiveDeleteGrant(user, item);
         Grant createWindow = destName.isEmpty() ? null
                 : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
         List<String> windows = new ArrayList<>();
@@ -166,6 +166,14 @@ final class MoveGuard {
             if (!namingRefusal.endsWith(".")) {
                 message.append('.');
             }
+        }
+        if (!delete && !GrantScope.deleteAppliesTo(item)) {
+            // D-71: a window's Delete applies only to a job, so for a folder, multibranch project or
+            // organization folder no window can supply the missing Delete; suggesting one would lead
+            // to a request refused at submission. No window is offered on the refusal page either.
+            message.append(" No permission window confers Delete on '").append(item.getFullName())
+                    .append("': a window's Delete applies only to a job, so moving it needs an administrator.");
+            return new MoveRefusal(message.toString(), item.getFullName(), destName, false, false);
         }
         if (toRequest.isEmpty()) {
             message.append(" Ask an administrator");

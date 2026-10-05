@@ -3,11 +3,13 @@ package io.jenkins.plugins.batchcontrol.security;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.init.InitMilestone;
 import hudson.init.Initializer;
+import hudson.model.Item;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.File;
@@ -95,6 +97,12 @@ public final class GrantService {
      * Whether {@code user} currently holds {@code permission} on the item named
      * {@code itemFullName} through an active grant. Only the three grantable item permissions
      * can ever match; any other permission returns {@code false} immediately.
+     *
+     * <p>A window names exactly one item (D-71), so this is a match on the exact full name. For
+     * Item/Create the name is that of the group the new item is created in (core checks Create on
+     * the group's ACL). Whether the action can apply to the item's kind is decided when the request
+     * is submitted and approved; callers that hold the item check it again
+     * ({@link #findActiveDeleteGrant}, {@code GrantAwareACL}).
      */
     public boolean hasActiveGrant(String user, String itemFullName, Permission permission) {
         GrantAction action = GrantAction.fromPermission(permission);
@@ -102,34 +110,15 @@ public final class GrantService {
     }
 
     /**
-     * As {@link #hasActiveGrant(String, String, Permission)}, telling whether the item is an item
-     * group: a FOLDER_ONLY grant confers Item/Delete only on a direct item that is not one (D-65).
-     */
-    public boolean hasActiveGrant(String user, String itemFullName, boolean itemIsGroup, Permission permission) {
-        GrantAction action = GrantAction.fromPermission(permission);
-        return action != null && findActiveGrant(user, itemFullName, action, itemIsGroup) != null;
-    }
-
-    /**
-     * The first active grant of {@code user} that covers {@code itemFullName} and includes
-     * {@code action}, or {@code null}. A {@code null} action matches any action (used by
+     * The first active grant of {@code user} whose scope is the item {@code itemFullName} and that
+     * includes {@code action}, or {@code null}. A {@code null} action matches any action (used by
      * {@code ItemChangeListener} to link RENAME/MOVE change records to the grant in use).
      *
-     * <p>Without knowing whether the item is an item group, a FOLDER_ONLY grant is never taken to
-     * confer DELETE (fail-safe, D-65); callers holding the item use the four-argument form.
+     * <p>For DELETE this matches by name only; callers holding the item use
+     * {@link #findActiveDeleteGrant}, which also requires the item to be a job (D-71).
      */
     @CheckForNull
-    public Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
-        return findActiveGrant(user, itemFullName, action, action == GrantAction.DELETE);
-    }
-
-    /**
-     * As {@link #findActiveGrant(String, String, GrantAction)}, telling whether the item is an
-     * item group: a FOLDER_ONLY grant confers DELETE only on a direct item that is not one (D-65).
-     */
-    @CheckForNull
-    public synchronized Grant findActiveGrant(String user, String itemFullName,
-                                              @CheckForNull GrantAction action, boolean itemIsGroup) {
+    public synchronized Grant findActiveGrant(String user, String itemFullName, @CheckForNull GrantAction action) {
         if (user == null || itemFullName == null) {
             return null;
         }
@@ -137,9 +126,7 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && (action == GrantAction.DELETE
-                            ? grant.getScope().includesDeleteOf(itemFullName, itemIsGroup)
-                            : grant.getScope().includes(itemFullName))
+                    && grant.getScope().includes(itemFullName)
                     && (action == null || grant.getActions().contains(action))) {
                 return grant;
             }
@@ -148,14 +135,36 @@ public final class GrantService {
     }
 
     /**
-     * Every active grant of {@code user} that covers {@code itemFullName} and includes
-     * {@code action} (D-40: the CREATE check has to see all of them, since each may carry a
-     * different name restriction).
+     * D-71: the active DELETE window of {@code user} on {@code item}, or {@code null}. A window's
+     * DELETE applies only to a job ({@link GrantScope#deleteAppliesTo}), so for any other item —
+     * a folder, a multibranch project, an organization folder — this is {@code null} whatever
+     * windows exist: deleting such a group would delete its children as SYSTEM.
+     */
+    @CheckForNull
+    public Grant findActiveDeleteGrant(String user, @CheckForNull Item item) {
+        return findActiveDeleteGrant(user, item, item == null ? null : item.getFullName());
+    }
+
+    /**
+     * As {@link #findActiveDeleteGrant(String, Item)} for the item under the name
+     * {@code itemFullName} (its name before a move, for example).
+     */
+    @CheckForNull
+    public Grant findActiveDeleteGrant(String user, @CheckForNull Item item, @CheckForNull String itemFullName) {
+        if (!GrantScope.deleteAppliesTo(item)) {
+            return null;
+        }
+        return findActiveGrant(user, itemFullName, GrantAction.DELETE);
+    }
+
+    /**
+     * Every active grant of {@code user} whose scope is the item {@code itemFullName} and that
+     * includes {@code action} (D-40: the CREATE check has to see all of them, since each may carry
+     * a different name restriction).
      *
      * <p>For {@link GrantAction#CREATE}, {@code itemFullName} is the item group the new item is
-     * created in (Item/Create is checked on the group's ACL), and the match is
-     * {@link io.jenkins.plugins.batchcontrol.model.GrantScope#includesCreateIn}: a FOLDER_ONLY
-     * scope confers Create in its folder only, never in a nested folder (D-65).
+     * created in (Item/Create is checked on the group's ACL), so a CREATE window confers Create in
+     * its own folder only, never in a nested folder or at the root (D-71).
      */
     public synchronized List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
         List<Grant> found = new ArrayList<>();
@@ -166,11 +175,7 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && (action == GrantAction.CREATE
-                            ? grant.getScope().includesCreateIn(itemFullName)
-                            : action == GrantAction.DELETE
-                                    ? grant.getScope().includesDeleteOf(itemFullName, true)
-                                    : grant.getScope().includes(itemFullName))
+                    && grant.getScope().includes(itemFullName)
                     && grant.getActions().contains(action)) {
                 found.add(grant);
             }
@@ -222,7 +227,8 @@ public final class GrantService {
 
     /**
      * D-35c: the active grant of {@code user} through whose Create the item {@code itemFullName}
-     * was created, or {@code null}. The item must still lie inside the grant's scope. While such a
+     * was created, or {@code null}. The item must still lie directly inside the grant's scope
+     * folder, matched by parent, not by name prefix (D-71). While such a
      * grant is active its holder also holds Item/Read and Item/Configure on that item (see
      * {@code GrantAwareACL}), so matrix-auth's creator listener finds the permissions already
      * held and writes no permanent entry; the permissions end with the window. S-09: when the
@@ -246,7 +252,7 @@ public final class GrantService {
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
                     && user.equals(grant.getUser())
-                    && grant.getScope().includes(itemFullName)
+                    && grant.getScope().isParentOf(itemFullName)
                     && grant.hasCreated(itemFullName, current)) {
                 return grant;
             }
@@ -446,10 +452,9 @@ public final class GrantService {
     /**
      * Whether a grant's coverage (scope, a scope below a folder, or D-35c created) includes the item.
      *
-     * <p>D-58b (1) guards every item below a scope item. For a FOLDER_ONLY scope (D-65) that
-     * reaches the contents of a nested folder too: the nested folder is a direct item whose
-     * configuration (and authorization property, inherited below it) the holder may change, so
-     * what lies below it stays guarded although the window confers nothing there.
+     * <p>D-58b (1) guards every item below a scope item, unchanged by D-71: a window on a folder
+     * confers nothing on its children, but the holder may change the folder's configuration (and
+     * its authorization property, inherited below it), so what lies below it stays guarded.
      */
     private static boolean covers(Grant grant, String itemFullName) {
         String scope = grant.getScope() == null ? null : grant.getScope().getFullName();
@@ -460,7 +465,7 @@ public final class GrantService {
                 // a folder's property is inherited below it, so a scope below the folder guards it
                 && (scope.startsWith(itemFullName + "/")
                         // D-58b (1): everything below a scope item (branch jobs of a multibranch
-                        // project in a JOB scope, for example)
+                        // project, jobs in a folder)
                         || itemFullName.startsWith(scope + "/"))) {
             return true;
         }
@@ -776,8 +781,8 @@ public final class GrantService {
         // chosen outside the monitor (S-03), then recorded under it.
         int slash = itemFullName.lastIndexOf('/');
         String itemName = itemFullName.substring(slash + 1);
-        // The Create lookup takes the group the item was created in (D-65: FOLDER_ONLY).
-        String group = slash < 0 ? "" : itemFullName.substring(0, slash);
+        // The Create lookup takes the group the item was created in (D-71: the scope folder).
+        String group = GrantScope.parentOf(itemFullName);
         Grant active = findActiveCreateGrant(user, group, itemName);
         if (active == null) {
             return null;
@@ -790,7 +795,7 @@ public final class GrantService {
                                                    @CheckForNull String identity) {
         Grant grant = store.loadGrant(grantId);
         if (grant == null || !grant.isActiveAt(BatchClock.now()) || !user.equals(grant.getUser())
-                || !grant.getScope().includes(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
+                || !grant.getScope().isParentOf(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
             return null;
         }
         List<String> items = grant.getCreatedItems();
@@ -817,8 +822,8 @@ public final class GrantService {
 
     /**
      * D-35c: an item recorded as created through an active grant was renamed or moved; the record
-     * follows it. Whether it still confers anything is decided by the scope check at query time,
-     * so moving the item out of the scope ends the permission.
+     * follows it. Whether it still confers anything is decided by the parent check at query time,
+     * so moving the item out of the scope folder ends the permission.
      */
     public synchronized void relocateCreatedItem(String oldFullName, String newFullName) {
         updateCreatedItems(oldFullName, newFullName);

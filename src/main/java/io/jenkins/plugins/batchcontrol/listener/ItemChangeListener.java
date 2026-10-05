@@ -5,7 +5,6 @@ import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
-import hudson.model.ItemGroup;
 import hudson.model.Job;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -13,7 +12,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
-import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
@@ -60,7 +59,7 @@ public class ItemChangeListener extends ItemListener {
         String fullName = item.getFullName();
         seedSnapshot(item);
         ChangeRecord record = ChangeRecord.create(ChangeType.CREATE, fullName, user, null);
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.CREATE));
+        record.setGrantId(ChangeRecording.createGrantIdFor(user, item));
         Store.get().appendChangeRecord(record);
     }
 
@@ -72,8 +71,7 @@ public class ItemChangeListener extends ItemListener {
         String user = ChangeRecording.currentUser();
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.DELETE, fullName, user, null);
-        Grant deleteGrant = GrantService.get().findActiveGrant(user, fullName, GrantAction.DELETE,
-                item instanceof ItemGroup);
+        Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item);
         record.setGrantId(deleteGrant == null ? null : deleteGrant.getId());
         Store.get().appendChangeRecord(record);
         Store.get().deleteConfigSnapshot(fullName);
@@ -88,7 +86,18 @@ public class ItemChangeListener extends ItemListener {
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.RENAME, fullName, user,
                 "Renamed from '" + oldName + "' to '" + newName + "'");
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, null));
+        // D-71: a window names one item by its full name, so the window in use names the item's old
+        // name (all onRenamed calls precede onLocationChanged, where grant records follow the item):
+        // a CONFIGURE or DELETE window on it, or the CREATE window it was created through (D-35c).
+        String parent = GrantScope.parentOf(fullName);
+        String oldFullName = parent.isEmpty() ? oldName : parent + "/" + oldName;
+        String grantId = ChangeRecording.activeGrantIdFor(user, oldFullName, null);
+        if (grantId == null) {
+            Grant creating = GrantService.get().findCreatingGrant(user, oldFullName,
+                    item instanceof AbstractItem ? ((AbstractItem) item).getRootDir() : null);
+            grantId = creating != null ? creating.getId() : ChangeRecording.activeGrantIdFor(user, fullName, null);
+        }
+        record.setGrantId(grantId);
         Store.get().appendChangeRecord(record);
     }
 
@@ -111,8 +120,7 @@ public class ItemChangeListener extends ItemListener {
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).
         String destination = parentOf(newFullName);
-        Grant deleteGrant = GrantService.get().findActiveGrant(user, oldFullName, GrantAction.DELETE,
-                item instanceof ItemGroup);
+        Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item, oldFullName);
         Grant createGrant = destination.isEmpty() ? null
                 : GrantService.get().findActiveCreateGrant(user, destination, item.getName());
         StringBuilder detail = new StringBuilder("Moved from '").append(oldFullName)

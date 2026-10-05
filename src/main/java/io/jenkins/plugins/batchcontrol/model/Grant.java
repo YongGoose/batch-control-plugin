@@ -34,6 +34,8 @@ public final class Grant {
     private final String grantRequestId;
     private final String user;
     private final GrantScope scope;
+    /** D-71: the kind of the scope item, copied from the request at approval ({@code null} if it had none). */
+    private ItemKind itemKind;
     private final List<GrantAction> actions;
     private final long grantedAtMillis;
     private final long expiresAtMillis;
@@ -99,6 +101,7 @@ public final class Grant {
                 request.getScope(), request.getActions(), grantedAt,
                 grantedAt.plus(Duration.ofMinutes(request.getDurationMinutes())));
         grant.createNamePattern = request.getCreateNamePattern();
+        grant.itemKind = request.getItemKind();
         return grant;
     }
 
@@ -148,6 +151,11 @@ public final class Grant {
 
     public GrantScope getScope() {
         return scope;
+    }
+
+    /** D-71: the kind of the scope item, copied from the request ({@code null} if it recorded none). */
+    public ItemKind getItemKind() {
+        return itemKind;
     }
 
     /** A defensive copy; the granted actions never change after creation. */

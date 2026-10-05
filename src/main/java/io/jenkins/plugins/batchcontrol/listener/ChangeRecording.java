@@ -6,6 +6,7 @@ import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import java.io.File;
 import jenkins.model.Jenkins;
@@ -48,6 +49,26 @@ final class ChangeRecording {
     @CheckForNull
     static String activeGrantIdFor(String user, String itemFullName, @CheckForNull GrantAction action) {
         Grant grant = GrantService.get().findActiveGrant(user, itemFullName, action);
+        return grant == null ? null : grant.getId();
+    }
+
+    /**
+     * The id of the active CREATE window through which {@code user} created {@code item}, or
+     * {@code null} (SPEC item 9). A CREATE window names the folder the item is created in (D-71),
+     * so the lookup takes the item's parent: preferably the window whose name restriction admits
+     * the item's name, else any CREATE window of the user on that folder.
+     */
+    @CheckForNull
+    static String createGrantIdFor(String user, Item item) {
+        String group = GrantScope.parentOf(item.getFullName());
+        if (group.isEmpty()) {
+            return null; // no root-scope grant exists (S-13)
+        }
+        Grant grant = GrantService.get().findActiveCreateGrant(user, group, item.getName());
+        if (grant == null) {
+            java.util.List<Grant> windows = GrantService.get().findActiveGrants(user, group, GrantAction.CREATE);
+            grant = windows.isEmpty() ? null : windows.get(0);
+        }
         return grant == null ? null : grant.getId();
     }
 

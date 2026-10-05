@@ -9,7 +9,7 @@ import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import java.util.ArrayList;
@@ -117,7 +117,7 @@ public final class NotificationDispatcher {
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
                     request.getScope().getFullName(), request.getRequester(), request.getReason(),
                     recipients, url("batch-control/grants/" + request.getId() + "/"), null,
-                    grantDetails(request.getScope(), request.getActions(), request.getDurationMinutes(),
+                    grantDetails(request.getItemKind(), request.getActions(), request.getDurationMinutes(),
                             request.getCreateNamePattern())));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
@@ -165,7 +165,7 @@ public final class NotificationDispatcher {
     public static void grantEnded(NotificationEvent event, GrantRequest request, boolean wasPending,
                                   @CheckForNull String reason) {
         try {
-            List<String> details = grantDetails(request.getScope(), request.getActions(),
+            List<String> details = grantDetails(request.getItemKind(), request.getActions(),
                     request.getDurationMinutes(), request.getCreateNamePattern());
             details.addAll(0, endDetails(reason));
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
@@ -231,7 +231,7 @@ public final class NotificationDispatcher {
                     grant.getScope().getFullName(), grant.getUser(), reason,
                     grant.getUser() == null ? Collections.emptyList() : List.of(grant.getUser()),
                     url("batch-control/grants/" + requestId + "/"), null,
-                    grantDetails(grant.getScope(), grant.getActions(), 0, grant.getCreateNamePattern())));
+                    grantDetails(grant.getItemKind(), grant.getActions(), 0, grant.getCreateNamePattern())));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the GRANT_EXPIRING notification of grant "
                     + grant.getId(), e);
@@ -240,13 +240,14 @@ public final class NotificationDispatcher {
 
     /**
      * e2e-03 DEF-24: what the approver decides on, so the mail can be judged without opening the
-     * request: scope type, actions, duration (when known) and the Create name restriction.
+     * request: the kind of the item the window names (D-71), actions, duration (when known) and
+     * the Create name restriction.
      */
-    static List<String> grantDetails(GrantScope scope, List<GrantAction> actions, int durationMinutes,
+    static List<String> grantDetails(@CheckForNull ItemKind itemKind, List<GrantAction> actions, int durationMinutes,
                                      String createNamePattern) {
         List<String> details = new ArrayList<>();
-        if (scope != null && scope.getType() != null) {
-            details.add("Scope type: " + scope.getType());
+        if (itemKind != null) {
+            details.add("Item kind: " + itemKind.getDisplayName());
         }
         if (actions != null && !actions.isEmpty()) {
             List<String> names = new ArrayList<>();
