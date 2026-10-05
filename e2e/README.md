@@ -493,7 +493,7 @@ that fail once when armed), and ends with the fixture preconditions above. Drive
   legacy scope types not approvable, DELETE only on a job.
 - `rename.py [UEGCA]`: no rename through any window (D-71c) by the Rename page and every URL form; allowed for an
   administrator and for standing Item/Configure.
-- `follow.py [WVMXCN]`: windows follow an administrator's rename and move (job; folder with a nested job), a new item at
+- `follow.py [WOVMXCN]`: windows follow a rename by an administrator or by `configurer` (standing Item/Configure) and an administrator's move (job; folder with a nested job), a new item at
   the old name gets nothing (D-74 (3)); a folder deleted by the administrator: its items' DELETE records name the
   administrator, not SYSTEM, and the windows below it end (1864bdc); `configurer`'s Delete Folder is refused (D-71);
   refused moves recorded once per minute (D-73, waits 62 s); a CREATE window under core's pattern naming strategy

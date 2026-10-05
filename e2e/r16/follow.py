@@ -1,11 +1,13 @@
 """e2e-16: windows follow their item (D-74 (3)), deletion records name the deleting user (SPEC 6, 177b13a), refused moves
 are recorded once per minute (D-73), and a CREATE window never bypasses the project naming strategy (SPEC 8, T-08-168).
 
-usage: python follow.py [WVMXCN]     rows: out/follow.jsonl, shots: R16-FOLLOW-*.png
+usage: python follow.py [WOVMXCN]     rows: out/follow.jsonl, shots: R16-FOLLOW-*.png
 W  w16 holds a CONFIGURE window on the job r16-fw/fw-job. The administrator renames the job in the browser (Rename
    page): the window now names r16-fw/fw-job2 (store, w16's grants list and detail page), confers Configure on the
    renamed job, and nothing on a new item the administrator then creates at the old name; w16's own rename of the job
    is still refused (D-71c)
+O  the same when a non-administrator renames with their own standing permission: configurer (Item/Configure, no
+   Administer) renames r16-fw/fw-own; w16's window on it follows to r16-fw/fw-own2 and confers there only
 V  w16 holds CONFIGURE windows on the folder r16-fwf and on the job r16-fwf/inner/deep. The administrator renames the
    folder: both windows follow (r16-fwf2, r16-fwf2/inner/deep) and confer on the renamed items only
 M  w16 holds a CONFIGURE window on r16-fw/fw-mv. The administrator moves it to r16-fwdest in the browser (Move page):
@@ -30,7 +32,7 @@ from lib import (Session, api, gv, groovy, check, note, window, grant_files, tex
                  console_ok, changes, violations, revoke_all, ENV)  # noqa: E402
 
 lib.LOGNAME[0] = "follow"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "WVMXCN"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "WOVMXCN"
 U = "w16"
 H = {"Content-Type": "application/x-www-form-urlencoded"}
 EXPLAIN = "is not allowed: while change control is on, a permission window does not allow renaming a job or folder"
@@ -64,8 +66,8 @@ def F = com.cloudbees.hudson.plugins.folder.Folder
 def folder = { parent, n -> parent.getItem(n) ?: parent.createProject(F, n) }
 def job = { parent, n -> if (parent.getItem(n) == null) { def p = parent.createProject(FreeStyleProject, n); p.setDescription('e2e-16 follow'); p.save() } }
 // leftovers of an earlier run of this driver
-['r16-fw/fw-job2', 'r16-fwf2', 'r16-fwdest/fw-mv', 'r16-fw/fw-job'].each { n -> def i = j.getItemByFullName(n); if (i != null) i.delete() }
-def fw = folder(j, 'r16-fw'); job(fw, 'fw-job'); job(fw, 'fw-mv')
+['r16-fw/fw-job2', 'r16-fwf2', 'r16-fwdest/fw-mv', 'r16-fw/fw-job', 'r16-fw/fw-own2'].each { n -> def i = j.getItemByFullName(n); if (i != null) i.delete() }
+def fw = folder(j, 'r16-fw'); job(fw, 'fw-job'); job(fw, 'fw-mv'); job(fw, 'fw-own')
 def fwf = folder(j, 'r16-fwf'); def inner = folder(fwf, 'inner'); job(inner, 'deep'); job(fwf, 'side')
 folder(j, 'r16-fwdest')
 def delf = folder(j, 'r16-delf'); job(delf, 'x'); def dsub = folder(delf, 'sub'); job(dsub, 'y')
@@ -134,6 +136,22 @@ def sec_W():
           and len(violations(new, U)) - v0 == 1, status=r.status_code, violations=len(violations(new, U)) - v0)
     renames = changes(lambda c: c.get("type") in ("RENAME", "MOVE") and c.get("target") in (old, new))
     note("W", "change records of the administrator's rename", records=[{k: c.get(k) for k in ("type", "target", "user", "detail")} for c in renames][-2:])
+
+
+def sec_O():
+    revoke_all(U)
+    old, new = "r16-fw/fw-own", "r16-fw/fw-own2"
+    gid = window(U, old, ["CONFIGURE"], reason="e2e-16 follow: configure fw-own")
+    r = api("configurer", J(old) + "/confirmRename?newName=fw-own2", "POST")
+    row = grant_row(gid)
+    res = {"rename by configurer": r.status_code, "renamed": exists(new) and not exists(old), "stored scope": row[4] if row else None,
+           "configure new": st(U, J(new) + "/configure"), "violations by configurer": len(violations(old, "configurer")) + len(violations(new, "configurer"))}
+    api("admin", J("r16-fw") + "/createItem?name=fw-own&mode=hudson.model.FreeStyleProject", "POST", headers=H)
+    res["configure new item at old name"] = st(U, J(old) + "/configure")
+    check("O", "configurer (standing Item/Configure) renames the job: allowed, no GRANT_VIOLATION, and w16's window follows to the "
+          "new name and confers there only", r.status_code == 302 and res["renamed"] and res["stored scope"] == new
+          and res["configure new"] == 200 and res["configure new item at old name"] == 403 and res["violations by configurer"] == 0,
+          window=gid, **res)
 
 
 def sec_V():
@@ -365,4 +383,4 @@ return j.getProjectNamingStrategy().getClass().name""")
 
 if __name__ == "__main__":
     arrange()
-    run_sections(WANT, {"W": sec_W, "V": sec_V, "M": sec_M, "X": sec_X, "C": sec_C, "N": sec_N})
+    run_sections(WANT, {"W": sec_W, "O": sec_O, "V": sec_V, "M": sec_M, "X": sec_X, "C": sec_C, "N": sec_N})
