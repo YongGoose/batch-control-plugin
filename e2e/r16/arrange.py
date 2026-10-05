@@ -131,7 +131,12 @@ return ['r16-file', 'r16-stash', 'r16-fail-pw', 'r16-fail-file', 'r16-fail-stash
 import json  # noqa: E402
 from lib import revoke_all  # noqa: E402
 
-print("revoked leftover windows:", {u: revoke_all(u) for u in ("w16", "w16b", "vh16")})
+import os  # noqa: E402
+
+if os.environ.get("R16_KEEP_WINDOWS") == "1":  # r16/durable.py re-arranges after a restart and keeps its windows
+    print("leftover windows kept (R16_KEEP_WINDOWS=1)")
+else:
+    print("revoked leftover windows:", {u: revoke_all(u) for u in ("w16", "w16b", "vh16")})
 
 state = json.loads(gv("""import hudson.model.*
 def j = jenkins.model.Jenkins.get()

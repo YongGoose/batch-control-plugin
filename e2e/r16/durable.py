@@ -105,7 +105,9 @@ def sec_D():
         # restart with the fault in place
         r = subprocess.run(["docker", "restart", "-t", "180", CONTAINER], capture_output=True, text=True, timeout=400)
         secs = wait_ready()
-        rearr = subprocess.run([sys.executable, str(lib.HERE / "arrange.py")], capture_output=True, text=True, timeout=600)
+        # permissions only: the windows of this section (the ended one and the control window) must stay as they are
+        rearr = subprocess.run([sys.executable, str(lib.HERE / "arrange.py")], capture_output=True, text=True, timeout=600,
+                               env=dict(os.environ, R16_KEEP_WINDOWS="1"))
         note("D", "Jenkins restarted; r16/arrange.py run again (JCasC reset the arrangement's permissions)", container=CONTAINER,
              rc=r.returncode, stderr=r.stderr[-200:], ready_after_s=secs, arrange_rc=rearr.returncode)
         ctrl_conf = st(U, "/job/r16/job/job-a/configure")
