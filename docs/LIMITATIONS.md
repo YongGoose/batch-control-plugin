@@ -369,8 +369,26 @@ from scripts.
     because request files are not pruned, storage grows with every such
     upload, and the Run Requests screen reads those larger files on every page
     load. Core `file` and `stashedFile` content stays in its own directory
-    (`fileParameterValueFiles/`, `stashedFileParameterValueFiles/`), and Batch
-    Control disposes of it when a request ends without a run.
+    under JENKINS_HOME (`fileParameterValueFiles/`,
+    `stashedFileParameterValueFiles/`) until a build takes it over. Jenkins
+    core cleans up such a file only for a value that reached the queue (when
+    its queue item is cancelled, for example) and never sweeps
+    `$JENKINS_HOME/fileParameterValueFiles/` itself, so the file of a value
+    that never reaches the queue stays there unless someone disposes of it.
+    Batch Control disposes of the files of a run request that ends without a
+    run (rejected, cancelled, expired, invalidated, or approved but impossible
+    to queue) and of a person's own direct build that run control refuses,
+    through any of core's channels: the build form, the parameters dialog,
+    `build` and `buildWithParameters` over HTTP, the CLI, and a build token.
+    It leaves two kinds of refused submission alone: a refused re-run that
+    uploads a new file (for example from the rebuild plugin's parameters
+    page), and a refused unattended submission that creates file values (for
+    example one from parameterized-trigger). Batch Control cannot tell the
+    file values of such a submission apart from values it shares with another
+    build, whose files must not be deleted, so it does not touch them, and
+    their files stay in `fileParameterValueFiles/` or
+    `stashedFileParameterValueFiles/` until an administrator removes them
+    (D-72).
 
 ## Before you switch either control on
 
