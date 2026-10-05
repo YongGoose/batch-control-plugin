@@ -1,7 +1,7 @@
 <?jelly escape-by-default='true'?>
 <!-- e2e-03 DEF-19 (SPEC item 8, D-40): included by the folder page for every action. Lists the
      viewer's own active Create windows on this folder with the new job names each allows, so a
-     refused New Item or Rename is not a mystery. Nothing is shown without such a window. Only the
+     refused New Item is not a mystery (no window allows renaming, D-71c). Nothing is shown without such a window. Only the
      stored name or pattern and constant text are rendered (escaped); no script. -->
 <j:jelly xmlns:j="jelly:core">
   <j:set var="windows" value="${it.windows}"/>
@@ -22,7 +22,7 @@
         </j:forEach>
       </ul>
       <p style="margin: 0;">
-        New Item and Rename refuse any other name while the window lasts.
+        New Item refuses any other name while the window lasts; the window does not allow renaming.
       </p>
     </div>
   </j:if>
