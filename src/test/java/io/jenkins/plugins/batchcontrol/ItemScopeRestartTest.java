@@ -45,14 +45,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (note 260) and T-08-145 (note 262): an ITEM window and the item kind it records survive a
  * restart with their reach unchanged, and a stored window or request with one of the earlier scope
  * types is not converted (D-69), so it confers nothing after the restart while an intact one next
- * to it still loads. T-08-151 (note 264, D-71b): a window whose item vanished while Jenkins was
- * down is unbound at startup.
+ * to it still loads. T-08-151 (note 264, converted for D-74 in note 270): a window whose item
+ * vanished while Jenkins was down ends at startup. T-08-189 (note 270, D-74): a window that followed
+ * a rename of its item (or of its item's folder) stays with the item across a restart. T-08-190 (note
+ * 270): a window whose end could not be written when its item was deleted does not come back after a
+ * restart on an item re-created at its name.
  *
  * <p>The grant file is located as ARCHITECTURE section 5 describes ({@code batch-control/grants/<id>.xml})
  * and is read only for premises; the earlier-type file is made from a file the current plugin
  * wrote, by replacing its scope type value.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-69, docs/ARCHITECTURE.md section 5 and
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71/D-69/D-74, docs/ARCHITECTURE.md sections 4 and 5 and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 public class ItemScopeRestartTest {
@@ -69,6 +72,9 @@ public class ItemScopeRestartTest {
     private String intactRequestId;
     private final Map<String, String> startupWindowIds = new LinkedHashMap<>();
     private Path home;
+    private String followedJobWindowId;
+    private String followedFolderWindowId;
+    private String followedChildWindowId;
 
     /**
      * T-08-106 (rewritten for D-71; was the D-65 FOLDER/FOLDER_ONLY restart row): u1's CONFIGURE
@@ -227,25 +233,23 @@ public class ItemScopeRestartTest {
     }
 
     /**
-     * T-08-151 (D-71b "at startup, windows whose item no longer exists are unbound"): u1 holds
-     * CONFIGURE windows on the job {@code ops/a}, the folder {@code ops/sub}, the job
-     * {@code ops/sub/b} inside it, and the job {@code ops/c}. While Jenkins is down the directories
-     * of {@code ops/a} and {@code ops/sub} are deleted (core fires no item event). After the start
-     * the three windows whose item is gone are shown unbound (Active list and detail page, the exact
-     * documented text) and no longer record an identity (ARCHITECTURE 5); after the administrator
-     * creates {@code ops/a} and {@code ops/sub/b} again, u1 holds no Configure on them and they are
-     * still shown unbound. Guard: the window on {@code ops/c}, whose item survived, is shown bound,
-     * still records its identity and confers Configure on {@code ops/c}.
+     * T-08-151 (D-74 "a window ... ends ... starting Jenkins after the item vanished"; ARCHITECTURE 4
+     * "at startup, windows whose item no longer exists end"; converted from the D-71b startup
+     * unbinding, note 270): u1 holds CONFIGURE windows on the job {@code ops/a}, the folder
+     * {@code ops/sub}, the job {@code ops/sub/b} inside it, and the job {@code ops/c}. While Jenkins
+     * is down the directories of {@code ops/a} and {@code ops/sub} are deleted (core fires no item
+     * event). After the start the three windows whose item is gone have ended (not active, no Active
+     * list row); after the administrator creates {@code ops/a} and {@code ops/sub/b} again, u1 holds
+     * no Configure on them and the windows are still ended. Guard: the window on {@code ops/c}, whose
+     * item survived, is active on {@code ops/c} and confers Configure on it.
      */
     @Test
-    public void t_08_151_windowWhoseItemVanishedWhileDownIsUnboundAtStartup() throws Throwable {
+    public void t_08_151_windowWhoseItemVanishedWhileDownEndsAtStartup() throws Throwable {
         session.then(r -> {
             prepare(r);
             for (String name : new String[] {"ops/a", "ops/sub", "ops/sub/b", "ops/c"}) {
                 Grant window = approve(request("u1", name, GrantAction.CONFIGURE));
                 startupWindowIds.put(name, window.getId());
-                assertTrue(WindowStateFixtures.storedBinding(r, window.getId()),
-                        "premise (ARCHITECTURE 5): the window on " + name + " records its item's identity");
                 assertTrue(can("u1", r.jenkins.getItemByFullName(name), Item.CONFIGURE), "premise: the window on " + name + " confers");
             }
             home = r.jenkins.getRootDir().toPath();
@@ -263,13 +267,11 @@ public class ItemScopeRestartTest {
             assertNull(r.jenkins.getItemByFullName("ops/a"), "premise: ops/a is gone after the start");
             assertNull(r.jenkins.getItemByFullName("ops/sub"), "premise: ops/sub is gone after the start");
             for (String name : new String[] {"ops/a", "ops/sub", "ops/sub/b"}) {
-                String id = startupWindowIds.get(name);
-                WindowStateFixtures.assertShownUnbound(r, "u1", id, "D-71b: the window on " + name + " whose item vanished while Jenkins was down");
-                assertFalse(WindowStateFixtures.storedBinding(r, id), "D-71b: the stored window on " + name + " must no longer record an identity");
+                WindowStateFixtures.assertEnded(r, "u1", startupWindowIds.get(name),
+                        "D-74: the window on " + name + " whose item vanished while Jenkins was down");
             }
             String onC = startupWindowIds.get("ops/c");
-            WindowStateFixtures.assertShownBound(r, "u1", onC, "guard: the window on ops/c, whose item survived");
-            assertTrue(WindowStateFixtures.storedBinding(r, onC), "guard: the window on ops/c still records its item's identity");
+            WindowStateFixtures.assertActiveOn(r, "u1", onC, "ops/c", "guard: the window on ops/c, whose item survived");
             assertTrue(can("u1", r.jenkins.getItemByFullName("ops/c"), Item.CONFIGURE), "guard: the window on ops/c still confers after the start");
 
             Item a;
@@ -280,9 +282,135 @@ public class ItemScopeRestartTest {
                 Folder sub = ops.createProject(Folder.class, "sub");
                 b = sub.createProject(FreeStyleProject.class, "b");
             }
-            assertFalse(can("u1", a, Item.CONFIGURE), "D-71b: no window may reach the re-created ops/a");
-            assertFalse(can("u1", b, Item.CONFIGURE), "D-71b: no window may reach the re-created ops/sub/b");
-            WindowStateFixtures.assertShownUnbound(r, "u1", startupWindowIds.get("ops/a"), "D-71b: the window on ops/a after the name was re-created");
+            assertFalse(can("u1", a, Item.CONFIGURE), "D-74: no window may reach the re-created ops/a");
+            assertFalse(can("u1", b, Item.CONFIGURE), "D-74: no window may reach the re-created ops/sub/b");
+            WindowStateFixtures.assertEnded(r, "u1", startupWindowIds.get("ops/a"), "D-74: the window on ops/a stays ended after the name was re-created");
+            WindowStateFixtures.assertEnded(r, "u1", startupWindowIds.get("ops/sub/b"),
+                    "D-74: the window on ops/sub/b stays ended after the name was re-created");
+        });
+    }
+
+    /**
+     * T-08-189 (D-74 "the window follows it -- windows on the items below a renamed or moved folder
+     * follow too"; SPEC item 4, restart durability; note 270): u1's CONFIGURE window on the job
+     * {@code ops/a}, u2's CONFIGURE windows on the folder {@code ops/sub} and the job
+     * {@code ops/sub/b}. The administrator renames {@code ops/a} to {@code ops/a-renamed} and the
+     * folder {@code ops/sub} to {@code ops/sub-renamed}; the windows follow (premise). After a
+     * restart the three windows are still active on {@code ops/a-renamed}, {@code ops/sub-renamed}
+     * and {@code ops/sub-renamed/b} and confer Configure there; items the administrator then creates
+     * at the old names ({@code ops/a}, a folder {@code ops/sub} with a job {@code ops/sub/b}) get
+     * nothing, and the windows stay on their items.
+     */
+    @Test
+    public void t_08_189_followedWindowStaysWithItsItemAcrossARestart() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            followedJobWindowId = approve(request("u1", "ops/a", GrantAction.CONFIGURE)).getId();
+            followedFolderWindowId = approve(request("u2", "ops/sub", GrantAction.CONFIGURE)).getId();
+            followedChildWindowId = approve(request("u2", "ops/sub/b", GrantAction.CONFIGURE)).getId();
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator renames the job and the folder
+                ((FreeStyleProject) r.jenkins.getItemByFullName("ops/a")).renameTo("a-renamed");
+                ((Folder) r.jenkins.getItemByFullName("ops/sub")).renameTo("sub-renamed");
+            }
+            assertEquals("ops/a-renamed", active(followedJobWindowId).getScope().getFullName(), "premise: the job window followed the rename");
+            assertEquals("ops/sub-renamed", active(followedFolderWindowId).getScope().getFullName(),
+                    "premise: the folder window followed the rename");
+            assertEquals("ops/sub-renamed/b", active(followedChildWindowId).getScope().getFullName(),
+                    "premise: the window below the renamed folder followed too");
+        });
+        session.then(r -> {
+            Item renamedJob = r.jenkins.getItemByFullName("ops/a-renamed");
+            Item renamedFolder = r.jenkins.getItemByFullName("ops/sub-renamed");
+            Item child = r.jenkins.getItemByFullName("ops/sub-renamed/b");
+            assertNotNull(child, "premise: the renamed items exist after the restart");
+            WindowStateFixtures.assertActiveOn(r, "u1", followedJobWindowId, "ops/a-renamed", "D-74: after the restart the job window stays on its job");
+            WindowStateFixtures.assertActiveOn(r, "u2", followedFolderWindowId, "ops/sub-renamed",
+                    "D-74: after the restart the folder window stays on its folder");
+            WindowStateFixtures.assertActiveOn(r, "u2", followedChildWindowId, "ops/sub-renamed/b",
+                    "D-74: after the restart the window below the folder stays on its job");
+            assertTrue(can("u1", renamedJob, Item.CONFIGURE), "D-74: after the restart u1 configures ops/a-renamed");
+            assertTrue(can("u2", renamedFolder, Item.CONFIGURE), "D-74: after the restart u2 configures ops/sub-renamed");
+            assertTrue(can("u2", child, Item.CONFIGURE), "D-74: after the restart u2 configures ops/sub-renamed/b");
+
+            Item a;
+            Item sub;
+            Item b;
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator creates items at the old names
+                Folder ops = (Folder) r.jenkins.getItemByFullName("ops");
+                a = ops.createProject(FreeStyleProject.class, "a");
+                Folder newSub = ops.createProject(Folder.class, "sub");
+                sub = newSub;
+                b = newSub.createProject(FreeStyleProject.class, "b");
+            }
+            assertFalse(can("u1", a, Item.CONFIGURE), "D-74: the new ops/a at the window's old name gets nothing");
+            assertFalse(can("u2", sub, Item.CONFIGURE), "D-74: the new ops/sub at the window's old name gets nothing");
+            assertFalse(can("u2", b, Item.CONFIGURE), "D-74: the new ops/sub/b at the window's old name gets nothing");
+            assertEquals("ops/a-renamed", active(followedJobWindowId).getScope().getFullName(), "guard: the job window stays on its job");
+            assertEquals("ops/sub-renamed/b", active(followedChildWindowId).getScope().getFullName(), "guard: the child window stays on its job");
+        });
+    }
+
+    /**
+     * T-08-190 (the restart half of T-08-164; SPEC 8 line 170 "deleting the item ends the window ...
+     * so ... re-creating items never makes a window reach an item nobody approved"; security-36
+     * S-36-03 (ii) intent; note 270): u1's CONFIGURE windows on the jobs {@code ops/a} and
+     * {@code ops/c}. The grants directory and the {@code ops/a} window's file are made read-only and
+     * the administrator deletes {@code ops/a}, so the window's end cannot be written at that moment
+     * (premise: the window is not active). Write access is restored, the expiry periodic work runs
+     * once, and the administrator creates a new job {@code ops/a}. After a restart u1 holds no
+     * Configure on the new {@code ops/a} and the window is not active. Guard: the window on
+     * {@code ops/c} is active after the restart and confers. Skipped where this process can write
+     * despite the read-only bits (root, Windows).
+     */
+    @Test
+    public void t_08_190_windowWhoseEndCouldNotBeWrittenDoesNotReturnAfterARestart() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            startupWindowIds.put("ops/a", approve(request("u1", "ops/a", GrantAction.CONFIGURE)).getId());
+            startupWindowIds.put("ops/c", approve(request("u1", "ops/c", GrantAction.CONFIGURE)).getId());
+            String onA = startupWindowIds.get("ops/a");
+            Path dir = r.jenkins.getRootDir().toPath().resolve("batch-control/grants");
+            Path stored = grantPath(r, onA);
+            java.io.File dirFile = dir.toFile();
+            java.io.File storedFile = stored.toFile();
+            try {
+                assertTrue(storedFile.setWritable(false, false), "fixture: the stored grant made read-only");
+                assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
+                boolean enforced;
+                Path probe = dir.resolve("probe-" + System.nanoTime() + ".tmp");
+                try {
+                    Files.createFile(probe);
+                    Files.delete(probe);
+                    enforced = false;
+                } catch (java.io.IOException expected) {
+                    enforced = true;
+                }
+                org.junit.jupiter.api.Assumptions.assumeTrue(enforced && !Files.isWritable(stored),
+                        "the file system does not refuse writes to read-only files for this process");
+                try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator deletes ops/a
+                    r.jenkins.getItemByFullName("ops/a").delete();
+                }
+                assertTrue(GrantService.get().listActive().stream().noneMatch(g -> onA.equals(g.getId())),
+                        "premise: the window on ops/a is not active after its job was deleted");
+            } finally {
+                dirFile.setWritable(true);
+                storedFile.setWritable(true);
+            }
+            hudson.ExtensionList.lookupSingleton(io.jenkins.plugins.batchcontrol.ops.ExpiryPeriodicWork.class).doRun();
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator creates a new job at the name
+                ((Folder) r.jenkins.getItemByFullName("ops")).createProject(FreeStyleProject.class, "a");
+            }
+            assertFalse(can("u1", r.jenkins.getItemByFullName("ops/a"), Item.CONFIGURE), "premise: before the restart the new ops/a gets nothing");
+        });
+        session.then(r -> {
+            Item recreated = r.jenkins.getItemByFullName("ops/a");
+            assertNotNull(recreated, "premise: the new ops/a exists after the restart");
+            String onA = startupWindowIds.get("ops/a");
+            assertFalse(can("u1", recreated, Item.CONFIGURE), "D-74: after the restart no window may reach the job re-created at ops/a");
+            assertTrue(GrantService.get().listActive().stream().noneMatch(g -> onA.equals(g.getId())),
+                    "the window on the deleted ops/a must not be active after the restart");
+            WindowStateFixtures.assertActiveOn(r, "u1", startupWindowIds.get("ops/c"), "ops/c", "guard: the window on ops/c after the restart");
+            assertTrue(can("u1", r.jenkins.getItemByFullName("ops/c"), Item.CONFIGURE), "guard: the window on ops/c still confers");
         });
     }
 

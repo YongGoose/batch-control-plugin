@@ -50,7 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * turn a time-limited window into standing permissions. "While change control is on, no window
  * allows renaming any item (job or folder of any kind) ...; a refused rename (whatever URL form
  * reaches core's rename endpoints) is recorded as GRANT_VIOLATION (D-71c)." Matrix rows T-08-132
- * (note 262), T-08-157 and T-08-158 (note 266).
+ * (note 262), T-08-157 and T-08-158 (note 266), T-08-185 and T-08-186 (note 270, security-38
+ * S-38-01: a trailing path segment after core's rename method).
  *
  * <p>Batch Control role-strategy strategy (D-35a); global roles give Overall/Read and Item/Read to
  * u1 and a1, RequestGrant to u1, Approve to a1, Administer to admin; the item role
@@ -60,7 +61,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * requested through the form contract and approved by a1.
  *
  * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71a/D-71c/D-73, docs/reports/security-34.md,
- * docs/reports/security-36.md and docs/TEST-MATRIX.md only (no src/main knowledge).
+ * docs/reports/security-36.md, docs/reports/security-38.md and docs/TEST-MATRIX.md only (no src/main
+ * knowledge).
  */
 @WithJenkins
 public class ItemIdentityRoleStrategyTest {
@@ -219,6 +221,94 @@ public class ItemIdentityRoleStrategyTest {
                 "fixture: the administrator revokes u1's window");
         assertFalse(can("u1", deploy, Item.CONFIGURE), "after the revocation u1 holds no Configure on deploy");
         assertFalse(can("u1", deploy, Item.BUILD), "after the revocation u1 holds no Build on deploy");
+    }
+
+    /**
+     * T-08-185 (security-38 S-38-01, role-strategy folder fixture; D-71c ruling 2): the T-08-132
+     * fixture (item role {@code sandbox.*} with Configure for u1, one CONFIGURE window on the folder
+     * {@code ops}). u1 POSTs {@code job/ops/confirmRename/extra?newName=sandbox5},
+     * {@code job/ops/confirm%52ename/x?newName=sandbox6} and {@code job/ops/confirmRename//x?newName=sandbox7}
+     * (a rename would put {@code ops/prod} under the role's pattern). Each answers 400 with the D-71c
+     * refusal for 'ops' (Folder) and "Nothing was renamed.", {@code ops} and {@code ops/prod} keep
+     * their names, nothing exists at the new name, u1 holds no Configure on {@code ops/prod}, and each
+     * adds one GRANT_VIOLATION naming u1 and {@code ops}. After the administrator revokes the window
+     * u1 holds no Configure on {@code ops} or {@code ops/prod} (no standing permission was gained).
+     * Guard: before the revocation the window still confers Configure on {@code ops}.
+     */
+    @Test
+    public void t_08_185_roleStrategyTrailingSegmentFolderRenamesAreRefused() throws Exception {
+        String windowId = openWindow("ops");
+        assertTrue(can("u1", ops, Item.CONFIGURE), "premise: the window confers Configure on ops");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "premise: the role does not reach ops/prod");
+        String[][] attempts = {{"confirmRename/extra", "sandbox5"}, {"confirm%52ename/x", "sandbox6"}, {"confirmRename//x", "sandbox7"}};
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        for (String[] attempt : attempts) {
+            String path = ops.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "ops", "Folder", "POST " + path);
+            assertNotNull(j.jenkins.getItemByFullName("ops"), path + " must leave ops in place");
+            assertNotNull(j.jenkins.getItemByFullName("ops/prod"), path + " must leave ops/prod under its full name");
+            assertNull(j.jenkins.getItemByFullName(attempt[1]), "nothing may exist at " + attempt[1]);
+            assertFalse(can("u1", opsProd, Item.CONFIGURE), "S-38-01: u1 must not gain Configure on ops/prod through " + path);
+            expected++;
+            List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+            assertEquals(expected, violations.size(), path + " must be recorded once as GRANT_VIOLATION, got " + violations);
+            ChangeRecord rec = violations.get(violations.size() - 1);
+            assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION of " + path + " names u1");
+            assertTrue(mentions(rec, "ops"), "the GRANT_VIOLATION names the folder ops: " + describe(rec));
+        }
+        assertTrue(can("u1", ops, Item.CONFIGURE), "guard: the window still confers Configure on ops after the refusals");
+
+        assertSuccess(ApproverFormFixtures.post(j, "admin", "batch-control/grants/" + windowId + "/revoke", List.of()),
+                "fixture: the administrator revokes u1's window");
+        assertFalse(can("u1", ops, Item.CONFIGURE), "after the revocation u1 holds no Configure on ops");
+        assertFalse(can("u1", opsProd, Item.CONFIGURE), "after the revocation u1 holds no Configure on ops/prod");
+    }
+
+    /**
+     * T-08-186 (security-38 S-38-01, role-strategy job fixture, the S-36-02 escalation; D-71c rulings
+     * 1 and 2): the T-08-158 fixture (item role {@code sandbox.*} with Read, Configure, Build and
+     * Workspace for u1; u1's CONFIGURE window on the top-level job {@code deploy}). u1 POSTs
+     * {@code job/deploy/confirmRename/extra?newName=sandbox-deploy5},
+     * {@code job/deploy/doRename/x?newName=sandbox-deploy6} and
+     * {@code job/deploy/do%52ename/x?newName=sandbox-deploy7}. Each answers 400 with the D-71c refusal
+     * for 'deploy' (Freestyle project) and "Nothing was renamed.", {@code deploy} keeps its name,
+     * nothing exists at the new name, u1 gains neither Build nor Workspace on the job, and each adds
+     * one GRANT_VIOLATION naming u1 and {@code deploy}. Once the administrator revokes the window, u1
+     * holds neither Configure, Build nor Workspace on {@code deploy}. Premises: the window confers
+     * Configure, not Build or Workspace; the role confers Build on a matching name.
+     */
+    @Test
+    public void t_08_186_roleStrategyTrailingSegmentJobRenamesAreRefused() throws Exception {
+        assertTrue(can("u1", sandbox, Item.BUILD), "premise: the item role sandbox.* confers Build on a matching name");
+        String windowId = openWindow("deploy");
+        assertTrue(can("u1", deploy, Item.CONFIGURE), "premise: the window confers Configure on deploy");
+        assertFalse(can("u1", deploy, Item.BUILD), "premise: the window confers no Build on deploy");
+        assertFalse(can("u1", deploy, Item.WORKSPACE), "premise: the window confers no Workspace on deploy");
+        String[][] attempts = {
+            {"confirmRename/extra", "sandbox-deploy5"}, {"doRename/x", "sandbox-deploy6"}, {"do%52ename/x", "sandbox-deploy7"},
+        };
+        int expected = records(ChangeType.GRANT_VIOLATION).size();
+        for (String[] attempt : attempts) {
+            String path = deploy.getUrl() + attempt[0] + "?newName=" + attempt[1];
+            RenameRefusalFixtures.assertWindowRenameRefused(RenameRefusalFixtures.postPath(j, "u1", path), "deploy", "Freestyle project",
+                    "POST " + path);
+            assertEquals("deploy", deploy.getFullName(), path + " must leave deploy under its name");
+            assertNull(j.jenkins.getItemByFullName(attempt[1]), "nothing may exist at " + attempt[1]);
+            assertFalse(can("u1", deploy, Item.BUILD), "S-38-01: u1 must not gain Build on deploy through " + path);
+            assertFalse(can("u1", deploy, Item.WORKSPACE), "S-38-01: u1 must not gain Workspace on deploy through " + path);
+            expected++;
+            List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+            assertEquals(expected, violations.size(), path + " must be recorded once as GRANT_VIOLATION, got " + violations);
+            ChangeRecord rec = violations.get(violations.size() - 1);
+            assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION of " + path + " names u1");
+            assertTrue(mentions(rec, "deploy"), "the GRANT_VIOLATION names the job deploy: " + describe(rec));
+        }
+
+        assertSuccess(ApproverFormFixtures.post(j, "admin", "batch-control/grants/" + windowId + "/revoke", List.of()),
+                "fixture: the administrator revokes u1's window");
+        assertFalse(can("u1", deploy, Item.CONFIGURE), "after the revocation u1 holds no Configure on deploy");
+        assertFalse(can("u1", deploy, Item.BUILD), "after the revocation u1 holds no Build on deploy");
+        assertFalse(can("u1", deploy, Item.WORKSPACE), "after the revocation u1 holds no Workspace on deploy");
     }
 
     // ---------------------------------------------------------------- helpers

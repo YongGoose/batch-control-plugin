@@ -165,12 +165,31 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     down. A window therefore either applies to its item, under whatever name
     the item has now, or has ended; renaming, moving, swapping or re-creating
     items, or combining several windows, cannot make a window reach an item
-    nobody approved. One gap remains: an item replaced on disk outside Jenkins,
-    followed by a reload, fires no item event, so a window naming it applies to
-    the replacement. The precondition is file-system access to `$JENKINS_HOME`,
-    which is outside the plugin's reach anyway (item 5); the reload itself does
-    not need `Overall/Administer`, because reloading a single item from disk
-    needs only `Item/Configure` on it.
+    nobody approved.
+
+    Ending a window is built to survive a failed write and a restart. The
+    window is marked ended in memory first, so it stops applying at once; then
+    a `GRANT_REVOKE` record is appended under `batch-control/changes/` and the
+    window's grant file under `batch-control/grants/` is rewritten. A grant
+    file that cannot be written is retried before every later grant write, on
+    every item event and by the periodic work. At startup, a grant file that
+    still says the window is open but has a `GRANT_REVOKE` record is ended
+    again from that record. Two gaps remain:
+
+    - If both directories are unwritable, nothing durable records the
+      window's end: the `GRANT_REVOKE` record could not be appended under
+      `batch-control/changes/` when the window ended (that failure is logged,
+      not retried), and the grant file under `batch-control/grants/` stays
+      unwritable until Jenkins restarts. If, in addition, an item is created
+      at the window's name before that restart, the window applies to the new
+      item after the restart. Either write succeeding is enough for the end to
+      survive the restart.
+    - An item replaced on disk outside Jenkins, followed by a reload, fires no
+      item event, so a window naming it applies to the replacement. The
+      precondition is file-system access to `$JENKINS_HOME`, which is outside
+      the plugin's reach anyway (item 5); the reload itself does not need
+      `Overall/Administer`, because reloading a single item from disk needs
+      only `Item/Configure` on it.
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
@@ -948,7 +967,13 @@ code does on purpose.
 48. **Pre-filled parameter values travel in the URL.** When a refused build
     submission leads to the Request Run form with the submitted values filled
     in (D-60), the values of non-sensitive parameters are carried in the
-    redirect URL's query string. From there they can reach the browser
+    redirect URL's query string. The values carried are those of string,
+    text, boolean, choice and run parameters (a run as its `job#build` id),
+    and of any other simple parameter whose definition rebuilds the same value
+    from its text; a value the job's definition no longer accepts, such as a
+    choice that is no longer offered or a run that no longer exists or that
+    the requester cannot see, is dropped and the field starts at its default.
+    From the URL the carried values can reach the browser
     history, reverse-proxy and servlet container access logs, and the
     `Referer` header of the next request. Password and other sensitive
     parameters are never carried. Anything typed into a plain string or text

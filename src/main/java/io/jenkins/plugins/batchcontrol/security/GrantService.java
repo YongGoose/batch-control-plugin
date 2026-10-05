@@ -46,6 +46,16 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * ({@link #followItem}), a deletion ends them ({@link #endWindowsOf}). Renaming through a window is
  * refused (D-71c, {@link GrantAwareACL}), so only an administrator or a user with their own
  * permissions can move a window's name.
+ *
+ * <p>D-74, a window's end is never lost: a window ends in memory first, so it confers nothing from
+ * that moment, and its {@code GRANT_REVOKE} record is appended before its file is rewritten. If the
+ * file cannot be written, the end is kept in {@link #unsavedEnds} and written again before every
+ * later grant write, by every item event and by the periodic work ({@link #flushUnsavedEnds()});
+ * every read of a grant file in this class applies it, so no other write can bring the window back.
+ * If Jenkins stops before the end is written, the record stands in for it: when the cache is
+ * loaded, a window whose file still says it is open but which has a {@code GRANT_REVOKE} record
+ * is ended again ({@link #applyRecordedEnds}), so a restart cannot re-open it, also not on an item
+ * created at its name in the meantime.
  */
 @Restricted(NoExternalUse.class)
 public final class GrantService {
@@ -54,10 +64,27 @@ public final class GrantService {
 
     private static final GrantService INSTANCE = new GrantService();
 
+    /**
+     * How the {@code GRANT_REVOKE} record of a window that ended because of its item goes on after
+     * the grant's description (D-74, {@link #endWindowsWhere}); its reason is always
+     * {@link Grant#REVOKED_ITEM_DELETED}. {@link #reasonOf} reads it back.
+     */
+    private static final String ENDED = "ended: ";
+
+    /** As {@link #ENDED} for a window closed by turning change control off ({@link #revokeAllActive()}). */
+    private static final String REVOKED_SWITCH_OFF = "revoked: " + Grant.REVOKED_CHANGE_CONTROL_OFF;
+
     private final Store store = Store.get();
 
     /** All known grants (active or not); guarded by {@code this}. */
     private List<Grant> cache;
+
+    /**
+     * D-74: windows that have ended (in memory, and in a {@code GRANT_REVOKE} record when that could
+     * be appended) but whose file still says they are open, by id; guarded by {@code this}. Cleared
+     * with the cache at startup, where the records stand in for them.
+     */
+    private final java.util.Map<String, Grant> unsavedEnds = new java.util.LinkedHashMap<>();
 
     private GrantService() {
     }
@@ -79,6 +106,9 @@ public final class GrantService {
 
     private synchronized void clearCache() {
         cache = null;
+        // Belongs to the Jenkins session that is gone (a test harness may start the next one, with
+        // another home, in the same JVM); the GRANT_REVOKE records replace it (applyRecordedEnds).
+        unsavedEnds.clear();
         markedRuns.clear();
         markedRunsLoaded = false;
     }
@@ -268,12 +298,12 @@ public final class GrantService {
                     || now.isBefore(cached.getExpiresAt().minus(lead))) {
                 continue;
             }
-            Grant grant = store.loadGrant(cached.getId());
+            Grant grant = load(cached.getId());
             if (grant == null || !grant.isActiveAt(now) || grant.isExpiringNotified()) {
                 continue;
             }
             grant.setExpiringNotified(true);
-            store.saveGrant(grant);
+            save(grant);
             replaceInCache(grant);
             claimed.add(grant);
         }
@@ -652,7 +682,7 @@ public final class GrantService {
             }
         }
         try {
-            Grant grant = store.loadGrant(grantId);
+            Grant grant = load(grantId);
             if (grant == null) {
                 return;
             }
@@ -661,7 +691,7 @@ public final class GrantService {
                 items.add(itemFullName);
             }
             grant.setChangedItems(items);
-            store.saveGrant(grant);
+            save(grant);
             replaceInCache(grant);
         } catch (RuntimeException e) {
             // S-28-06: a lost mark would let the item go unguarded once the window ends.
@@ -765,7 +795,7 @@ public final class GrantService {
                 continue;
             }
             try {
-                Grant grant = store.loadGrant(cached.getId());
+                Grant grant = load(cached.getId());
                 if (grant == null) {
                     continue;
                 }
@@ -778,7 +808,7 @@ public final class GrantService {
                     }
                 }
                 grant.setChangedItems(kept);
-                store.saveGrant(grant);
+                save(grant);
                 replaceInCache(grant);
             } catch (RuntimeException e) {
                 LOGGER.log(java.util.logging.Level.SEVERE, "Could not clear the changed-under-grant entries of grant "
@@ -844,7 +874,7 @@ public final class GrantService {
                 continue;
             }
             try {
-                Grant grant = store.loadGrant(cached.getId());
+                Grant grant = load(cached.getId());
                 if (grant == null) {
                     continue;
                 }
@@ -858,7 +888,7 @@ public final class GrantService {
                     }
                 }
                 grant.setChangedItems(new ArrayList<>(updated));
-                store.saveGrant(grant);
+                save(grant);
                 replaceInCache(grant);
             } catch (RuntimeException e) {
                 LOGGER.log(java.util.logging.Level.WARNING, "Could not update the changed-under-grant state of '"
@@ -897,7 +927,7 @@ public final class GrantService {
         if (grant.getScope() != null && !current.equals(grant.getScope().getFullName())) {
             grant.followItem(current);
         }
-        store.saveGrant(grant);
+        save(grant);
         List<Grant> grants = grants();
         grants.removeIf(existing -> existing.getId().equals(grant.getId()));
         grants.add(grant);
@@ -924,7 +954,7 @@ public final class GrantService {
 
     @CheckForNull
     private synchronized Grant recordCreatedItemIn(String grantId, String user, String itemFullName) {
-        Grant grant = store.loadGrant(grantId);
+        Grant grant = load(grantId);
         if (grant == null || !grant.isActiveAt(BatchClock.now()) || !user.equals(grant.getUser())
                 || !grant.getScope().isParentOf(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
             return null;
@@ -940,7 +970,7 @@ public final class GrantService {
             changed.add(itemFullName);
         }
         grant.setChangedItems(changed);
-        store.saveGrant(grant);
+        save(grant);
         replaceInCache(grant);
         return grant;
     }
@@ -977,18 +1007,19 @@ public final class GrantService {
                 || oldFullName.equals(newFullName)) {
             return;
         }
+        retryUnsavedEnds();
         Instant now = BatchClock.now();
         for (Grant cached : new ArrayList<>(grants())) {
             if (!cached.isActiveAt(now) || cached.getScope() == null || !cached.getScope().includes(oldFullName)) {
                 continue;
             }
             try {
-                Grant grant = store.loadGrant(cached.getId());
+                Grant grant = load(cached.getId());
                 if (grant == null) {
                     continue;
                 }
                 grant.followItem(newFullName);
-                store.saveGrant(grant);
+                save(grant);
                 replaceInCache(grant);
                 LOGGER.info(() -> "Grant " + grant.getId() + " follows its item from '" + oldFullName + "' to '"
                         + newFullName + "'");
@@ -1002,17 +1033,20 @@ public final class GrantService {
 
     /**
      * D-74: the item {@code fullName} was deleted; every active window naming it, or an item below
-     * it, ends: it is revoked by the user who deleted the item, with
-     * {@link Grant#REVOKED_ITEM_DELETED} as the reason and a {@code GRANT_REVOKE} record, so it
-     * keeps its history. Core reports the deletion before it frees the name, so no item can be
-     * created under that name first.
+     * it, ends: it is revoked by {@code user}, with {@link Grant#REVOKED_ITEM_DELETED} as the reason
+     * and a {@code GRANT_REVOKE} record, so it keeps its history. Core reports the deletion before it
+     * frees the name, so no item can be created under that name first.
+     *
+     * @param user the user who deleted the item, also when core deleted it as SYSTEM because it lay
+     *             below a folder that user deleted (SPEC 6: the history names who did what;
+     *             {@link WindowItemListener})
      */
-    public synchronized void endWindowsOf(String fullName) {
+    public synchronized void endWindowsOf(String fullName, String user) {
         if (fullName == null || fullName.isEmpty()) {
             return;
         }
         endWindowsWhere(scope -> scope.equals(fullName) || scope.startsWith(fullName + "/"),
-                Grant.REVOKED_ITEM_DELETED, "'" + fullName + "' was deleted");
+                Grant.REVOKED_ITEM_DELETED, "'" + fullName + "' was deleted", user);
     }
 
     /**
@@ -1026,7 +1060,7 @@ public final class GrantService {
             return;
         }
         endWindowsWhere(fullName::equals, Grant.REVOKED_ITEM_DELETED,
-                "'" + fullName + "' is now the name of a new item");
+                "'" + fullName + "' is now the name of a new item", Jenkins.getAuthentication2().getName());
     }
 
     /**
@@ -1035,32 +1069,37 @@ public final class GrantService {
      * Jenkins stopped between deleting it and handling the deletion.
      */
     public synchronized void endWindowsOfMissingItems(Predicate<String> exists) {
-        endWindowsWhere(scope -> !exists.test(scope), Grant.REVOKED_ITEM_DELETED, "its item no longer exists");
+        endWindowsWhere(scope -> !exists.test(scope), Grant.REVOKED_ITEM_DELETED, "its item no longer exists",
+                Jenkins.getAuthentication2().getName());
     }
 
-    /** Revokes the active windows (with a non-empty scope full name) whose scope {@code affected} accepts. */
-    private void endWindowsWhere(Predicate<String> affected, String reason, String why) {
+    /**
+     * Revokes, by {@code caller}, the active windows (with a non-empty scope full name) whose scope
+     * {@code affected} accepts. A window whose file cannot be read is ended from its cached copy;
+     * either way a failed write is retried ({@link #revokeOne}).
+     */
+    private void endWindowsWhere(Predicate<String> affected, String reason, String why, String caller) {
+        retryUnsavedEnds();
         Instant now = BatchClock.now();
-        String caller = Jenkins.getAuthentication2().getName();
         for (Grant cached : new ArrayList<>(grants())) {
             String scope = cached.getScope() == null ? null : cached.getScope().getFullName();
             if (!cached.isActiveAt(now) || scope == null || scope.isEmpty() || !affected.test(scope)) {
                 continue;
             }
+            Grant grant;
             try {
-                Grant grant = store.loadGrant(cached.getId());
-                if (grant == null) {
-                    grants().removeIf(existing -> existing.getId().equals(cached.getId())); // no file: confers nothing
-                } else if (grant.getRevokedAt() != null) {
-                    replaceInCache(grant);
-                } else {
-                    revokeOne(grant, caller, reason, "ended: " + why);
-                }
+                grant = load(cached.getId());
             } catch (RuntimeException e) {
-                // Ended in memory whatever happens to the file, so it confers nothing from now on.
-                cached.markRevoked(now, caller, reason);
-                LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + cached.getId() + " as ended ("
-                        + why + "); it confers nothing until Jenkins restarts; an administrator must revoke it", e);
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not read grant " + cached.getId()
+                        + "; ending it from its copy in memory (" + why + ")", e);
+                grant = cached;
+            }
+            if (grant == null) {
+                grants().removeIf(existing -> existing.getId().equals(cached.getId())); // no file: confers nothing
+            } else if (grant.getRevokedAt() != null) {
+                replaceInCache(grant);
+            } else {
+                revokeOne(grant, caller, reason, ENDED + why);
             }
         }
     }
@@ -1087,7 +1126,7 @@ public final class GrantService {
             if (kept.size() == cached.getCreatedItems().size()) {
                 continue;
             }
-            Grant grant = store.loadGrant(cached.getId());
+            Grant grant = load(cached.getId());
             if (grant == null) {
                 continue;
             }
@@ -1098,7 +1137,7 @@ public final class GrantService {
                 }
             }
             grant.setCreatedItems(stored);
-            store.saveGrant(grant);
+            save(grant);
             replaceInCache(grant);
             LOGGER.info(() -> "Grant " + grant.getId() + ": dropped created-item records of items "
                     + "that no longer exist");
@@ -1120,14 +1159,14 @@ public final class GrantService {
             if (!cached.isActiveAt(now) || !cached.hasCreated(fullName)) {
                 continue;
             }
-            Grant grant = store.loadGrant(cached.getId());
+            Grant grant = load(cached.getId());
             if (grant == null) {
                 continue;
             }
             List<String> kept = grant.getCreatedItems();
             kept.remove(fullName);
             grant.setCreatedItems(kept);
-            store.saveGrant(grant);
+            save(grant);
             replaceInCache(grant);
             LOGGER.info(() -> "Grant " + grant.getId() + ": dropped the stale created-item record of '" + fullName
                     + "', now the name of a new item");
@@ -1157,7 +1196,7 @@ public final class GrantService {
             if (!changed) {
                 continue;
             }
-            Grant grant = store.loadGrant(cached.getId());
+            Grant grant = load(cached.getId());
             if (grant == null) {
                 continue;
             }
@@ -1172,7 +1211,7 @@ public final class GrantService {
                 }
             }
             grant.setCreatedItems(updated);
-            store.saveGrant(grant);
+            save(grant);
             replaceInCache(grant);
         }
     }
@@ -1188,7 +1227,7 @@ public final class GrantService {
     public synchronized Grant revoke(String grantId) {
         Objects.requireNonNull(grantId, "grantId");
         Jenkins.get().checkPermission(BatchControlPermissions.MANAGE);
-        Grant grant = store.loadGrant(grantId);
+        Grant grant = load(grantId);
         if (grant == null) {
             throw new IllegalArgumentException("No such grant: " + grantId);
         }
@@ -1242,10 +1281,19 @@ public final class GrantService {
         String caller = Jenkins.getAuthentication2().getName();
         int total = active.size();
         int closed = 0;
+        retryUnsavedEnds();
         for (Grant cached : active) {
             // Revoke the store's copy — the same one revoke(String) mutates — so the persisted
             // grant and the cache cannot end up disagreeing about who revoked it and when.
-            Grant grant = store.loadGrant(cached.getId());
+            Grant grant;
+            try {
+                grant = load(cached.getId());
+            } catch (RuntimeException e) {
+                // D-74: an unreadable file must not leave this or the remaining windows open.
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not read grant " + cached.getId()
+                        + "; revoking it from its copy in memory", e);
+                grant = cached;
+            }
             if (grant == null) {
                 LOGGER.warning(() -> "Grant " + cached.getId() + " is active in memory but has no "
                         + "file in the store, so it cannot be revoked as part of switching change "
@@ -1260,9 +1308,8 @@ public final class GrantService {
             }
             closed++;
             // #85: the record and the grant say why, not just who.
-            revokeOne(grant, caller, Grant.REVOKED_CHANGE_CONTROL_OFF, "revoked: "
-                    + Grant.REVOKED_CHANGE_CONTROL_OFF + " by '" + caller + "' ("
-                    + closed + " of " + total + " active permission windows closed)");
+            revokeOne(grant, caller, Grant.REVOKED_CHANGE_CONTROL_OFF, REVOKED_SWITCH_OFF
+                    + " by '" + caller + "' (" + closed + " of " + total + " active permission windows closed)");
         }
         int closedCount = closed;
         LOGGER.info(() -> "Change control was switched off by '" + caller + "': " + closedCount
@@ -1271,21 +1318,208 @@ public final class GrantService {
     }
 
     /**
-     * Marks {@code grant} revoked by {@code caller}, persists it, refreshes the cache and appends
-     * the {@code GRANT_REVOKE} record. The single revocation write path, so a per-grant revocation
-     * and a switch-off mass revocation cannot drift apart in what they persist or record.
+     * Marks {@code grant} revoked by {@code caller}, refreshes the cache, appends the
+     * {@code GRANT_REVOKE} record and persists the grant. The single revocation write path, so a
+     * per-grant revocation and a switch-off mass revocation cannot drift apart in what they persist
+     * or record.
+     *
+     * <p>D-74, fail-closed: the window ends in memory before anything is written, so it confers
+     * nothing from this moment whatever happens to the files. The record comes before the grant
+     * file, so Jenkins stopping in between leaves a record that ends the window again at the next
+     * start ({@link #applyRecordedEnds}). A grant file that cannot be written is kept in
+     * {@link #unsavedEnds} and written again later; a record that cannot be appended is logged.
      */
-    private void revokeOne(Grant grant, String caller, @CheckForNull String reason, String detail) {
+    private synchronized void revokeOne(Grant grant, String caller, @CheckForNull String reason, String detail) {
         grant.markRevoked(BatchClock.now(), caller, reason);
-        store.saveGrant(grant);
         replaceInCache(grant);
         ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REVOKE,
-                grant.getScope() == null ? null : grant.getScope().getFullName(), caller,
-                "Grant " + grant.getId() + " for user '" + grant.getUser() + "' ("
-                        + grant.getScope() + ") " + detail);
+                grant.getScope() == null ? null : grant.getScope().getFullName(), caller, describe(grant) + detail);
         record.setGrantId(grant.getId());
-        store.appendChangeRecord(record);
+        try {
+            store.appendChangeRecord(record);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not record the end of grant " + grant.getId()
+                    + " (" + detail + "); it has ended all the same", e);
+        }
+        try {
+            save(grant);
+        } catch (RuntimeException e) {
+            unsavedEnds.put(grant.getId(), grant);
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + grant.getId() + " as ended ("
+                    + detail + "); it confers nothing, and its end is written again before every grant write"
+                    + " and by the periodic work until that succeeds", e);
+        }
         LOGGER.info(() -> "Grant " + grant.getId() + " revoked by '" + caller + "'");
+    }
+
+    // ---------------------------------------------------------------- D-74 ends not yet written
+
+    /**
+     * D-74: writes the ends that could not be written so far (called by the periodic work; every
+     * grant write and every item event does the same first).
+     */
+    public synchronized void flushUnsavedEnds() {
+        retryUnsavedEnds();
+    }
+
+    /**
+     * Writes every end in {@link #unsavedEnds} into its grant file, reading the file first so that
+     * nothing else in it is lost. One that still fails stays for the next attempt; a window whose
+     * file is gone is dropped (it confers nothing).
+     */
+    private synchronized void retryUnsavedEnds() {
+        if (unsavedEnds.isEmpty()) {
+            return;
+        }
+        for (Grant ended : new ArrayList<>(unsavedEnds.values())) {
+            try {
+                Grant stored = store.loadGrant(ended.getId());
+                if (stored != null) {
+                    if (stored.getRevokedAt() == null) {
+                        stored.markRevoked(ended.getRevokedAt(), ended.getRevokedBy(), ended.getRevokedReason());
+                        store.saveGrant(stored);
+                    }
+                    replaceInCache(stored);
+                }
+                unsavedEnds.remove(ended.getId());
+                LOGGER.info(() -> "The end of grant " + ended.getId() + " is now written");
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.FINE, "The end of grant " + ended.getId()
+                        + " still cannot be written", e);
+            }
+        }
+    }
+
+    /**
+     * The stored grant {@code id}, or {@code null}; if its end is not written yet, the copy read is
+     * ended as in memory, so a write of anything else in it also writes the end and never re-opens
+     * the window. Every read of a grant file in this class goes through here.
+     */
+    @CheckForNull
+    private synchronized Grant load(String id) {
+        Grant grant = store.loadGrant(id);
+        if (grant != null) {
+            applyUnsavedEnd(grant);
+        }
+        return grant;
+    }
+
+    private synchronized void applyUnsavedEnd(Grant grant) {
+        Grant ended = unsavedEnds.get(grant.getId());
+        if (ended != null && grant.getRevokedAt() == null) {
+            grant.markRevoked(ended.getRevokedAt(), ended.getRevokedBy(), ended.getRevokedReason());
+        }
+    }
+
+    /**
+     * Writes {@code grant} (the only grant write in this class), after the ends not written yet;
+     * an ended grant written here leaves {@link #unsavedEnds}.
+     */
+    private synchronized void save(Grant grant) {
+        retryUnsavedEnds();
+        store.saveGrant(grant);
+        if (grant.getRevokedAt() != null) {
+            unsavedEnds.remove(grant.getId());
+        }
+    }
+
+    /**
+     * D-74: ends again, in memory and in {@link #unsavedEnds}, every window of {@code loaded} whose
+     * file says it is still open but which has a {@code GRANT_REVOKE} record: its end was decided
+     * and recorded, but Jenkins stopped before the grant file could be written. Only the records
+     * since the oldest such window was granted are read; a failure is logged and leaves the windows
+     * as their files say (the item-event and startup checks still apply).
+     */
+    private synchronized void applyRecordedEnds(List<Grant> loaded) {
+        Instant now = BatchClock.now();
+        java.util.Map<String, Grant> open = new java.util.HashMap<>();
+        Instant oldest = null;
+        for (Grant grant : loaded) {
+            if (grant.getRevokedAt() == null && now.isBefore(grant.getExpiresAt())) {
+                open.put(grant.getId(), grant);
+                if (oldest == null || grant.getGrantedAt().isBefore(oldest)) {
+                    oldest = grant.getGrantedAt();
+                }
+            }
+        }
+        if (open.isEmpty()) {
+            return;
+        }
+        io.jenkins.plugins.batchcontrol.store.RecordPage<ChangeRecord> page;
+        try {
+            page = store.pageChangeRecords(store.listStoredMonths(),
+                    new io.jenkins.plugins.batchcontrol.store.Period(oldest, null),
+                    r -> r.getType() == ChangeType.GRANT_REVOKE && r.getGrantId() != null && open.containsKey(r.getGrantId()),
+                    0, Store.MAX_SCANNED_RECORDS, Store.MAX_SCANNED_RECORDS);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not read the GRANT_REVOKE records; a permission window"
+                    + " whose end could not be written before Jenkins stopped may be open again", e);
+            return;
+        }
+        if (page.isTruncated()) {
+            LOGGER.warning(() -> "Not every change record since " + open.size() + " open permission window(s) were"
+                    + " granted could be read; a window whose end could not be written before Jenkins stopped may"
+                    + " be open again");
+        }
+        for (ChangeRecord record : page.getItems()) {
+            Grant grant = open.get(record.getGrantId());
+            if (grant == null || grant.getRevokedAt() != null) {
+                continue;
+            }
+            grant.markRevoked(record.getAt(), record.getUser(), reasonOf(grant, record.getDetail()));
+            unsavedEnds.put(grant.getId(), grant);
+            LOGGER.warning(() -> "Grant " + grant.getId() + " ended at " + record.getAt() + " (" + record.getDetail()
+                    + "), but its file still said it was open; it is ended again and its end is written at the next"
+                    + " grant write");
+        }
+    }
+
+    /** How the detail of {@code grant}'s {@code GRANT_REVOKE} record begins ({@link #revokeOne}). */
+    private static String describe(Grant grant) {
+        return "Grant " + grant.getId() + " for user '" + grant.getUser() + "' (" + grant.getScope() + ") ";
+    }
+
+    /**
+     * The revocation reason that the detail of {@code grant}'s {@code GRANT_REVOKE} record implies
+     * ({@link #revokeOne}); {@code null} (an individual revocation) when it says neither.
+     */
+    @CheckForNull
+    private static String reasonOf(Grant grant, @CheckForNull String detail) {
+        String start = describe(grant);
+        if (detail == null || !detail.startsWith(start)) {
+            return null;
+        }
+        String rest = detail.substring(start.length());
+        if (rest.startsWith(ENDED)) {
+            return Grant.REVOKED_ITEM_DELETED;
+        }
+        if (rest.startsWith(REVOKED_SWITCH_OFF)) {
+            return Grant.REVOKED_CHANGE_CONTROL_OFF;
+        }
+        return null;
+    }
+
+    /**
+     * Every known grant, active or ended, as the permission checks see it (a copy of the list): an
+     * end not yet written to its file is already in it. Screens that list windows read this, not
+     * the files, so they agree with {@link #listActive()}.
+     */
+    public synchronized List<Grant> listAll() {
+        return new ArrayList<>(grants());
+    }
+
+    /** The grant {@code id} as the permission checks see it (see {@link #listAll()}), or {@code null}. */
+    @CheckForNull
+    public synchronized Grant find(String id) {
+        if (id == null) {
+            return null;
+        }
+        for (Grant grant : grants()) {
+            if (id.equals(grant.getId())) {
+                return grant;
+            }
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------- cache
@@ -1297,7 +1531,10 @@ public final class GrantService {
             return cache != null ? cache : new ArrayList<>();
         }
         if (cache == null) {
-            cache = new ArrayList<>(store.listGrants());
+            List<Grant> loaded = new ArrayList<>(store.listGrants());
+            loaded.forEach(this::applyUnsavedEnd);
+            applyRecordedEnds(loaded);
+            cache = loaded;
         }
         return cache;
     }

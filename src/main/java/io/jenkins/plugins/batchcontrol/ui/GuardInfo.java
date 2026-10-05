@@ -5,7 +5,6 @@ import hudson.model.Item;
 import hudson.model.ItemGroup;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import java.util.HashSet;
 import java.util.Set;
 import jenkins.model.Jenkins;
@@ -139,7 +138,7 @@ public final class GuardInfo {
             return null;
         }
         try {
-            Grant grant = Store.get().loadGrant(grantId);
+            Grant grant = GrantService.get().find(grantId);
             if (grant == null) {
                 return null;
             }

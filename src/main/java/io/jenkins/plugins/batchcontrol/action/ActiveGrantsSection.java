@@ -5,7 +5,6 @@ import hudson.model.Failure;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import jenkins.model.Jenkins;
@@ -44,7 +43,7 @@ public class ActiveGrantsSection {
 
     /**
      * Stapler: serves {@code /batch-control/grants/active/<grantId>/...}; {@code null} renders a
-     * 404 when no grant with that id is stored (an unsafe id is treated the same way). An
+     * 404 when {@link GrantService} knows no grant with that id (an unsafe id matches none). An
      * existing grant that is no longer active still resolves: {@link GrantService#revoke}
      * rejects it with a message.
      */
@@ -53,11 +52,7 @@ public class ActiveGrantsSection {
         if (grantId == null || grantId.isEmpty()) {
             return null;
         }
-        try {
-            if (Store.get().loadGrant(grantId) == null) {
-                return null;
-            }
-        } catch (IllegalArgumentException e) {
+        if (GrantService.get().find(grantId) == null) {
             return null;
         }
         return new Item(grantId);

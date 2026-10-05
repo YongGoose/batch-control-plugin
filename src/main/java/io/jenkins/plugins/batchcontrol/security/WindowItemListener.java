@@ -17,7 +17,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       or moved folder): the windows naming the item now name its new full name
  *       ({@link GrantService#followItem}).</li>
  *   <li>{@code onDeleted}: the windows naming the deleted item, or an item below it, end
- *       ({@link GrantService#endWindowsOf}).</li>
+ *       ({@link GrantService#endWindowsOf}), revoked by the user who deleted it. Core deletes the
+ *       items below a folder as SYSTEM; their windows are revoked by the user who deleted the folder,
+ *       remembered from {@code onCheckDelete} while that folder's deletion is under way
+ *       ({@link DeletionAttribution}; SPEC 6: the history names who did what).</li>
  *   <li>{@code onCreated} (and a copy, which core reports as a creation): a window still naming the
  *       new item's name belongs to an item that disappeared without an event, and ends
  *       ({@link GrantService#endWindowsOnNewItem}).</li>
@@ -30,7 +33,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * reload, which fires no item event.
  *
  * <p>The ordinal runs this listener after the change-recording listeners (default ordinal 0), so
- * the DELETE, RENAME and MOVE records are still linked to the window used, under its old name.
+ * the DELETE, RENAME and MOVE records are still linked to the window used, under its old name, and
+ * they can still ask {@link DeletionAttribution#deletingUser} who deleted an item, whose entry this
+ * listener forgets in {@code onDeleted}.
  * Acts whatever the switches say: with change control off no window is active (S-15).
  */
 @Extension(ordinal = -1000)
@@ -38,6 +43,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 public final class WindowItemListener extends ItemListener {
 
     private static final Logger LOGGER = Logger.getLogger(WindowItemListener.class.getName());
+
+    @Override
+    public void onCheckDelete(Item item) {
+        // Runs last (ordinal), so a veto by another listener has already been raised.
+        DeletionAttribution.remember(item);
+    }
 
     @Override
     public void onCreated(Item item) {
@@ -64,11 +75,13 @@ public final class WindowItemListener extends ItemListener {
     @Override
     public void onDeleted(Item item) {
         try {
-            GrantService.get().endWindowsOf(item.getFullName());
+            GrantService.get().endWindowsOf(item.getFullName(), DeletionAttribution.deletingUser(item));
         } catch (RuntimeException e) {
             // Never fails the deletion.
             LOGGER.log(Level.WARNING, "Could not end the permission windows of the deleted item '"
                     + item.getFullName() + "'", e);
+        } finally {
+            DeletionAttribution.forget(item); // last listener (ordinal): every other one has asked
         }
     }
 

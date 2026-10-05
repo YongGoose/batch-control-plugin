@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol;
 
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import java.net.URL;
@@ -8,7 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
+import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.htmlunit.html.DomAttr;
 import org.htmlunit.html.DomElement;
@@ -18,38 +21,40 @@ import org.jvnet.hudson.test.JenkinsRule;
 
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.excerpt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Shared reading of whether a permission window still applies to its item (D-71a, D-71b), from
- * the screens and from the stored grant file, for the rows of note 264.
+ * Shared reading of a permission window's state for the rows of notes 264 and 270: whether it is
+ * active and on which item, or whether it has ended, read from the service and from the grants
+ * page's lists (D-66), never from the window state marker.
  *
- * <p>The screen contract (documented by ui-dev): in the grants page's Active list
- * ({@code table[data-batch-control-list=active]}) each window's row links to its detail page
- * {@code batch-control/grants/<id>/} and its Remaining cell carries
- * {@code data-batch-control-window-state="bound"} (the time left) or {@code ="unbound"} with
- * exactly the text {@link #UNBOUND_TEXT}; on the detail page the Permission Window table's State
- * cell carries the same marker ("Open, N min left" when bound); an ended window has no marker.
+ * <p>D-74 (SPEC item 8 line 170, ARCHITECTURE 4 "Following the item"): a window applies to its item,
+ * not to a name. When an administrator or a user with their own permissions renames or moves the
+ * item, the window follows it (so do the windows on the items below a renamed or moved folder);
+ * deleting the item ends (revokes, reason "its item was deleted") the windows naming it or anything
+ * below it, with a GRANT_REVOKE record; creating a new item at a window's name and starting Jenkins
+ * after the item vanished end it too. There is no "no longer applies" state any more: a window either
+ * applies to its (possibly renamed or moved) item or has ended. The "No longer applies" display that
+ * D-71a introduced is being removed, so nothing here asserts it either way, and the window state
+ * marker ({@code data-batch-control-window-state}) is not read at all.
  *
- * <p>The stored form (ARCHITECTURE section 5): a grant file ({@code batch-control/grants/<id>.xml})
- * carries {@code itemIdentity}, recorded at approval; absent, the grant is bound to nothing, and it
- * is cleared when an item event ends the binding.
+ * <p>The page contract used (D-66, T-UI-95, T-08-122, T-08-66): the grants page lists active
+ * windows in {@code table[data-batch-control-list=active]}, each row linking to the window's detail
+ * page {@code batch-control/grants/<id>/} and naming the window's item by its full name; ended
+ * windows are rows of {@code table[data-batch-control-list=ended]} naming the item, and a revocation
+ * reason (D-63) is shown on the grants page.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-71a/D-71b, docs/ARCHITECTURE.md sections 4 and 5
- * and the ui-dev screen contract only (no src/main knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-63/D-66/D-74, docs/ARCHITECTURE.md sections 4
+ * and 5 only (no src/main knowledge).
  */
 final class WindowStateFixtures {
 
-    static final String STATE = "data-batch-control-window-state";
-    static final String UNBOUND_TEXT = "No longer applies (the item was renamed, moved or deleted)";
     static final String ACTIVE_LIST = "table[data-batch-control-list=active]";
-    private static final Pattern LIST_TIME_LEFT = Pattern.compile("\\d+\\s*min");
-    private static final Pattern DETAIL_OPEN = Pattern.compile("^Open, .*\\d.* left$");
-    /** An {@code itemIdentity} element with some content (the binding recorded at approval). */
-    private static final Pattern STORED_IDENTITY = Pattern.compile("<itemIdentity(?:\\s[^>]*)?>\\s*[^<\\s]");
+    static final String ENDED_LIST = "table[data-batch-control-list=ended]";
+    /** The documented reason of a window ended by its item's deletion (ARCHITECTURE 4, D-74). */
+    static final String DELETED_REASON = "its item was deleted";
 
     private WindowStateFixtures() {
         // utility class
@@ -62,6 +67,11 @@ final class WindowStateFixtures {
                 .collect(Collectors.toList());
         assertEquals(1, found.size(), "fixture: " + user + " must hold exactly one active window on " + fullName + ", got " + found);
         return found.get(0).getId();
+    }
+
+    /** The active window {@code grantId} from the service, or null if it is not active. */
+    static Grant active(String grantId) {
+        return GrantService.get().listActive().stream().filter(g -> grantId.equals(g.getId())).findFirst().orElse(null);
     }
 
     /**
@@ -90,13 +100,37 @@ final class WindowStateFixtures {
         return found;
     }
 
-    /** The elements carrying the window state marker inside {@code scope}. */
-    private static List<DomElement> markers(DomNode scope) {
+    /** The rows of the Ended list whose text names {@code fullName} (as a whole word between separators). */
+    static List<DomElement> endedRowsNaming(HtmlPage list, String fullName) {
         List<DomElement> out = new ArrayList<>();
-        for (DomNode n : scope.querySelectorAll("[" + STATE + "]")) {
-            out.add((DomElement) n);
+        for (DomNode table : list.querySelectorAll(ENDED_LIST)) {
+            for (DomNode n : table.querySelectorAll("tr")) {
+                String text = n.asNormalizedText();
+                if (names(text, fullName)) {
+                    out.add((DomElement) n);
+                }
+            }
         }
         return out;
+    }
+
+    /** True if {@code text} contains {@code fullName} not directly followed or preceded by a name character. */
+    private static boolean names(String text, String fullName) {
+        int at = text.indexOf(fullName);
+        while (at >= 0) {
+            boolean before = at == 0 || !nameChar(text.charAt(at - 1));
+            int end = at + fullName.length();
+            boolean after = end >= text.length() || !nameChar(text.charAt(end));
+            if (before && after) {
+                return true;
+            }
+            at = text.indexOf(fullName, at + 1);
+        }
+        return false;
+    }
+
+    private static boolean nameChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '/' || c == '.';
     }
 
     /** The detail page of the window, opened by {@code viewer}; it must answer 200. */
@@ -107,63 +141,94 @@ final class WindowStateFixtures {
     }
 
     /**
-     * The window {@code grantId} is shown as no longer applying: its Active list row (seen by
-     * {@code viewer}) and its detail page each carry exactly one state marker, {@code unbound}, whose
-     * text is exactly {@link #UNBOUND_TEXT}.
+     * The window {@code grantId} is active on the item {@code fullName}: the service lists it as
+     * active with exactly that scope full name, and the grants page seen by {@code viewer} lists it
+     * in the Active list in a row that links to its detail page and names {@code fullName}.
      */
-    static void assertShownUnbound(JenkinsRule j, String viewer, String grantId, String what) throws Exception {
-        HtmlPage list = UsabilityFixtures.htmlPage(j, viewer, "batch-control/grants/");
-        DomElement row = activeRow(j, list, grantId);
-        assertNotNull(row, what + ": the window must still be listed among the active windows (it has not ended): "
-                + excerpt(list.asNormalizedText()));
-        assertSingleMarker(row, "unbound", what + " (Active list row)");
-        assertEquals(UNBOUND_TEXT, markers(row).get(0).asNormalizedText().trim(), what + ": the Active list must say the window no longer applies");
-
-        DomNode main = mainPanel(detailPage(j, viewer, grantId));
-        assertSingleMarker(main, "unbound", what + " (detail page)");
-        assertEquals(UNBOUND_TEXT, markers(main).get(0).asNormalizedText().trim(), what + ": the detail page must say the window no longer applies");
-    }
-
-    /**
-     * The window {@code grantId} is shown as applying: its Active list row carries one marker,
-     * {@code bound}, showing the time left; its detail page carries one marker, {@code bound},
-     * reading "Open, N min left". Neither says it no longer applies.
-     */
-    static void assertShownBound(JenkinsRule j, String viewer, String grantId, String what) throws Exception {
+    static void assertActiveOn(JenkinsRule j, String viewer, String grantId, String fullName, String what) throws Exception {
+        Grant grant = active(grantId);
+        assertNotNull(grant, what + ": the window " + grantId + " must be active, active windows: " + describeActive());
+        assertEquals(fullName, grant.getScope().getFullName(), what + ": the window must name its item's current full name");
         HtmlPage list = UsabilityFixtures.htmlPage(j, viewer, "batch-control/grants/");
         DomElement row = activeRow(j, list, grantId);
         assertNotNull(row, what + ": the window must be listed among the active windows: " + excerpt(list.asNormalizedText()));
-        assertSingleMarker(row, "bound", what + " (Active list row)");
-        String listText = markers(row).get(0).asNormalizedText().trim();
-        assertTrue(LIST_TIME_LEFT.matcher(listText).find(), what + ": the Active list must show the time left, was '" + listText + "'");
-        assertFalse(row.asNormalizedText().contains("No longer applies"), what + ": a bound window must not be shown as no longer applying");
-
-        DomNode main = mainPanel(detailPage(j, viewer, grantId));
-        assertSingleMarker(main, "bound", what + " (detail page)");
-        String detailText = markers(main).get(0).asNormalizedText().trim();
-        assertTrue(DETAIL_OPEN.matcher(detailText).matches(), what + ": the detail page must read 'Open, N min left', was '" + detailText + "'");
-        assertFalse(main.asNormalizedText().contains("No longer applies"), what + ": a bound window's page must not say it no longer applies");
+        assertTrue(names(row.asNormalizedText(), fullName), what + ": the Active list row must name the item " + fullName
+                + ": " + excerpt(row.asNormalizedText()));
     }
 
-    /** An ended window: no Active list row and no state marker on its detail page. */
-    static void assertShownEnded(JenkinsRule j, String viewer, String grantId, String what) throws Exception {
+    /**
+     * The window {@code grantId} has ended: the service does not list it as active, the grants page
+     * seen by {@code viewer} has no Active list row for it, and its detail page still opens (an
+     * ended window keeps its page).
+     */
+    static void assertEnded(JenkinsRule j, String viewer, String grantId, String what) throws Exception {
+        assertNull(active(grantId), what + ": the window " + grantId + " must have ended (not active)");
         HtmlPage list = UsabilityFixtures.htmlPage(j, viewer, "batch-control/grants/");
         assertNull(activeRow(j, list, grantId), what + ": an ended window must not be listed among the active windows");
-        DomNode main = mainPanel(detailPage(j, viewer, grantId));
-        assertTrue(markers(main).isEmpty(), what + ": an ended window's detail page carries no window state marker, found "
-                + markers(main).stream().map(e -> e.getAttribute(STATE) + ":" + e.asNormalizedText()).collect(Collectors.toList()));
+        detailPage(j, viewer, grantId);
     }
 
-    private static void assertSingleMarker(DomNode scope, String expected, String what) {
-        List<DomElement> found = markers(scope);
-        assertEquals(1, found.size(), what + ": exactly one " + STATE + " marker expected, found "
-                + found.stream().map(e -> e.getAttribute(STATE) + ":" + e.asNormalizedText()).collect(Collectors.toList()));
-        assertEquals(expected, found.get(0).getAttribute(STATE), what + ": window state");
+    /**
+     * The window {@code grantId} on {@code fullName} was ended by its item's deletion: ended as in
+     * {@link #assertEnded}, and the Ended list of the grants page has a row naming {@code fullName}
+     * that shows the reason {@link #DELETED_REASON} (D-63: the grants screen shows a revocation's
+     * reason).
+     */
+    static void assertEndedByDeletion(JenkinsRule j, String viewer, String grantId, String fullName, String what) throws Exception {
+        assertEnded(j, viewer, grantId, what);
+        HtmlPage list = UsabilityFixtures.htmlPage(j, viewer, "batch-control/grants/");
+        List<DomElement> rows = endedRowsNaming(list, fullName);
+        assertTrue(rows.stream().anyMatch(r -> r.asNormalizedText().toLowerCase(Locale.ROOT).contains(DELETED_REASON)),
+                what + ": the Ended list must show the window on " + fullName + " with the reason '" + DELETED_REASON + "'; rows naming it: "
+                        + rows.stream().map(r -> excerpt(r.asNormalizedText())).collect(Collectors.toList()));
     }
 
-    private static DomNode mainPanel(HtmlPage page) {
-        DomNode main = page.querySelector("#main-panel");
-        return main == null ? page : main;
+    /** The ids of every GRANT_REVOKE record now stored (current month). */
+    static Set<String> revokeRecordIds() {
+        return ApproverFormFixtures.records(ChangeType.GRANT_REVOKE).stream().map(ChangeRecord::getId).collect(Collectors.toSet());
+    }
+
+    /** The GRANT_REVOKE records stored since {@code before} (ids of {@link #revokeRecordIds()}). */
+    static List<ChangeRecord> revokeRecordsSince(Set<String> before) {
+        return ApproverFormFixtures.records(ChangeType.GRANT_REVOKE).stream().filter(r -> !before.contains(r.getId()))
+                .collect(Collectors.toList());
+    }
+
+    /** True if {@code rec} identifies the window {@code grantId} on {@code fullName}. */
+    static boolean identifies(ChangeRecord rec, String grantId, String fullName) {
+        String target = String.valueOf(rec.getTarget());
+        String detail = String.valueOf(rec.getDetail());
+        return grantId.equals(rec.getGrantId()) || target.contains(grantId) || detail.contains(grantId) || fullName.equals(target);
+    }
+
+    /**
+     * Since {@code before}, exactly one GRANT_REVOKE record was stored per window of
+     * {@code windows} (each {@code {grantId, fullName}}) and no other, each stating in its detail
+     * that the item was deleted (D-63: the record detail names the reason; the reason's exact text,
+     * {@link #DELETED_REASON}, is pinned on the grants screen, {@link #assertEndedByDeletion}).
+     */
+    static void assertDeletionRevokeRecords(Set<String> before, String[][] windows, String what) {
+        List<ChangeRecord> added = revokeRecordsSince(before);
+        assertEquals(windows.length, added.size(), what + ": one GRANT_REVOKE record per window ended by the deletion, got " + describe(added));
+        for (String[] w : windows) {
+            long matching = added.stream().filter(r -> identifies(r, w[0], w[1])).count();
+            assertEquals(1, matching, what + ": exactly one GRANT_REVOKE record must identify the window on " + w[1] + " (" + w[0] + "), got "
+                    + describe(added));
+        }
+        for (ChangeRecord r : added) {
+            assertTrue(String.valueOf(r.getDetail()).toLowerCase(Locale.ROOT).contains("was deleted"),
+                    what + ": the GRANT_REVOKE record must say that the item was deleted: " + describe(List.of(r)));
+        }
+    }
+
+    static String describe(List<ChangeRecord> records) {
+        return records.stream().map(r -> "[user=" + r.getUser() + " target=" + r.getTarget() + " grantId=" + r.getGrantId()
+                + " detail=" + r.getDetail() + "]").collect(Collectors.joining(", "));
+    }
+
+    private static String describeActive() {
+        return GrantService.get().listActive().stream().map(g -> g.getId() + "@" + g.getScope().getFullName())
+                .collect(Collectors.joining(", "));
     }
 
     /** Revoke controls (href, action, formaction or data-* URL whose path ends in {@code /revoke}) inside {@code scope}. */
@@ -193,15 +258,16 @@ final class WindowStateFixtures {
         return out;
     }
 
+    /** The main panel of a page (or the page itself). */
+    static DomNode mainPanel(HtmlPage page) {
+        DomNode main = page.querySelector("#main-panel");
+        return main == null ? page : main;
+    }
+
     /** The stored grant file ({@code batch-control/grants/<id>.xml}, ARCHITECTURE 5). */
     static String storedGrant(JenkinsRule j, String grantId) throws Exception {
         Path file = j.jenkins.getRootDir().toPath().resolve("batch-control/grants/" + grantId + ".xml");
         assertTrue(Files.isRegularFile(file), "premise (ARCHITECTURE 5): the window is stored at " + file);
         return Files.readString(file, StandardCharsets.UTF_8);
-    }
-
-    /** Whether the stored grant still records the item's identity (ARCHITECTURE 5 {@code itemIdentity}). */
-    static boolean storedBinding(JenkinsRule j, String grantId) throws Exception {
-        return STORED_IDENTITY.matcher(storedGrant(j, grantId)).find();
     }
 }
