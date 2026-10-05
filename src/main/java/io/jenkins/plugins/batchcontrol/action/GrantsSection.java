@@ -25,6 +25,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.KindIcon;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
@@ -335,9 +336,11 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * <p>The item is looked up as the caller ({@link GrantRequestService#findScopeItem}): an
      * item that does not exist and one the caller may not read (Item/Discover only included)
      * get the same answer, so the check cannot be used to probe for names. The answer only
-     * repeats the item's own full name and its descriptor's display name, escaped by
-     * {@link FormValidation#ok(String)}. A blank field gets no message (the form is not
-     * filled in yet; submitting it is refused next to the field).
+     * repeats the item's own full name and its descriptor's display name. A blank field gets no
+     * message (the form is not filled in yet; submitting it is refused next to the field).
+     *
+     * <p>spec-review-S6 M-1: the kind is shown with its icon, as in the lists
+     * ({@code tags/scopeItem.jelly}), so the answer is markup ({@link #kindMarkup}).
      */
     @RequirePOST
     public FormValidation doCheckScopeFullName(@QueryParameter String value) {
@@ -356,7 +359,26 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             return FormValidation.error("'" + item.getFullName() + "' is part of another job and cannot be "
                     + "named by a permission window; name the job it belongs to.");
         }
-        return FormValidation.ok(kind.getDisplayName() + " '" + item.getFullName() + "'");
+        return FormValidation.okWithMarkup(kindMarkup(kind, item.getFullName()));
+    }
+
+    /**
+     * The item check's answer for an item of {@code kind}: one element carrying the descriptor id
+     * as {@code data-batch-control-item-kind} (the hook of {@code tags/scopeItem.jelly}), holding
+     * the kind's icon ({@link KindIcon}, an {@code svg} without text) and then the text
+     * {@code <kind display name> '<full name>'} — exactly the text of the earlier plain answer.
+     *
+     * <p>Every value that is not a constant of this method is escaped with {@link Util#escape},
+     * which is what {@link FormValidation#ok(String)} applied to the plain answer: the display
+     * name and the full name (a job name is user input), and the descriptor id. The icon markup
+     * is core's symbol SVG for the descriptor's icon class, which is plugin code, not user input.
+     */
+    static String kindMarkup(ItemKind kind, String fullName) {
+        return "<span data-batch-control-item-kind=\"" + Util.escape(kind.getDescriptorId()) + "\">"
+                + KindIcon.svg(kind.getIconClassName(), "icon-sm")
+                + "<span class=\"jenkins-!-margin-left-1\">"
+                + Util.escape(kind.getDisplayName() + " '" + fullName + "'")
+                + "</span></span>";
     }
 
     private static List<GrantAction> parseActions(@CheckForNull String[] raw, FormErrors errors) {

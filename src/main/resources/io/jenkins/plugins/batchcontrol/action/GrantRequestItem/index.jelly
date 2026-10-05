@@ -68,6 +68,15 @@
         </tbody>
       </table>
 
+      <!-- D-71a (5), security-34 S-34-02: a CONFIGURE request on a folder, multibranch project or
+           organization folder confers nothing on the items inside it, but the group's own settings
+           still reach them. Stated to the designated approvers and the requester
+           (GrantRequestItem#isShowGroupConfigureNotice); not shown for a job. Fixed text, on one
+           line so that the element's text is exactly the two sentences. -->
+      <j:if test="${it.showGroupConfigureNotice}">
+        <div class="jenkins-alert jenkins-alert-warning" data-batch-control-notice="group-configure">This folder's settings apply to the items inside it (for example implicitly loaded Pipeline libraries). Reconfiguring a multibranch project or organization folder can create or delete its generated items.</div>
+      </j:if>
+
       <!-- R4-12: the window of an approved request, with Revoke for a holder of Batch
            Control/Manage (the rule of the Grants list's Revoke; GrantRequestItem#doRevoke and the
            service re-check). A refused revoke is shown above the window. -->

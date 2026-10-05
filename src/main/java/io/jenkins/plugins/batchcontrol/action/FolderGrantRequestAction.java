@@ -18,8 +18,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 /**
  * R4-14 (D-66): the folder counterpart of {@link JobGrantRequestAction}, a "Request Change
  * Permission" entry on a folder that opens the grant request form prefilled for the folder
- * ({@code scopeFullName=<folder>}). D-71: the window names this folder only and covers nothing
- * inside it; Create starts checked for a regular folder, Configure for a computed one.
+ * ({@code scopeFullName=<folder>}). D-71: the window names this folder only and confers no
+ * permission on the items inside it (its settings still affect them, D-71a); Create starts checked
+ * for a regular folder, Configure for a computed one.
+ *
+ * <p>spec-review-S6 m-5: the entry has exactly one URL form, the same as the job entry's:
+ * {@code batch-control/grants/new?scopeFullName=<rawEncode(full name)>} (relative to the folder's
+ * URL) and, for the dialog, the same single parameter on {@code batch-control/grants/dialog}.
+ * There is no {@code actions} parameter: the form preselects the action from the item it resolves
+ * ({@code GrantsSection#isPrefillAction}).
  *
  * <p>No URL space, no view of its own and no state: the entry links to the Grants screen's form
  * ({@code /batch-control/grants/new}, or its dialog), whose own gate and {@code @RequirePOST}
