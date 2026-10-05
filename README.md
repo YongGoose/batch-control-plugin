@@ -46,19 +46,36 @@ an SCM trigger or a webhook until an approver has activated it
 
 **Change control** governs changing a job. A user who does *not* hold the standing
 permission to create, configure or delete one asks for a permission window
-instead: a scope (one job, or a folder), some combination of `CREATE`,
-`CONFIGURE` and `DELETE`, a duration and a reason. A window **adds** those
+instead: one item (a job, or a folder of any kind), some combination of `CREATE`,
+`CONFIGURE` and `DELETE`, a duration and a reason. A window names exactly that
+one item and confers nothing on any other item, not even on the jobs and folders
+inside a folder it names; to change a job in a folder, request a window for that
+job. `CONFIGURE` covers the item's own configuration only (for a folder, the
+folder's settings). `CREATE` applies only to a regular folder, not to a job, a
+multibranch project or an organization folder, and allows creating items
+directly inside that folder, never inside a folder nested in it. `DELETE`
+applies only to a job. A request for `CREATE` or `DELETE` on an item where it
+cannot apply is refused when it is submitted. Every request shows the item's
+kind (Pipeline, Freestyle project, Folder, Multibranch Pipeline, Organization
+Folder, ...) next to its name, so the approver sees what kind of item they are
+deciding on, and approval is refused if the item is gone or its kind has
+changed since the request was made. A window **adds** those
 permissions to whatever the user already has, for as long as it lasts; it never
 takes anything away and it imposes nothing on someone who holds the permission
 standing, which is what the "standing change permissions" monitor is for. Deleting
 is the one exception: while change control is on, deleting a job needs an active
 `DELETE` window even from a user whose standing permissions would allow it, and
-only administrators are not vetoed. Moving an item between folders (the folders
+only administrators are not vetoed. Since no window confers `Item/Delete` on a
+folder, a multibranch project or an organization folder (deleting one deletes
+everything inside it), only an administrator can delete one of those while
+change control is on. Moving an item between folders (the folders
 plugin's `Item/Move`) is treated as deleting it here and creating it there: while
 change control is on, a user without `Overall/Administer` can move an item only
 if they hold `Item/Delete` on the item and `Item/Create` at the destination, each
 either standing or from an active window, and a `CREATE` window's name
-restriction is matched against the moved item's name. A refused move changes
+restriction is matched against the moved item's name. For the same reason no
+window can authorise moving a folder of any kind: that needs an administrator, or
+a user who already holds `Item/Delete` on it standing. A refused move changes
 nothing, tells the user why and is recorded as a `GRANT_VIOLATION`. While run
 control is also on, a job moved by a non-administrator arrives the way a newly
 created job does: not activated and locked, recorded as `HELD`, so it needs a
@@ -305,7 +322,8 @@ jobs, folders and agents effective from that moment; review them first
 in the Batch Control section of **Manage Jenkins → System**, shown while a
 variant is installed. While an approved window is open, the selected variant
 *adds* that window's actions, `Item/Create`, `Item/Configure` or `Item/Delete`,
-on that window's scope, and passes every other decision through unchanged, so
+on the one item that window names (`Item/Create` directly inside it), and passes
+every other decision through unchanged, so
 with no active window it behaves exactly like the plain strategy. It resolves a
 permission the way Jenkins itself does, by walking the `impliedBy` chain, so a
 window also answers the permissions Jenkins treats as implied by the granted
@@ -404,7 +422,11 @@ the job's parameters, while Jenkins' own build entry is relabelled **Direct Buil
 core entry reaches the queue with no approval and is refused. **Request Change
 Permission** sits alongside them while change control is on, for a user who does
 not already hold `Item/Configure` on the job, and opens the window request form
-with that job filled in. **Grants** shows pending window requests, the time left on
+with that job filled in. A folder's page carries the same entry for the folder
+itself, for a user who lacks a permission a window could add there. The form
+takes the full name of one job or folder and shows the item's kind once the name
+is recognised; there is no scope type to choose, and each action says where it
+applies. **Grants** shows pending window requests, the time left on
 an active window, the history of expired ones and a link to request another.
 **Activations** lists activation and hold requests, with the ones awaiting your
 decision at the top, and is where the approver decides them; the request itself
@@ -464,8 +486,8 @@ may change the set at any time before a decision is made.
 **Restricting the name a CREATE window may create.** A `CREATE` permission
 window request may optionally carry an exact job name or a regular expression.
 When one is given, the window confers `Item/Create` only for a new item whose
-name matches it; left empty, the window behaves as before, any name in the
-scope folder. The pattern is validated at submission and shown to the approver
+name matches it; left empty, the window allows any name directly inside the
+window's folder. The pattern is validated at submission and shown to the approver
 before they decide. It does not reach a child that a computed folder (a
 multibranch project or an organization folder) creates while indexing, since
 that child is created by the system rather than through the window
@@ -504,6 +526,17 @@ rather than after it, and keep the remaining time, the expiry history and the
 re-request link on the Grants screen. Deleting is the exception: the plugin's own
 veto message names the grant to request.
 
+**A permission window covers one item.** A window names one job or one folder
+and gives nothing on any other item, so a change that spans several jobs needs a
+window for each of them, and a `CONFIGURE` window on a folder covers the
+folder's own settings, not the jobs inside it. `CREATE` works only directly
+inside a regular folder, never at the Jenkins root, inside a nested folder or
+inside a multibranch project or organization folder. `DELETE` works only on a
+job. No window can delete or move a folder, a multibranch project or an
+organization folder, because core deletes everything inside one without
+checking it: while change control is on, deleting one needs an administrator,
+and moving one needs an administrator or standing `Item/Delete` on it.
+
 **A `CONFIGURE` window confers whatever Jenkins implies from `Item/Configure`.**
 On the plugin set this project is built against that means `Item/ExtendedRead`
 (which reads `config.xml`), `Credentials/UseItem` and `Run/Replay`, and another
@@ -514,10 +547,13 @@ that a non-administrator approved while being shown only the word `CONFIGURE`.
 `Run/Replay` is the one to know about: run control still refuses a replay of a job
 that requires approval, so it is not a way around the run gate there, but on a job
 without run control a window holder can replay a build with a modified Pipeline
-script. A `CONFIGURE` window also lets its holder rename the job to any free name
-in its folder, since Jenkins allows a rename to anyone who may configure the job;
-the rename is recorded with the window. Under a `CREATE` window with a name
-restriction, renames of what that window created are limited to matching names.
+script. Renaming follows Jenkins' own rule: it needs `Item/Configure` on the
+item, or else both `Item/Delete` on it and `Item/Create` in its folder. So a
+`CONFIGURE` window lets its holder rename the item it names to any free name in
+the same folder, and the rename is recorded with the window; on a folder that
+changes the full name of everything inside it and ends their pending run
+requests. Under a `CREATE` window with a name restriction, renames of what that
+window created are limited to matching names.
 
 **On an item a grant has touched, only an administrator can widen
 authorization.** A Pipeline `properties` step saves its job's authorization

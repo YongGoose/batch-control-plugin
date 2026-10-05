@@ -95,9 +95,40 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no
     effect at all, and only the monitor warning tells you.
-11. **Grants must name a concrete job or folder.** There is no instance-wide
-    grant, which means a grant can confer `Item/Create` only inside a named
-    folder, never at the Jenkins root.
+11. **A permission window covers exactly one job or folder.** A window names
+    one item, of any kind, and confers nothing on any other item, including the
+    jobs and folders inside a folder it names (D-71). There is no instance-wide
+    window and no window for a folder and everything below it, so a change that
+    spans several jobs needs a window for each of them, each decided on its own.
+    What each action reaches:
+
+    - `CONFIGURE`, with the permissions Jenkins implies from it (item 33),
+      covers the item's own configuration only; for a folder that is the
+      folder's settings, not the items inside it.
+    - `CREATE` applies only to a regular folder and allows creating items
+      directly inside it: never at the Jenkins root, never inside a folder
+      nested in it, and never inside a multibranch project or organization
+      folder, whose children are generated (item 6). The Configure that the
+      holder keeps on items created that way (D-35c) is matched by the created
+      item's parent being the window's folder, not by its name.
+    - `DELETE` applies only to a job, including multi-configuration and Maven
+      projects, whose sub-items are part of the job. No window confers
+      `Item/Delete` on a folder, a multibranch project or an organization
+      folder, because core deletes everything inside one as SYSTEM without
+      checking those items. While change control is on, the delete veto
+      therefore leaves deleting one of these to administrators, and moving one
+      (item 44) needs an administrator or standing `Item/Delete` on it.
+
+    A request for `CREATE` or `DELETE` on an item where it cannot apply is
+    refused when it is submitted. The request records the item's kind (for
+    example Pipeline, Freestyle project, Folder, Multibranch Pipeline or
+    Organization Folder), the request screens show that kind with its icon
+    (there is no scope type to choose), and approval is refused when no
+    item exists at that name any more or its kind has changed. Once approved, a
+    window matches its item by full name: after a rename or a move it does not
+    cover the item under its new name, and an item that comes to have that name
+    while the window is open is covered, with `CREATE` still limited to a
+    regular folder and `DELETE` to a job (item 44).
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
@@ -347,10 +378,16 @@ code does on purpose.
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
 
-    A `CONFIGURE` window also lets its holder **rename** the job, to any free
-    name in its folder, because Jenkins allows a rename to anyone who may
-    configure the job. The rename is recorded as `RENAME` with the window it was
-    made under, and like any rename it ends the job's pending requests (item 30).
+    A `CONFIGURE` window also lets its holder **rename** the item it names, to
+    any free name in the same folder. Renaming follows core's rule: it needs
+    `Item/Configure` on the item, or else both `Item/Delete` on it and
+    `Item/Create` in its folder, so one `CONFIGURE` window is enough. The rename
+    is recorded as `RENAME` with the window it was made under, and like any
+    rename it ends the item's pending requests (item 30). On a folder (of any
+    kind) the rename changes the full name of everything inside it, so it ends
+    the pending run requests of the jobs inside as well and produces one `MOVE`
+    record per descendant job (item 26), although the window confers nothing on
+    those jobs. After the rename the window no longer covers the item (item 11).
     An approver who wants to rule out renames has no narrower window to grant.
     A `CREATE` window with a name restriction is different: renaming a job its
     holder created through that window, or a rename that relies on the window's
@@ -380,7 +417,7 @@ code does on purpose.
     *items*, not accounts. While change control is on, these items are
     guarded:
 
-    - every item in the scope of an active grant;
+    - every item an active grant names;
     - every item whose configuration was changed under a grant (saved or
       created by a user whose permission came only from a grant), every item
       a non-administrator created inside a guarded folder, and every
@@ -624,15 +661,23 @@ code does on purpose.
     active window (D-59). The cost: a non-administrator who holds `Item/Move`
     and `Item/Create` standing but not `Item/Delete` can no longer move items
     while change control is on, although plain Jenkins would let them. A
-    `DELETE` window on the item lets such a user move it, but the move then
+    `DELETE` window on a job lets such a user move it, but the move then
     costs what a delete and recreate would: while run control is also on, a
     job moved by a non-administrator is no longer activated, gets the same
     lock as a newly created job and is recorded as `HELD` naming the move, so
     it does not run unattended until a new activation request is approved
-    (D-59a). Administrators' moves keep the job's state. The refused move
+    (D-59a). Administrators' moves keep the job's state. No window can make a
+    folder, a multibranch project or an organization folder movable, because
+    a window's `DELETE` applies only to a job (item 11, D-71): moving one of
+    those needs an administrator or standing `Item/Delete` on it. Likewise no
+    window confers `Item/Create` in the Jenkins root or inside a multibranch
+    project or organization folder, so a move to one of those destinations
+    needs standing `Item/Create` there or an administrator. In both cases the
+    refusal says an administrator must make the move instead of suggesting a
+    window. The refused move
     changes nothing and is recorded as a `GRANT_VIOLATION`. A user who holds
     `Item/Delete` on two jobs can still swap them by moving them in and out
-    of a job-scoped window's name; such a user could already delete and
+    of a window's item name; such a user could already delete and
     recreate them, and with run control on the swapped jobs arrive locked
     and not activated, as recreated ones would. With change control off,
     moves behave exactly as in Jenkins.
