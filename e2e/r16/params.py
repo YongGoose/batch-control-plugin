@@ -1,6 +1,6 @@
 """e2e-16: a run request keeps the submitted typed parameter values, for every type (D-72, D-72b; SPEC item 5).
 
-usage: python params.py [FDSEB413CRUXY]   rows: out/params.jsonl, shots: R16-PARAM-*.png
+usage: python params.py [FDSEB413CRUXZY]   rows: out/params.jsonl, shots: R16-PARAM-*.png
 F  core `file` parameter (Freestyle r16-file) through the Request Run PAGE: UPLOAD file + SECRET password + NOTE
    string; approve; the approved build receives the exact uploaded bytes (sha) and the ORIGINAL secret (its sha), and
    the request detail shows `[file] UPLOAD`, `********` for the secret, NOTE in clear; no plaintext secret in the store
@@ -20,6 +20,8 @@ V  (part of F/S/X) the typed values live in requests/run/<id>.values.xml, the re
    plaintext secret; the values file is gone once the approved run started, and once a request is rejected or cancelled
    (D-74 (1), D-72b (5))
 X  temporary files are disposed of when a file request is rejected and when it is cancelled
+Z  the same disposal for the file-parameters plugin's stashed files (stashedFileParameterValueFiles) of a r16-stash request
+   rejected and one cancelled
 Y  (after F/S/E/B) every text surface shows the file values only as `[file] <name>` and the secret only masked: the
    History page, requests.csv and runs.csv (parameters column), the Dashboard: no file content, no Base64 text, no
    plaintext secret, no server path (SPEC 5, D-72; coverage inventory G-M6/G-L8)"""
@@ -35,7 +37,7 @@ from lib import (Session, api, gv, check, note, decide, text_of, J, BASE, SECRET
                  sha, make_file, fill_run_form, param_box, loc_id, tick, run_files, run_file_text)  # noqa: E402
 
 lib.LOGNAME[0] = "params"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "FDSEB413CRUXY"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "FDSEB413CRUXZY"
 REQ = "requester"
 MASK = "********"
 
@@ -310,6 +312,30 @@ def sec_C():
         set_cap("104857600")
 
 
+def sec_Z():
+    job = "r16-stash"
+    for verb, actor in (("reject", "approver-1"), ("cancel", REQ)):
+        f, _ = make_file(f"dispose-stash-{verb}.bin", 2500, f"r16-dispose-stash-{verb}")
+        b, _ = make_file(f"dispose-b64-{verb}.bin", 700, f"r16-dispose-b64-{verb}")
+        files0 = file_counts()
+        s, url, rid, errs, status = submit_page(job, f"e2e-16 dispose stashed on {verb}", params={"SECRET": SECRET, "NOTE": "n"},
+                                                files={"STASHED": str(f), "B64": str(b)})
+        s.done()
+        if not check("Z", f"a stashedFile request to {verb} was created", rid is not None, errors=errs[:3]):
+            continue
+        files_submitted = file_counts()
+        pending_files = run_files(rid)
+        st = decide(actor, "requests", rid, verb)
+        time.sleep(2)
+        files_after = file_counts()
+        check("Z", f"a stashedFile request's stashed upload is disposed of when it is {verb}ed, and its values file removed",
+              st in (200, 302) and files_submitted.get("stashedFileParameterValueFiles", 0) > files0.get("stashedFileParameterValueFiles", 0)
+              and files_after.get("stashedFileParameterValueFiles", 0) <= files0.get("stashedFileParameterValueFiles", 0)
+              and f"{rid}.values.xml" in pending_files and f"{rid}.values.xml" not in run_files(rid),
+              decide_status=st, files_before=files0, files_submitted=files_submitted, files_after=files_after,
+              pending_files=pending_files, after_files=run_files(rid))
+
+
 def sec_Y():
     import base64 as _b
     files = sorted((lib.OUT / "files").glob("b64-*.bin")) + sorted((lib.OUT / "files").glob("stashed-*.bin")) + \
@@ -400,6 +426,6 @@ if __name__ == "__main__":
     run_sections(list(dict.fromkeys(
         [c for c in [s for s in ["F", "D", "S", "E", "B"] if s in WANT]]
         + (["413"] if "4" in WANT or "413" in WANT else [])
-        + [c for c in ["C", "R", "U", "X", "Y"] if c in WANT])),
+        + [c for c in ["C", "R", "U", "X", "Z", "Y"] if c in WANT])),
         {"F": sec_F, "D": sec_D, "S": sec_S, "E": sec_E, "B": sec_B, "413": sec_413, "C": sec_C, "R": sec_R, "U": sec_U,
-         "X": sec_X, "Y": sec_Y})
+         "X": sec_X, "Z": sec_Z, "Y": sec_Y})

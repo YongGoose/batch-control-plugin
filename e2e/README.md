@@ -171,14 +171,36 @@ filesystem path in the visible text (`/var/`, `/tmp/`, `/home/`, `jenkins_home`,
 `WEB-INF/`, `C:\`); an HTML entity shown as text (double escaping); `<script` shown as text; and the probe that
 `ci/seed_markup.py` files as a run request and a grant request (reason and rejection comment
 `bc-markup-probe <b>b</b> & "q" <img src=x onerror=window.__bcCanary=1>`) not reading exactly as typed, or its
-`onerror` canary running. Text in `pre`, `code` and `textarea` is not checked. Empty cells in optional columns (Decided,
+`onerror` canary running; and (e2e-16) a scope written with a scope type that D-71 removed (`JOB:`, `FOLDER:`,
+`FOLDER_ONLY:`). Text in `pre`, `code` and `textarea` is not checked. Empty cells in optional columns (Decided,
 Aborted by, Comment, Parameters, ...) are logged once per pattern as `empty-optional` rows without a verdict.
+
+Raw enum values (e2e-16): an UPPER_SNAKE_CASE constant (`GRANT_REVOKE`, `APPROVED_REQUEST`, ...), the scope prefix
+`ITEM:` and the state and action words of the plugin's vocabulary (`PENDING`, `APPROVED`, ..., `CONFIGURE`, `CREATE`,
+`DELETE`) shown as text are logged once per URL pattern and value as `raw-enum` rows with result INFO, without a
+verdict: they are the known UX review items UX-4/UX-5, which the owner has deferred. `summary.md` lists them under
+`raw_enum_values` (value: URL patterns) for the report's UX section.
 
 `ci/selftest_content.py` checks the checks without Jenkins: it runs the crawl's own `CONTENT_JS` and `content_checks()`
 (read from `r14/crawl.py`'s source) in headless Chromium on a synthetic page that plants each finding next to
 look-alikes that must stay silent (a path in `<pre>`, a URL path, empty optional cells), and on a clean page with the
-probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings (2026-10-05:
-8 findings on the first page, none on the second). Run it after editing the checks; CI can run it in the `coverage` job.
+probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings and raw-enum
+rows (2026-10-06: 9 defect findings and the raw-enum values `FOLDER_ONLY`, `GRANT_REVOKE`, `ITEM:`, `PENDING` on the
+first page; no defect and only `JOB_NAME` on the second, where `GRANT_REVOKE` and `ITEM:` inside `<code>` and title-case
+words must stay silent). Run it after editing the checks; CI can run it in the `coverage` job.
+
+### Fixture preconditions
+
+The last setup step, `ci/preconditions.py`, asserts the seeded state the drivers assume before any unit runs (read-only:
+REST and the script console): the plugins a scenario needs are active (`batch-control`, `file-parameters`, folders,
+matrix-auth, Pipeline, multibranch, git, role-strategy, job-dsl); both switches on, `approver-1` listed, the Batch Control
+strategy installed; each account's permission profile (`requester`, `reqonly`, `approver-1`, `manager`, `nobc`,
+`configurer`, `auditor`, `admin`: what it must and must not hold, read on `batch-pipeline`, which no seeded window names);
+the seed jobs and folders (`batch-daily` approval-required with DATE/MODE/SECRET, `batch-cron`'s timer, `batch-pipeline`,
+`team-mb` a multibranch project); the ids of `r14/out/ids.json` resolving with the status their names say; the markup
+probe stored. A failure fails the setup, and every unit of the shard is then BLOCKED rather than passing for the wrong
+reason. `r16/arrange.py` ends the same way for the e2e-16 fixtures (parameter types of each r16 job, the window holders
+holding Item/Read only after their leftover windows are revoked).
 
 ### CI contract (for `.github/workflows`)
 
@@ -456,6 +478,43 @@ activations, windows, changes and incidents through the plugin's own endpoints; 
 page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State-changing controls: `actions.py`;
 entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
 `helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
+
+## e2e-16 driver (`r16/`)
+
+Hosting review round 6 (D-71..D-74, 2026-10-05/06). `r16/lib.py` loads `r6/lib.py` (screenshots in
+`screenshots/run-16/`, rows in `r16/out/<driver>.jsonl`); every assertion prints `PASS {...}` / `FAIL {...}` and a
+driver exits non-zero on a FAIL, so `ci/shard.py` judges them directly. `arrange.py` (idempotent, run first by every r16
+unit) creates the accounts `w16`, `w16b` (window holders: Item/Read and RequestGrant only) and `vh16` (Request and
+ViewHistory, no Build), the folders and jobs (core `file`, `stashedFile`, `base64File` and password parameters; jobs
+that fail once when armed), and ends with the fixture preconditions above. Drivers and sections:
+
+- `items.py [JFMKLD]`: one-item windows (D-71): kind with icon and no scope selector, a job window reaches only the job,
+  a folder window only the folder, CREATE directly in a regular folder only, CREATE/DELETE refused on a computed folder,
+  legacy scope types not approvable, DELETE only on a job.
+- `rename.py [UEGCA]`: no rename through any window (D-71c) by the Rename page and every URL form; allowed for an
+  administrator and for standing Item/Configure.
+- `follow.py [WVMXCN]`: windows follow an administrator's rename and move (job; folder with a nested job), a new item at
+  the old name gets nothing (D-74 (3)); a folder deleted by the administrator: its items' DELETE records name the
+  administrator, not SYSTEM, and the windows below it end (1864bdc); `configurer`'s Delete Folder is refused (D-71);
+  refused moves recorded once per minute (D-73, waits 62 s); a CREATE window under core's pattern naming strategy
+  (T-08-168, restored afterwards).
+- `params.py [FDSEB413CRUXY]`: typed values through the Request Run page and the job-page dialog (core file, stashedFile,
+  base64File, password); the values file `requests/run/<id>.values.xml` and its removal (D-74 (1)); 413 at both stages
+  (declared length; a chunked body judged on its kept size); repeated name and U+0000 as 400 form errors; disposal of
+  temporary files; the History, CSV and Dashboard surfaces.
+- `rerun.py [PFSVI]`: incident rerun with a secret, a core file (direct) and a stashed file (validated fallback form,
+  D-72a); the `fromRerun` reference validated (ViewHistory, same job, unknown and hostile values); incident actions need
+  ViewHistory (SPEC 11).
+- `d60.py [RNFB]`: a refused direct build leads to the prefilled Request Run form: a run parameter carried (T-06-103),
+  from the new job page's parameters dialog too (G-M5); files and secrets never carried.
+- `names.py`: the CREATE name restriction in the #107 optionalBlock.
+- `durable.py`: a window's end survives a failed grant write (the grants directory made read-only) and a restart
+  (`docker restart $BC_CONTAINER-jenkins`; 6325e85). JCasC re-applies the authorization strategy at boot and drops the
+  arrangement's permissions, so the driver runs `arrange.py` again after the restart and checks a control window; in CI
+  it is a `last` unit.
+
+Against any running stack: `BC_BASE=http://localhost:<port>/jenkins BC_BROWSER_CHANNEL=chromium python r16/arrange.py`,
+then the drivers (the setup of `ci/shard.py` must have run on that Jenkins for the seeded accounts and jobs).
 
 ## e2e-15 driver (`r15/`)
 
