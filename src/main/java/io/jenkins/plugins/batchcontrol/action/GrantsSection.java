@@ -27,6 +27,7 @@ import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.KindIcon;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
+import io.jenkins.plugins.batchcontrol.ui.WindowBinding;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
@@ -113,6 +114,9 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Per-request cache of every stored grant by id. */
     private Map<String, Grant> grantsById;
+
+    /** Per-request cache of the grant layer's copies of the active windows (D-71a display). */
+    private Map<String, Grant> effectiveActive;
 
     @Override
     public Object getTarget() {
@@ -873,6 +877,28 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return items == null
                 ? ""
                 : items.stream().map(String::valueOf).collect(Collectors.joining(", "));
+    }
+
+    /**
+     * D-71a, D-71b: whether the open window of an Active row still applies to its item. A window
+     * whose item was renamed, moved or deleted stays listed (and revocable) until it ends, but the
+     * row says it no longer applies instead of showing the remaining time ({@link WindowBinding};
+     * display only, nothing changes).
+     */
+    public boolean isWindowBound(Row row) {
+        Grant grant = row.grant;
+        if (grant == null) {
+            return false;
+        }
+        if (effectiveActive == null) {
+            effectiveActive = WindowBinding.effectiveActive();
+        }
+        return WindowBinding.isBound(grant, effectiveActive.get(grant.getId()));
+    }
+
+    /** Jelly: the Active row text of a window that no longer applies. */
+    public String getUnboundLabel() {
+        return WindowBinding.UNBOUND_LABEL;
     }
 
     // ---------------------------------------------------------------- helpers

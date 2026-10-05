@@ -28,6 +28,7 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
+import io.jenkins.plugins.batchcontrol.ui.WindowBinding;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
@@ -160,6 +161,24 @@ public class GrantRequestItem implements ModelObject {
     public boolean isWindowOpen() {
         Grant g = getGrant();
         return g != null && g.isActiveAt(BatchClock.now());
+    }
+
+    /**
+     * D-71a, D-71b: whether the open window still applies to its item. A window whose item was
+     * renamed, moved or deleted stays open (and revocable) until it ends, but this page says it no
+     * longer applies instead of showing the remaining time ({@link WindowBinding}; display only).
+     */
+    public boolean isWindowBound() {
+        Grant g = getGrant();
+        if (g == null) {
+            return false;
+        }
+        return WindowBinding.isBound(g, WindowBinding.effectiveActive().get(g.getId()));
+    }
+
+    /** Jelly: the State text of an open window that no longer applies. */
+    public String getUnboundLabel() {
+        return WindowBinding.UNBOUND_LABEL;
     }
 
     /**
