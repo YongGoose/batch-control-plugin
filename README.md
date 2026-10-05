@@ -420,7 +420,8 @@ as they were, password and file values included; they are fixed, not offered for
 editing. The rerun form has only
 the approver checkboxes: the reason is generated from the incident and cannot be
 typed in. When a value can no longer be recovered from the build (a stashed
-file, which the build removes when it completes, or a deleted build), no request
+file, which the build removes when it completes, or a deleted build, which
+includes a same-numbered build of a re-created job), no request
 is created there: the job's Request Run form opens with the other values filled
 in, the requester provides files and passwords again, and the request submitted
 from it is linked to the incident only after the server has validated the incident
