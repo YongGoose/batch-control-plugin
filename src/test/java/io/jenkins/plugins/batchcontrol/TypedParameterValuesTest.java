@@ -87,7 +87,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * exactly those values, the original secret and file included; every textual form shows a masked
  * map ({@code ********} for a sensitive value, {@code [file] <original name>} for a file). Matrix
  * rows T-05-41 .. T-05-50 (note 260); T-05-93, T-05-96 and T-05-97 (note 265: another
- * Secret-carrying type, no file content in the store, run control off).
+ * Secret-carrying type, no file content in the store, run control off); T-05-101 (note 268: the
+ * typed values live in {@code requests/run/<id>.values.xml}, D-74).
  *
  * <p>Requests are submitted through the job's Request Run form as a browser does (multipart, the
  * file chosen in the parameter's own file control) wherever the row is about the form, and through
@@ -248,9 +249,9 @@ public class TypedParameterValuesTest {
      * approved Pipeline build byte for byte ({@code withFileParameter}, {@code B64_FILENAME});
      * neither its Base64 text nor its content appears on the request detail page, the dashboard, the
      * history screens or the CSV exports, which show {@code [file] payload.bin}; in the store the
-     * Base64 lives only inside the request's own file while it is pending, nowhere once the approved
-     * run has started (D-72b (5); note 265 moved the "own file" check before the approval), and the
-     * decoded content never.
+     * Base64 lives only inside the request's own values file {@code <id>.values.xml} while it is
+     * pending (D-74; note 268), nowhere once the approved run has started (D-72b (5); note 265 moved
+     * the "own file" check before the approval), and the decoded content never.
      */
     @Test
     public void t_05_44_base64FileReachesTheRunAndNeverAppearsAsText() throws Exception {
@@ -267,10 +268,11 @@ public class TypedParameterValuesTest {
         String id = submitRequest(j, "u1", job, Map.of("DATE", PLAIN),
                 Map.of("B64", uploadFile("payload.bin", content)));
         assertEquals(fileDisplay("payload.bin"), RunRequestService.get().load(id).getParameters().get("B64"));
-        String requestFile = "requests/run/" + id + ".xml";
-        assertEquals(List.of(requestFile), storeFilesContaining(j, base64.substring(0, 32)),
-                "while pending, the Base64 must live inside the request's own file and nowhere else in the store");
-        assertTrue(storeFilesContaining(j, base64).contains(requestFile), "while pending, the request file must hold the whole Base64 (D-72)");
+        String valuesFile = "requests/run/" + TypedParameterFixtures.valuesFileName(id);
+        assertEquals(List.of(valuesFile), storeFilesContaining(j, base64.substring(0, 32)),
+                "while pending, the Base64 must live inside the request's own values file and nowhere else in the store (D-74)");
+        assertTrue(storeFilesContaining(j, base64).contains(valuesFile),
+                "while pending, the request's values file must hold the whole Base64 (D-72, D-74)");
 
         approve(id);
         j.waitUntilNoActivity();
@@ -299,15 +301,15 @@ public class TypedParameterValuesTest {
         }
 
         assertEquals(List.of(), storeFilesContaining(j, base64.substring(0, 32)),
-                "after the run the Base64 must be nowhere in the store: the request file drops its typed values once the approved"
-                + " run starts (D-72b (5)), and run records, incidents, changes and CSV sources hold the masked form");
+                "after the run the Base64 must be nowhere in the store: the request's values file is deleted once the approved"
+                + " run starts (D-72b (5), D-74), and run records, incidents, changes and CSV sources hold the masked form");
         assertEquals(List.of(), storeFilesContaining(j, B64_MARKER), "the decoded content must not be written anywhere in the store");
     }
 
     /**
      * T-05-45: a Password parameter given to the typed service overload reaches the approved build
-     * as the original plaintext (observed inside the build, never printed), while the request's file
-     * holds it only in Jenkins' encrypted form, no store file holds the plaintext, and the display
+     * as the original plaintext (observed inside the build, never printed), while the request's
+     * values file (D-74) holds it only in Jenkins' encrypted form, no store file holds the plaintext, and the display
      * map and the detail page show {@code ********}. Guard: the plain value is stored verbatim and
      * reaches the build.
      */
@@ -327,8 +329,8 @@ public class TypedParameterValuesTest {
         assertEquals(MASK, shown.get("TOKEN"), "a sensitive value is shown as " + MASK);
         assertEquals(PLAIN, shown.get("PLAIN"));
 
-        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.requestFile(j, request.getId()), SECRET),
-                "the request's file must hold the secret in Jenkins' encrypted form (D-72), so the run can receive it");
+        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.valuesFile(j, request.getId()), SECRET),
+                "the request's values file must hold the secret in Jenkins' encrypted form (D-72, D-74), so the run can receive it");
         assertEquals(List.of(), storeFilesContaining(j, SECRET), "no store file may hold the secret in plaintext");
         assertEquals(List.of(), storeFilesContaining(j, SECRET_DEFAULT), "no store file may hold the definition default in plaintext");
         assertFalse(storeFilesContaining(j, PLAIN).isEmpty(), "guard: the plain value is in the store, so the scan reads the right place");
@@ -536,7 +538,7 @@ public class TypedParameterValuesTest {
     /**
      * T-05-93 (S7 m-1): a parameter value of another type that carries a {@code Secret} field (not a
      * {@code PasswordParameterValue}, not flagged sensitive) given to the typed service overload:
-     * the request's file holds it only in Jenkins' encrypted form, no store file holds the
+     * the request's values file (D-74) holds it only in Jenkins' encrypted form, no store file holds the
      * plaintext, the display map, the detail page, {@code requests.csv} and the history show
      * {@code ********}; the approved build receives the original, and afterwards no store file
      * (run records included) and neither {@code runs.csv} nor the runs history holds the plaintext.
@@ -558,8 +560,8 @@ public class TypedParameterValuesTest {
 
         assertEquals(MASK, RunRequestService.get().load(id).getParameters().get("KEY"), "a Secret value is shown as " + MASK);
         assertEquals(PLAIN, RunRequestService.get().load(id).getParameters().get("PLAIN"));
-        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.requestFile(j, id), secret),
-                "the request's file must hold the Secret field in Jenkins' encrypted form");
+        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.valuesFile(j, id), secret),
+                "the request's values file must hold the Secret field in Jenkins' encrypted form (D-74)");
         assertEquals(List.of(), storeFilesContaining(j, secret), "no store file may hold the plaintext");
         assertFalse(storeFilesContaining(j, PLAIN).isEmpty(), "guard: the plain value is in the store, so the scan reads the right place");
         String detail = readable(j, "a1", "batch-control/requests/" + id + "/");
@@ -648,6 +650,77 @@ public class TypedParameterValuesTest {
         assertArrayEquals(content, bytes(build.getWorkspace().child("UPLOAD")), "the build must receive exactly the uploaded bytes");
         assertEquals(PLAIN, ((StringParameterValue) build.getAction(ParametersAction.class).getParameter("DATE")).getValue());
         assertEquals(before, ApproverFormFixtures.runRequestIds(), "no run request may be created with run control off");
+    }
+
+    /**
+     * T-05-101 (D-74 (1), note 268): a PENDING request with parameters (Password TOKEN, string
+     * TARGET; typed service overload) is stored as two files: {@code requests/run/<id>.xml} with the
+     * masked display map and no typed value (neither value's class name, no token that decrypts to
+     * the secret), and {@code requests/run/<id>.values.xml} whose root is
+     * {@code io.jenkins.plugins.batchcontrol.model.RunRequestValues}, whose {@code requestId} is the
+     * request's id and which holds the typed values (the secret encrypted). A parameterless request
+     * submitted on the Request Run form has {@code <id>.xml} only. Guard: the parameterless request,
+     * having no values file, is approved and runs (a missing values file refuses only a request with
+     * parameters), and still has no values file afterwards.
+     */
+    @Test
+    public void t_05_101_valuesFileExistsOnlyForARequestWithParameters() throws Exception {
+        String target = "staging-d74-Kq3";
+        FreeStyleProject typed = j.createFreeStyleProject("values-file-x");
+        addParameters(typed, new PasswordParameterDefinition("TOKEN", Secret.fromString(SECRET_DEFAULT), "token"),
+                new StringParameterDefinition("TARGET", "default-target"));
+        setBatchControl(typed, new BatchControlJobProperty(true));
+        FreeStyleProject bare = j.createFreeStyleProject("no-values-x");
+        setBatchControl(bare, new BatchControlJobProperty(true));
+        Set<String> listing = TypedParameterFixtures.requestDirListing(j);
+
+        List<ParameterValue> values = new ArrayList<>();
+        values.add(new PasswordParameterValue("TOKEN", SECRET));
+        values.add(new StringParameterValue("TARGET", target));
+        String id = createTyped(typed, values).getId();
+        Set<String> added = TypedParameterFixtures.requestDirListing(j);
+        added.removeAll(listing);
+        assertEquals(Set.of(id + ".xml", TypedParameterFixtures.valuesFileName(id)), added,
+                "a request with parameters is stored as <id>.xml and <id>.values.xml (D-74)");
+
+        String valuesXml = TypedParameterFixtures.valuesXml(j, id);
+        java.util.regex.Matcher root = java.util.regex.Pattern.compile("^\\s*(?:<\\?xml[^>]*\\?>\\s*)?<([A-Za-z_][\\w.$-]*)")
+                .matcher(valuesXml);
+        assertTrue(root.find(), "the values file must be XML: " + UsabilityFixtures.excerpt(valuesXml));
+        assertEquals("io.jenkins.plugins.batchcontrol.model.RunRequestValues", root.group(1), "the values file's root element (D-74)");
+        assertTrue(valuesXml.contains("<requestId>" + id + "</requestId>"), "the values file must name its request: "
+                + UsabilityFixtures.excerpt(valuesXml));
+        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.valuesFile(j, id), SECRET),
+                "the values file holds the secret in Jenkins' encrypted form");
+        assertTrue(valuesXml.contains("hudson.model.StringParameterValue") && valuesXml.contains(target),
+                "the values file holds the typed string value as XStream writes it: " + UsabilityFixtures.excerpt(valuesXml));
+
+        String requestXml = TypedParameterFixtures.requestXml(j, id);
+        for (String type : new String[] {"hudson.model.StringParameterValue", "hudson.model.PasswordParameterValue"}) {
+            assertFalse(requestXml.contains(type), "<id>.xml must hold no typed value (D-74), found " + type + ": "
+                    + UsabilityFixtures.excerpt(requestXml));
+        }
+        assertFalse(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.requestFile(j, id), SECRET),
+                "<id>.xml must not hold the secret, not even encrypted (D-74)");
+        assertEquals(Map.of("TOKEN", MASK, "TARGET", target), RunRequestService.get().load(id).getParameters(),
+                "guard: <id>.xml carries the masked display map");
+        assertEquals(List.of(), storeFilesContaining(j, SECRET), "no store file holds the secret in plaintext");
+
+        Set<String> before = TypedParameterFixtures.requestDirListing(j);
+        String bareId = submitRequest(j, "u1", bare, Map.of(), Map.of());
+        Set<String> bareAdded = TypedParameterFixtures.requestDirListing(j);
+        bareAdded.removeAll(before);
+        assertEquals(Set.of(bareId + ".xml"), bareAdded, "a parameterless request is stored as <id>.xml only, without a values file (D-74)");
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(bareId).getStatus());
+
+        approve(bareId);
+        j.waitUntilNoActivity();
+        FreeStyleBuild build = bare.getBuildByNumber(1);
+        assertNotNull(build, "guard: the parameterless request has no values file and still runs once approved");
+        j.assertBuildStatusSuccess(build);
+        assertEquals(bareId, build.getCause(ApprovedCause.class).getRequestId());
+        assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(bareId).getStatus());
+        assertFalse(Files.exists(TypedParameterFixtures.valuesPath(j, bareId)), "the parameterless request never gains a values file");
     }
 
     // ---------------------------------------------------------------- helpers

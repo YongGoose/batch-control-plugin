@@ -24,6 +24,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.file_parameters.StashedFileParameterDefinition;
 import io.jenkins.plugins.file_parameters.StashedFileParameterValue;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,8 +55,10 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.MASK;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.added;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.deleteValuesFile;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.duplicateTypedValue;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.editRequestFile;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.editValuesFile;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileDisplay;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileItem;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.holdsEncrypted;
@@ -63,11 +66,13 @@ import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.markReason;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.renameTypedValue;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestDirListing;
-import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestFile;
-import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestXml;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.retypeTypedValue;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.tempFiles;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.uploadFile;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.valuesFile;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.valuesFileName;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.valuesPath;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.valuesXml;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -89,14 +94,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * text, carries the form again (T-05-18, T-UI-117) and adds an explanation that names the field or
  * sits in the field's own parameter block (T-UI-07 precedent). Wording is not pinned.
  *
- * <p>Rows about stored values edit {@code requests/run/<id>.xml} on disk (ARCHITECTURE section 5),
- * as a pre-release file or an administrator's edit would leave it, and first prove that the plugin
- * reads the edited file (a marker appended to the stored reason is read back). Each refusal is
- * paired with an unedited twin request of the same job that is approved and runs with its own
- * value.
+ * <p>Rows about stored values edit the request's values file {@code requests/run/<id>.values.xml}
+ * on disk (D-74 (1); note 268), as an administrator's edit or a damaged disk would leave it, or
+ * delete it (a request whose stored values are missing), and first prove that the plugin reads the
+ * request from disk (a marker appended to the reason in {@code requests/run/<id>.xml} is read
+ * back). Each refusal is paired with an unedited twin request of the same job that is approved and
+ * runs with its own value.
  *
- * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72 and D-72b, and the Given/When/Then
- * of docs/reports/security-35.md and docs/reports/spec-review-S7.md only (no src/main knowledge).
+ * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72, D-72b and D-74, and the
+ * Given/When/Then of docs/reports/security-35.md and docs/reports/spec-review-S7.md only (no
+ * src/main knowledge).
  */
 @WithJenkins
 public class TypedParameterIntegrityTest {
@@ -254,7 +261,7 @@ public class TypedParameterIntegrityTest {
      * Secret-carrying value of another type ({@code TokenParameterValue}, shown as a mask) of
      * 10,001 characters are each refused (IllegalArgumentException or Failure) and nothing is
      * stored. Boundary guard: both at exactly 10,000 characters are accepted, and the password is
-     * held encrypted in the request's file.
+     * held encrypted in the request's values file (D-74).
      */
     @Test
     public void t_05_74_nonDisplayedValuesOverTheLimitAreRefusedByTheService() throws Exception {
@@ -280,7 +287,8 @@ public class TypedParameterIntegrityTest {
         RunRequest ok = createTyped(job, atLimit);
         assertEquals(RequestStatus.PENDING, ok.getStatus(), "boundary: 10,000 characters are accepted");
         assertEquals(MASK, RunRequestService.get().load(ok.getId()).getParameters().get("TOKEN"));
-        assertTrue(holdsEncrypted(requestFile(j, ok.getId()), "p".repeat(10_000)), "boundary: the password is held encrypted");
+        assertTrue(holdsEncrypted(valuesFile(j, ok.getId()), "p".repeat(10_000)),
+                "boundary: the password is held encrypted in the values file (D-74)");
     }
 
     /**
@@ -335,7 +343,8 @@ public class TypedParameterIntegrityTest {
      * T-05-77 (S-35-03, service): {@code create} with a value containing U+0000 after a valid one,
      * with a value containing U+FFFF, and with a reason containing U+0000 is each refused
      * (IllegalArgumentException or Failure) and leaves the {@code requests/run/} listing unchanged
-     * (no temporary file). Guard: valid values add exactly {@code <id>.xml}.
+     * (no temporary file). Guard: valid values add exactly {@code <id>.xml} and
+     * {@code <id>.values.xml} (D-74).
      */
     @Test
     public void t_05_77_xmlIllegalCharacterIsRefusedByTheServiceWithoutLeftovers() throws Exception {
@@ -360,14 +369,15 @@ public class TypedParameterIntegrityTest {
         RunRequest ok = createTyped(job, List.of(new StringParameterValue("X", "fine"), new StringParameterValue("Y", "also fine")));
         Set<String> after = requestDirListing(j);
         after.removeAll(listing);
-        assertEquals(Set.of(ok.getId() + ".xml"), after, "guard: a valid request adds exactly its own file");
+        assertEquals(Set.of(ok.getId() + ".xml", valuesFileName(ok.getId())), after,
+                "guard: a valid request adds exactly its own two files, the request and its values (D-74)");
     }
 
     // ================================================================ approval fails closed
 
     /**
-     * T-05-78 (S-35-01 defence in depth): a PENDING request's file is edited to hold a second typed
-     * TARGET ({@code production}) while the display still shows {@code staging}: approval is
+     * T-05-78 (S-35-01 defence in depth): a PENDING request's values file is edited to hold a second
+     * typed TARGET ({@code production}) while the display still shows {@code staging}: approval is
      * refused (service and HTTP, plain message), the request is neither APPROVED nor EXECUTED,
      * nothing runs and no build ever sees {@code production}. Guard: the unedited twin is approved
      * and runs with its own value.
@@ -378,7 +388,7 @@ public class TypedParameterIntegrityTest {
         String id = createTyped(job, List.of(new StringParameterValue("TARGET", "staging"))).getId();
         String twin = createTyped(job, List.of(new StringParameterValue("TARGET", "guarded"))).getId();
         editStored(id, xml -> duplicateTypedValue(xml, "TARGET", "production"));
-        assertTrue(requestXml(j, id).contains("production"), "premise: the second typed value is in the file");
+        assertTrue(valuesXml(j, id).contains("production"), "premise: the second typed value is in the values file");
         assertEquals(Map.of("TARGET", "staging"), RunRequestService.get().load(id).getParameters(), "premise: the approver sees staging only");
 
         assertApprovalRefused("a request whose typed values repeat TARGET", job, id);
@@ -387,7 +397,7 @@ public class TypedParameterIntegrityTest {
     }
 
     /**
-     * T-05-79 (S-35-01): the stored typed value TARGET is renamed to OTHER while the display still
+     * T-05-79 (S-35-01): the typed value TARGET in the values file is renamed to OTHER while the display still
      * names TARGET (with MODE in both): approval is refused, nothing runs. Guard: the unedited twin
      * runs with its own value.
      */
@@ -405,7 +415,7 @@ public class TypedParameterIntegrityTest {
     }
 
     /**
-     * T-05-80 (S-35-04 (a)): the stored typed value TARGET names a class that cannot be loaded (its
+     * T-05-80 (S-35-04 (a)): the typed value TARGET in the values file names a class that cannot be loaded (its
      * plugin removed or the class renamed): approval is refused (fail closed) and nothing runs, so
      * the build never falls back to the default. Guard: the unedited twin runs with its own value.
      */
@@ -415,7 +425,7 @@ public class TypedParameterIntegrityTest {
         String id = createTyped(job, List.of(new StringParameterValue("TARGET", "staging"))).getId();
         String twin = createTyped(job, List.of(new StringParameterValue("TARGET", "guarded"))).getId();
         editStored(id, xml -> retypeTypedValue(xml, "TARGET", "io.jenkins.plugins.batchcontrol.NoSuchParameterValueD72b"));
-        assertTrue(requestXml(j, id).contains("NoSuchParameterValueD72b"), "premise: the file names the unloadable class");
+        assertTrue(valuesXml(j, id).contains("NoSuchParameterValueD72b"), "premise: the values file names the unloadable class");
 
         assertApprovalRefused("a request with a typed value that cannot be loaded", job, id);
         assertTwinRuns(job, twin, "guarded");
@@ -423,17 +433,18 @@ public class TypedParameterIntegrityTest {
     }
 
     /**
-     * T-05-81 (D-72b (3), S7 m-4, S-35-04 (b)): a request file in the shape written before D-72 (the
-     * display map, no typed values): approval is refused and nothing runs (no build with the job's
-     * default). Guard: the unedited twin runs with its own value.
+     * T-05-81 (D-72b (3), D-74 (1), S7 m-4, S-35-04 (b)): a request with parameters whose values file
+     * is missing (the shape a request stored before D-72 has: the display map, no typed values; here
+     * {@code <id>.values.xml} is deleted): approval is refused and nothing runs (no build with the
+     * job's default). Guard: the unedited twin runs with its own value.
      */
     @Test
     public void t_05_81_requestStoredBeforeD72CannotBeApproved() throws Exception {
         FreeStyleProject job = storedJob("stored-pre72");
         String id = createTyped(job, List.of(new StringParameterValue("TARGET", "staging"))).getId();
         String twin = createTyped(job, List.of(new StringParameterValue("TARGET", "guarded"))).getId();
-        editStored(id, TypedParameterFixtures::withoutTypedValues);
-        assertFalse(requestXml(j, id).contains("<parameterValues"), "premise: the file holds no typed values");
+        deleteStoredValues(id);
+        assertFalse(Files.exists(valuesPath(j, id)), "premise: the request has no values file");
         assertEquals(Map.of("TARGET", "staging"), RunRequestService.get().load(id).getParameters(), "premise: the display map stays");
 
         assertApprovalRefused("a request stored before D-72", job, id);
@@ -460,9 +471,21 @@ public class TypedParameterIntegrityTest {
         return job;
     }
 
-    /** Edits request {@code id}'s file and proves the plugin reads the edited file (the reason marker). */
+    /** Edits request {@code id}'s values file and proves the plugin reads the request from disk (the reason marker). */
     private void editStored(String id, UnaryOperator<String> edit) throws Exception {
-        editRequestFile(j, id, xml -> markReason(edit.apply(xml), EDIT_MARK));
+        editValuesFile(j, id, edit);
+        proveReread(id);
+    }
+
+    /** Deletes request {@code id}'s values file and proves the plugin reads the request from disk (the reason marker). */
+    private void deleteStoredValues(String id) throws Exception {
+        deleteValuesFile(j, id);
+        proveReread(id);
+    }
+
+    /** Marks the reason in {@code <id>.xml} and reads it back, so the request is not served from a stale copy. */
+    private void proveReread(String id) throws Exception {
+        editRequestFile(j, id, xml -> markReason(xml, EDIT_MARK));
         RunRequest reread = RunRequestService.get().load(id);
         assertNotNull(reread, "premise: the edited request still loads");
         assertTrue(reread.getReason().endsWith(EDIT_MARK), "premise: the plugin reads the edited file (reason was '"
