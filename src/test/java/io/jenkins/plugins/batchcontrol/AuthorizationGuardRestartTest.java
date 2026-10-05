@@ -4,7 +4,6 @@ import hudson.model.Item;
 import hudson.model.User;
 import hudson.security.AuthorizationMatrixProperty;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -63,7 +62,7 @@ public class AuthorizationGuardRestartTest {
             StrategyFixtures.changeControlOn();
             WorkflowJob pipe = r.jenkins.createProject(WorkflowJob.class, "pipe");
             pipe.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
-            StrategyFixtures.grant("bob", GrantScope.Type.JOB, "pipe", Arrays.asList(GrantAction.CONFIGURE));
+            StrategyFixtures.grant("bob", "pipe", Arrays.asList(GrantAction.CONFIGURE));
             String xml = pipe.getConfigFile().asString().replace("<script>echo &apos;hello&apos;</script>",
                     "<script>properties([authorizationMatrix(entries: [user(name: &apos;bob&apos;, permissions: "
                             + "[&apos;Job/Configure&apos;])])])</script>");

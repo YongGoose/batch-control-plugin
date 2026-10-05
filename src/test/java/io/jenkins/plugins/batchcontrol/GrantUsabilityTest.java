@@ -117,7 +117,7 @@ public class GrantUsabilityTest {
     public void t_08_49_grantsScreenShowsExpiredWindowAndReRequestLink() throws Exception {
         j.createFreeStyleProject("win-job");
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
-        String id = submitGrantOk(j, "u1", "JOB", "win-job", Arrays.asList("CONFIGURE"), 30, "fix the schedule", null, "a1");
+        String id = submitGrantOk(j, "u1", "win-job", Arrays.asList("CONFIGURE"), 30, "fix the schedule", null, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval");
         assertTrue(GrantService.get().hasActiveGrant("u1", "win-job", Item.CONFIGURE), "fixture: the window is active");
 
@@ -160,11 +160,14 @@ public class GrantUsabilityTest {
      * T-08-50 (DEF-19, D-40): under a name-restricted CREATE grant, the New Item name check and the
      * rename check answer with a message naming the restriction (not a 403, not "the same as the
      * current name"), a matching name is accepted, the refused POSTs name the restriction instead
-     * of "missing the Job/Create permission", and typing logs no AccessDeniedException.
+     * of "missing the Job/Create permission", and typing logs no AccessDeniedException. Since D-71
+     * the window on the folder carries [CREATE, CONFIGURE] (DELETE applies only to a job and can no
+     * longer be requested on a folder); the rename of {@code team/app-7} rests on the D-35c
+     * Configure of the item u1 created, as before (note 260).
      */
     @Test
     public void t_08_50_nameRestrictionIsExplainedWhileTypingAndOnRefusal() throws Exception {
-        String id = submitGrantOk(j, "u1", "FOLDER", "team", Arrays.asList("CREATE", "CONFIGURE", "DELETE"), 30,
+        String id = submitGrantOk(j, "u1", "team", Arrays.asList("CREATE", "CONFIGURE"), 30,
                 "create the app job", PATTERN, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval");
         List<NameValuePair> create = new ArrayList<>();
@@ -268,7 +271,7 @@ public class GrantUsabilityTest {
         j.createFreeStyleProject("off-job");
         java.util.Set<Object> before = byUser("u1").stream().map(r -> (Object) r.getId()).collect(Collectors.toSet());
 
-        WebResponse refused = submitGrant(j, "u1", "JOB", "off-job", Arrays.asList("CONFIGURE"), 30, "needs a change", null, "a1");
+        WebResponse refused = submitGrant(j, "u1", "off-job", Arrays.asList("CONFIGURE"), 30, "needs a change", null, "a1");
         assertClientError(refused, "a grant request while change control is off");
         assertTrue(refused.getContentAsString().toLowerCase(Locale.ROOT).contains("change control"),
                 "the refusal names the switch: " + excerpt(refused.getContentAsString()));

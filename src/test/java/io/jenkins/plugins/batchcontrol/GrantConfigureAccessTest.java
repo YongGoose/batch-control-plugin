@@ -208,8 +208,8 @@ public class GrantConfigureAccessTest {
         JenkinsRule.WebClient wc = webClient().login("u1");
 
         // scope boundary: the grant names batch-x only
-        assertEquals(403, status(get(wc, jobY.getUrl() + "configure")), "a JOB-scoped grant must not open another job's configure screen");
-        assertEquals(403, status(get(wc, jobY.getUrl() + "config.xml")), "a JOB-scoped grant must not open another job's config XML");
+        assertEquals(403, status(get(wc, jobY.getUrl() + "configure")), "a window on one job must not open another job's configure screen");
+        assertEquals(403, status(get(wc, jobY.getUrl() + "config.xml")), "a window on one job must not open another job's config XML");
         assertFalse(hasPermissionAs("u1", jobY, Item.EXTENDED_READ), "EXTENDED_READ must not leak to a job outside the scope");
         assertFalse(hasPermissionAs("u1", jobY, Item.CONFIGURE), "Item/Configure must not leak to a job outside the scope");
 
@@ -264,7 +264,7 @@ public class GrantConfigureAccessTest {
     private Grant grantConfigureOnJobX() {
         GrantRequest request;
         try (ACLContext ignored = as("u1")) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), WINDOW_MINUTES,
                     "scheduled maintenance", "a1");
         }

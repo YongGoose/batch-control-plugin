@@ -59,7 +59,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Every refusal row is paired with a twin in which the same move goes through, so a row cannot
  * pass merely because moves are broken.
  *
- * <p>Written from docs/SPEC.md item 8, docs/DECISIONS.md D-59 (D-40, D-40a, D-21, D-48) and
+ * <p>Since D-71 a permission window names exactly one item (scope type ITEM): a CREATE window on a
+ * folder admits creating directly inside it, a DELETE window applies only to a job, so the
+ * "Delete at the source" half of a move comes from a DELETE window on the moved job itself
+ * (TEST-MATRIX note 260).
+ *
+ * <p>Written from docs/SPEC.md item 8, docs/DECISIONS.md D-59 (D-40, D-40a, D-21, D-48, D-71) and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
@@ -106,14 +111,14 @@ public class MoveChangeControlTest {
 
     /**
      * T-SEC-53 (MV-1, CREATE+CONFIGURE): u1 holds only native Move (+Read) and an approved
-     * FOLDER {@code team} [CREATE, CONFIGURE] grant; moving {@code prod/x} into {@code team} is
+     * window on the folder {@code team} [CREATE, CONFIGURE]; moving {@code prod/x} into {@code team} is
      * refused: nothing moves, 4xx with a plain message, one GRANT_VIOLATION naming u1 and
      * {@code prod/x}. Twin: once u1 also holds native Delete on {@code prod}, the same move goes
      * through and records no violation.
      */
     @Test
     public void t_sec_53_moveOnlyUserWithCreateConfigureGrantCannotMoveIn() throws Exception {
-        grant("u1", "FOLDER", "team", null, "CREATE", "CONFIGURE");
+        grant("u1", "team", null, "CREATE", "CONFIGURE");
 
         WebResponse refused = move("u1", prod.getItem("x"), team);
         assertRefusedMove(refused, "x", "u1", "prod/x");
@@ -125,13 +130,23 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-54 (MV-1, CREATE+DELETE): as T-SEC-53 with a FOLDER {@code team} [CREATE, DELETE]
-     * grant: the grant's Delete covers the destination, not the item's source, so the move is
-     * refused and recorded. Twin: with native Delete on {@code prod} it goes through.
+     * T-SEC-54 (MV-1, CREATE+DELETE), rewritten for D-71: the former fixture, a [CREATE, DELETE]
+     * window on the folder {@code team}, can no longer be requested (DELETE applies only to a job),
+     * which the row now asserts first. The rest keeps its intent: u1 holds a CREATE window on
+     * {@code team} and a DELETE window on another job ({@code team/other}); a Delete window that
+     * does not name the moved item does not cover its source, so the move is refused and
+     * recorded. Twin: with native Delete on {@code prod} it goes through.
      */
     @Test
     public void t_sec_54_moveOnlyUserWithCreateDeleteGrantCannotMoveIn() throws Exception {
-        grant("u1", "FOLDER", "team", null, "CREATE", "DELETE");
+        team.createProject(FreeStyleProject.class, "other");
+        int requestsBefore = io.jenkins.plugins.batchcontrol.policy.GrantRequestService.get().list().size();
+        assertClientError(ApproverFormFixtures.submitGrant(j, "u1", "team", Arrays.asList("CREATE", "DELETE"), 30,
+                "maintenance in team", null, "a1"), "D-71: a DELETE window on the folder team");
+        assertEquals(requestsBefore, io.jenkins.plugins.batchcontrol.policy.GrantRequestService.get().list().size(),
+                "D-71: the refused [CREATE, DELETE] request on a folder must not be stored");
+        grant("u1", "team", null, "CREATE");
+        grant("u1", "team/other", null, "DELETE");
 
         WebResponse refused = move("u1", prod.getItem("x"), team);
         assertRefusedMove(refused, "x", "u1", "prod/x");
@@ -143,8 +158,8 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-55 (MV-2): u1 holds native Move, native Item/Create on {@code team} and a FOLDER
-     * {@code team} [CONFIGURE] grant, no Delete on {@code prod/x}: the move into {@code team}
+     * T-SEC-55 (MV-2): u1 holds native Move, native Item/Create on {@code team} and a
+     * [CONFIGURE] window on the folder {@code team}, no Delete on {@code prod/x}: the move into {@code team}
      * (which would let u1 edit the job and move it back) is refused and recorded. Twin: with
      * native Delete on {@code prod} it goes through.
      */
@@ -152,7 +167,7 @@ public class MoveChangeControlTest {
     public void t_sec_55_nativeCreatePlusConfigureGrantCannotPullAJobIn() throws Exception {
         folderPermission(team, "u1", Item.CREATE);
         assertTrue(has(team, "u1", Item.CREATE), "premise: u1 holds native Create on team");
-        grant("u1", "FOLDER", "team", null, "CONFIGURE");
+        grant("u1", "team", null, "CONFIGURE");
 
         WebResponse refused = move("u1", prod.getItem("x"), team);
         assertRefusedMove(refused, "x", "u1", "prod/x");
@@ -164,7 +179,7 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-56 (MV-3): u1 holds a JOB-scope [CONFIGURE] grant on {@code team/a}, native Move and
+     * T-SEC-56 (MV-3): u1 holds a [CONFIGURE] window on the job {@code team/a}, native Move and
      * native Create on {@code team} and {@code parking}, no Delete on either job. Moving
      * {@code team/a} away is refused and recorded; with {@code team/a} moved away by the system,
      * moving {@code prod/a} into its name is refused and recorded too. Twin: u2, holding native
@@ -180,7 +195,7 @@ public class MoveChangeControlTest {
             folderPermission(team, userId, Item.CREATE);
             folderPermission(parking, userId, Item.CREATE);
         }
-        grant("u1", "JOB", "team/a", null, "CONFIGURE");
+        grant("u1", "team/a", null, "CONFIGURE");
 
         // step 1: move the granted job away
         WebResponse away = move("u1", team.getItem("a"), parking);
@@ -231,19 +246,21 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-58 (allowed, from grants): u1 holds native Move, a FOLDER {@code prod} [DELETE] grant
-     * and a FOLDER {@code team} [CREATE] grant: the move goes through and records no violation.
-     * Guard twin: with only the CREATE grant the move is refused.
+     * T-SEC-58 (allowed, from grants): u1 holds native Move, a [DELETE] window on the job
+     * {@code prod/x} (D-71: DELETE names the job itself; the former window on the folder
+     * {@code prod} can no longer be requested) and a [CREATE] window on the folder {@code team}:
+     * the move goes through and records no violation. Guard twin: with only the CREATE window
+     * the move is refused.
      */
     @Test
     public void t_sec_58_grantedDeleteAndCreateAllowTheMove() throws Exception {
-        grant("u1", "FOLDER", "team", null, "CREATE");
+        grant("u1", "team", null, "CREATE");
         assertClientError(move("u1", prod.getItem("x"), team), "guard: the CREATE grant alone does not admit the move");
         assertNotNull(prod.getItem("x"));
         assertNull(team.getItem("x"));
         assertEquals(1, records(ChangeType.GRANT_VIOLATION).size(), "guard: the refused move is recorded");
 
-        grant("u1", "FOLDER", "prod", null, "DELETE");
+        grant("u1", "prod/x", null, "DELETE");
         assertSuccess(move("u1", prod.getItem("x"), team), "a move with granted Delete at the source and granted Create at the destination");
         assertMoved("x");
         assertEquals(1, records(ChangeType.GRANT_VIOLATION).size(), "the permitted move adds no violation");
@@ -279,8 +296,8 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-SEC-61 (D-40 on moves): u1 holds native Move and native Delete on {@code prod} and a FOLDER
-     * {@code team} [CREATE] grant restricted to {@code /nightly-[a-z]+/}. Moving {@code prod/x}
+     * T-SEC-61 (D-40 on moves): u1 holds native Move and native Delete on {@code prod} and a
+     * [CREATE] window on the folder {@code team} restricted to {@code /nightly-[a-z]+/}. Moving {@code prod/x}
      * (non-matching name) is refused with 4xx and a GRANT_VIOLATION (previously a silent redirect
      * without a record); moving {@code prod/nightly-a} goes through.
      */
@@ -288,7 +305,7 @@ public class MoveChangeControlTest {
     public void t_sec_61_moveUnderNameRestrictedCreateGrantMatchesTheName() throws Exception {
         prod.createProject(FreeStyleProject.class, "nightly-a");
         folderPermission(prod, "u1", Item.DELETE);
-        grant("u1", "FOLDER", "team", "/nightly-[a-z]+/", "CREATE");
+        grant("u1", "team", "/nightly-[a-z]+/", "CREATE");
 
         WebResponse refused = move("u1", prod.getItem("x"), team);
         assertRefusedMove(refused, "x", "u1", "prod/x");
@@ -341,15 +358,16 @@ public class MoveChangeControlTest {
     }
 
     /**
-     * T-09-24 (backlog #84): u1's move of {@code prod/x} into {@code team} is authorised by a FOLDER
-     * {@code prod} [DELETE] window and a FOLDER {@code team} [CREATE] window; the MOVE change record
+     * T-09-24 (backlog #84): u1's move of {@code prod/x} into {@code team} is authorised by a
+     * [DELETE] window on the job {@code prod/x} (D-71) and a [CREATE] window on the folder
+     * {@code team}; the MOVE change record
      * names both windows (each grant id appears in its grant id or detail) and its grantId is the
      * CREATE window's. Guard: the administrator's move back leaves a MOVE record naming neither.
      */
     @Test
     public void t_09_24_moveRecordNamesEveryWindowThatAuthorisedIt() throws Exception {
-        String deleteWindow = grantId("u1", "FOLDER", "prod", "DELETE");
-        String createWindow = grantId("u1", "FOLDER", "team", "CREATE");
+        String deleteWindow = grantId("u1", "prod/x", "DELETE");
+        String createWindow = grantId("u1", "team", "CREATE");
         assertFalse(deleteWindow.equals(createWindow), "premise: two distinct windows");
         List<ChangeRecord> movesBefore = records(ChangeType.MOVE);
 
@@ -387,10 +405,10 @@ public class MoveChangeControlTest {
     }
 
     /** Files and approves a grant and returns the id of the one new active window. */
-    private String grantId(String userId, String scopeType, String scope, String... actions) throws Exception {
+    private String grantId(String userId, String scope, String... actions) throws Exception {
         Set<String> before = new java.util.HashSet<>();
         GrantService.get().listActive().forEach(g -> before.add(g.getId()));
-        grant(userId, scopeType, scope, null, actions);
+        grant(userId, scope, null, actions);
         List<String> fresh = new java.util.ArrayList<>();
         GrantService.get().listActive().forEach(g -> {
             if (!before.contains(g.getId())) {
@@ -434,9 +452,10 @@ public class MoveChangeControlTest {
         assertNotNull(team.getItem(name), "the moved item must be in team");
     }
 
-    private void grant(String userId, String scopeType, String scope, String pattern, String... actions) throws Exception {
+    /** Files and approves a window on the one item {@code scope} (D-71: no scope type). */
+    private void grant(String userId, String scope, String pattern, String... actions) throws Exception {
         long before = GrantService.get().listActive().stream().filter(g -> userId.equals(g.getUser())).count();
-        String id = submitGrantOk(j, userId, scopeType, scope, Arrays.asList(actions), 30,
+        String id = submitGrantOk(j, userId, scope, Arrays.asList(actions), 30,
                 "maintenance in " + scope, pattern, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval by a1");
         long after = GrantService.get().listActive().stream().filter(g -> userId.equals(g.getUser())).count();

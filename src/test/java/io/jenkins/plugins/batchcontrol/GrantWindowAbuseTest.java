@@ -113,7 +113,7 @@ public class GrantWindowAbuseTest {
      */
     @Test
     public void t_rt_05_jobPlantedInGrantWindowStartsLocked() throws Exception {
-        grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "team/batch"),
                 Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30);
 
         // u1 plants a cron job inside the grant window
@@ -161,7 +161,10 @@ public class GrantWindowAbuseTest {
 
     /**
      * T-RT-06: a batch of config saves spans the grant expiry; every write is re-checked
-     * individually, so writes before the boundary succeed and writes after it are 403.
+     * individually, so writes before the boundary succeed and writes after it are 403. Since
+     * D-71 a window names one item, so the batch runs under four 30-minute CONFIGURE windows
+     * granted at the same instant, one per job (before D-71: one FOLDER window on
+     * {@code team/batch}); the property measured, the per-write expiry check, is unchanged.
      */
     @Test
     public void t_rt_06_writesAfterExpiryAreRejectedPerWrite() throws Exception {
@@ -172,8 +175,10 @@ public class GrantWindowAbuseTest {
             jobs[i].setDescription("base");
         }
 
-        grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
-                Arrays.asList(GrantAction.CONFIGURE), 30);
+        for (FreeStyleProject job : jobs) {
+            grantTo("u1", new GrantScope(GrantScope.Type.ITEM, job.getFullName()),
+                    Arrays.asList(GrantAction.CONFIGURE), 30);
+        }
         JenkinsRule.WebClient wc = webClient().login("u1");
 
         // inside the window: the first two writes of the batch succeed
@@ -204,7 +209,7 @@ public class GrantWindowAbuseTest {
         FreeStyleProject side = j.createFreeStyleProject("side-job");
         side.setDescription("side-base");
 
-        grantTo("u1", new GrantScope(GrantScope.Type.JOB, "hot-job"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "hot-job"),
                 Arrays.asList(GrantAction.CONFIGURE), 60);
         JenkinsRule.WebClient u1 = webClient().login("u1");
         JenkinsRule.WebClient admin = webClient().login("admin");

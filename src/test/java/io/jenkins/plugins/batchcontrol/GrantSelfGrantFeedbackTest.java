@@ -5,7 +5,6 @@ import hudson.model.Item;
 import hudson.security.AuthorizationMatrixProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -46,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * administrator; the browser form shows it on a standard Jenkins page." Matrix rows T-02-47 ..
  * T-02-49 (note 147).
  *
- * <p>bob holds Configure on the job only through a JOB grant (StrategyFixtures); the job carries
+ * <p>bob holds Configure on the job only through a window on it (StrategyFixtures); the job carries
  * its own matrix property with alice's Configure entry and a Read entry for bob, so the form
  * offers a row for bob in which he can tick Configure for himself. Every save also changes the
  * description, which must persist ("the other changes were saved").
@@ -176,7 +175,7 @@ public class GrantSelfGrantFeedbackTest {
         amp.add(Item.READ, PermissionEntry.user("bob"));
         p.addProperty(amp);
         assertFalse(has(p, "bob", Item.CONFIGURE), "premise: bob holds no native Configure");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, name, Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", name, Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(p, "bob", Item.CONFIGURE), "premise: the grant confers Configure on the job");
         return p;
     }

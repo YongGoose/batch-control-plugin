@@ -182,7 +182,6 @@ public class GrantWebTest {
         JenkinsRule.WebClient wc = webClient().login("u1");
         WebRequest request = new WebRequest(wc.createCrumbedUrl("batch-control/grants/create"), HttpMethod.POST);
         java.util.List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
-        params.add(new org.htmlunit.util.NameValuePair("scopeType", "JOB"));
         params.add(new org.htmlunit.util.NameValuePair("scopeFullName", "batch-x"));
         params.add(new org.htmlunit.util.NameValuePair("actions", "CONFIGURE"));
         params.add(new org.htmlunit.util.NameValuePair("durationMinutes", "60"));
@@ -250,7 +249,7 @@ public class GrantWebTest {
 
     private GrantRequest pendingRequest() {
         try (ACLContext ignored = as("u1")) {
-            return GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            return GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance", "a1");
         }
     }

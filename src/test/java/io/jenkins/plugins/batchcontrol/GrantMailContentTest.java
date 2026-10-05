@@ -23,11 +23,13 @@ import org.jvnet.mock_javamail.Mailbox;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrantOk;
 import static io.jenkins.plugins.batchcontrol.UsabilityFixtures.excerpt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Matrix row T-13-20 (e2e-03 DEF-24, note 139): the grant request mail tells the approver what
- * they decide on — the actions, the duration and the name restriction — besides the D-36 fields.
+ * Matrix rows T-13-20 (e2e-03 DEF-24, note 139) and T-08-123 (D-71, note 260): the grant request
+ * mail tells the approver what they decide on — the actions, the duration, the name restriction
+ * and the kind of the window's item — besides the D-36 fields.
  * Derived from SPEC 8 (D-40: the restriction "is shown to the approver") and SPEC 13 (D-36); the
  * D-36 field list itself does not name them, see note 139.
  *
@@ -67,18 +69,46 @@ public class GrantMailContentTest {
         Mailbox.clearAll();
     }
 
-    /** T-13-20 (DEF-24): the REQUEST_CREATED mail of a grant request names actions, duration and restriction. */
+    /**
+     * T-13-20 (DEF-24): the REQUEST_CREATED mail of a grant request names actions, duration and
+     * restriction. Since D-71 the two actions are CREATE and CONFIGURE (a request for DELETE on a
+     * folder is refused at submission; before D-71 the row used CREATE and DELETE, note 260).
+     */
     @Test
     public void t_13_20_grantRequestMailNamesActionsDurationAndRestriction() throws Exception {
-        String id = submitGrantOk(j, "u1", "FOLDER", "team", Arrays.asList("CREATE", "DELETE"), 37,
+        String id = submitGrantOk(j, "u1", "team", Arrays.asList("CREATE", "CONFIGURE"), 37,
                 "month-end report", "app-2", "a2");
 
         String body = plainTextBody(awaitSingleMail(A2_MAIL));
         assertTrue(body.contains(id) && body.contains("team"), "premise (T-13-16): id and scope are in the mail; body was: " + body);
         String lower = body.toLowerCase(Locale.ROOT);
-        assertTrue(lower.contains("create") && lower.contains("delete"), "the mail must name the requested actions: " + excerpt(body));
+        assertTrue(lower.contains("create") && lower.contains("configure"), "the mail must name the requested actions: " + excerpt(body));
         assertTrue(body.contains("37"), "the mail must name the requested duration (37 minutes): " + excerpt(body));
         assertTrue(body.contains("app-2"), "the mail must name the name restriction the approver decides on (D-40): " + excerpt(body));
+    }
+
+    /**
+     * T-08-123 (D-71): the REQUEST_CREATED mail names the window's item and its kind's display
+     * name, as the request screens do (SPEC 8): the line "Item kind: <display name>" next to the
+     * scope, and no scope type line. A request on a Freestyle job says "Item kind: Freestyle
+     * project"; a request on a folder says "Item kind: Folder" and not "Freestyle project", so the
+     * kind is the item's own and not a constant (note 260).
+     */
+    @Test
+    public void t_08_123_grantRequestMailNamesTheItemKind() throws Exception {
+        j.createFreeStyleProject("mail-job");
+        submitGrantOk(j, "u1", "mail-job", Arrays.asList("CONFIGURE"), 15, "fix the mail job", null, "a2");
+        String jobBody = plainTextBody(awaitSingleMail(A2_MAIL));
+        assertTrue(jobBody.contains("mail-job"), "premise: the mail names the item: " + excerpt(jobBody));
+        assertTrue(jobBody.contains("Item kind: Freestyle project"), "the mail must name the kind of mail-job: " + excerpt(jobBody));
+        assertFalse(jobBody.contains("Scope type"), "D-71: the mail carries no scope type line: " + excerpt(jobBody));
+
+        Mailbox.clearAll();
+        submitGrantOk(j, "u1", "team", Arrays.asList("CREATE"), 15, "a new job in team", null, "a2");
+        String folderBody = plainTextBody(awaitSingleMail(A2_MAIL));
+        assertTrue(folderBody.contains("team"), "premise: the mail names the item: " + excerpt(folderBody));
+        assertTrue(folderBody.contains("Item kind: Folder"), "the mail must name the kind of team: " + excerpt(folderBody));
+        assertFalse(folderBody.contains("Freestyle project"), "the kind must be the item's own: " + excerpt(folderBody));
     }
 
     private static Message awaitSingleMail(String address) throws Exception {

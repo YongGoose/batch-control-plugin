@@ -282,7 +282,7 @@ public class RetentionClosedRequestsTest {
 
     private GrantRequest submitGrant() throws Exception {
         return as("u1", () -> GrantRequestService.get().create(
-                new GrantScope(GrantScope.Type.JOB, "batch-x"), Arrays.asList(GrantAction.CONFIGURE),
+                new GrantScope(GrantScope.Type.ITEM, "batch-x"), Arrays.asList(GrantAction.CONFIGURE),
                 30, "retention probe", "a1"));
     }
 

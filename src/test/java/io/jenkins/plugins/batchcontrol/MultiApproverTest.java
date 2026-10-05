@@ -338,7 +338,7 @@ public class MultiApproverTest {
     public void t_03_20_grantRequestWithSeveralApprovers() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
         GrantRequest stored = GrantRequestService.get().load(id);
         assertEquals(Arrays.asList("a1", "a2"), stored.getApprovers());
@@ -363,7 +363,7 @@ public class MultiApproverTest {
         cfg.setApprovers(Arrays.asList("a1", "a2", "a3", "admin", "u1"));
         cfg.save();
         Set<String> before = grantRequestIds();
-        assertClientError(submitGrant(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        assertClientError(submitGrant(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "again", null, "a1", "u1"), "a grant request whose set contains the requester");
         assertEquals(before, grantRequestIds());
     }
@@ -377,7 +377,7 @@ public class MultiApproverTest {
     public void t_03_22_grantChangeApproverByRequesterEditsTheSetAndRecords() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
 
         assertSuccess(changeGrantApprovers(j, "u1", id, "a2", "a3"), "the requester's grant designation change");
@@ -402,7 +402,7 @@ public class MultiApproverTest {
     public void t_03_23_grantChangeApproverByNonVisibleHolderIsNotFound() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
 
         assertEquals(404, changeGrantApprovers(j, "u2", id, "a3").getStatusCode(),
@@ -423,7 +423,7 @@ public class MultiApproverTest {
     public void t_03_26_grantChangeApproverByDesignatedApproverIsForbidden() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
 
         assertEquals(403, changeGrantApprovers(j, "a1", id, "a3").getStatusCode(),
@@ -443,7 +443,7 @@ public class MultiApproverTest {
     public void t_03_24_grantChangeApproverByGetIsRefused() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
 
         WebResponse response = get(j, "u1", "batch-control/grants/" + id + "/changeApprover?approvers=a3");
@@ -463,7 +463,7 @@ public class MultiApproverTest {
     public void t_03_25_grantChangeApproverAfterDecisionIsRefused() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: the decision that closes the request");
 

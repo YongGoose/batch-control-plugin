@@ -7,7 +7,6 @@ import hudson.security.AuthorizationMatrixProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import java.net.URL;
@@ -89,7 +88,7 @@ public class GrantViolationDetailTest {
     @Test
     public void t_08_47_grantViolationWordingCarriesNoInternalReference() throws Exception {
         // a restricted CREATE grant on the folder
-        String requestId = submitGrantOk(j, "bob", "FOLDER", "team", Arrays.asList("CREATE"), 30,
+        String requestId = submitGrantOk(j, "bob", "team", Arrays.asList("CREATE"), 30,
                 "create the app jobs", "/app-[0-9]+/", "a1");
         assertSuccess(decideGrant(j, "a1", requestId, "approve", "ok"), "fixture: approval by a1");
         assertTrue(GrantService.get().listActive().stream().anyMatch(g -> "bob".equals(g.getUser())),
@@ -118,7 +117,7 @@ public class GrantViolationDetailTest {
         AuthorizationMatrixProperty amp = new AuthorizationMatrixProperty(new HashMap<>(), new InheritParentStrategy());
         amp.add(Item.CONFIGURE, PermissionEntry.user("alice"));
         solo.addProperty(amp);
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "solo", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "solo", Arrays.asList(GrantAction.CONFIGURE));
         String close = "</hudson.security.AuthorizationMatrixProperty>";
         String xml = solo.getConfigFile().asString();
         assertTrue(xml.contains(close), "fixture: solo must carry an authorization property");
