@@ -3,14 +3,24 @@ package io.jenkins.plugins.batchcontrol;
 import hudson.model.FileParameterDefinition;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
+import hudson.model.FileParameterValue;
+import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.StringParameterDefinition;
+import hudson.model.StringParameterValue;
+import hudson.model.User;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.util.PluginServletFilter;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
+import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.policy.RequestTooLargeException;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
+import io.jenkins.plugins.file_parameters.Base64FileParameterDefinition;
+import io.jenkins.plugins.file_parameters.Base64FileParameterValue;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -24,6 +34,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import jenkins.model.Jenkins;
@@ -44,11 +55,14 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileDisplay;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.fileItem;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestDirListing;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.tempFiles;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.uploadFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -58,7 +72,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the check comes after the permission check, answers HTTP 413, creates no request and leaves
  * nothing on disk. Matrix rows T-05-59 .. T-05-64 (note 260); T-05-94 (the exact default) and
  * T-05-95 (a chunked body is judged by its actual size, D-72b (4)) use {@link RawHttpFixtures}
- * (note 265).
+ * (note 265). T-05-98 .. T-05-100 (security-37 S-37-01, note 265 addendum): what a request keeps
+ * (file contents, decoded Base64, stored texts) is held to the cap whatever names, encodings or part
+ * kinds a chunked body uses, and the service refuses it with {@code RequestTooLargeException}.
  *
  * <p>The property is set per test and cleared afterwards, so the plugin must read it when it checks
  * (the TriggerBlockedAuditTest convention; Request in the deliverable report). The body size of a
@@ -320,6 +336,110 @@ public class RequestBodyCapTest {
         assertNothingRan();
     }
 
+    /**
+     * T-05-98 (security-37 S-37-01, numeric references): with the cap at 64 KiB, a chunked multipart
+     * body whose {@code json} refers to two ~400 KiB parts by the JSON numbers {@code 7} (core file
+     * UPLOAD, {@code data.csv}) and {@code 8} (base64File B64, {@code data.bin}) answers 413, creates
+     * no request and keeps nothing: neither {@code fileParameterValueFiles/} nor
+     * {@code requests/run/} gains a file, nothing is queued. Guard: the same encoding with 1 KiB parts
+     * is not refused by the cap (so the 413 is the size, not the encoding). The string-reference
+     * control (an over-size chunked body naming its part) is T-05-95.
+     */
+    @Test
+    public void t_05_98_chunkedPartsReferencedByNumbersAreHeldToTheCap() throws Exception {
+        System.setProperty(CAP_PROPERTY, Long.toString(CAP));
+        FreeStyleProject two = twoFileJob("cap-num");
+        String auth = RawHttpFixtures.basic("u1", RawHttpFixtures.apiToken("u1"));
+        String boundary = "s37-numeric-boundary-Rn98";
+
+        byte[] small = numericReferenceBody(boundary, payload("s37-num-small-csv-Ka98", 1024), payload("s37-num-small-bin-Kb98", 1024));
+        int smallAnswer = postChunked(two, auth, boundary, small);
+        assertNotEquals(413, smallAnswer, "guard: numeric references under the cap must not be refused by the cap");
+        assertTrue(smallAnswer < 500, "guard: numeric references under the cap must not crash, got HTTP " + smallAnswer);
+
+        Set<String> ids = ApproverFormFixtures.runRequestIds();
+        Set<String> listing = requestDirListing(j);
+        Set<Path> temp = tempFiles(j);
+        byte[] large = numericReferenceBody(boundary, payload("s37-num-large-csv-La98", 400 * 1024),
+                payload("s37-num-large-bin-Lb98", 400 * 1024));
+        assertTrue(large.length > 2 * 400 * 1024, "premise: the body carries both 400 KiB parts, was " + large.length);
+
+        assertEquals(413, postChunked(two, auth, boundary, large),
+                "parts referenced by JSON numbers must count against the cap: 413 expected");
+        assertKeptNothing(two, ids, listing, temp);
+    }
+
+    /**
+     * T-05-99 (security-37 S-37-01, {@code json} as a file part): with the cap at 64 KiB, a chunked
+     * multipart body with a small form-field {@code json} (naming only DATE) followed by a file part
+     * named {@code json} that refers to two ~400 KiB parts {@code blob} (UPLOAD, {@code data.csv})
+     * and {@code blob2} (B64, {@code data.bin}) answers 413, creates no request and keeps nothing
+     * under {@code fileParameterValueFiles/} or {@code requests/run/}; nothing is queued.
+     */
+    @Test
+    public void t_05_99_jsonSentAsAFilePartAfterADecoyIsHeldToTheCap() throws Exception {
+        System.setProperty(CAP_PROPERTY, Long.toString(CAP));
+        FreeStyleProject two = twoFileJob("cap-decoy");
+        String auth = RawHttpFixtures.basic("u1", RawHttpFixtures.apiToken("u1"));
+        String boundary = "s37-decoy-boundary-Dj99";
+
+        String decoy = requestJson("[{\"name\":\"DATE\",\"value\":\"2026-10-01\"}]");
+        String real = requestJson("[{\"name\":\"UPLOAD\",\"file\":\"blob\"},{\"name\":\"B64\",\"file\":\"blob2\"},"
+                + "{\"name\":\"DATE\",\"value\":\"2026-10-01\"}]");
+        List<Object[]> parts = new ArrayList<>();
+        parts.add(RawHttpFixtures.part("json", null, decoy.getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("json", "json", real.getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("blob", "data.csv", payload("s37-decoy-csv-Ma99", 400 * 1024)));
+        parts.add(RawHttpFixtures.part("blob2", "data.bin", payload("s37-decoy-bin-Mb99", 400 * 1024)));
+        byte[] body = RawHttpFixtures.multipart(boundary, parts);
+
+        Set<String> ids = ApproverFormFixtures.runRequestIds();
+        Set<String> listing = requestDirListing(j);
+        Set<Path> temp = tempFiles(j);
+        assertEquals(413, postChunked(two, auth, boundary, body),
+                "a file-part json after a form-field decoy must not escape the cap: 413 expected");
+        assertKeptNothing(two, ids, listing, temp);
+    }
+
+    /**
+     * T-05-100 (security-37 S-37-01, service): with the cap at 64 KiB, {@code
+     * RunRequestService.create(job, values, ...)} refuses with {@code RequestTooLargeException} (an
+     * {@code IllegalArgumentException}) a core {@code FileParameterValue} of 80 KiB, a
+     * {@code base64File} value of 80 KiB (decoded), and the two together at 36 KiB each (the cap
+     * bounds the sum); no request is created, {@code requests/run/} is unchanged and nothing new is
+     * kept under the temporary directories. Guard: the same values at 16 KiB each are accepted
+     * (PENDING, shown as {@code [file] small.csv} and {@code [file] small.bin}).
+     */
+    @Test
+    public void t_05_100_serviceRefusesKeptContentOverTheCap() throws Exception {
+        System.setProperty(CAP_PROPERTY, Long.toString(CAP));
+        FreeStyleProject svc = twoFileJob("cap-svc");
+        Set<String> ids = ApproverFormFixtures.runRequestIds();
+        Set<String> listing = requestDirListing(j);
+        Set<Path> temp = tempFiles(j);
+        int over = (int) CAP + 16 * 1024;
+        int half = (int) CAP / 2 + 4 * 1024;
+
+        assertThrows(RequestTooLargeException.class, () -> createAsU1(svc, List.of(
+                coreFile("data.csv", payload("s37-svc-core-over-Na00", over)), date())),
+                "a core file value over the cap must be refused with RequestTooLargeException");
+        assertThrows(RequestTooLargeException.class, () -> createAsU1(svc, List.of(
+                base64File("data.bin", payload("s37-svc-b64-over-Nb00", over)), date())),
+                "a base64File value whose decoded size is over the cap must be refused with RequestTooLargeException");
+        assertThrows(RequestTooLargeException.class, () -> createAsU1(svc, List.of(
+                coreFile("data.csv", payload("s37-svc-core-half-Nc00", half)),
+                base64File("data.bin", payload("s37-svc-b64-half-Nd00", half)), date())),
+                "two file values that together exceed the cap must be refused with RequestTooLargeException");
+        assertKeptNothing(svc, ids, listing, temp);
+
+        RunRequest ok = createAsU1(svc, List.of(coreFile("small.csv", payload("s37-svc-core-ok-Ne00", (int) CAP / 4)),
+                base64File("small.bin", payload("s37-svc-b64-ok-Nf00", (int) CAP / 4)), date()));
+        assertEquals(RequestStatus.PENDING, ok.getStatus(), "guard: the same values under the cap are accepted");
+        Map<String, String> shown = RunRequestService.get().load(ok.getId()).getParameters();
+        assertEquals(fileDisplay("small.csv"), shown.get("UPLOAD"), "guard: the accepted request shows the core file");
+        assertEquals(fileDisplay("small.bin"), shown.get("B64"), "guard: the accepted request shows the base64File");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /** The Request Run fields (reason, approver, DATE) and {@code data.csv} as UPLOAD, as multipart. */
@@ -330,6 +450,68 @@ public class RequestBodyCapTest {
         parts.add(RawHttpFixtures.part("DATE", null, "2026-10-01".getBytes(StandardCharsets.UTF_8)));
         parts.add(RawHttpFixtures.part("UPLOAD", "data.csv", file));
         return RawHttpFixtures.multipart(boundary, parts);
+    }
+
+    /** An approval-required Freestyle job with a core file UPLOAD, a base64File B64 and a string DATE. */
+    private FreeStyleProject twoFileJob(String name) throws Exception {
+        FreeStyleProject two = j.createFreeStyleProject(name);
+        two.addProperty(new ParametersDefinitionProperty(new FileParameterDefinition("UPLOAD", "input"),
+                new Base64FileParameterDefinition("B64"), new StringParameterDefinition("DATE", "2000-01-01")));
+        setBatchControl(two, new BatchControlJobProperty(true));
+        return two;
+    }
+
+    /** Core's {@code json} form value: reason, approver and the given parameter array. */
+    private static String requestJson(String parameterArray) {
+        return "{\"reason\":\"month-end batch\",\"approvers\":\"a1\",\"parameter\":" + parameterArray + "}";
+    }
+
+    /** {@code json} naming UPLOAD's part by the number 7 and B64's by 8, then the two parts. */
+    private static byte[] numericReferenceBody(String boundary, byte[] csv, byte[] bin) throws IOException {
+        String json = requestJson("[{\"name\":\"UPLOAD\",\"file\":7},{\"name\":\"B64\",\"file\":8},"
+                + "{\"name\":\"DATE\",\"value\":\"2026-10-01\"}]");
+        List<Object[]> parts = new ArrayList<>();
+        parts.add(RawHttpFixtures.part("json", null, json.getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("7", "data.csv", csv));
+        parts.add(RawHttpFixtures.part("8", "data.bin", bin));
+        return RawHttpFixtures.multipart(boundary, parts);
+    }
+
+    /** POSTs {@code body} to {@code target}'s submit endpoint chunked (no declared length) and returns the status. */
+    private int postChunked(FreeStyleProject target, String auth, String boundary, byte[] body) throws IOException {
+        return RawHttpFixtures.post(j.getURL(), target.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth),
+                RawHttpFixtures.header("Content-Type", "multipart/form-data; boundary=" + boundary)), body, true);
+    }
+
+    /** No request created, {@code requests/run/} unchanged, nothing new under the temporary directories, nothing ran. */
+    private void assertKeptNothing(FreeStyleProject target, Set<String> ids, Set<String> listing, Set<Path> temp) throws Exception {
+        assertEquals(ids, ApproverFormFixtures.runRequestIds(), "no request may be created");
+        assertEquals(listing, requestDirListing(j), "no file of any name may be added under requests/run/");
+        assertEquals(temp, tempFiles(j), "nothing may be kept under fileParameterValueFiles/ or stashedFileParameterValueFiles/");
+        j.waitUntilNoActivity();
+        assertTrue(j.jenkins.getQueue().isEmpty(), "the queue must be empty");
+        assertEquals(1, target.getNextBuildNumber(), "no build number may have been consumed");
+    }
+
+    private static RunRequest createAsU1(FreeStyleProject target, List<ParameterValue> values) {
+        try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
+            return RunRequestService.get().create(target, values, "month-end batch", "a1");
+        }
+    }
+
+    private static ParameterValue coreFile(String fileName, byte[] content) throws IOException {
+        return new FileParameterValue("UPLOAD", uploadFile(fileName, content), fileName);
+    }
+
+    private static ParameterValue base64File(String fileName, byte[] content) throws IOException {
+        Base64FileParameterValue value = new Base64FileParameterValue("B64");
+        value.setFile(fileItem(fileName, content));
+        return value;
+    }
+
+    private static ParameterValue date() {
+        return new StringParameterValue("DATE", "2026-10-01");
     }
 
     private static Set<String> created(Set<String> before) {
