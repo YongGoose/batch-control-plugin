@@ -29,17 +29,14 @@ import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
-import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import jenkins.model.menu.Group;
 import jenkins.model.menu.Semantic;
@@ -73,8 +70,12 @@ public class JobRequestAction implements Action {
     /** {@link FormErrors} name of the request form. */
     static final String FORM = "request";
 
-    /** Shape of an incident id taken from a query string before it is looked up (D-72). */
-    private static final Pattern INCIDENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
+    /**
+     * D-72a: request attribute holding the incident reference {@link #doSubmit} validated, so a
+     * refused submission re-renders the rerun notice and the hidden {@value RequestRunPrefill#FROM_RERUN}
+     * field from the validated id, never from the raw field.
+     */
+    private static final String RERUN_ATTRIBUTE = JobRequestAction.class.getName() + ".rerunIncident";
 
     private final Job<?, ?> job;
 
@@ -286,31 +287,36 @@ public class JobRequestAction implements Action {
     }
 
     /**
-     * D-72 (SPEC item 11): the id of the incident whose rerun continues on this form, from
-     * {@value RequestRunPrefill#FROM_RERUN}{@code =<id>} on a GET, or {@code null}. Only an
-     * incident of this job that the viewer may see ({@code BatchControl/ViewHistory}, which the
-     * rerun itself needs) counts; anything else is ignored, so a crafted link shows no notice and
-     * reveals nothing. The form then says which values must be provided again; the values that
-     * could be recovered arrive as {@code p.<name>} like a refused build's (D-60).
+     * D-72, D-72a (SPEC item 11): the id of the incident whose rerun continues on this form, or
+     * {@code null}. On a GET it comes from {@value RequestRunPrefill#FROM_RERUN}{@code =<id>}; on a
+     * refused submission it is the reference {@link #doSubmit} validated (the hidden field of the
+     * same name), and nothing is read from the body here. Either way the id counts only when
+     * {@link IncidentService#linkableIncident} accepts it (an existing incident of this job, and a
+     * viewer holding {@code BatchControl/ViewHistory} who may request a run of the job, the rights
+     * of the rerun itself), the same rule {@link #doSubmit} links the request by; anything else is
+     * ignored, so a crafted link shows no notice and reveals nothing. The form then says which
+     * values must be provided again and that the request will be linked to the incident, and
+     * carries the id back in the hidden field; the values that could be recovered arrive as
+     * {@code p.<name>} like a refused build's (D-60).
      */
     @CheckForNull
     public String getRerunIncidentId() {
         StaplerRequest2 req = org.kohsuke.stapler.Stapler.getCurrentRequest2();
-        if (req == null || !"GET".equals(req.getMethod())
-                || !SectionAccess.hasAny(SectionAccess.history())) {
+        if (req == null) {
             return null;
         }
-        String id = req.getParameter(RequestRunPrefill.FROM_RERUN);
-        if (id == null || !INCIDENT_ID.matcher(id).matches()) {
-            return null;
+        String reference;
+        if (getFormErrors().isPresent()) {
+            // A refusal: the reference doSubmit validated (none on a body over the size cap, which
+            // is never read). Checked again in case the incident went away in the meantime.
+            Object validated = req.getAttribute(RERUN_ATTRIBUTE);
+            reference = validated instanceof String ? (String) validated : null;
+        } else if ("GET".equals(req.getMethod())) {
+            reference = req.getParameter(RequestRunPrefill.FROM_RERUN);
+        } else {
+            reference = null;
         }
-        Incident incident;
-        try {
-            incident = IncidentService.get().load(id);
-        } catch (IllegalArgumentException | UncheckedIOException e) {
-            return null;
-        }
-        return incident != null && job.getFullName().equals(incident.getJobFullName()) ? id : null;
+        return IncidentService.get().linkableIncident(reference, job);
     }
 
     /**
@@ -323,7 +329,12 @@ public class JobRequestAction implements Action {
         if (incidentId == null) {
             return "";
         }
-        Incident incident = IncidentService.get().load(incidentId);
+        Incident incident;
+        try {
+            incident = IncidentService.get().load(incidentId);
+        } catch (RuntimeException e) {
+            return ""; // unreadable since it was validated: the user writes the reason
+        }
         return incident == null ? "" : "Rerun requested from incident " + incidentId
                 + " (failed run " + incident.getRunId() + ")";
     }
@@ -407,6 +418,14 @@ public class JobRequestAction implements Action {
      * ({@link ParameterFiles}); once the values are handed to the service, it disposes of them on
      * its own refusals. The re-rendered form never shows a password or a file again.
      *
+     * <p>D-72a (SPEC item 11): a submission from the form an incident rerun fell back to carries
+     * the incident id in the field {@value RequestRunPrefill#FROM_RERUN}. It is read after the
+     * permission and size checks, passed through {@link IncidentService#linkableIncident} and only
+     * the id that check returns goes to {@link RunRequestService#create(Job, List, String, List,
+     * String) create}, which links the request so that a successful run records
+     * {@code resolvedByRunId}; an invalid reference is ignored. A refused submission keeps the
+     * validated reference on the re-rendered form.
+     *
      * <p>N-01: {@link #parseParameters} is inside the {@code try} on purpose. A parameter
      * definition rejects a bad value by throwing {@link IllegalArgumentException} — a choice
      * parameter given a value outside its choices, for instance — and that is the same class the
@@ -442,6 +461,10 @@ public class JobRequestAction implements Action {
         JSONObject formData = req.getParameter("json") != null ? req.getSubmittedForm() : null;
         String reason = Util.fixEmptyAndTrim(formData != null
                 ? formData.optString("reason", "") : Util.fixNull(req.getParameter("reason")));
+        // D-72a (SPEC item 11): the incident reference the rerun fallback form carries back. The
+        // request is linked only to what IncidentService#linkableIncident accepts; a missing,
+        // malformed, unknown or foreign reference makes an unlinked request, never an error.
+        String rerunIncident = IncidentService.get().linkableIncident(rerunReference(req, formData), job);
 
         // e2e-03 DEF-09: every refusal of the user's input is shown on the form, next to the
         // field, with the input kept (FormErrors), instead of a bare "Error" page.
@@ -475,7 +498,8 @@ public class JobRequestAction implements Action {
                 // From here the service owns the values' temporary files, on a refusal too.
                 handedOver = true;
                 try {
-                    RunRequest request = RunRequestService.get().create(job, submitted, reason, approvers);
+                    RunRequest request = RunRequestService.get().create(job, submitted, reason, approvers,
+                            rerunIncident);
                     rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
                             + Util.rawEncode(request.getId()) + "/");
                     return;
@@ -491,8 +515,27 @@ public class JobRequestAction implements Action {
                 ParameterFiles.dispose(submitted, "a refused run request form for job '" + job.getFullName() + "'");
             }
         }
+        if (rerunIncident != null) {
+            // D-72a: the re-rendered form keeps the validated reference (getRerunIncidentId).
+            req.setAttribute(RERUN_ATTRIBUTE, rerunIncident);
+        }
         // D-66: a refusal is shown where the form was, in the dialog or on this page.
         errors.attach(submitted).render(req, rsp, this, Dialogs.refusalView(req, "index.jelly"));
+    }
+
+    /**
+     * D-72a: the raw {@value RequestRunPrefill#FROM_RERUN} field of a submission, unvalidated: the
+     * plain field (the rendered form's hidden input, or a script's field), else the same name in
+     * the {@code json} blob. Only ever passed to {@link IncidentService#linkableIncident}.
+     */
+    @CheckForNull
+    private static String rerunReference(StaplerRequest2 req, @CheckForNull JSONObject formData) {
+        String raw = req.getParameter(RequestRunPrefill.FROM_RERUN);
+        if (raw == null && formData != null) {
+            Object value = formData.opt(RequestRunPrefill.FROM_RERUN);
+            raw = value instanceof String ? (String) value : null;
+        }
+        return raw;
     }
 
     /**

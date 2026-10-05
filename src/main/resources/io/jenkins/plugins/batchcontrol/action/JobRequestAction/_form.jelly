@@ -14,7 +14,9 @@
      body is read (over the size cap, HTTP 413) is still answered with the dialog view. A refused
      submission never shows a password or a file again, and says which ones to provide again; so
      do a refused direct build (D-60; files are not carried, issue #115) and a rerun that continues
-     here because a value of the failed run could not be recovered (fromRerun). -->
+     here because a value of the failed run could not be recovered (fromRerun). D-72a: that form
+     carries the incident id back in the hidden field fromRerun, and the request is linked to the
+     incident once the server has validated it again. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="errors" value="${it.formErrors}"/>
@@ -50,17 +52,26 @@
           them approves the request.
         </p>
         <j:set var="bcReenter" value="${it.reenterParameterNames}"/>
-        <j:set var="bcRerunId" value="${errors.present ? null : it.rerunIncidentId}"/>
+        <!-- D-72a: the incident reference, validated (JobRequestAction#getRerunIncidentId, the
+             rule doSubmit links by): from fromRerun on the GET, from the submission on a refusal.
+             It travels back in the hidden field; the server validates it again on submission. -->
+        <j:set var="bcRerunId" value="${it.rerunIncidentId}"/>
         <j:choose>
           <j:when test="${bcRerunId != null}">
+            <input type="hidden" name="fromRerun" value="${bcRerunId}"/>
             <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-notice="rerun">
-              No rerun request was created yet: not every parameter value of the failed run of
-              incident <a href="${rootURL}/batch-control/incidents/${bcRerunId}/">${bcRerunId}</a>
-              could be recovered (a file the build has already removed, for example). The values
-              that could be recovered, if any, are filled in below; check every parameter. File and
-              password parameter values must be provided again<j:if test="${!empty(bcReenter)}">:
-              <j:forEach var="n" items="${bcReenter}" varStatus="st">${st.index > 0 ? ', ' : ''}<b>${n}</b></j:forEach></j:if>.
-              A request submitted here is not linked to the incident.
+              <j:if test="${!errors.present}">
+                No rerun request was created yet: not every parameter value of the failed run of
+                incident <a href="${rootURL}/batch-control/incidents/${bcRerunId}/">${bcRerunId}</a>
+                could be recovered (a file the build has already removed, for example). The values
+                that could be recovered, if any, are filled in below; check every parameter. File and
+                password parameter values must be provided again<j:if test="${!empty(bcReenter)}">:
+                <j:forEach var="n" items="${bcReenter}" varStatus="st">${st.index > 0 ? ', ' : ''}<b>${n}</b></j:forEach></j:if>.
+              </j:if>
+              The request you submit here will be linked to incident
+              <a href="${rootURL}/batch-control/incidents/${bcRerunId}/">${bcRerunId}</a>, like a
+              rerun requested on the incident: if its run succeeds, the incident records it as the
+              run that resolved it (the incident's status is still changed by hand).
             </div>
           </j:when>
           <j:when test="${!errors.present and it.prefilled}">
