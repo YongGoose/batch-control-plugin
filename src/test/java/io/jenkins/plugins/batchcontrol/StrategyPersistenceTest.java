@@ -6,7 +6,6 @@ import hudson.model.Item;
 import hudson.security.AuthorizationMatrixProperty;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlRoleBasedAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
@@ -80,7 +79,7 @@ public class StrategyPersistenceTest {
             amp.add(Item.CONFIGURE, PermissionEntry.user("alice"));
             p.addProperty(amp);
             r.createFreeStyleProject("granted");
-            StrategyFixtures.grant("bob", GrantScope.Type.JOB, "granted", Arrays.asList(GrantAction.CONFIGURE));
+            StrategyFixtures.grant("bob", "granted", Arrays.asList(GrantAction.CONFIGURE));
             r.jenkins.save();
             matrixBefore = StrategyFixtures.describeMatrix(s.getGrantedPermissionEntries());
             assertTrue(configXml(r.jenkins).contains(BatchControlMatrixAuthorizationStrategy.class.getName()),
@@ -124,7 +123,7 @@ public class StrategyPersistenceTest {
             StrategyFixtures.changeControlOn();
             r.createFreeStyleProject("team-a");
             r.createFreeStyleProject("other");
-            StrategyFixtures.grant("carol", GrantScope.Type.JOB, "other", Arrays.asList(GrantAction.CONFIGURE));
+            StrategyFixtures.grant("carol", "other", Arrays.asList(GrantAction.CONFIGURE));
             r.jenkins.save();
             rolesBefore = StrategyFixtures.describeRoles(s);
             assertTrue(configXml(r.jenkins).contains(BatchControlRoleBasedAuthorizationStrategy.class.getName()),

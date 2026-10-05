@@ -308,7 +308,7 @@ public class SwitchSaveFailureTest {
         j.createFreeStyleProject("other-x");
         GrantRequest request;
         try (ACLContext ignored = as("u1")) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "other-x"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "other-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 60, "second window", "a1");
         }
         try (ACLContext ignored = as("a1")) {
@@ -341,7 +341,7 @@ public class SwitchSaveFailureTest {
         assertTrue(cfg.isChangeControlEnabled(), "fixture: change control must really be on before it is turned off");
         GrantRequest request;
         try (ACLContext ignored = as("u1")) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 60, "scheduled maintenance", "a1");
         }
         Grant grant;

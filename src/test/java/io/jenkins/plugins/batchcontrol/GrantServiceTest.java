@@ -110,13 +110,13 @@ public class GrantServiceTest {
         BatchClock.reset();
     }
 
-    /** T-08-01: an approved Grant(u1, JOB X, CONFIGURE, 30min) lets u1 save X's config immediately. */
+    /** T-08-01: an approved Grant(u1, ITEM X, CONFIGURE, 30min) lets u1 save X's config immediately. */
     @Test
     public void t_08_01_grantAllowsConfigureOnScopedJob() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u1");
         assertEquals(403, postConfigXml(wc, jobX, "changed-before-grant"), "before the grant the delegate must deny (Item/Read only)");
 
-        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
         assertNotNull(grant);
         assertEquals("u1", grant.getUser());
@@ -131,18 +131,18 @@ public class GrantServiceTest {
     /** T-08-02: the same grant gives no permission outside its scope (job Y stays 403). */
     @Test
     public void t_08_02_grantDoesNotCoverOtherJobs() throws Exception {
-        grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
 
         JenkinsRule.WebClient wc = webClient().login("u1");
-        assertEquals(403, postConfigXml(wc, jobY, "should-not-save"), "a JOB-scoped grant must never leak to another job");
+        assertEquals(403, postConfigXml(wc, jobY, "should-not-save"), "a window on one job must never leak to another job");
         assertEquals("base", jobY.getDescription(), "job Y must be untouched");
     }
 
     /** T-08-03: past the expiry instant the very first permission check is denied (no timer involved). */
     @Test
     public void t_08_03_expiredGrantDeniedFromFirstCheck() throws Exception {
-        grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
@@ -156,7 +156,7 @@ public class GrantServiceTest {
     /** T-08-05: a Manage holder revokes the active grant; denial is immediate and a GRANT_REVOKE record remains. */
     @Test
     public void t_08_05_manageRevokeIsImmediateAndRecorded() throws Exception {
-        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
         assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
 
@@ -181,19 +181,19 @@ public class GrantServiceTest {
     public void t_08_09_durationAboveMaxOrNonPositiveRejected() throws Exception {
         assertRejected("a duration above maxGrantMinutes must reject creation", () -> {
             try (ACLContext ignored = as("u1")) {
-                GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+                GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                         Arrays.asList(GrantAction.CONFIGURE), 300, "long maintenance", "a1");
             }
         });
         assertRejected("a zero duration must reject creation", () -> {
             try (ACLContext ignored = as("u1")) {
-                GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+                GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                         Arrays.asList(GrantAction.CONFIGURE), 0, "zero duration", "a1");
             }
         });
         assertRejected("a negative duration must reject creation", () -> {
             try (ACLContext ignored = as("u1")) {
-                GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+                GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                         Arrays.asList(GrantAction.CONFIGURE), -10, "negative duration", "a1");
             }
         });
@@ -203,7 +203,7 @@ public class GrantServiceTest {
     /** T-08-10: a CONFIGURE-only grant never covers DELETE; the un-granted action stays denied. */
     @Test
     public void t_08_10_ungrantedActionStaysDenied() throws Exception {
-        grantTo("u1", new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
 
         JenkinsRule.WebClient wc = webClient().login("u1");
@@ -231,7 +231,7 @@ public class GrantServiceTest {
         assertNotNull(j.jenkins.getItemByFullName("batch-y"), "the job must survive the vetoed delete");
 
         // with an active DELETE grant the same user may delete
-        grantTo("u2", new GrantScope(GrantScope.Type.JOB, "batch-y"),
+        grantTo("u2", new GrantScope(GrantScope.Type.ITEM, "batch-y"),
                 Arrays.asList(GrantAction.DELETE), 30);
         wc.getPage(new WebRequest(wc.createCrumbedUrl(jobY.getUrl() + "doDelete"), HttpMethod.POST));
         assertNull(j.jenkins.getItemByFullName("batch-y"), "with the DELETE grant the delete must pass");
@@ -244,7 +244,13 @@ public class GrantServiceTest {
         assertNull(j.jenkins.getItemByFullName("admin-target"), "the admin must be able to delete without any grant");
     }
 
-    /** T-08-11: a FOLDER-scoped [CREATE, CONFIGURE] grant works inside the folder only. */
+    /**
+     * T-08-11, rewritten for D-71: an ITEM [CREATE, CONFIGURE] window on the folder
+     * {@code team/batch}. CREATE works directly inside the folder; CONFIGURE covers the folder
+     * itself and, through D-35c, the job u1 created there. A job that already existed inside the
+     * folder is NOT covered: the former FOLDER scope covered it, D-71 withdraws that, so the row
+     * now asserts the refusal (note 260). Outside the folder nothing is conferred.
+     */
     @Test
     public void t_08_11_folderScopeWorksInsideFolderOnly() throws Exception {
         Folder team = j.jenkins.createProject(Folder.class, "team");
@@ -253,7 +259,7 @@ public class GrantServiceTest {
         FreeStyleProject inner = batch.createProject(FreeStyleProject.class, "inner");
         inner.setDescription("base");
 
-        grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "team/batch"),
                 Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30);
 
         JenkinsRule.WebClient wc = webClient().login("u1");
@@ -261,11 +267,23 @@ public class GrantServiceTest {
         // CREATE inside the folder (checked on the parent folder's ACL) must pass
         int createInside = postCreateItem(wc, "job/team/job/batch/", "new-inner");
         assertTrue(createInside < 400, "creating a job inside the granted folder must succeed, got HTTP " + createInside);
-        assertNotNull(j.jenkins.getItemByFullName("team/batch/new-inner"));
+        FreeStyleProject created = j.jenkins.getItemByFullName("team/batch/new-inner", FreeStyleProject.class);
+        assertNotNull(created);
+        created.setDescription("base");
 
-        // CONFIGURE inside the folder must pass
-        assertEquals(200, postConfigXml(wc, inner, "changed-inside"));
-        assertEquals("changed-inside", inner.getDescription());
+        // CONFIGURE of the job u1 created through the window must pass (D-35c)
+        assertEquals(200, postConfigXml(wc, created, "changed-created"));
+        assertEquals("changed-created", created.getDescription());
+
+        // CONFIGURE of the folder itself (the window's item) is conferred
+        try (ACLContext ignored = as("u1")) {
+            assertTrue(batch.hasPermission(Item.CONFIGURE), "the window's own item (the folder) must be configurable");
+        }
+
+        // D-71: a job that already existed inside the folder is not covered by the folder's window
+        assertEquals(403, postConfigXml(wc, inner, "changed-inside"),
+                "D-71: a window on a folder must not confer Configure on a job inside it");
+        assertEquals("base", inner.getDescription());
 
         // outside the folder scope: CREATE denied (sibling folder and root)
         assertEquals(403, postCreateItem(wc, "job/team/job/other/", "escape-job"), "creating outside the folder scope must be denied");
@@ -286,7 +304,7 @@ public class GrantServiceTest {
 
         GrantRequest request;
         try (ACLContext ignored = as("u1")) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance window", "a1");
         }
         assertEquals(RequestStatus.PENDING, request.getStatus());
@@ -310,7 +328,7 @@ public class GrantServiceTest {
     public void grantRequestApproverValidationMirrorsRunRequests() throws Exception {
         assertRejected("an approver outside the global list must reject grant request creation", () -> {
             try (ACLContext ignored = as("u1")) {
-                GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+                GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                         Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance", "u2");
             }
         });

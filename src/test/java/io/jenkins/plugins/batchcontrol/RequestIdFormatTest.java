@@ -110,7 +110,7 @@ public class RequestIdFormatTest {
     public void t_08_91_newGrantRequestAndGrantHaveUuidAndPagesResolve() throws Throwable {
         session.then(r -> {
             prepare(r);
-            String requestId = submitGrantOk(r, "u1", "JOB", RUN_JOB, List.of("CONFIGURE"), 60,
+            String requestId = submitGrantOk(r, "u1", RUN_JOB, List.of("CONFIGURE"), 60,
                     "uuid window", null, "a1");
             assertCanonicalUuid(requestId, "grant request id");
             WebResponse page = getFollowing(r, "u1", "batch-control/grants/" + requestId + "/");
@@ -188,9 +188,9 @@ public class RequestIdFormatTest {
         String[] legacyGrant = {"20261001-095001-h6c1vb"};
         session.then(r -> {
             prepare(r);
-            grantRequestId = submitGrantOk(r, "u1", "JOB", RUN_JOB, List.of("CONFIGURE"), 60,
+            grantRequestId = submitGrantOk(r, "u1", RUN_JOB, List.of("CONFIGURE"), 60,
                     "earlier-format pending", null, "a1");
-            approvedGrantRequestId = submitGrantOk(r, "u1", "JOB", ACT_JOB, List.of("CONFIGURE"), 120,
+            approvedGrantRequestId = submitGrantOk(r, "u1", ACT_JOB, List.of("CONFIGURE"), 120,
                     "earlier-format window", null, "a1");
             assertSuccess(decideGrant(r, "a1", approvedGrantRequestId, "approve", "ok"), "fixture: approval");
             grantId = onlyActiveGrant().getId();

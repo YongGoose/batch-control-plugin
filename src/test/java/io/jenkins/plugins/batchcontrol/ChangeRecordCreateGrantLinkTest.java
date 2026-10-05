@@ -5,7 +5,6 @@ import hudson.model.FreeStyleProject;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import java.net.URL;
@@ -37,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * item that grant created is a change under that grant and carries its id. Matrix rows T-09-19
  * and T-09-20 (note 120).
  *
- * <p>bob holds only a FOLDER {@code team} CREATE grant; c1 holds native Item/Configure
+ * <p>bob holds only a CREATE window on the folder {@code team} (D-71: scope type ITEM); c1 holds native Item/Configure
  * (StrategyFixtures). Written from docs/SPEC.md, docs/reports/e2e-03.md and
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
@@ -66,7 +65,7 @@ public class ChangeRecordCreateGrantLinkTest {
      */
     @Test
     public void t_09_19_configureOfItemCreatedUnderCreateGrantCarriesThatGrantId() throws Exception {
-        Grant grant = StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+        Grant grant = StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CREATE));
 
         assertTrue(createItem("bob", "app-2") < 400, "fixture: bob must create team/app-2 under the grant");
         FreeStyleProject created = (FreeStyleProject) team.getItem("app-2");
@@ -110,7 +109,7 @@ public class ChangeRecordCreateGrantLinkTest {
      */
     @Test
     public void t_09_20_configureByUserWithoutGrantCarriesNoGrantId() throws Exception {
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CREATE));
         assertTrue(createItem("bob", "app-3") < 400, "fixture: bob must create team/app-3 under the grant");
         FreeStyleProject created = (FreeStyleProject) team.getItem("app-3");
         assertNotNull(created);

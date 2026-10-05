@@ -10,7 +10,6 @@ import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.security.AuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlRoleBasedAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.io.File;
@@ -368,7 +367,7 @@ public class RoleStrategySurfaceTest {
 
         installVariant();
         StrategyFixtures.changeControlOn();
-        StrategyFixtures.grant("carol", GrantScope.Type.JOB, "other", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("carol", "other", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(other, "carol", Item.CONFIGURE), "premise: carol's grant confers under the Batch Control strategy");
         call.run();
         assertSame(BatchControlRoleBasedAuthorizationStrategy.class, j.jenkins.getAuthorizationStrategy().getClass(),

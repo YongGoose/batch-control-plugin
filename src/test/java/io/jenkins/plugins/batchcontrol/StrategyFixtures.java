@@ -136,12 +136,13 @@ final class StrategyFixtures {
     }
 
     /**
-     * {@code user} requests a grant, a1 approves it. Each row asserts the grant's effect itself
-     * (through {@link #has}) as its premise.
+     * {@code user} requests a permission window on the one item {@code scopeName} (D-71: scope
+     * type ITEM), a1 approves it. Each row asserts the grant's effect itself (through
+     * {@link #has}) as its premise.
      */
-    static Grant grant(String user, GrantScope.Type type, String scopeName, List<GrantAction> actions)
+    static Grant grant(String user, String scopeName, List<GrantAction> actions)
             throws Exception {
-        GrantScope scope = new GrantScope(type, scopeName);
+        GrantScope scope = new GrantScope(GrantScope.Type.ITEM, scopeName); // D-71: one item
         GrantRequest request = as(user, () -> GrantRequestService.get().create(scope, actions, WINDOW_MINUTES,
                 "maintenance for " + scopeName, "a1"));
         Grant grant = as("a1", () -> GrantRequestService.get().approve(request.getId(), "ok"));

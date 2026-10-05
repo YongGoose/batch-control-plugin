@@ -44,8 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * characters cannot inject markup), and nothing moves. Matrix row T-SEC-63 (note 192). The plain
  * answer for non-browser clients stays covered by T-SEC-53..56 (MoveChangeControlTest).
  *
- * <p>Fixture as T-SEC-53: u1 holds native Item/Move and an approved FOLDER {@code team}
- * [CREATE, CONFIGURE] grant, no Delete on the item. A link to the item on the refusal page is
+ * <p>Fixture as T-SEC-53: u1 holds native Item/Move and an approved [CREATE, CONFIGURE] window on
+ * the folder {@code team} (D-71: scope type ITEM), no Delete on the item. A link to the item on the refusal page is
  * allowed and not asserted either way.
  *
  * <p>Written from docs/SPEC.md item 8, docs/DECISIONS.md D-59/D-48 and docs/TEST-MATRIX.md only
@@ -89,7 +89,7 @@ public class MoveRefusalPageTest {
         prod.createProject(FreeStyleProject.class, HOSTILE);
         assertNotNull(prod.getItem(HOSTILE), "fixture: the item with the hostile name must exist");
 
-        String id = submitGrantOk(j, "u1", "FOLDER", "team", Arrays.asList("CREATE", "CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "team", Arrays.asList("CREATE", "CONFIGURE"), 30,
                 "maintenance in team", null, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval by a1");
         assertEquals(1, GrantService.get().listActive().stream().filter(g -> "u1".equals(g.getUser())).count(),
@@ -179,12 +179,14 @@ public class MoveRefusalPageTest {
     }
 
     /**
-     * T-SEC-72 (backlog #83): the browser refusal page of T-SEC-63 (u1 lacks Delete on the item,
-     * Create on {@code team} comes from a window) links, in its body, a grant request form
-     * ({@code batch-control/grants/}) pre-filled through {@code scopeFullName=} for what is missing:
-     * the item or its source folder {@code prod}, never the destination {@code team} (Create is not
-     * missing). Following the link as u1 answers 200 with the form's {@code scopeFullName} field
-     * holding the linked value.
+     * T-SEC-72 (backlog #83), rewritten for D-71: the browser refusal page of T-SEC-63 (u1 lacks
+     * Delete on the item, Create on {@code team} comes from a window) links, in its body, a grant
+     * request form pre-filled for what is missing. Since D-71 a DELETE window names the job itself,
+     * so the link is the frozen prefill URL {@code batch-control/grants/new?scopeFullName=<item>}
+     * (with {@code actions=DELETE} if it names an action) and never names the source folder
+     * {@code prod} (before D-71 a FOLDER window on {@code prod} was also accepted; note 260), the
+     * destination {@code team} (Create is not missing) or a {@code scopeType}. Following the link
+     * as u1 answers 200 with the form's {@code scopeFullName} field holding the item's full name.
      */
     @Test
     public void t_sec_72_refusalPageLinksAPrefilledGrantRequestForm() throws Exception {
@@ -211,12 +213,14 @@ public class MoveRefusalPageTest {
             }
         }
         assertFalse(forms.isEmpty(), "the refusal page must link a pre-filled grant request form (scopeFullName=); links: " + all);
-        String source = prod.getFullName();
         for (java.net.URL url : forms) {
             String scope = queryValue(url, "scopeFullName");
-            assertTrue(scope.equals(source) || scope.equals(item.getFullName()),
-                    "a pre-filled form must be for what is missing (Delete on " + item.getFullName() + " or " + source
-                            + "), got scopeFullName=" + scope + " in " + url);
+            assertEquals(item.getFullName(), scope, "D-71: a pre-filled form must be for the Delete that is missing, on the"
+                    + " item itself (not the folder " + prod.getFullName() + "), got scopeFullName=" + scope + " in " + url);
+            assertTrue(url.getPath().replaceAll("/+$", "").endsWith("batch-control/grants/new"), "the link must be the prefill URL grants/new: " + url);
+            assertFalse(("&" + url.getQuery()).contains("&scopeType="), "D-71: the link must carry no scopeType: " + url);
+            String action = queryValue(url, "actions");
+            assertTrue(action.isEmpty() || "DELETE".equals(action), "a named action must be the missing DELETE: " + url);
         }
 
         java.net.URL first = forms.get(0);

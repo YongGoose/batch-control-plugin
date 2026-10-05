@@ -143,8 +143,9 @@ public class JobGrantSidebarEntryTest {
     /**
      * T-UI-10 (condition 2, positive): a grant-permission holder without {@code Item/Configure}
      * gets the entry, and it points at the grant screen with this job's scope prefilled. Since
-     * e2e-06 DEF-01 the link carries {@code scopeFullName} only (no {@code &}, which the new job
-     * page's menu escaped) and the form it opens defaults to the JOB scope (note 194).
+     * e2e-06 DEF-01 the link carries {@code scopeFullName} (note 194); since D-71 it may also carry
+     * the frozen prefill parameter {@code actions}, never a {@code scopeType}, and the form it
+     * opens has no scope type control (note 260).
      */
     @Test
     public void t_ui_10_entryIsPresentAndLinksToThePrefilledGrantScreen() throws Exception {
@@ -156,7 +157,7 @@ public class JobGrantSidebarEntryTest {
                 + j.contextPath + "), so a link that drops it cannot resolve correctly by accident");
         // D-66 (note 248): the form moved from the grants list page to grants/new.
         assertGrantFormUrl(resolved(entry), "scopeFullName=batch-x", "the entry must resolve to the grant request form"
-                + " under the context path, with the JOB scope and this job's full name (raw href " + entry.getHrefAttribute() + ")");
+                + " under the context path, with this job's full name (raw href " + entry.getHrefAttribute() + ")");
         assertFollowsToForm(entry, "batch-x");
     }
 
@@ -230,7 +231,7 @@ public class JobGrantSidebarEntryTest {
      */
     @Test
     public void t_ui_13_grantScreenPrefillsTheScopeAndChecksConfigure() throws Exception {
-        HtmlPage page = newForm("g1", "scopeType=JOB&scopeFullName=batch-x");
+        HtmlPage page = newForm("g1", "scopeFullName=batch-x");
         assertEquals(200, page.getWebResponse().getStatusCode());
 
         HtmlInput scope = scopeField(page);
@@ -258,7 +259,7 @@ public class JobGrantSidebarEntryTest {
     @Test
     public void t_ui_14_prefillNeverReflectsTheQueryValue() throws Exception {
         String payload = "<img src=x onerror=1>";
-        HtmlPage page = newForm("g1", "scopeType=JOB&scopeFullName=" + urlEncode(payload));
+        HtmlPage page = newForm("g1", "scopeFullName=" + urlEncode(payload));
         assertEquals(200, page.getWebResponse().getStatusCode(), "an unresolvable scope name must not break the screen");
 
         assertEquals("", scopeField(page).getValue(), "an unresolvable name must leave the field empty rather than echoing the input");
@@ -318,9 +319,22 @@ public class JobGrantSidebarEntryTest {
         return anchor.getHtmlPageOrNull().getFullyQualifiedUrl(anchor.getHrefAttribute()).toURI().normalize().toString();
     }
 
-    /** {@code url} is the grant request form {@code <context>/batch-control/grants/new} with exactly {@code query} (D-66). */
-    private void assertGrantFormUrl(String url, String query, String message) throws Exception {
-        assertEquals(j.getURL() + "batch-control/grants/new?" + query, url, message);
+    /**
+     * {@code url} is the grant request form {@code <context>/batch-control/grants/new} (D-66) whose
+     * query holds exactly the encoded parameter {@code scopeQuery} ({@code scopeFullName=...}) and,
+     * at most, the frozen prefill parameter {@code actions=CONFIGURE} (the action the entry is
+     * for); any other parameter, a {@code scopeType} in particular, fails (D-71).
+     */
+    private void assertGrantFormUrl(String url, String scopeQuery, String message) throws Exception {
+        int q = url.indexOf('?');
+        assertTrue(q > 0, message + ": the link must carry a query, was " + url);
+        assertEquals(j.getURL() + "batch-control/grants/new", url.substring(0, q), message);
+        List<String> pairs = Arrays.asList(url.substring(q + 1).split("&"));
+        assertTrue(pairs.contains(scopeQuery), message + ": the query must hold " + scopeQuery + ", was " + url);
+        for (String pair : pairs) {
+            assertTrue(pair.equals(scopeQuery) || pair.equals("actions=CONFIGURE"),
+                    message + ": unexpected query parameter " + pair + " (D-71: no scopeType) in " + url);
+        }
     }
 
     /** Follows the entry the way a browser would; the form must come back about {@code fullName}. */
@@ -330,8 +344,8 @@ public class JobGrantSidebarEntryTest {
                 .getPage(new WebRequest(new URL(resolved(entry)), HttpMethod.GET));
         assertEquals(200, page.getWebResponse().getStatusCode(), "following the entry for " + fullName + " must answer 200");
         assertEquals(fullName, scopeField(page).getValue(), "the folder path must survive the round trip through the query string");
-        assertEquals("JOB", scopeTypeValue(page), "the form opened from the entry must be pre-filled with the JOB scope"
-                + " (e2e-06 DEF-01: the link carries scopeFullName only and the form defaults to JOB)");
+        assertTrue(page.getElementsByName("scopeType").isEmpty() && page.getElementsByName("_.scopeType").isEmpty(),
+                "D-71: the form opened from the entry must carry no scope type control");
         String text = page.asNormalizedText();
         assertTrue(text.contains("Prefilled for") && text.contains(fullName.substring(fullName.lastIndexOf('/') + 1)),
                 "the form must say it is pre-filled for " + fullName + ": " + text.substring(0, Math.min(600, text.length())));
@@ -361,24 +375,6 @@ public class JobGrantSidebarEntryTest {
                 .login(userId).getPage(new WebRequest(new URL(j.getURL(), url), HttpMethod.GET));
     }
 
-
-    /** The selected scope type: a select's selected option, a checked radio, or a plain input's value. */
-    private static String scopeTypeValue(HtmlPage page) {
-        for (org.htmlunit.html.DomElement e : page.getElementsByName("scopeType")) {
-            if (e instanceof org.htmlunit.html.HtmlSelect) {
-                List<org.htmlunit.html.HtmlOption> sel = ((org.htmlunit.html.HtmlSelect) e).getSelectedOptions();
-                return sel.isEmpty() ? null : sel.get(0).getValueAttribute();
-            }
-            if (e instanceof org.htmlunit.html.HtmlRadioButtonInput) {
-                if (((org.htmlunit.html.HtmlRadioButtonInput) e).isChecked()) {
-                    return ((HtmlInput) e).getValue();
-                }
-            } else if (e instanceof HtmlInput) {
-                return ((HtmlInput) e).getValue();
-            }
-        }
-        return null;
-    }
 
     private static HtmlInput scopeField(HtmlPage page) {
         HtmlInput input = page.getElementsByTagName("input").stream()
@@ -422,7 +418,7 @@ public class JobGrantSidebarEntryTest {
         GrantRequest request;
         try (ACLContext ignored = as("g1")) {
             request = GrantRequestService.get().create(
-                    new GrantScope(GrantScope.Type.JOB, jobFullName),
+                    new GrantScope(GrantScope.Type.ITEM, jobFullName),
                     Arrays.asList(GrantAction.CONFIGURE), WINDOW_MINUTES,
                     "scheduled maintenance", "a1");
         }

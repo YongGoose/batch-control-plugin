@@ -213,7 +213,7 @@ public class SystemBuildWarningTest {
     }
 
     private String request(String job) throws Exception {
-        return submitGrantOk(j, "bob", "JOB", job, Arrays.asList("CONFIGURE"), 30, "maintenance of " + job, null, "a1");
+        return submitGrantOk(j, "bob", job, Arrays.asList("CONFIGURE"), 30, "maintenance of " + job, null, "a1");
     }
 
     private String manageText() throws Exception {

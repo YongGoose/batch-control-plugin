@@ -60,8 +60,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * a global lock is held, a typing-time validation (GET) is refused without a record, and the
  * submitted name is matched as submitted (untrimmed). Matrix rows T-SEC-35 .. T-SEC-40.
  *
- * <p>Same set-up as {@link CreateNamePatternTest}: folder {@code team}, a FOLDER-scoped grant
- * held by u1 (no Create/Configure/Delete of their own) under the Batch Control matrix strategy
+ * <p>Same set-up as {@link CreateNamePatternTest}: folder {@code team}, a window on that folder
+ * (D-71: scope type ITEM) held by u1 (no Create/Configure/Delete of their own) under the Batch Control matrix strategy
  * (D-35a), change control on, run control off.
  *
  * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-40/D-40a, docs/reports/security-08.md and
@@ -131,12 +131,18 @@ public class CreateNameRestrictionSecurityTest {
      * T-SEC-36 (S-02): a rename authorised by the grant's Create on the parent (core's Create +
      * Delete rename branch) must match the restriction, and the new name is read from the rename
      * endpoint's own parameter ({@code newName}); a spoofed {@code name} parameter carrying a
-     * matching name does not help. A matching rename still works.
+     * matching name does not help. A matching rename still works. Core takes this branch for a
+     * user without Configure on the item: Create in the parent plus Delete on the item. Since D-71
+     * u1 holds them through two windows, the restricted CREATE on {@code team} and a DELETE on the
+     * job {@code team/legacy}; before D-71 one FOLDER [CREATE, DELETE] window gave both, which can
+     * no longer be requested (note 260). The row does not claim that every rename needs two
+     * windows (Configure on the item suffices in core's other branch).
      */
     @Test
     public void t_sec_36_createAndDeleteRenameIgnoresASpoofedNameParameter() throws Exception {
         team.createProject(FreeStyleProject.class, "legacy");
-        grant("/nightly-[a-z]+/", "CREATE", "DELETE");
+        grant("/nightly-[a-z]+/", "CREATE");
+        grantOn("team/legacy", "DELETE");
 
         WebResponse refused = rename("u1", "legacy", "evil-name", "nightly-ok");
         assertClientError(refused, "a Create+Delete rename to a non-matching newName with a matching name parameter");
@@ -181,7 +187,7 @@ public class CreateNameRestrictionSecurityTest {
         team.createProject(FreeStyleProject.class, "existing");
         String pattern = "/(a|a)*\\1b/";
         Set<String> before = grantRequestIds();
-        WebResponse submission = submitGrant(j, "u1", "FOLDER", "team", Arrays.asList("CREATE"), 30,
+        WebResponse submission = submitGrant(j, "u1", "team", Arrays.asList("CREATE"), 30,
                 "create the report job", pattern, "a1");
         if (submission.getStatusCode() >= 400) {
             // Refusing the construct at submission also satisfies "no pattern can stall the instance".
@@ -278,7 +284,8 @@ public class CreateNameRestrictionSecurityTest {
     @Test
     public void t_sec_39_typingTimeValidationIsRefusedWithoutARecord() throws Exception {
         team.createProject(FreeStyleProject.class, "legacy");
-        grant("/nightly-[a-z]+/", "CREATE", "DELETE");
+        grant("/nightly-[a-z]+/", "CREATE");
+        grantOn("team/legacy", "DELETE"); // D-71: the Create+Delete branch's Delete comes from a window on the job
 
         for (String prefix : new String[] {"a", "ad", "adh", "adho", "adhoc"}) {
             WebResponse check = ApproverFormFixtures.get(j, "u1",
@@ -305,11 +312,14 @@ public class CreateNameRestrictionSecurityTest {
      * T-SEC-40 (S-06): the name is matched as the command submits it. CLI {@code create-job} and
      * {@code copy-job} with {@code "app-1 "} (trailing space) against the exact restriction
      * {@code app-1} are refused, leave no item and are recorded; {@code app-1} itself is created.
+     * A copy reads the source's configuration; since D-71 that comes from a CONFIGURE window on
+     * {@code team/template-job} (before D-71 the folder window's CONFIGURE covered it, note 260).
      */
     @Test
     public void t_sec_40_trailingSpaceNameIsNotTrimmedIntoAMatch() throws Exception {
         team.createProject(FreeStyleProject.class, "template-job");
         grant("app-1", "CREATE", "CONFIGURE");
+        grantOn("team/template-job", "CONFIGURE");
 
         CLICommandInvoker.Result created = new CLICommandInvoker(j, "create-job").asUser("u1")
                 .withStdin(new ByteArrayInputStream(MINIMAL_JOB_XML.getBytes(StandardCharsets.UTF_8)))
@@ -335,8 +345,16 @@ public class CreateNameRestrictionSecurityTest {
 
     // ---------------------------------------------------------------- helpers
 
+    /** An unrestricted window on the one item {@code fullName} for u1, approved by a1 (D-71). */
+    private void grantOn(String fullName, String... actions) throws Exception {
+        String id = submitGrantOk(j, "u1", fullName, Arrays.asList(actions), 30,
+                "maintenance of " + fullName, null, "a1");
+        assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval by a1");
+    }
+
+    /** A window on the folder {@code team} for u1 with the given restriction, approved by a1. */
     private String grant(String createNamePattern, String... actions) throws Exception {
-        String id = submitGrantOk(j, "u1", "FOLDER", "team", Arrays.asList(actions), 30,
+        String id = submitGrantOk(j, "u1", "team", Arrays.asList(actions), 30,
                 "create the nightly report job", createNamePattern, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval by a1");
         assertTrue(GrantService.get().listActive().stream().anyMatch(g -> "u1".equals(g.getUser())),

@@ -90,9 +90,11 @@ public class RequestDialogTest {
     /**
      * T-UI-98: the grants page, a job page and a folder page (R4-14) each offer a grant request
      * entry whose content is the grant request form posting to {@code grants/create}; from the job
-     * page it is pre-filled with the job, from the folder page with the folder. Guards: a user
-     * without BatchControl/RequestGrant is offered no grant form from the folder page, and with
-     * change control off neither is the requester.
+     * page it is pre-filled with the job, from the folder page with the folder. Since D-71 there is
+     * no scope type: no form carries a {@code scopeType} control (before D-71 the folder form had
+     * to select FOLDER and the select had to offer JOB, FOLDER and FOLDER_ONLY; note 260). Guards:
+     * a user without BatchControl/RequestGrant is offered no grant form from the folder page, and
+     * with change control off neither is the requester.
      */
     @Test
     public void t_ui_98_grantRequestEntriesOnGrantsJobAndFolderPages() throws Exception {
@@ -111,18 +113,19 @@ public class RequestDialogTest {
         Map<URL, HtmlForm> fromFolder = entries("g1", folderPage);
         assertFalse(fromFolder.isEmpty(), "the folder page must offer a grant request entry (R4-14); targets were "
                 + RequestPageFixtures.entryTargets(j, folderPage));
-        assertTrue(fromFolder.values().stream().anyMatch(f -> "team".equals(scopeFullName(f)) && "FOLDER".equals(scopeType(f))),
-                "the folder page's grant form must be pre-filled with the folder and the FOLDER scope: " + scopes(fromFolder));
+        assertTrue(fromFolder.values().stream().anyMatch(f -> "team".equals(scopeFullName(f))),
+                "the folder page's grant form must be pre-filled with the folder: " + scopes(fromFolder));
+        for (Map<URL, HtmlForm> fromPage : List.of(fromJob, fromFolder)) {
+            fromPage.forEach((url, f) -> assertFalse(hasScopeTypeControl(f),
+                    "D-71: the grant form from " + url + " must carry no scope type control"));
+        }
 
         HtmlPage blank = UsabilityFixtures.htmlPage(j, "g1", "batch-control/grants/new");
         List<HtmlForm> forms = UsabilityFixtures.formsEndingWith(blank, GRANT_CREATE);
         assertFalse(forms.isEmpty(), "grants/new must render the grant request form");
-        List<String> types = new ArrayList<>();
-        for (Object o : forms.get(0).getByXPath(".//select[@name='scopeType']/option")) {
-            types.add(((org.htmlunit.html.HtmlOption) o).getValueAttribute());
-        }
-        assertTrue(types.containsAll(List.of("JOB", "FOLDER", "FOLDER_ONLY")), "the scope select must offer JOB, FOLDER and FOLDER_ONLY"
-                + " (D-65): " + types);
+        assertFalse(hasScopeTypeControl(forms.get(0)), "D-71: the grant request form must carry no scope type control");
+        assertTrue(UsabilityFixtures.hasField(forms.get(0), "scopeFullName") && UsabilityFixtures.hasField(forms.get(0), "actions"),
+                "guard: the form still asks for the item and the actions");
 
         assertTrue(entries("n1", UsabilityFixtures.htmlPage(j, "n1", "job/team/")).isEmpty(),
                 "a user without RequestGrant must be offered no grant request form from the folder page");
@@ -153,7 +156,7 @@ public class RequestDialogTest {
         assertLandsOn(runResponse, "u1", "batch-control/requests/" + runsAfter.iterator().next());
 
         Set<String> grantsBefore = ApproverFormFixtures.grantRequestIds();
-        WebResponse grantResponse = ApproverFormFixtures.submitGrant(j, "g1", "JOB", "batch-x",
+        WebResponse grantResponse = ApproverFormFixtures.submitGrant(j, "g1", "batch-x",
                 Arrays.asList("CONFIGURE"), 30, "fix the job", null, "a1");
         Set<String> grantsAfter = ApproverFormFixtures.grantRequestIds();
         grantsAfter.removeAll(grantsBefore);
@@ -256,7 +259,6 @@ public class RequestDialogTest {
     private static List<org.htmlunit.util.NameValuePair> grantParams(String minutes) {
         List<org.htmlunit.util.NameValuePair> p = new ArrayList<>();
         p.add(new org.htmlunit.util.NameValuePair("dialog", "true"));
-        p.add(new org.htmlunit.util.NameValuePair("scopeType", "JOB"));
         p.add(new org.htmlunit.util.NameValuePair("scopeFullName", "batch-x"));
         p.add(new org.htmlunit.util.NameValuePair("actions", "CONFIGURE"));
         p.add(new org.htmlunit.util.NameValuePair("durationMinutes", minutes));
@@ -265,21 +267,9 @@ public class RequestDialogTest {
         return p;
     }
 
-    /** The selected scope type of the form: a select's selected option, a checked radio, or an input's value. */
-    static String scopeType(HtmlForm form) {
-        for (Object e : form.getByXPath(".//*[@name='scopeType']")) {
-            if (e instanceof HtmlSelect s && !s.getSelectedOptions().isEmpty()) {
-                return s.getSelectedOptions().get(0).getValueAttribute();
-            }
-            if (e instanceof org.htmlunit.html.HtmlRadioButtonInput r) {
-                if (r.isChecked()) {
-                    return r.getValueAttribute();
-                }
-            } else if (e instanceof HtmlInput i) {
-                return i.getValue();
-            }
-        }
-        return null;
+    /** True if the form carries any control named {@code scopeType} (select, radio, hidden or text input). */
+    static boolean hasScopeTypeControl(HtmlForm form) {
+        return !form.getByXPath(".//*[@name='scopeType' or @name='_.scopeType']").isEmpty();
     }
 
     private Map<URL, HtmlForm> entries(String user, HtmlPage page) throws Exception {
@@ -322,7 +312,7 @@ public class RequestDialogTest {
 
     private static List<String> scopes(Map<URL, HtmlForm> entries) {
         List<String> out = new ArrayList<>();
-        entries.forEach((url, f) -> out.add(url + " -> " + scopeType(f) + ":" + scopeFullName(f)));
+        entries.forEach((url, f) -> out.add(url + " -> " + scopeFullName(f)));
         return out;
     }
 

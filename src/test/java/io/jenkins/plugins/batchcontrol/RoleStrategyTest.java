@@ -12,7 +12,6 @@ import hudson.model.User;
 import hudson.slaves.DumbSlave;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlRoleBasedAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -157,9 +156,9 @@ public class RoleStrategyTest {
         FreeStyleProject r = j.createFreeStyleProject("other-2");
         assertFalse(has(q, "carol", Item.CONFIGURE), "premise: carol has no Configure before the grant");
 
-        StrategyFixtures.grant("carol", GrantScope.Type.JOB, "other", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("carol", "other", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(q, "carol", Item.CONFIGURE), "the grant must be layered over the role ACL");
-        assertFalse(has(r, "carol", Item.CONFIGURE), "guard: a JOB-scoped grant must not reach another job");
+        assertFalse(has(r, "carol", Item.CONFIGURE), "guard: a window on one job must not reach another job");
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(WINDOW_MINUTES + 1)), ZoneOffset.UTC));
         assertFalse(has(q, "carol", Item.CONFIGURE), "past the expiry the grant must be refused from the first check");
@@ -182,7 +181,7 @@ public class RoleStrategyTest {
         AdministrativeMonitor monitor = StrategyFixtures.strategyMonitor();
         StrategyFixtures.configureBuildAuthenticator(); // D-35d: isolate the strategy half of the monitor (note 53)
         FreeStyleProject q = j.createFreeStyleProject("other");
-        StrategyFixtures.grant("carol", GrantScope.Type.JOB, "other", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("carol", "other", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(q, "carol", Item.CONFIGURE), "premise: the grant confers under the subclass");
         assertFalse(monitor.isActivated(), "guard: the monitor must be quiet while the Batch Control role strategy is installed");
 

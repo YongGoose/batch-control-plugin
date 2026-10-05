@@ -133,7 +133,6 @@ public class FormRefusalUsabilityTest {
         // (c) grant request over maxGrantMinutes (20)
         Set<String> grantsBefore = ApproverFormFixtures.grantRequestIds();
         List<NameValuePair> params = new ArrayList<>();
-        params.add(new NameValuePair("scopeType", "JOB"));
         params.add(new NameValuePair("scopeFullName", "form-x"));
         params.add(new NameValuePair("actions", "CONFIGURE"));
         params.add(new NameValuePair("durationMinutes", "45"));

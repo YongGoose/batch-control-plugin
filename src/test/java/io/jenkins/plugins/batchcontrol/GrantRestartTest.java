@@ -154,7 +154,7 @@ public class GrantRestartTest {
     private Grant grantU1Configure(int minutes) {
         GrantRequest request;
         try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, JOB),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, JOB),
                     Arrays.asList(GrantAction.CONFIGURE), minutes, "restart durability window", "a1");
         }
         try (ACLContext ignored = ACL.as2(User.getById("a1", true).impersonate2())) {

@@ -12,7 +12,6 @@ import hudson.security.Permission;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
 import hudson.slaves.DumbSlave;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -166,10 +165,13 @@ public class MatrixStrategyTest {
     }
 
     /**
-     * T-02-12 (PoC-5 row 9, option A; SPEC 8 expiry): a grant is layered over the per-item ACL.
-     * A FOLDER-scoped CONFIGURE grant reaches a job that has its own authorization property, the
-     * job's own entry stays effective, and the grant is refused from the first check at expiry.
-     * Guard: the grant does not reach a job outside the folder.
+     * T-02-12 (PoC-5 row 9, option A; SPEC 8 expiry), rewritten for D-71: a grant is layered over
+     * the per-item ACL. bob's CONFIGURE window on the job {@code f/job}, which has its own
+     * authorization property, reaches it; the job's own entry stays effective; the grant is
+     * refused from the first check at expiry. Guards: the window reaches neither a job outside
+     * the folder nor the folder {@code f} itself. The former fixture reached {@code f/job}
+     * through a FOLDER window on {@code f}; D-71 withdraws that reach, so carol's window on
+     * {@code f} now confers Configure on {@code f} only and nothing on {@code f/job} (note 260).
      */
     @Test
     public void t_02_12_grantLayeredOverPerItemAclAndExpires() throws Exception {
@@ -183,14 +185,21 @@ public class MatrixStrategyTest {
         p.addProperty(amp);
 
         assertFalse(has(p, "bob", Item.CONFIGURE), "premise: bob has no Configure before the grant");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "f", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "f/job", Arrays.asList(GrantAction.CONFIGURE));
 
-        assertTrue(has(p, "bob", Item.CONFIGURE), "a folder-scoped grant must reach a job that has its own property");
+        assertTrue(has(p, "bob", Item.CONFIGURE), "a window on the job must reach a job that has its own property");
         assertTrue(has(p, "alice", Item.CONFIGURE), "the job's own entry must stay effective under the grant layer");
-        assertFalse(has(outside, "bob", Item.CONFIGURE), "guard: the grant must not reach a job outside its folder");
+        assertFalse(has(outside, "bob", Item.CONFIGURE), "guard: the grant must not reach another job");
+        assertFalse(has(f, "bob", Item.CONFIGURE), "guard: a window on a job confers nothing on its folder");
+
+        assertFalse(has(f, "carol", Item.CONFIGURE), "premise: carol has no Configure on f before her window");
+        StrategyFixtures.grant("carol", "f", Arrays.asList(GrantAction.CONFIGURE));
+        assertTrue(has(f, "carol", Item.CONFIGURE), "a window on the folder confers Configure on the folder itself");
+        assertFalse(has(p, "carol", Item.CONFIGURE), "D-71: a window on the folder must not reach the job inside it");
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(WINDOW_MINUTES + 1)), ZoneOffset.UTC));
         assertFalse(has(p, "bob", Item.CONFIGURE), "past the expiry the grant must be refused from the first check (no timer)");
         assertTrue(has(p, "alice", Item.CONFIGURE), "the job's own entry is unaffected by the expiry");
+        assertFalse(has(f, "carol", Item.CONFIGURE), "past the expiry carol's window is refused too");
     }
 }

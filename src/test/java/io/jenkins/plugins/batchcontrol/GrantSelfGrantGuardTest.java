@@ -9,7 +9,6 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -121,7 +120,7 @@ public class GrantSelfGrantGuardTest {
     public void t_02_22_grantOnlyConfigureCannotWriteJobAuthorizationEntry() throws Exception {
         FreeStyleProject p = jobWithAliceProperty("job");
         assertFalse(has(p, "bob", Item.CONFIGURE), "premise: bob holds no native Configure");
-        Grant grant = StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
+        Grant grant = StrategyFixtures.grant("bob", "job", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(p, "bob", Item.CONFIGURE), "premise: the grant confers Configure on the job");
         assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(), "premise: no violation recorded yet");
 
@@ -162,7 +161,7 @@ public class GrantSelfGrantGuardTest {
     @Test
     public void t_02_23_ordinarySaveIsKeptAndNativeConfigureWideningIsReverted() throws Exception {
         FreeStyleProject p = jobWithAliceProperty("job");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "job", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "job", Arrays.asList(GrantAction.CONFIGURE));
 
         String xml = p.getConfigFile().asString();
         // A new job's config.xml may carry no <description> element at all: drop whatever form it
@@ -190,19 +189,22 @@ public class GrantSelfGrantGuardTest {
     }
 
     /**
-     * T-02-24 (D-35b, folder property): bob holds Configure inside folder {@code team} only
-     * through a FOLDER grant and adds a folder authorization property to {@code team/sub} that
-     * gives himself Item/Configure. The change is reverted (no entry for bob), a GRANT_VIOLATION
-     * record names bob and {@code team/sub}, and after the window bob has no Configure on the job
-     * inside it.
+     * T-02-24 (D-35b, folder property), rewritten for D-71: bob holds Configure on the folder
+     * {@code team/sub} only through a CONFIGURE window on that folder (before D-71 a FOLDER window
+     * on {@code team} reached it; since D-71 a window names the folder itself) and adds a folder
+     * authorization property to {@code team/sub} that gives himself Item/Configure. The change is
+     * reverted (no entry for bob), a GRANT_VIOLATION record names bob and {@code team/sub}, and
+     * after the window bob has no Configure on the job inside it. The window never reached that
+     * job (D-71), which the row asserts as well.
      */
     @Test
     public void t_02_24_grantOnlyConfigureCannotWriteFolderAuthorizationEntry() throws Exception {
         Folder team = j.jenkins.createProject(Folder.class, "team");
         Folder sub = team.createProject(Folder.class, "sub");
         FreeStyleProject job = sub.createProject(FreeStyleProject.class, "job");
-        Grant grant = StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CONFIGURE));
-        assertTrue(has(sub, "bob", Item.CONFIGURE), "premise: the FOLDER grant confers Configure on team/sub");
+        Grant grant = StrategyFixtures.grant("bob", "team/sub", Arrays.asList(GrantAction.CONFIGURE));
+        assertTrue(has(sub, "bob", Item.CONFIGURE), "premise: the window on team/sub confers Configure on team/sub");
+        assertFalse(has(job, "bob", Item.CONFIGURE), "D-71: the window on the folder does not reach the job inside it");
 
         StrategyFixtures.as("bob", () -> {
             com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty fp =
@@ -232,7 +234,7 @@ public class GrantSelfGrantGuardTest {
     }
 
     /**
-     * T-02-25 (D-35c, PoC-5 row 15): bob holds only a FOLDER CREATE grant on {@code team} and
+     * T-02-25 (D-35c, PoC-5 row 15): bob holds only a CREATE window on the folder {@code team} and
      * creates {@code team/new}. During the window he may configure the item he created (and not
      * a pre-existing one); matrix-auth's creator listener therefore adds nothing, so past the
      * window bob holds no Configure on {@code team/new}, no authorization entry names him (in
@@ -243,7 +245,7 @@ public class GrantSelfGrantGuardTest {
         Folder team = j.jenkins.createProject(Folder.class, "team");
         FreeStyleProject old = team.createProject(FreeStyleProject.class, "old");
         assertFalse(has(team, "bob", Item.CREATE), "premise: bob cannot create before the grant");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CREATE));
         assertTrue(has(team, "bob", Item.CREATE), "premise: the CREATE grant confers Item/Create on the folder");
 
         FreeStyleProject created = StrategyFixtures.as("bob", () -> team.createProject(FreeStyleProject.class, "new"));
@@ -327,12 +329,15 @@ public class GrantSelfGrantGuardTest {
     }
 
     /**
-     * T-02-38 (security-05 S-01, D-35d(1)): carol holds Item/Configure on {@code S/F/j} only
-     * through a FOLDER {@code S} CONFIGURE grant, inherited through {@code S/F}; the job has no
-     * property of its own. carol POSTs {@code S/F/j/config.xml} adding a property that gives
-     * herself Item/Configure. The property is removed (memory and disk), one GRANT_VIOLATION
-     * names carol, {@code S/F/j} and the grant, and past the window carol has no Configure.
-     * Guard: c1 (native Configure) is not affected (T-02-23).
+     * T-02-38 (security-05 S-01, D-35d(1)), rewritten for D-71: carol holds a CONFIGURE window on
+     * the folder {@code S}. Before D-71 it reached {@code S/F/j} by inheritance and the row
+     * asserted that the guard still caught the authorization entry she added there; D-71
+     * withdraws that reach, so the row now asserts that her POST of {@code S/F/j/config.xml} with
+     * a property for herself is refused (403) and leaves no entry (note 260). S-01's guard half (a
+     * Configure that comes only from a window is decided through the parent strategy, not by a
+     * name lookup) is kept on the window's own item: a folder authorization property carol adds
+     * to {@code S} is reverted, and one GRANT_VIOLATION names carol, {@code S} and the grant. Past
+     * the window carol has no Configure on either.
      */
     @Test
     public void t_02_38_inheritedFolderGrantCannotWriteAuthorizationEntry() throws Exception {
@@ -340,39 +345,60 @@ public class GrantSelfGrantGuardTest {
         Folder f = s.createProject(Folder.class, "F");
         FreeStyleProject job = f.createProject(FreeStyleProject.class, "j");
         assertFalse(has(job, "carol", Item.CONFIGURE), "premise: carol holds no native Configure");
-        Grant grant = StrategyFixtures.grant("carol", GrantScope.Type.FOLDER, "S", Arrays.asList(GrantAction.CONFIGURE));
-        assertTrue(has(job, "carol", Item.CONFIGURE), "premise: the folder grant reaches S/F/j by inheritance");
+        Grant grant = StrategyFixtures.grant("carol", "S", Arrays.asList(GrantAction.CONFIGURE));
+        assertTrue(has(s, "carol", Item.CONFIGURE), "premise: the window confers Configure on S itself");
+        assertFalse(has(job, "carol", Item.CONFIGURE), "D-71: the window on S must not reach S/F/j");
 
-        postConfigXml("carol", job, withNewPropertyFor(job.getConfigFile().asString(), "carol"));
-
+        assertEquals(403, postConfigXml("carol", job, withNewPropertyFor(job.getConfigFile().asString(), "carol")),
+                "D-71: carol's save of S/F/j must be refused, the window on S does not cover it");
         FreeStyleProject current = j.jenkins.getItemByFullName("S/F/j", FreeStyleProject.class);
         AuthorizationMatrixProperty amp = current.getProperty(AuthorizationMatrixProperty.class);
         assertTrue(amp == null || !mentions(amp.getGrantedPermissionEntries(), "carol"),
-                "the authorization property added through an inherited grant must be reverted");
-        assertFalse(current.getConfigFile().asString().contains(":carol</permission>"), "the revert must be persisted on disk");
+                "the refused save must leave no authorization entry for carol");
+        assertFalse(current.getConfigFile().asString().contains(":carol</permission>"), "nothing for carol on disk");
+        assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(), "a refused save changes nothing to revert");
+
+        StrategyFixtures.as("carol", () -> {
+            com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty fp =
+                    new com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty(
+                            new HashMap<Permission, Set<String>>());
+            fp.add(Item.CONFIGURE, PermissionEntry.user("carol"));
+            s.addProperty(fp);
+            return null;
+        });
+        Folder sNow = j.jenkins.getItemByFullName("S", Folder.class);
+        com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty fp =
+                sNow.getProperties().get(com.cloudbees.hudson.plugins.folder.properties.AuthorizationMatrixProperty.class);
+        assertTrue(fp == null || !mentions(fp.getGrantedPermissionEntries(), "carol"),
+                "the authorization property carol added to the window's folder must be reverted");
+        assertFalse(sNow.getConfigFile().asString().contains(":carol</permission>"), "the revert must be persisted on disk");
         List<ChangeRecord> violations = StrategyFixtures.records(ChangeType.GRANT_VIOLATION);
         assertEquals(1, violations.size(), "exactly one GRANT_VIOLATION record must be written, got " + violations.size());
         assertEquals("carol", violations.get(0).getUser());
-        assertEquals("S/F/j", violations.get(0).getTarget());
-        assertTrue(violations.get(0).getDetail().contains(grant.getId()), "the record must name the (ancestor-scoped) grant");
+        assertEquals("S", violations.get(0).getTarget());
+        assertTrue(violations.get(0).getDetail().contains(grant.getId()), "the record must name the grant");
 
         afterWindow();
         assertFalse(has(current, "carol", Item.CONFIGURE), "past the window carol must hold no Configure on S/F/j");
+        assertFalse(has(sNow, "carol", Item.CONFIGURE), "past the window carol must hold no Configure on S");
     }
 
     /**
-     * T-02-39 (security-05 S-01, D-35d(1)): bob holds only a FOLDER {@code S} CREATE grant and
-     * creates folder {@code S/F}; the administrator creates {@code S/F/j} inside it. D-35c confers
-     * Configure on exactly what bob created: {@code S/F} yes, {@code S/F/j} no. bob's POST of
-     * {@code S/F/j/config.xml} adding a property for himself leaves no entry. The positive twin:
-     * bob creates {@code S/F/mine} himself and may configure it, but a property he adds to it is
-     * reverted and recorded (Configure there comes only from the grant). Past the window bob has
-     * Configure on none of them.
+     * T-02-39 (security-05 S-01, D-35d(1)), rewritten for D-71: bob holds only a CREATE window on
+     * {@code S} and creates the folder {@code S/F} directly inside it; the administrator creates
+     * {@code S/F/j} inside that. D-35c confers Configure on exactly what bob created: {@code S/F}
+     * yes, {@code S/F/j} no. bob's POST of {@code S/F/j/config.xml} adding a property for himself
+     * leaves no entry. Since D-71 the window's CREATE applies directly inside {@code S} only, so
+     * bob can no longer create {@code S/F/mine} inside the folder he created (the former positive
+     * twin, now asserted refused, note 260); the positive twin moves to {@code S/mine}, created
+     * directly in {@code S}: bob may configure it, but a property he adds to it is reverted and
+     * recorded (Configure there comes only from the window). Past the window bob has Configure on
+     * none of them.
      */
     @Test
     public void t_02_39_createGrantConfigureDoesNotReachOthersChildren() throws Exception {
         Folder s = j.jenkins.createProject(Folder.class, "S");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "S", Arrays.asList(GrantAction.CREATE));
+        StrategyFixtures.grant("bob", "S", Arrays.asList(GrantAction.CREATE));
         Folder f = StrategyFixtures.as("bob", () -> s.createProject(Folder.class, "F"));
         assertTrue(has(f, "bob", Item.CONFIGURE), "premise (D-35c): bob configures the folder he created");
         FreeStyleProject others = f.createProject(FreeStyleProject.class, "j"); // created by the administrator (SYSTEM)
@@ -384,16 +410,22 @@ public class GrantSelfGrantGuardTest {
         AuthorizationMatrixProperty amp = othersNow.getProperty(AuthorizationMatrixProperty.class);
         assertTrue(amp == null || !mentions(amp.getGrantedPermissionEntries(), "bob"), "bob must not be able to write S/F/j's property");
 
-        FreeStyleProject mine = StrategyFixtures.as("bob", () -> f.createProject(FreeStyleProject.class, "mine"));
-        assertTrue(has(mine, "bob", Item.CONFIGURE), "guard: bob configures the job he created (D-35c)");
+        assertFalse(has(f, "bob", Item.CREATE), "D-71: CREATE never applies inside a nested folder, not even one bob created");
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> StrategyFixtures.as("bob", () -> f.createProject(FreeStyleProject.class, "mine")),
+                "D-71: bob must not create inside S/F");
+        assertTrue(f.getItem("mine") == null, "D-71: nothing may be created inside S/F");
+
+        FreeStyleProject mine = StrategyFixtures.as("bob", () -> s.createProject(FreeStyleProject.class, "mine"));
+        assertTrue(has(mine, "bob", Item.CONFIGURE), "guard: bob configures the job he created directly in S (D-35c)");
         postConfigXml("bob", mine, withNewPropertyFor(mine.getConfigFile().asString(), "bob"));
-        FreeStyleProject mineNow = j.jenkins.getItemByFullName("S/F/mine", FreeStyleProject.class);
+        FreeStyleProject mineNow = j.jenkins.getItemByFullName("S/mine", FreeStyleProject.class);
         AuthorizationMatrixProperty mineAmp = mineNow.getProperty(AuthorizationMatrixProperty.class);
         assertTrue(mineAmp == null || !mentions(mineAmp.getGrantedPermissionEntries(), "bob"),
                 "a property bob adds to his own created job must be reverted (grant-only Configure)");
         assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).stream().anyMatch(
-                rec -> "bob".equals(rec.getUser()) && "S/F/mine".equals(rec.getTarget())),
-                "the revert on S/F/mine must be recorded as GRANT_VIOLATION");
+                rec -> "bob".equals(rec.getUser()) && "S/mine".equals(rec.getTarget())),
+                "the revert on S/mine must be recorded as GRANT_VIOLATION");
 
         afterWindow();
         assertFalse(has(othersNow, "bob", Item.CONFIGURE));
@@ -413,7 +445,7 @@ public class GrantSelfGrantGuardTest {
         p.getProperty(AuthorizationMatrixProperty.class).add(Item.BUILD, PermissionEntry.user("carol"));
         p.save();
         assertTrue(has(p, "carol", Item.BUILD), "premise: carol builds through the job property");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "j", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "j", Arrays.asList(GrantAction.CONFIGURE));
 
         java.nio.file.Path file = p.getConfigFile().getFile().toPath();
         String disk = java.nio.file.Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
@@ -440,7 +472,7 @@ public class GrantSelfGrantGuardTest {
     }
 
     /**
-     * T-02-34 (D-35c, creation payload): bob holds only a FOLDER CREATE grant on {@code team} and
+     * T-02-34 (D-35c, creation payload): bob holds only a CREATE window on the folder {@code team} and
      * POSTs {@code job/team/createItem} with a config.xml carrying an AuthorizationMatrixProperty
      * that gives himself and carol Item/Configure. The item is created, the payload's property is
      * removed (memory and disk) and one GRANT_VIOLATION names bob and {@code team/new}; past the
@@ -450,7 +482,7 @@ public class GrantSelfGrantGuardTest {
     @Test
     public void t_02_34_createItemPayloadCannotCarryAuthorizationProperty() throws Exception {
         j.jenkins.createProject(Folder.class, "team");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CREATE));
 
         String plain = "<?xml version='1.1' encoding='UTF-8'?><project><properties/><builders/><publishers/><buildWrappers/></project>";
         int guard = postCreateItem("bob", "job/team/", "name=clean", plain);
@@ -463,8 +495,8 @@ public class GrantSelfGrantGuardTest {
 
     /**
      * T-02-35 (D-35c, copied item): the source {@code team/src} carries an authorization property
-     * (bob and carol Item/Configure, set by the administrator). bob, with only a FOLDER CREATE
-     * grant, copies it through {@code createItem?mode=copy&from=src}. The copy carries no
+     * (bob and carol Item/Configure, set by the administrator). bob, with only a CREATE window
+     * on the folder {@code team}, copies it through {@code createItem?mode=copy&from=src}. The copy carries no
      * authorization property of the source, one GRANT_VIOLATION names bob and {@code team/copy},
      * and past the window bob holds no Configure on the copy. Guard: the source keeps its property.
      */
@@ -477,7 +509,7 @@ public class GrantSelfGrantGuardTest {
         amp.add(Item.CONFIGURE, PermissionEntry.user("carol"));
         src.addProperty(amp);
         assertTrue(has(src, "bob", Item.EXTENDED_READ), "premise: bob may read the source's configuration");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CREATE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CREATE));
 
         org.htmlunit.Page answer = postCreateItemPage("bob", "job/team/", "name=copy&mode=copy&from=src", null);
         // D-48 ruling: the copy is made, but its stripped authorization property is reported to

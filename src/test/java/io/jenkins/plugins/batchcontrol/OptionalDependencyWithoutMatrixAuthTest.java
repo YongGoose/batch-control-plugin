@@ -107,7 +107,7 @@ public class OptionalDependencyWithoutMatrixAuthTest {
         assertFalse(has(p, "bob", Item.CONFIGURE), "premise: bob has no Configure on 'other' before the grant");
         GrantRequest request;
         try (ACLContext ignored = ACL.as2(User.getById("bob", true).impersonate2())) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "other"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "other"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance", "a1");
         }
         Grant grant;

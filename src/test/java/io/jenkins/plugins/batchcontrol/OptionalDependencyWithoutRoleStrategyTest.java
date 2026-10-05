@@ -88,7 +88,7 @@ public class OptionalDependencyWithoutRoleStrategyTest {
         assertFalse(has(p, "bob", Item.CONFIGURE), "premise: bob has no Configure before the grant");
         GrantRequest request;
         try (ACLContext ignored = ACL.as2(User.getById("bob", true).impersonate2())) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "job"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "job"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance", "a1");
         }
         Grant grant;

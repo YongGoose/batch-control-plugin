@@ -210,7 +210,7 @@ public class NotificationTest {
      */
     @Test
     public void t_13_04_grantRequestEventsAndRecipients() throws Exception {
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1", "a2");
         List<NotificationCapture> created = NotificationCapture.await(NotificationEvent.REQUEST_CREATED, id);
         assertEquals(1, created.size());
@@ -226,7 +226,7 @@ public class NotificationTest {
         List<NotificationCapture> approved = NotificationCapture.await(NotificationEvent.APPROVED, id);
         assertEquals(List.of("u1"), approved.get(0).recipients);
 
-        String rejectedId = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("DELETE"), 30,
+        String rejectedId = submitGrantOk(j, "u1", "batch-x", Arrays.asList("DELETE"), 30,
                 "remove the job", null, "a2");
         assertSuccess(decideGrant(j, "a2", rejectedId, "reject", "not now"), "rejection by a2");
         List<NotificationCapture> rejected = NotificationCapture.await(NotificationEvent.REJECTED, rejectedId);
@@ -281,7 +281,7 @@ public class NotificationTest {
     public void t_13_07_pendingGrantRequestExpiringFiresOnce() throws Exception {
         cfg.setPendingTimeoutHours(1);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1");
 
         runExpiryWorkAt(T0.plus(Duration.ofMinutes(49)));
@@ -303,7 +303,7 @@ public class NotificationTest {
      */
     @Test
     public void t_13_08_activeGrantExpiringFiresOnceBeforeTheWindowEnds() throws Exception {
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "approval by a1");
         assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE), "premise: the window is open");
@@ -356,7 +356,7 @@ public class NotificationTest {
         assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(id).getStatus());
         assertEquals(1, job.getBuilds().size(), "the approved build must run despite the failing notifier");
 
-        String grantId = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String grantId = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a1");
         assertSuccess(decideGrant(j, "a1", grantId, "approve", "ok"), "the grant approval");
         assertTrue(GrantService.get().hasActiveGrant("u1", "batch-x", Item.CONFIGURE));
