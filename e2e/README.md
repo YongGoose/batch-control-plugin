@@ -63,7 +63,7 @@ moved to `ci/out/_previous/` first). For shards in parallel on one machine, use 
    from an empty JENKINS_HOME, then waits for the login page, the admin API and `batch-control` active.
 5. `ci/shard.py run <k>/<N>`: the setup (`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`,
    `r14/arrange_fast.py`, `ci/arrange_ci.py`, `r14/seed_fast.py`, `r14/seed.py`, `r14/seed_paging.py`,
-   `ci/seed_markup.py`: the e2e-14 arrangement), then the shard's units in the e2e-14 order. One log per step in
+   `ci/seed_markup.py`: the e2e-14 arrangement; then `ci/preconditions.py`, the fixture checks), then the shard's units in the e2e-14 order. One log per step in
    `logs/`, `summary.md` / `summary.json` with the verdicts and durations.
 6. Always, also after a failure: a coverage dump through the script console (`snapshot-before-stop.exec`), a graceful
    `docker compose stop -t 180` (JaCoCo writes the exec file when the JVM exits), the final `jacoco-<k>.exec`, the
@@ -92,22 +92,26 @@ re-enables the plugin's monitors.
 `ci/shard.py units` lists the units with their steps. A unit is a group of driver invocations that must run in order on
 one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account in between).
 Units are assigned with a deterministic longest-processing-time split over the measured minutes, so the same N always
-gives the same shards; `role` replaces the authorization strategy and always runs last in its shard.
+gives the same shards; `role` (replaces the authorization strategy) and `r16-durable` (restarts Jenkins) are `last`
+units: each runs last in its shard, and never two in one shard.
 
-Measured 2026-10-05 (MacBook, Docker Desktop, Playwright Chromium headless, two shards at a time on one machine; the
-image was cached, so no build time is included). Every shard: 2 min until Jenkins is ready, 3.3 min setup.
+Measured 2026-10-06 (e2e-16: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards at a time on
+one machine; the image was cached, so no build time is included). Every shard: about 2.2 min until Jenkins is ready,
+3.5 min setup (now including `ci/preconditions.py`).
 
-| Shard of 5 | Units | Steps | Driver minutes (incl. setup) | Wall minutes | Lines covered by the shard |
-|---|---|---:|---:|---:|---:|
-| 1/5 | `def07`, `crawl-requester`, `crawl-reqonly`, `role` | 34 | 24.8 | 27.0 | 57.3% |
-| 2/5 | `crawl-admin`, `jobui-new-admin`, `jobui-classic-others` | 22 | 28.7 | 30.9 | 57.9% |
-| 3/5 | `crawl-approver-1`, `actions`, `jobui-new-requester`, `jobui-classic-reqonly`, `misc`, `round3` | 24 | 21.3 | 23.4 | 65.9% |
-| 4/5 | `crawl-manager`, `crawl-nobc`, `jobui-classic-requester`, `targeted`, `multibranch` | 39 | 24.5 | 26.7 | 59.7% |
-| 5/5 | `jobui-new-reqonly`, `jobui-new-others`, `jobui-classic-admin` | 19 | 24.2 | 26.4 | 52.0% |
+| Shard of 5 | Units | Steps | Driver minutes (incl. setup) | Wall minutes |
+|---|---|---:|---:|---:|
+| 1/5 | `def07`, `crawl-approver-1`, `actions`, `jobui-new-requester`, `jobui-classic-reqonly`, `misc`, `r16-rerun` | 31 | 24.6 | 26.8 |
+| 2/5 | `crawl-admin`, `jobui-new-admin`, `jobui-classic-others`, `r16-d60`, `r16-names` | 27 | 31.7 | 34.0 |
+| 3/5 | `crawl-requester`, `crawl-reqonly`, `r16-items`, `r16-params`, `role` | 34 | 26.2 | 28.7 |
+| 4/5 | `crawl-manager`, `crawl-nobc`, `jobui-classic-requester`, `r16-rename`, `r16-follow`, `multibranch` | 38 | 28.5 | 30.9 |
+| 5/5 | `jobui-new-reqonly`, `jobui-new-others`, `jobui-classic-admin`, `targeted`, `round3`, `r16-durable` | 29 | 27.7 | 29.9 |
 
-All 138 steps passed on main (`cb5ad5d`); the five exec files merged: **lines 67.3% (6466/9608), instructions 67.3%,
-branches 51.7%, methods 79.7%** of `io.jenkins.plugins.batchcontrol`. The crawls reported no content defect. N is
-free (`run.sh 1/3` works, `shard.py plan-all <N>` shows the split); 5 keeps every shard under half an hour.
+On the plugin built from aeaac42 every step passed except `r16-durable` in shard 5, a driver defect fixed in 0a68f5c
+and re-run alone (docs/reports/e2e-16.md). The merged execution data of the five shards and the two re-runs: **lines
+72.2% (7871/10908), instructions 72.2%, branches 57.3%, methods 82.4%** of `io.jenkins.plugins.batchcontrol`; changed
+lines against cb5ad5d 72.8%. The crawls reported no content defect. N is free (`run.sh 1/3` works,
+`shard.py plan-all <N>` shows the split); 5 keeps every shard at about half an hour.
 
 ### Coverage
 
@@ -226,7 +230,7 @@ requests work with the default read-only token.
   plugins of `e2e/plugins.txt` from the Jenkins update centre) and pulling `axllent/mailpit`. Network needed:
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
-- Durations: per shard 23-31 min measured locally ("Units and shards" above: 2 min start, 3.3 min setup, the units);
+- Durations: per shard 27-34 min measured locally (2026-10-06) ("Units and shards" above: 2 min start, 3.3 min setup, the units);
   on a runner add the image build (the base image and the plugins of `plugins.txt`, a few minutes without a cache),
   the Playwright install (about 1 min) and the artifact upload. Expect 35-45 min per shard, the five in parallel, and
   2-3 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT` (default 2700 s) bounds one step.
