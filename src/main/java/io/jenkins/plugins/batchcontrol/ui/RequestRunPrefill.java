@@ -9,6 +9,7 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
 import hudson.model.SimpleParameterDefinition;
 import hudson.util.Secret;
+import io.jenkins.plugins.batchcontrol.store.FileParametersSupport;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -61,13 +62,6 @@ public final class RequestRunPrefill {
      * because a value of the failed run could not be recovered.
      */
     public static final String FROM_RERUN = "fromRerun";
-
-    /**
-     * Base class of the file-parameters plugin's definitions (stashedFile, base64File), matched by
-     * name because the plugin is optional and the class is not public.
-     */
-    static final String FILE_PARAMETERS_DEFINITION =
-            "io.jenkins.plugins.file_parameters.AbstractFileParameterDefinition";
 
     /** Longest value carried in the redirect URL. */
     static final int MAX_VALUE_LENGTH = 2000;
@@ -159,20 +153,13 @@ public final class RequestRunPrefill {
 
     /**
      * Whether {@code definition} takes a file: core's {@link FileParameterDefinition} or a
-     * definition of the file-parameters plugin (stashedFile, base64File; matched by class name,
-     * the plugin is optional). A file is never carried into the form; the user selects it again.
+     * definition of the optional file-parameters plugin (stashedFile, base64File; through
+     * {@link FileParametersSupport#isFileDefinition}). A file is never carried into the form; the
+     * user selects it again.
      */
     public static boolean isFileDefinition(@CheckForNull ParameterDefinition definition) {
-        if (definition instanceof FileParameterDefinition) {
-            return true;
-        }
-        for (Class<?> type = definition == null ? null : definition.getClass(); type != null;
-                type = type.getSuperclass()) {
-            if (FILE_PARAMETERS_DEFINITION.equals(type.getName())) {
-                return true;
-            }
-        }
-        return false;
+        return definition instanceof FileParameterDefinition
+                || FileParametersSupport.isFileDefinition(definition);
     }
 
     /** {@code ?p.A=1&p.B=x} for the given values, or the empty string for none. */
