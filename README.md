@@ -423,7 +423,9 @@ typed in. When a value can no longer be recovered from the build (a stashed
 file, which the build removes when it completes, or a deleted build), no request
 is created there: the job's Request Run form opens with the other values filled
 in, the requester provides files and passwords again, and the request submitted
-from it is still linked to the incident. Submitting a rerun needs `BatchControl/Request` plus
+from it is linked to the incident only after the server has validated the incident
+reference again: the incident exists, belongs to that job, and the submitter holds
+`BatchControl/ViewHistory`. Submitting a rerun needs `BatchControl/Request` plus
 `Item/Read` on the job, like any run request (`Item/Build` is not required), and
 the Incidents screen itself needs `BatchControl/ViewHistory`, so the user needs
 all three; the typical roles in step 3 give that combination only to administrators unless you
