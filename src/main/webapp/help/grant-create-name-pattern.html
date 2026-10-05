@@ -1,6 +1,6 @@
 <div>
   Optional, and only for a request that includes <b>Create</b>. Limits which new job the grant
-  lets you create in the scope.
+  lets you create directly inside the folder.
   <ul>
     <li>An exact item name, for example <code>nightly-report</code>: only a job with exactly that
       name can be created.</li>
@@ -8,7 +8,7 @@
       expression must match the <em>whole</em> item name (the name of the new job itself, not its
       folder path).</li>
   </ul>
-  Leave it empty to allow any name in the scope. The restriction is checked when you submit
+  Leave it empty to allow any name in the folder. The restriction is checked when you submit
   (an invalid expression is refused) and shown to the approver. It does not affect Configure or
   Delete. An attempt to create a job with another name is refused and recorded as a grant
   violation.

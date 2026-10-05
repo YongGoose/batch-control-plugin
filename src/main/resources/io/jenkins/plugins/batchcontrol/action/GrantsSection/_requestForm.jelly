@@ -5,7 +5,12 @@
      submission (GrantsSection#doCreate, ui.FormErrors) comes back with each message next to its
      field and the input kept; the action is absolute because the refusal is rendered at
      .../grants/create. U-01: a prefill comes from the resolved model object, never from the raw
-     query string, and every value is escaped by the Jelly default. -->
+     query string, and every value is escaped by the Jelly default.
+     D-71: a window names exactly one job or folder, so there is no scope type. The name field is
+     checked as it is typed (POST GrantsSection#doCheckScopeFullName, with the crumb; the answer
+     is the item's kind, or "No such item" for a missing or invisible item); the actions say where
+     each applies. The service refuses an action that cannot apply at submission, and the refusal
+     is shown next to the field it concerns. -->
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="errors" value="${it.formErrors}"/>
   <j:set var="renew" value="${it.renewSource}"/>
@@ -38,28 +43,18 @@
           </p>
         </j:if>
         <bc:formError errors="${errors}"/>
-        <j:set var="scopeTypeValue" value="${errors.present ? errors.value('scopeType') : it.prefillScopeType}"/>
-        <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
-          <div class="jenkins-select">
-            <select name="scopeType" class="jenkins-select__input">
-              <option value="JOB" selected="${scopeTypeValue == 'JOB' ? 'true' : null}">Job (exact full name)</option>
-              <option value="FOLDER" selected="${scopeTypeValue == 'FOLDER' ? 'true' : null}">Folder and everything below</option>
-              <!-- D-65 (R4-15): the folder and the items directly in it, not nested folders. -->
-              <option value="FOLDER_ONLY" selected="${scopeTypeValue == 'FOLDER_ONLY' ? 'true' : null}">Folder only (not nested folders)</option>
-            </select>
-          </div>
-          <div class="jenkins-form-description">
-            Folder only covers the folder and the items directly in it: new items can be created
-            only directly in the folder, and a nested folder cannot be deleted.
-          </div>
-          <bc:fieldError errors="${errors}" field="scopeType"/>
-        </f:entry>
-        <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
-          <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
-                 value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"/>
+        <f:entry title="Job or folder (full name)"
+                 description="The one item the window is for. It covers nothing else, not even the items inside a folder."
+                 help="/plugin/batch-control/help/grant-scope-full-name.html">
+          <f:textbox name="scopeFullName" placeholder="team/folder/job"
+                     value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"
+                     checkUrl="${rootURL}/batch-control/grants/checkScopeFullName" checkDependsOn=""
+                     checkMethod="post"/>
           <bc:fieldError errors="${errors}" field="scopeFullName"/>
         </f:entry>
-        <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
+        <f:entry title="Actions"
+                 description="Configure: the item's own configuration. Create: new items directly inside a folder (folders only). Delete: the job (jobs only)."
+                 help="/plugin/batch-control/help/grant-actions.html">
           <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
                GrantsSection#doCreate reads with getParameterValues("actions"). -->
           <div class="jenkins-!-margin-bottom-1">

@@ -6,12 +6,14 @@ import hudson.model.Failure;
 import hudson.model.Item;
 import hudson.model.ModelObject;
 import hudson.security.Permission;
+import hudson.util.FormValidation;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -40,6 +42,7 @@ import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -57,6 +60,8 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *   <li>{@code /batch-control/grants/new} — the new request form as a page;
  *       {@code /batch-control/grants/dialog} — the same form for core's dialog (D-66)</li>
  *   <li>{@code POST /batch-control/grants/create} — submit a new grant request</li>
+ *   <li>{@code POST /batch-control/grants/checkScopeFullName} — the form's check of the item
+ *       name (D-71): its kind, or "No such item"</li>
  *   <li>{@code /batch-control/grants/<id>/} — request detail; POST {@code approve} /
  *       {@code reject} / {@code cancel} / {@code revoke} (see {@link GrantRequestItem})</li>
  *   <li>{@code POST /batch-control/grants/active/<grantId>/revoke} — revoke an active grant
@@ -209,7 +214,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * parses HTTP input; all business validation (action set non-empty, duration cap, approver
      * eligibility, reason required) is enforced by {@link GrantRequestService#create}.
      *
-     * <p>Form fields: {@code scopeType} (JOB/FOLDER), {@code scopeFullName}, {@code actions}
+     * <p>Form fields: {@code scopeFullName} (the one job or folder the window names, D-71; a
+     * {@code scopeType} field sent by an earlier form is ignored), {@code actions}
      * (multi-valued checkboxes), {@code durationMinutes} (preset select),
      * {@code customDurationMinutes} (optional free number overriding the preset, capped
      * client-side at {@code maxGrantMinutes} and re-checked by the service), {@code reason},
@@ -223,8 +229,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         // e2e-03 DEF-09: every refusal of the user's input is shown on this screen next to the
         // field it concerns, with the input kept (FormErrors), instead of a bare "Error" page.
         FormErrors errors = new FormErrors(CREATE_FORM);
-        GrantScope scope = parseScope(req.getParameter("scopeType"), req.getParameter("scopeFullName"),
-                errors);
+        GrantScope scope = parseScope(req.getParameter("scopeFullName"), errors);
         List<GrantAction> actions = parseActions(req.getParameterValues("actions"), errors);
         int durationMinutes = parseDuration(
                 req.getParameter("durationMinutes"), req.getParameter("customDurationMinutes"), errors);
@@ -253,7 +258,11 @@ public class GrantsSection implements ModelObject, StaplerProxy {
                         + Util.rawEncode(created.getId()) + "/");
                 return;
             } catch (IllegalArgumentException | IllegalStateException e) {
-                errors.fromService(e.getMessage(), "name restriction", "createNamePattern",
+                // D-71: the item refusals first, by phrases that an item name inside the message
+                // cannot imitate as easily as a single word ("reason", "duration") can.
+                errors.fromService(e.getMessage(), "no such item", "scopeFullName",
+                        "part of another job", "scopeFullName", "action applies only", "actions",
+                        "name restriction", "createNamePattern",
                         "duration", "customDurationMinutes", "reason", "reason",
                         "approver", "approvers", "action", "actions", "no such", "scopeFullName",
                         "scope", "scopeFullName");
@@ -276,7 +285,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             return null;
         }
         StringBuilder query = new StringBuilder();
-        for (String name : new String[] {"scopeType", "scopeFullName", "from", "actions"}) {
+        for (String name : new String[] {"scopeFullName", "from", "actions"}) {
             String[] values = req.getParameterValues(name);
             if (values == null) {
                 continue;
@@ -296,24 +305,58 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     // ---------------------------------------------------------------- form input parsing
 
+    /**
+     * D-71: a window names exactly one item, so the scope is the full name alone. Whether that
+     * item exists, is visible to the requester and can carry the requested actions is the
+     * service's to decide ({@link GrantRequestService#create}).
+     */
     @CheckForNull
-    private static GrantScope parseScope(@CheckForNull String rawType, @CheckForNull String rawFullName,
-                                         FormErrors errors) {
-        GrantScope.Type type = null;
-        try {
-            type = rawType == null ? null : GrantScope.Type.valueOf(rawType.trim());
-        } catch (IllegalArgumentException e) {
-            type = null;
-        }
-        if (type == null) {
-            errors.field("scopeType", "Choose Job, Folder and everything below, or Folder only (not nested folders).");
-        }
+    private static GrantScope parseScope(@CheckForNull String rawFullName, FormErrors errors) {
         String fullName = rawFullName == null ? "" : rawFullName.trim();
         if (fullName.isEmpty()) {
             errors.field("scopeFullName",
                     "Enter the full name of the job or folder, for example team/nightly-report.");
+            return null;
         }
-        return type == null || fullName.isEmpty() ? null : new GrantScope(type, fullName);
+        return GrantScope.item(fullName);
+    }
+
+    // ---------------------------------------------------------------- form validation (D-71)
+
+    /** What the item check answers for an item that does not exist or that the caller cannot see. */
+    static final String NO_SUCH_ITEM = "No such item";
+
+    /**
+     * POST {@code /batch-control/grants/checkScopeFullName} — the request form's check of the
+     * item name (D-71): the kind of the job or folder the window would name, for example
+     * {@code Pipeline 'team/nightly'}, so the requester sees what they are asking for before
+     * submitting. Read-only; {@link #doCreate} and the service decide for real.
+     *
+     * <p>The item is looked up as the caller ({@link GrantRequestService#findScopeItem}): an
+     * item that does not exist and one the caller may not read (Item/Discover only included)
+     * get the same answer, so the check cannot be used to probe for names. The answer only
+     * repeats the item's own full name and its descriptor's display name, escaped by
+     * {@link FormValidation#ok(String)}. A blank field gets no message (the form is not
+     * filled in yet; submitting it is refused next to the field).
+     */
+    @RequirePOST
+    public FormValidation doCheckScopeFullName(@QueryParameter String value) {
+        Jenkins.get().checkPermission(BatchControlPermissions.REQUEST_GRANT);
+        String fullName = Util.fixEmptyAndTrim(value);
+        if (fullName == null) {
+            return FormValidation.ok();
+        }
+        Item item = GrantRequestService.findScopeItem(fullName);
+        if (item == null) {
+            return FormValidation.error(NO_SUCH_ITEM);
+        }
+        ItemKind kind = ItemKind.of(item);
+        if (kind == null) {
+            // A matrix configuration or Maven module: readable, but part of its job.
+            return FormValidation.error("'" + item.getFullName() + "' is part of another job and cannot be "
+                    + "named by a permission window; name the job it belongs to.");
+        }
+        return FormValidation.ok(kind.getDisplayName() + " '" + item.getFullName() + "'");
     }
 
     private static List<GrantAction> parseActions(@CheckForNull String[] raw, FormErrors errors) {
@@ -445,34 +488,9 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     // ------------------------------------------------------- new-request prefill (U-01)
 
     /**
-     * Scope type the new-request form starts on: the renewed grant's (D-33, {@code ?from=}),
-     * else {@code ?scopeType=}, else {@code JOB}.
-     *
-     * <p>The value is matched against {@link GrantScope.Type} and anything else falls back to
-     * {@code JOB}, so a hand-edited query string cannot put an unknown string into the form.
-     */
-    public String getPrefillScopeType() {
-        Grant source = getRenewSource();
-        if (source != null) {
-            return source.getScope().getType().name();
-        }
-        StaplerRequest2 req = Stapler.getCurrentRequest2();
-        String raw = req == null ? null : req.getParameter("scopeType");
-        if (raw != null) {
-            try {
-                return GrantScope.Type.valueOf(raw.trim()).name();
-            } catch (IllegalArgumentException ignored) {
-                // Fall through to the default.
-            }
-        }
-        // R4-14: opened from a folder (one query parameter, see JobGrantRequestAction#getUrlName):
-        // the resolved item tells a folder from a job.
-        return isPrefilledForFolder() ? GrantScope.Type.FOLDER.name() : GrantScope.Type.JOB.name();
-    }
-
-    /**
-     * Whether the form was opened for a folder ({@code ?scopeFullName=} resolves, as the viewer,
-     * to an item group that is not a job).
+     * Whether the form was opened for a folder where a window's Create applies
+     * ({@code ?scopeFullName=} resolves, as the viewer, to a regular folder; D-71: not a job and
+     * not a computed folder such as a multibranch project or an organization folder).
      */
     public boolean isPrefilledForFolder() {
         if (getRenewSource() != null) {
@@ -483,8 +501,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         if (raw == null || raw.trim().isEmpty()) {
             return false;
         }
-        Item item = Visibility.findVisibleItem(raw.trim());
-        return item instanceof hudson.model.ItemGroup && !(item instanceof hudson.model.Job);
+        return GrantScope.createAppliesTo(Visibility.findVisibleItem(raw.trim()));
     }
 
     /**
@@ -558,7 +575,9 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             }
             return false;
         }
-        // R4-14: from a folder, Create (New Item) is the usual need; from a job, Configure.
+        // R4-14: from a regular folder, Create (New Item) is the usual need; from a job, a
+        // multibranch project or an organization folder, Configure (D-71: Create applies only to
+        // a regular folder).
         GrantAction usual = isPrefilledForFolder() ? GrantAction.CREATE : GrantAction.CONFIGURE;
         return isPrefilled() && usual.name().equals(action);
     }
@@ -600,6 +619,10 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
         private final GrantScope scope;
 
+        /** D-71: the kind of the scope item, or {@code null} when none was recorded. */
+        @CheckForNull
+        private final ItemKind itemKind;
+
         private final List<GrantAction> actions;
 
         private final String user;
@@ -613,6 +636,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             this.grant = grant;
             this.id = request.getId();
             this.scope = request.getScope();
+            this.itemKind = request.getItemKind() != null || grant == null
+                    ? request.getItemKind() : grant.getItemKind();
             this.actions = request.getActions();
             this.user = grant != null ? grant.getUser() : request.getRequester();
             this.createNamePattern = request.getCreateNamePattern();
@@ -624,6 +649,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             this.grant = grant;
             this.id = grant.getId();
             this.scope = grant.getScope();
+            this.itemKind = grant.getItemKind();
             this.actions = grant.getActions();
             this.user = grant.getUser();
             this.createNamePattern = grant.getCreateNamePattern();
@@ -650,6 +676,12 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
         public GrantScope getScope() {
             return scope;
+        }
+
+        /** D-71: the kind of the item the row names (icon and display name), or {@code null}. */
+        @CheckForNull
+        public ItemKind getItemKind() {
+            return itemKind;
         }
 
         public List<GrantAction> getActions() {

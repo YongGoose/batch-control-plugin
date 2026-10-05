@@ -1,7 +1,9 @@
 <?jelly escape-by-default='true'?>
 <!-- e2e-03 DEF-09: a refused approve, reject, cancel or approver change comes back to this page
      (ui.FormErrors) with the message next to the field or above the form it concerns and the
-     input kept. Form targets are absolute because the refusal is rendered at the POST URL. -->
+     input kept. Form targets are absolute because the refusal is rendered at the POST URL.
+     D-71: the Scope row shows the one item the request names, with its kind
+     (tags/scopeItem.jelly). -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Grant Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
@@ -26,7 +28,7 @@
         <tbody>
           <tr>
             <th style="text-align: left; width: 12rem;">Scope</th>
-            <td>${it.request.scope.type}: ${it.request.scope.fullName}</td>
+            <td><bc:scopeItem fullName="${it.request.scope.fullName}" kind="${it.request.itemKind}"/></td>
           </tr>
           <tr><th style="text-align: left;">Actions</th><td>${it.join(it.request.actions)}</td></tr>
           <j:if test="${it.request.createNamePattern != null}">
@@ -143,8 +145,8 @@
       <j:if test="${it.canDecide}">
         <h2>Decision</h2>
         <p class="jenkins-description">
-          Approving immediately grants the requester the selected permissions in the requested
-          scope for the requested duration.
+          Approving immediately grants the requester the selected permissions on the requested
+          item for the requested duration.
         </p>
         <j:set var="approveErrors" value="${it.formErrors('approve')}"/>
         <j:set var="rejectErrors" value="${it.formErrors('reject')}"/>

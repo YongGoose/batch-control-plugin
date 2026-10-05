@@ -1,3 +1,11 @@
 <div>
-  The Jenkins permissions to grant temporarily: Create, Configure and/or Delete items within the scope.
+  The Jenkins permissions to grant temporarily on the one job or folder named above.
+  <ul>
+    <li><b>Configure</b>: change the item's own configuration (for a folder, its settings, not the
+      items inside it).</li>
+    <li><b>Create</b>: create new items directly inside the folder. Applies only to a regular
+      folder.</li>
+    <li><b>Delete</b>: delete the job. Applies only to a job.</li>
+  </ul>
+  A request for Create or Delete on an item where it does not apply is refused when you submit it.
 </div>

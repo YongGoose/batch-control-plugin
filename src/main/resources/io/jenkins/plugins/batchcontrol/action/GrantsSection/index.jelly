@@ -3,7 +3,8 @@
      windows, one row per request, each linking to its detail page. The request form opens in
      core's dialog from the app bar; the old prefill links of this page (?scopeFullName=, ?from=)
      are redirected to the form page (GrantsSection#getLegacyFormQuery). Backlog #89: short cells
-     do not wrap at 1280 px, only free text does. -->
+     do not wrap at 1280 px, only free text does. D-71: the Scope column shows the one item a
+     request or window names, with its kind (tags/scopeItem.jelly). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="legacyQuery" value="${it.legacyFormQuery}"/>
@@ -26,8 +27,8 @@
       </l:app-bar>
       <bc:tabs active="grants"/>
       <p class="jenkins-description">
-        Temporary (just-in-time) permission windows for creating, configuring or deleting jobs:
-        the requests awaiting a decision, the windows open now and the ones that have ended.
+        Temporary (just-in-time) permission windows, each for one job or folder: the requests
+        awaiting a decision, the windows open now and the ones that have ended.
       </p>
 
       <h2>Pending Requests</h2>
@@ -53,7 +54,7 @@
               <j:forEach var="r" items="${it.pendingItems}">
                 <tr>
                   <td style="white-space: nowrap;"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></td>
-                  <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
+                  <td style="white-space: nowrap;"><bc:scopeItem fullName="${r.scope.fullName}" kind="${r.itemKind}"/></td>
                   <td style="white-space: nowrap;">${it.join(r.actions)}</td>
                   <td style="white-space: nowrap;">${r.request.durationMinutes} min</td>
                   <td>${r.request.reason}</td>
@@ -105,7 +106,7 @@
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${g.user}</td>
-                  <td style="white-space: nowrap;">${g.scope.type}: ${g.scope.fullName}</td>
+                  <td style="white-space: nowrap;"><bc:scopeItem fullName="${g.scope.fullName}" kind="${r.itemKind}"/></td>
                   <td style="white-space: nowrap;">${it.join(g.actions)}</td>
                   <td style="white-space: nowrap;"><code>${it.createNameLabel(r)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
@@ -162,7 +163,7 @@
                     </j:choose>
                   </td>
                   <td style="white-space: nowrap;">${r.user}</td>
-                  <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
+                  <td style="white-space: nowrap;"><bc:scopeItem fullName="${r.scope.fullName}" kind="${r.itemKind}"/></td>
                   <td style="white-space: nowrap;">${it.join(r.actions)}</td>
                   <td style="white-space: nowrap;"><code>${it.createNameLabel(r)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(it.endedAt(r))}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
