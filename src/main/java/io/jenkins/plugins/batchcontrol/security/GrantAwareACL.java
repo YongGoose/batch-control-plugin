@@ -55,13 +55,9 @@ import org.springframework.security.core.Authentication;
  * that item: its descendants the holder did not create get nothing from it (D-35d), which is why
  * the delegate is always evaluated with the grant layer switched off (see {@link #hasPermission2}).
  *
- * <p>D-71a (security-34 S-34-01, S-34-03): a window confers something only on the very item it
- * was approved for: it must name this item's full name exactly <em>and</em> be bound to this item
- * ({@link GrantService#isBoundTo}: the identity recorded at approval and the kind). A rename, move,
- * swap or re-creation therefore never re-points a window; a renamed item loses its window
- * (fail-closed). The identity is only looked at once an active window of the user names the item
- * (an in-memory match), and is cached per item object ({@link ItemIdentity}), so the hot path does
- * not touch the file system for the many items a page asks about.
+ * <p>A window confers something only on the item whose full name it names exactly (D-71). It
+ * follows that item when an administrator or a user with their own permissions renames or moves
+ * it, and ends when the item is deleted (D-74, {@link WindowItemListener}).
  *
  * <p>D-71c (security-36 S-36-01, S-36-02): while change control is on, no window confers anything
  * for renaming any item, a job or a folder of any kind. Core allows a rename to a user with
@@ -70,7 +66,8 @@ import org.springframework.security.core.Authentication;
  * Configure) on the item, nor a DELETE window on it, nor a CREATE window on its parent answers
  * those checks. A rename re-points everything matched by name (a role-strategy pattern, other
  * windows' names, everything inside a folder), so the window's permissions could outlive it. The
- * rename is recognised from the endpoint Stapler dispatches, decoded ({@link NewItemName#forRename}).
+ * rename is recognised from the web method Stapler dispatches on the item, decoded
+ * ({@link NewItemName#forRename}).
  * See {@link #refuseRename}.
  *
  * <p>{@link #withoutGrants} evaluates a check with the grant layer switched off on the current
@@ -101,9 +98,8 @@ final class GrantAwareACL extends ACL {
     private final String itemFullName;
 
     /**
-     * The item this ACL guards; {@code null} with no item. D-71a: a window confers something only
-     * when it names this item's full name and is bound to this item ({@link GrantService#isBoundTo});
-     * for Item/Create this is the folder the new item is created in.
+     * The item this ACL guards; {@code null} with no item. A window confers something only when it
+     * names this item's full name; for Item/Create this is the folder the new item is created in.
      */
     @CheckForNull
     private final Item item;
@@ -124,8 +120,7 @@ final class GrantAwareACL extends ACL {
 
     /**
      * An ACL for an object grants never apply to (the root, a node, a computer). The full name is
-     * kept for the callers' symmetry; without an item no window can be bound, so nothing is
-     * conferred whatever it says.
+     * kept for the callers' symmetry; without an item nothing is conferred whatever it says.
      */
     GrantAwareACL(@CheckForNull ACL delegate, @CheckForNull String itemFullName) {
         this(delegate, itemFullName, null);
@@ -309,7 +304,7 @@ final class GrantAwareACL extends ACL {
         }
 
         void recordRefusal(String user) {
-            String itemName = refusedName;
+            String itemName = refusedName == null ? null : NewItemName.forRecord(refusedName);
             Grant grant = this.grant;
             String group = groupFullName;
             if (itemName == null || grant == null || group == null) {
@@ -421,7 +416,6 @@ final class GrantAwareACL extends ACL {
                 // delete its children as SYSTEM without checking them.
                 continue;
             }
-            // D-71a: the window must name this item and be bound to it (identity and kind).
             Grant window = GrantService.get().findActiveGrant(user, item, GrantAction.fromPermission(p));
             if (window == null) {
                 continue;
@@ -537,13 +531,16 @@ final class GrantAwareACL extends ACL {
                 + " Item/Delete on it and Item/Create in its parent), or an administrator.";
     }
 
-    /** D-71c, D-73: the refused rename, merged with its repeats (same item, new name, user) for a minute. */
+    /**
+     * D-71c, D-73: the refused rename, merged with its repeats (same item, new name, user) for a
+     * minute. The new name is capped in the key and the detail (security-38 S-38-02).
+     */
     private void recordRename(String user, String kind, NewItemName rename, Grant window) {
         String target = itemFullName;
         if (target == null) {
             return;
         }
-        String newName = rename.getName() == null ? "?" : rename.getName();
+        String newName = NewItemName.forRecord(rename.getName());
         boolean written;
         try {
             written = BlockedAttemptAudit.get().record(ChangeType.GRANT_VIOLATION,
@@ -583,7 +580,6 @@ final class GrantAwareACL extends ACL {
             // computed folder) it confers nothing, whatever the stored grant says.
             return Decision.NONE;
         }
-        // D-71a: the windows must name this folder and be bound to it (the folder's identity).
         List<Grant> grants = GrantService.get().findActiveGrants(user, item, GrantAction.CREATE);
         if (grants.isEmpty()) {
             return Decision.NONE;

@@ -91,7 +91,7 @@ public class ItemChangeListener extends ItemListener {
         // a CONFIGURE or DELETE window on it, or the CREATE window it was created through (D-35c).
         String parent = GrantScope.parentOf(fullName);
         String oldFullName = parent.isEmpty() ? oldName : parent + "/" + oldName;
-        // D-71a: the window is bound to the item, whose identity a rename keeps.
+        // Windows follow the item only in onLocationChanged (D-74), so they still name the old name here.
         String grantId = ChangeRecording.activeGrantIdFor(user, oldFullName, item, null);
         if (grantId == null) {
             Grant creating = GrantService.get().findCreatingGrant(user, oldFullName, item);
@@ -120,8 +120,8 @@ public class ItemChangeListener extends ItemListener {
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).
         String destination = parentOf(newFullName);
-        // D-71a: the Delete window is bound to the item (a move keeps its identity), the Create window
-        // to the destination folder, which is now the item's parent.
+        // The Delete window still names the old name (windows follow the item after this listener,
+        // D-74); the Create window names the destination folder, which is now the item's parent.
         Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item, oldFullName);
         Grant createGrant = destination.isEmpty() ? null
                 : GrantService.get().findActiveCreateGrant(user, item.getParent(), item.getName());

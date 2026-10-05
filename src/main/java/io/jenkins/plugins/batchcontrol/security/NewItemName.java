@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.StringTokenizer;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.Ancestor;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.TokenList;
@@ -43,10 +44,12 @@ import org.kohsuke.stapler.TokenList;
  * another endpoint is {@link Kind#UNNAMED}: it cannot create anything, and answering it keeps the
  * "New Item" link and page available.
  *
- * <p>D-71c (security-36 S-36-01): the endpoint is the web method Stapler actually dispatches: the
- * last token of the canonical request path, percent-decoded the way Stapler decodes it
- * ({@link #webMethodOf}). Comparing the raw URI missed {@code confirm%52ename}, {@code %63onfirmRename}
- * and a trailing slash, which all run {@code doConfirmRename}.
+ * <p>D-71c (security-36 S-36-01, security-38 S-38-01): a rename is recognised by the web method
+ * Stapler dispatches on the item: the first token after the item in the request path, decoded as
+ * Stapler decodes it ({@link #methodAfter}). Core's rename methods ignore any path after them, so
+ * {@code confirmRename/x}, {@code confirm%52ename} and {@code doRename/} all rename. The other
+ * endpoints are matched on the last token of the path ({@link #webMethodOf}); a mismatch there only
+ * makes a restricted Create grant confer nothing.
  *
  * <p>Names are returned exactly as submitted, untrimmed (S-06).
  */
@@ -64,6 +67,9 @@ final class NewItemName {
 
     /** The web method of the folders plugin's move action ({@code <item>/move/move}). */
     static final String MOVE_OPERATION = "move";
+
+    /** security-38 S-38-02: at most this many characters of a submitted name go into a record. */
+    static final int MAX_RECORDED_NAME = 255;
 
     private static final String RELOCATION_ACTION = "com.cloudbees.hudson.plugins.folder.relocate.RelocationAction";
 
@@ -154,15 +160,11 @@ final class NewItemName {
     @CheckForNull
     static NewItemName forRename(String itemFullName) {
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        String endpoint = req == null ? null : endpoint(req);
-        if (req == null || !isRenameEndpoint(endpoint)) {
-            return null;
-        }
-        Item renamed = req.findAncestorObject(Item.class);
+        Item renamed = req == null ? null : renamedItem(req);
         if (renamed == null || !itemFullName.equals(renamed.getFullName())) {
             return null;
         }
-        return renameContext(req, endpoint);
+        return renameContext(req, renameMethod(req));
     }
 
     /**
@@ -173,15 +175,90 @@ final class NewItemName {
     @CheckForNull
     static NewItemName forRenameIn(String groupFullName) {
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        String endpoint = req == null ? null : endpoint(req);
-        if (req == null || !isRenameEndpoint(endpoint)) {
-            return null;
-        }
-        Item renamed = req.findAncestorObject(Item.class);
+        Item renamed = req == null ? null : renamedItem(req);
         if (renamed == null || !groupFullName.equals(renamed.getParent().getFullName())) {
             return null;
         }
-        return renameContext(req, endpoint);
+        return renameContext(req, renameMethod(req));
+    }
+
+    /**
+     * D-71c (security-38 S-38-01): the item the current request renames (or validates a new name
+     * for), or {@code null}: the nearest item the request was dispatched through, when the web
+     * method dispatched on it is a rename method ({@link #renameMethod}).
+     */
+    @CheckForNull
+    private static Item renamedItem(StaplerRequest2 req) {
+        Ancestor ancestor = req.findAncestor(Item.class);
+        if (ancestor == null || !isRenameEndpoint(methodAfter(ancestor.getRestOfUrl()))) {
+            return null;
+        }
+        Object item = ancestor.getObject();
+        return item instanceof Item ? (Item) item : null;
+    }
+
+    /** The web method dispatched on the nearest item of the request ({@link #methodAfter}), or {@code null}. */
+    @CheckForNull
+    private static String renameMethod(StaplerRequest2 req) {
+        Ancestor ancestor = req.findAncestor(Item.class);
+        return ancestor == null ? null : methodAfter(ancestor.getRestOfUrl());
+    }
+
+    /**
+     * D-71c (security-38 S-38-01): the web method Stapler dispatches on an object whose remaining
+     * path is {@code restOfUrl} ({@link Ancestor#getRestOfUrl()}: Stapler's own raw tokens after the
+     * object, already canonical, so no empty, {@code .} or {@code ..} segment): its first token,
+     * percent-decoded with Stapler's {@link TokenList#decode}. Whatever follows the first token is
+     * ignored, as core's rename methods ignore it, so {@code confirmRename/x},
+     * {@code confirmRename/%2E} and {@code confirm%52ename/x} are all {@code confirmRename}.
+     * Erring towards recognising a rename: a leading token that decodes to {@code .} is skipped, and
+     * the decoded token is cut at {@code ;}, {@code /} or {@code \} (Stapler would dispatch no
+     * method for such a token). {@code null} when there is no token.
+     */
+    @CheckForNull
+    static String methodAfter(@CheckForNull String restOfUrl) {
+        if (restOfUrl == null) {
+            return null;
+        }
+        StringTokenizer tokens = new StringTokenizer(restOfUrl, "/\\");
+        while (tokens.hasMoreTokens()) {
+            String raw = tokens.nextToken();
+            String token;
+            try {
+                token = TokenList.decode(raw);
+            } catch (RuntimeException e) {
+                token = raw; // malformed escape: Stapler cannot dispatch this request either
+            }
+            int cut = indexOfAny(token, ";/\\");
+            if (cut >= 0) {
+                token = token.substring(0, cut);
+            }
+            if (!".".equals(token)) {
+                return token;
+            }
+        }
+        return null;
+    }
+
+    private static int indexOfAny(String text, String chars) {
+        for (int i = 0; i < text.length(); i++) {
+            if (chars.indexOf(text.charAt(i)) >= 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * security-38 S-38-02: {@code name} as written into a record or a merge key: at most
+     * {@value #MAX_RECORDED_NAME} characters, longer names cut and ended with an ellipsis, so a long
+     * submitted name cannot inflate the audit file.
+     */
+    static String forRecord(@CheckForNull String name) {
+        if (name == null) {
+            return "?";
+        }
+        return name.length() <= MAX_RECORDED_NAME ? name : name.substring(0, MAX_RECORDED_NAME) + "\u2026";
     }
 
     private static NewItemName renameContext(StaplerRequest2 req, String endpoint) {
@@ -285,8 +362,9 @@ final class NewItemName {
     }
 
     /**
-     * D-71c (security-36 S-36-01): the last token of {@code path} as Stapler sees it when it picks
-     * the web method: {@code Stapler#canonicalPath} (empty and {@code .} segments dropped,
+     * The last token of {@code path} as Stapler sees it when it picks the web method (used for
+     * {@code createItem}, {@code checkJobName} and {@code move}; a rename is recognised by
+     * {@link #methodAfter}): {@code Stapler#canonicalPath} (empty and {@code .} segments dropped,
      * {@code ..} removes the segment before it), then the {@link TokenList} split on {@code /} and
      * {@code \}, then the token percent-decoded with Stapler's own {@link TokenList#decode}. So
      * {@code confirm%52ename}, {@code %63onfirmRename} and {@code confirmRename/} are all

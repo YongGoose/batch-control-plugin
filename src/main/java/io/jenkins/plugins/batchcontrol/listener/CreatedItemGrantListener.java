@@ -45,10 +45,9 @@ public class CreatedItemGrantListener extends ItemListener {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             return;
         }
-        // D-71a: a created-item record still listed under the new item's name belongs to an item
+        // D-74: a created-item record still listed under the new item's name belongs to an item
         // that disappeared without a deletion event (deleted on disk and reloaded). It is dropped
-        // before anything is recorded, so it never applies to the new item, whatever identity the
-        // new item's directory gets (an inode number reused by the file system).
+        // before anything is recorded, so it never applies to the new item.
         GrantService.get().forgetStaleCreatedItem(item.getFullName());
         if (!GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy())) {
             return;
@@ -61,7 +60,7 @@ public class CreatedItemGrantListener extends ItemListener {
         String fullName = item.getFullName();
         ItemGroup<? extends Item> parent = item.getParent();
         // Create lookups take the group the item was created in (D-71: a CREATE window confers
-        // Create in its own folder only; D-71a: only while that folder is the one it was approved for).
+        // Create in its own folder only).
         if (!(parent instanceof Item)) {
             return; // no window names the Jenkins root (S-13)
         }
@@ -100,7 +99,7 @@ public class CreatedItemGrantListener extends ItemListener {
      * longer exist. Runs as SYSTEM, so every item is visible without switching authentication.
      * Core does not fire this on "Reload Configuration from Disk"; a record left behind by an item
      * that disappeared in a reload is dropped when another item is created under its name
-     * ({@link #onCreated}, D-71a).
+     * ({@link #onCreated}, D-74).
      */
     @Override
     public void onLoaded() {

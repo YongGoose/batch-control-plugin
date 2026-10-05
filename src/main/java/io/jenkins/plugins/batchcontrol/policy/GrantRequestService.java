@@ -20,7 +20,6 @@ import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Duration;
@@ -281,11 +280,10 @@ public final class GrantRequestService {
      * loads without a type and is not converted) is refused with {@link IllegalStateException}.
      *
      * <p>D-71a: the scope must be the item's canonical full name (requests are stored with it,
-     * S-34-04), and the item's identity must be readable, since the grant is bound to it; a request
-     * that fails either is refused with {@link IllegalStateException} (only reached for an item the
-     * approver can see).
+     * S-34-04); a request that does not name it so is refused with {@link IllegalStateException}
+     * (only reached for an item the approver can see).
      *
-     * @return the item the grant will be bound to
+     * @return the item the window will be on
      * @throws IllegalArgumentException for an empty (root) scope, as at creation, or an item the
      *                                  approver cannot see
      * @throws IllegalStateException when the item is gone or its kind changed
@@ -358,18 +356,6 @@ public final class GrantRequestService {
         }
     }
 
-    /**
-     * D-71c (S-36-03 (i)): whether {@code item} is still the item at {@code fullName}, as the caller
-     * sees it; {@code false} when another item, or none the caller may see, is there.
-     */
-    private static boolean stillAtName(Item item, String fullName) {
-        try {
-            return Jenkins.get().getItemByFullName(fullName) == item;
-        } catch (AccessDeniedException e) {
-            return false;
-        }
-    }
-
     // ---------------------------------------------------------------- decisions (SPEC 3, 8)
 
     /**
@@ -409,14 +395,6 @@ public final class GrantRequestService {
             // can still be stopped. Deliberately after checkDecision, so a non-approver learns
             // nothing about the scope's validity.
             Item item = checkScopeAtApproval(request);
-            // D-71a (security-34 S-34-01, S-34-03): the grant is bound to the item it is approved for.
-            // Read fresh from disk (not cached), so the binding is the item's identity right now.
-            String identity = ItemIdentity.of(item.getRootDir());
-            if (identity == null) {
-                throw new IllegalStateException("Grant request " + id + " cannot be approved: the item '"
-                        + item.getFullName() + "' could not be identified on disk, so the window could not be bound"
-                        + " to it. Try again, or ask an administrator to check the item's directory.");
-            }
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
                 String reason = EndReasons.pendingExpired();
@@ -432,20 +410,11 @@ public final class GrantRequestService {
             request.setDecidedBy(Jenkins.getAuthentication2().getName());
             request.setDecisionComment(comment);
             store.saveGrantRequest(request);
-            Grant grant = Grant.createFor(request, now, identity);
+            Grant grant = Grant.createFor(request, now);
             // Registration persists the grant and makes it effective in the same critical
-            // section, so approval and effectiveness are atomic.
-            GrantService.get().register(grant);
-            // D-71c (security-36 S-36-03 (i)): item events do not take this lock, so the item may have
-            // been deleted, and another one created at its name, between the identity read above and
-            // the registration; the window would then carry the deleted directory's identity, which
-            // the file system may hand to the new one. From the registration on, every event at the
-            // name sees the window, so one check here closes the gap: the window stays bound only if
-            // the very item approved is still at that name, looked up as the approver who saw it a
-            // moment ago (anything else, including an item they cannot see, unbinds: fail-closed).
-            if (!stillAtName(item, grant.getScope().getFullName())) {
-                GrantService.get().unbindGrant(grant.getId(), "was replaced while the window was being approved");
-            }
+            // section, so approval and effectiveness are atomic. D-74: on the item checked above,
+            // under its name at registration (it follows a rename that happened meanwhile).
+            GrantService.get().register(grant, item);
             LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
                     + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
             created = grant;
