@@ -291,9 +291,11 @@ public class ItemScopeUiTest {
      * {@code team}, the multibranch project {@code mb} and the organization folder {@code org}: the
      * designated approver a1's detail page of each carries an element
      * {@code [data-batch-control-notice="group-configure"]} whose text speaks of the items inside;
-     * for {@code mb} and {@code org} it also speaks of creating and deleting. Guard: the detail page
-     * of g1's CONFIGURE request on the job {@code batch-x} carries no such element (the page
-     * itself opens and names the job). The wording is not pinned beyond those words.
+     * for {@code mb} and {@code org} it also speaks of creating and deleting. Since note 264 (D-71a
+     * ruling 2) every one of the three also says that a Configure window does not allow renaming
+     * the item and names the administrator who can. Guard: the detail page of g1's CONFIGURE
+     * request on the job {@code batch-x} carries no such element (the page itself opens and names
+     * the job). The wording is not pinned beyond those words.
      */
     @Test
     public void t_08_138_configureRequestOnAnItemGroupWarnsTheApprover() throws Exception {
@@ -317,6 +319,10 @@ public class ItemScopeUiTest {
                 assertTrue(CREATE_WORD.matcher(text).find() && DELETE_WORD.matcher(text).find(), "the notice on the computed folder "
                         + c[1] + " must say that reconfiguring it can create or delete its generated items: " + text);
             }
+            assertTrue(RENAME_REFUSED.matcher(text).find(), "D-71a ruling 2 (note 264): the notice on " + c[1] + " must say that a"
+                    + " Configure window does not allow renaming it: " + text);
+            assertTrue(text.toLowerCase(java.util.Locale.ROOT).contains("administrator"), "the notice on " + c[1] + " must say who can"
+                    + " rename it (an administrator): " + text);
         }
 
         HtmlPage jobDetail = UsabilityFixtures.htmlPage(j, "a1", "batch-control/grants/" + onJob + "/");
@@ -386,6 +392,9 @@ public class ItemScopeUiTest {
     private static final Pattern INSIDE = Pattern.compile("(?i)\\b(?:inside|within|contain(?:s|ed)?|below|beneath|under)\\b");
     private static final Pattern CREATE_WORD = Pattern.compile("(?i)\\bcreat");
     private static final Pattern DELETE_WORD = Pattern.compile("(?i)\\bdelet");
+    /** A sentence saying a rename is not allowed ("does not allow renaming it", "cannot rename it", ...). */
+    private static final Pattern RENAME_REFUSED = Pattern.compile(
+            "(?i)\\b(?:does not|doesn't|cannot|can't|will not|won't|may not|never)\\s+(?:allow\\s+|let\\s+\\w+\\s+)?renam");
     /** Allowed by Jenkins' item name check, able to break out of an attribute if written unescaped (as MoveRefusalPageTest). */
     static final String HOSTILE = "x\"onmouseover='alert(1)' data-injected=\"1";
 
