@@ -55,22 +55,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * T-SEC-07 and T-SEC-19 (SPEC section 6: "a secret parameter (Password parameter) is stored masked
- * in the history", ARCHITECTURE section 5: "{@code PasswordParameterValue} and {@code Secret}
- * values are stored as {@code ********}") under decision P-03 (owner ruling: keep the current
- * behaviour).
+ * T-SEC-07 and T-SEC-19 (SPEC section 6: "Secret parameter values never appear in plaintext in
+ * Batch Control's files, screens, records or CSV: a run request stores them in Jenkins' encrypted
+ * form so that the approved build receives the original value, and every textual form shows
+ * {@code ********}", SPEC item 5 and ARCHITECTURE section 5 under D-72).
  *
- * <p>P-03 fixes two things at once, and this class pins both halves:
+ * <p>Decision-driven rewrite (matrix note 260): these rows used to pin P-03 option ①, under which
+ * the secret was masked before it was stored and the approved build received the literal mask.
+ * D-72 supersedes that ruling: the request keeps the typed {@code PasswordParameterValue}
+ * (encrypted on disk) and the approved build receives the original secret. The row now pins both
+ * halves of D-72:
  *
  * <ul>
- *   <li><b>the guarantee</b> — the plaintext of a secret parameter is never persisted, rendered
- *       or exported. Not on the request detail screen, not in any file under
- *       {@code $JENKINS_HOME/batch-control/}, not in {@code requests.csv} / {@code runs.csv};</li>
- *   <li><b>the accepted limitation</b> — because the masking happens before the value is stored,
- *       an approved request cannot reproduce the original secret: the build that the approval
- *       launches receives the mask, not the secret. This is documented behaviour (README), not a
- *       defect, and it is asserted here so that a future "convenience" change which starts
- *       persisting recoverable secrets fails this class instead of passing it silently.</li>
+ *   <li><b>the guarantee</b> (unchanged) - the plaintext of a secret parameter is never written,
+ *       rendered or exported as text. Not in the request's display map, not on the request detail
+ *       screen, not in any file under {@code $JENKINS_HOME/batch-control/}, not in the CSV
+ *       exports, not on the dashboard;</li>
+ *   <li><b>the delivery</b> (new, replacing the former "accepted limitation") - the build that the
+ *       approval launches receives exactly the secret that was typed into the form.</li>
  * </ul>
  *
  * <p>Every negative assertion below is paired with a positive twin on the <em>same</em> surface,
@@ -79,13 +81,13 @@ import static org.junit.jupiter.api.Assertions.fail;
  * passing it. The secret parameter's <em>name</em> is also asserted to be present wherever the
  * plain one is, so "silently drop the whole secret parameter" is not a way to pass either.
  *
- * <p>Written from docs/SPEC.md, docs/ARCHITECTURE.md sections 2/5 and docs/DECISIONS.md (P-03)
- * only; no src/main knowledge.
+ * <p>Written from docs/SPEC.md, docs/ARCHITECTURE.md sections 2/5 and docs/DECISIONS.md (P-03,
+ * D-72) only; no src/main knowledge.
  */
 @WithJenkins
 public class SecretParameterMaskingTest {
 
-    /** The mask ARCHITECTURE section 5 and P-03 both name. */
+    /** The mask SPEC item 5 and ARCHITECTURE section 5 name (D-72). */
     private static final String MASK = "********";
 
     private static final String SECRET_PARAM = "SECRET_TOKEN";
@@ -135,14 +137,15 @@ public class SecretParameterMaskingTest {
 
     /**
      * T-SEC-07 (main path): a run request created through the per-job request form for a job that
-     * has a Password parameter keeps no plaintext anywhere, while the job's non-sensitive
-     * parameter stays fully visible on every surface.
+     * has a Password parameter keeps no plaintext anywhere and delivers the original secret to the
+     * approved build, while the job's non-sensitive parameter stays fully visible on every surface.
      *
      * <p>The request is created through the screen a human uses (POST
-     * {@code job/X/batch-control/submit} driven by the rendered form) rather than through
-     * {@code RunRequestService}, because P-03 states the masking happens while the submitted
-     * {@code ParameterValue}s are turned into the stored {@code Map<String,String>} — the service
-     * API takes strings and can no longer tell which of them was sensitive.
+     * {@code job/X/batch-control/submit} driven by the rendered form), the path on which a typed
+     * secret travels from a browser. The typed service overload is covered by T-05-45.
+     *
+     * <p>D-72 (decision-driven rewrite, note 260): the approved build now receives the original
+     * secret; the former P-03 option ① assertion (the build receives the mask) is withdrawn.
      */
     @Test
     public void t_sec_07_secretParameterNeverAppearsInPlaintextWhilePlainParameterStaysVisible()
@@ -177,7 +180,7 @@ public class SecretParameterMaskingTest {
                     + " secret parameter, so the approver can see that one was supplied");
         }
 
-        // ---------- approve: the build runs (and the P-03 limitation becomes observable)
+        // ---------- approve: the build runs with the original secret (D-72)
         try (ACLContext ignored = as("a1")) {
             RunRequestService.get().approve(request.getId(), "reviewed the raw parameters");
         }
@@ -188,15 +191,15 @@ public class SecretParameterMaskingTest {
         ParametersAction parameters = build.getAction(ParametersAction.class);
         assertNotNull(parameters, "the launched build must carry its parameters");
         assertEquals(PLAIN_VALUE, plainTextOf(parameters.getParameter(PLAIN_PARAM)), "the non-sensitive parameter must reach the build exactly as requested"
-                + " (SPEC 5), which is what makes the next assertion meaningful");
-        // P-03, accepted limitation: the original secret is NOT reproduced on execution.
-        String secretOnBuild = plainTextOf(parameters.getParameter(SECRET_PARAM));
-        assertNotNull(secretOnBuild, "the secret parameter must still be passed to the build by name");
-        assertFalse(FORBIDDEN_PLAINTEXTS.stream().anyMatch(secretOnBuild::contains), "P-03 (accepted limitation, README): the approved run must NOT be able to"
-                + " reproduce the original secret - if this ever fails, a recoverable"
-                + " plaintext is being persisted somewhere and the whole row must be"
-                + " re-decided, not relaxed");
-        assertTrue(secretOnBuild.contains(MASK), "the build must receive the mask for the secret parameter, was: " + secretOnBuild);
+                + " (SPEC 5)");
+        // D-72 (supersedes P-03 option ①): the original secret IS reproduced on execution.
+        ParameterValue secretParameter = parameters.getParameter(SECRET_PARAM);
+        assertNotNull(secretParameter, "the secret parameter must be passed to the build by name");
+        assertTrue(secretParameter instanceof PasswordParameterValue && secretParameter.isSensitive(),
+                "the secret must reach the build as a sensitive Password value, was: " + secretParameter);
+        assertEquals(SECRET_VALUE, plainTextOf(secretParameter), "D-72: the approved build must receive exactly the"
+                + " secret typed into the request form (P-03 option ①, under which it received the mask, is"
+                + " superseded)");
 
         // ---------- the storage layer as bytes on disk, and the CSV exports
         assertStoreHasNoPlaintext();
@@ -211,9 +214,10 @@ public class SecretParameterMaskingTest {
     /**
      * T-SEC-19 (the recording path): the guarantee must not depend on the request screen. A build
      * started with a real {@link PasswordParameterValue} by any other path still gets recorded
-     * masked — that is the ARCHITECTURE section 5 store rule ("PasswordParameterValue and Secret
-     * are stored as ********"), and it is the surface that a job with a Password parameter hits
+     * masked - the ARCHITECTURE section 5 rule (D-72: "in every textual form (... run records ...)
+     * a sensitive value is ********"), and the surface that a job with a Password parameter hits
      * every time it runs without going through an approval (cron, upstream, an uncontrolled job).
+     * Unchanged by D-72 apart from this wording (note 260).
      */
     @Test
     public void t_sec_19_runRecordOfADirectBuildMasksPasswordParameterValues() throws Exception {
