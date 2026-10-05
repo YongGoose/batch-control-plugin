@@ -7,6 +7,9 @@ import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
+import hudson.model.Run;
+import hudson.model.RunParameterDefinition;
+import hudson.model.RunParameterValue;
 import hudson.model.SimpleParameterDefinition;
 import hudson.util.Secret;
 import io.jenkins.plugins.batchcontrol.store.FileParametersSupport;
@@ -15,9 +18,11 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -31,11 +36,17 @@ import org.kohsuke.stapler.StaplerRequest2;
  * shows: nothing is queued or stored until the requester submits the form, whose field names are
  * unchanged.
  *
- * <p>Only parameters whose value round-trips through a string are carried
- * ({@link SimpleParameterDefinition}: string, text, boolean, choice and the like). Sensitive
- * values (password parameters, {@link Secret}s, anything {@link ParameterValue#isSensitive()})
- * are never written into the URL nor taken from it (P-03), file parameters cannot be, and a value
- * the definition refuses (a choice outside its choices) is dropped and leaves the job's default.
+ * <p>Only parameters whose value round-trips through a string are carried: those of a
+ * {@link SimpleParameterDefinition} (string, text, boolean, choice, run and the like), as the
+ * string form the definition's {@code createValue(String)} turns back into the same value
+ * (the text of a string, boolean or number value; the {@code job#build} id
+ * of a run value, T-06-103; any other value's own string form only when the definition rebuilds
+ * an equal value from it). A value without such a form is not carried. Sensitive values
+ * (password parameters, {@link Secret}s, anything {@link ParameterValue#isSensitive()}) are never
+ * written into the URL nor taken from it (P-03), file parameters cannot be, and a value the
+ * definition refuses (a choice outside its choices, a run that does not exist or the viewer cannot
+ * see) is dropped and leaves the job's default. Core's view of a run parameter does not show its
+ * default, so the form renders a carried run itself ({@link #selectedRunId}).
  * Values longer than {@value #MAX_VALUE_LENGTH} characters are left out so the redirect stays
  * within common URL limits, and a longer {@value #PREFIX} query value is ignored; the user
  * re-enters them. The whole encoded query is capped at {@value #MAX_QUERY_LENGTH} characters:
@@ -99,13 +110,9 @@ public final class RequestRunPrefill {
             if (value == null || !isCarriable(definition) || value.isSensitive()) {
                 continue;
             }
-            Object raw = value.getValue();
-            if (!(raw instanceof String || raw instanceof Boolean || raw instanceof Number)) {
-                continue; // Secret, file, run or anything that does not round-trip as text
-            }
-            String text = String.valueOf(raw);
-            if (text.length() > MAX_VALUE_LENGTH) {
-                continue;
+            String text = carriedText((SimpleParameterDefinition) definition, value);
+            if (text == null || text.length() > MAX_VALUE_LENGTH) {
+                continue; // Secret, file or anything that does not round-trip as text
             }
             // S-33-03: in definition order, a value is carried only while the encoded query
             // stays within MAX_QUERY_LENGTH; one that would exceed it is left out (a later,
@@ -250,13 +257,105 @@ public final class RequestRunPrefill {
         return null;
     }
 
+    /**
+     * The string form of {@code value} from which {@code definition}'s {@code createValue(String)}
+     * rebuilds the same value, or {@code null} when there is none and the value is not carried:
+     * <ul>
+     * <li>a string, boolean or number value: its text (string, text, boolean, choice);
+     * <li>a run value: its {@code job#build} id ({@link RunParameterValue#getRunId()}), the form
+     *     core's run parameter accepts, kept when the definition takes it back (the run still
+     *     exists and the user may see it);
+     * <li>any other value: its own string form, kept only when the definition rebuilds a value
+     *     equal to it from that text, so an object without such a form is never carried.
+     * </ul>
+     * A {@link Secret} is never turned into text, and a rebuilt value that is sensitive does not
+     * count as a round trip.
+     */
+    @CheckForNull
+    private static String carriedText(SimpleParameterDefinition definition, ParameterValue value) {
+        String text;
+        try {
+            if (value instanceof RunParameterValue) {
+                text = ((RunParameterValue) value).getRunId();
+            } else {
+                Object raw = value.getValue();
+                if (raw instanceof String || raw instanceof Boolean || raw instanceof Number) {
+                    return String.valueOf(raw);
+                }
+                if (raw == null || raw instanceof Secret) {
+                    return null;
+                }
+                text = String.valueOf(raw);
+            }
+        } catch (RuntimeException e) {
+            return null; // a value that cannot even be read is not carried
+        }
+        return text != null && roundTrips(definition, value, text) ? text : null;
+    }
+
+    /**
+     * Whether {@code definition.createValue(text)} gives back {@code value}: for a run value, a
+     * run value naming the same {@code job#build}; for anything else, a value whose
+     * {@link ParameterValue#getValue()} equals the original's. Neither may be sensitive.
+     */
+    private static boolean roundTrips(SimpleParameterDefinition definition, ParameterValue value,
+                                      String text) {
+        try {
+            ParameterValue rebuilt = definition.createValue(text);
+            if (rebuilt == null || rebuilt.isSensitive()) {
+                return false;
+            }
+            if (value instanceof RunParameterValue) {
+                return rebuilt instanceof RunParameterValue
+                        && text.equals(((RunParameterValue) rebuilt).getRunId());
+            }
+            Object raw = rebuilt.getValue();
+            return !(raw instanceof Secret) && Objects.equals(raw, value.getValue());
+        } catch (RuntimeException e) {
+            return false; // the definition does not take this string form
+        }
+    }
+
+    /**
+     * T-06-103: the run the Request Run form must show selected for {@code definition}, or
+     * {@code null} when the definition's own view is right. Core's view of a run parameter lists
+     * the project's builds, newest first, without marking the definition's default; so a copy
+     * defaulting to a carried run ({@link #apply}, or a refused submission's value) would show the
+     * newest build instead. Non-null only for core's own {@link RunParameterDefinition} (a subclass
+     * may have its own view) whose default run is not the first one listed; the form then renders
+     * the same fields with that run selected.
+     */
+    @CheckForNull
+    public static String selectedRunId(@CheckForNull ParameterDefinition definition) {
+        if (definition == null || definition.getClass() != RunParameterDefinition.class) {
+            return null;
+        }
+        try {
+            ParameterValue value = definition.getDefaultParameterValue();
+            if (!(value instanceof RunParameterValue)) {
+                return null;
+            }
+            String runId = ((RunParameterValue) value).getRunId();
+            Iterator<?> builds = ((RunParameterDefinition) definition).getBuilds().iterator();
+            Object first = builds.hasNext() ? builds.next() : null;
+            if (runId == null || !(first instanceof Run)
+                    || runId.equals(((Run<?, ?>) first).getExternalizableId())) {
+                return null; // core's view already selects it (its first option), or lists none
+            }
+            return runId;
+        } catch (RuntimeException e) {
+            return null; // no project, or a run that is gone: core's view as it is
+        }
+    }
+
     private static String encode(String text) {
         return URLEncoder.encode(text, StandardCharsets.UTF_8);
     }
 
     private static boolean isCarriable(ParameterDefinition definition) {
         return definition instanceof SimpleParameterDefinition
-                && !(definition instanceof PasswordParameterDefinition);
+                && !(definition instanceof PasswordParameterDefinition)
+                && !isFileDefinition(definition);
     }
 
     private static ParameterDefinition withDefault(ParameterDefinition definition, String text) {
