@@ -378,6 +378,13 @@ behind any of them.
   single required status check for merging. After the move to jenkinsci,
   ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
   the `Jenkinsfile`.
+- The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e (shard 1)`
+  … `e2e (shard 5)`, `e2e coverage`) runs on the same events against a real
+  Jenkins in Docker and reports the JaCoCo coverage of the lines your change
+  touched in the job summary, as annotations and in the `e2e-coverage`
+  artifact. It is **not** a required check; a red shard is worth a look (its
+  logs and screenshots are in the `e2e-shard-<k>` artifact). See
+  `e2e/README.md`, "CI runner and e2e coverage" and "CI contract".
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins

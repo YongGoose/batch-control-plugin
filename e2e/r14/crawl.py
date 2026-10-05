@@ -9,8 +9,19 @@ For every page reached (start set + Batch Control links found on the way, two pa
   * every non-submit button / dialog link: clicked on a fresh load of the page and classified
     (dialog opened, navigated, DOM changed, nothing). A dialog is closed again with Escape and, on a
     second open, with its Cancel button; both must close it.
-Rows go to out/crawl.jsonl. Nothing is POSTed here (state-changing buttons are clicked in actions.py)."""
-import json, re, sys, time
+Rows go to out/crawl.jsonl. Nothing is POSTed here (state-changing buttons are clicked in actions.py).
+
+Content checks (CI, 2026-10-05), on every page reached with status < 400, all roles: a row with kind "content" and a
+"FAIL content ..." line (once per check, URL pattern and finding) for
+  * empty-cell: an empty data cell on a Batch Control page in a column (or th/td row) whose value always exists
+    (EXPECTED_COLUMNS); empty optional cells are logged as check "empty-optional" with result INFO, without a FAIL;
+  * server-path: a server filesystem path in the visible text of the main or side panel (/var/, /tmp/, /home/, ...,
+    jenkins_home, JENKINS_HOME, StoreLocation=, WEB-INF/, a Windows drive path);
+  * double-escaped: an HTML entity shown as text (&lt; &gt; &amp; &quot; &apos; &#..;);
+  * markup-text: "<script" shown as text;
+  * markup-live: the seeded probe's <img onerror> canary ran, or the probe (ci/seed_markup.py) does not read as typed.
+Text inside pre/code/textarea and hidden elements is not checked. BC_CRAWL_LOG names the log (default "crawl")."""
+import json, os, re, sys, time
 from urllib.parse import urljoin, urlparse
 from lib import Session, close, BASE, groovy
 import lib
@@ -64,7 +75,7 @@ def crawlable(path):
 
 def emit(row):
     row.update(role=ROLE, ui=UI)
-    lib.log("crawl", row)
+    lib.log(os.environ.get("BC_CRAWL_LOG", "crawl"), row)
 
 
 ELEMENTS_JS = r"""
@@ -88,6 +99,99 @@ ELEMENTS_JS = r"""
   });
   return out;
 }"""
+
+
+CONTENT_JS = r"""
+() => {
+  const vis = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const texts = [];
+  for (const root of [document.querySelector('#main-panel'), document.querySelector('#side-panel')]) {
+    if (!root) continue;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n => {
+      const p = n.parentElement;
+      if (!p || p.closest('pre, code, textarea, script, style, template, noscript')) return NodeFilter.FILTER_REJECT;
+      return vis(p) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; }});
+    let n;
+    while ((n = w.nextNode())) { const t = n.nodeValue.replace(/\s+/g, ' ').trim(); if (t) texts.push([t, n.parentElement]); }
+  }
+  const PATH = /(?:^|[\s"'(=,;:])(\/(?:var|tmp|home|opt|usr|etc|root|srv|private|Users)\/[^\s"'<>)]*)|(jenkins_home|JENKINS_HOME|StoreLocation=|WEB-INF\/|\b[A-Za-z]:\\[A-Za-z])/;
+  const ENT = /&(?:lt|gt|amp|quot|apos|#\d+|#x[0-9a-fA-F]+);/;
+  const desc = el => el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+  const out = {paths: [], entities: [], script_text: [], empty_cells: [], probe: []};
+  for (const [t, el] of texts) {
+    let m;
+    if ((m = PATH.exec(t))) out.paths.push({match: m[1] || m[2], text: t.slice(0, 160), el: desc(el)});
+    if ((m = ENT.exec(t))) out.entities.push({match: m[0], text: t.slice(0, 160), el: desc(el)});
+    if (/<script/i.test(t)) out.script_text.push({text: t.slice(0, 160), el: desc(el)});
+  }
+  const full = texts.map(x => x[0]).join(' ');
+  for (let i = full.indexOf('bc-markup-probe'); i >= 0; i = full.indexOf('bc-markup-probe', i + 1)) out.probe.push(full.slice(i, i + 80));
+  out.canary = !!window.__bcCanary;
+  out.injected = document.querySelectorAll('#main-panel img[src="x"], #side-panel img[src="x"]').length;
+  const empty = c => !c.innerText.trim() && !c.querySelector('svg, img, input, button, select, textarea, progress, meter, canvas');
+  const mp = document.querySelector('#main-panel');
+  if (mp) mp.querySelectorAll('table').forEach((tb, ti) => {
+    if (!vis(tb)) return;
+    const hrow = tb.tHead && tb.tHead.rows[0];
+    const heads = hrow ? [...hrow.cells].map(c => c.innerText.trim()) : [];
+    const caption = ((tb.closest('section, div') || mp).querySelector('h2, h3') || {}).innerText || '';
+    [...tb.tBodies].forEach(b => [...b.rows].forEach(r => {
+      const cells = [...r.cells];
+      if (cells.length === 2 && cells[0].tagName === 'TH' && cells[1].tagName === 'TD') {
+        if (empty(cells[1])) out.empty_cells.push({table: ti, caption: caption.trim().slice(0, 40), column: cells[0].innerText.trim(), row: ''});
+        return;
+      }
+      if (!heads.length || cells.length !== heads.length) return;
+      cells.forEach((c, ci) => {
+        if (c.tagName === 'TD' && heads[ci] && empty(c))
+          out.empty_cells.push({table: ti, caption: caption.trim().slice(0, 40), column: heads[ci], row: (cells[0].innerText || '').trim().slice(0, 40)});
+      });
+    }));
+  });
+  return out;
+}"""
+# Columns (and th/td row labels) whose value always exists by definition: identity, the job/scope, the person who
+# filed, times, state and result. Every other column of the plugin's tables is optional by meaning (Decided, Decided by,
+# Approved by, Aborted by, Comment, Parameters, Request, Grant, Detail, Names, Value, User of a timer run, ...).
+EXPECTED_COLUMNS = {"ID", "Job", "Job or folder", "Requester", "Approvers", "Created", "Status", "State", "At", "Run", "Scope",
+                    "Action", "Actions", "Type", "Kind", "Target", "Started", "Result", "Duration", "Granted", "Expires",
+                    "Remaining", "Incident", "Holder", "Name", "Reason", "Changed by", "Cause", "Build", "User or group"}
+PROBE_AS_TYPED = 'bc-markup-probe <b>b</b> & "q" <img src=x onerror=window.__bcCanary=1>'
+_content_seen = set()
+
+
+def content_checks(s, path, pt):
+    """The content checks of the docstring; one FAIL line per (check, pattern, finding), every finding logged."""
+    try:
+        c = s.page.evaluate(CONTENT_JS)
+    except Exception as e:  # noqa
+        c = None
+        emit({"page": path, "pattern": pt, "kind": "content", "check": "content-js", "result": "ERROR", "detail": str(e)[:200]})
+    if not c:
+        return
+    found = []
+    if "/batch-control" in path:
+        for x in c["empty_cells"]:
+            if x["column"] in EXPECTED_COLUMNS:
+                found.append(("empty-cell", f"{x['caption']} / {x['column']}", x))
+            elif ("empty-optional", pt, x["column"]) not in _content_seen:  # optional value: once per pattern, UX review only
+                _content_seen.add(("empty-optional", pt, x["column"]))
+                emit({"page": path, "pattern": pt, "kind": "content", "check": "empty-optional", "key": x["column"], "result": "INFO", "detail": x})
+    found += [("server-path", x["match"], x) for x in c["paths"]]
+    found += [("double-escaped", x["match"], x) for x in c["entities"]]
+    found += [("markup-text", "<script", x) for x in c["script_text"]]
+    if c["canary"] or c["injected"]:
+        found.append(("markup-live", "probe <img onerror> rendered as markup", {"canary": c["canary"], "injected": c["injected"]}))
+    for snip in c["probe"]:
+        head = re.split(r"…|\.\.\.", snip)[0].rstrip()  # a list may shorten the text with an ellipsis
+        if not (snip.startswith(PROBE_AS_TYPED) or (head != snip and PROBE_AS_TYPED.startswith(head))):
+            found.append(("markup-live", "probe text not as typed", {"shown": snip}))
+    for check, key, detail in found:
+        emit({"page": path, "pattern": pt, "kind": "content", "check": check, "key": key, "result": "DEFECT", "detail": detail})
+        sig = (check, pt, key)
+        if sig not in _content_seen:
+            _content_seen.add(sig)
+            print("FAIL content " + json.dumps({"role": ROLE, "ui": UI, "check": check, "page": path, "key": key, "detail": detail})[:600], flush=True)
 
 
 def check_url(s, url, cache):
@@ -189,6 +293,7 @@ def main():
               "console": cons[:5], "bad_subrequests": bad[:5]})
         if status and status >= 400:
             continue
+        content_checks(s, path, pt)
         els = s.page.evaluate(ELEMENTS_JS)
         is_bc = "/batch-control" in path
         for el in els:

@@ -41,10 +41,15 @@ _browser = None
 
 
 def browser():
+    """Headless Google Chrome by default. BC_BROWSER_CHANNEL=chromium uses Playwright's own Chromium instead
+    (`python -m playwright install --with-deps chromium`, pinned by the playwright version: the CI runner, ci/run.sh);
+    another value is passed through as the channel (e.g. msedge). BC_HEADED=1 shows the window."""
     global _pw, _browser
     if _browser is None:
         _pw = sync_playwright().start()
-        _browser = _pw.chromium.launch(channel="chrome")
+        channel = os.environ.get("BC_BROWSER_CHANNEL", "chrome")
+        _browser = _pw.chromium.launch(channel=None if channel in ("", "chromium") else channel,
+                                       headless=os.environ.get("BC_HEADED") != "1")
     return _browser
 
 
