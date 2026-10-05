@@ -406,6 +406,11 @@ from scripts.
     `RENAME` for the folder itself. This is accurate, since every child's full
     name did change, but it means one rename can generate a large number of
     records.
+52. **A `DELETE` record of an item deleted together with its folder names the
+    user who deleted the folder** only when core deletes the item on the same
+    thread inside `AbstractItem.delete()`; an item removed in any other way, on
+    another thread or outside `AbstractItem.delete()`, is recorded under the
+    authentication current at that moment, which is often SYSTEM.
 27. **The expired-window denial page is Jenkins' own.** Saving a configuration
     after a `CONFIGURE` window has expired gives the stock Jenkins 403 page. The
     plugin deliberately does not intercept it: Jenkins does not offer that as an
@@ -925,8 +930,10 @@ code does on purpose.
     needs standing `Item/Create` there or an administrator. In both cases the
     refusal says an administrator must make the move instead of suggesting a
     window. The refused move
-    changes nothing and is recorded as a `GRANT_VIOLATION`. A user who holds
-    `Item/Delete` on two jobs can still swap them by moving them; such a user
+    changes nothing and is recorded as a `GRANT_VIOLATION`; the same refused
+    move by the same user (same item and destination) is recorded once per
+    minute, and repeats within that minute go only to the Jenkins log (D-73).
+    A user who holds `Item/Delete` on two jobs can still swap them by moving them; such a user
     could already delete and recreate them, and with run control on the
     swapped jobs arrive locked and not activated, as recreated ones would. A
     swap does not carry a window from one job to the other: each window
