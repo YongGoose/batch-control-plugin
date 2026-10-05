@@ -23,19 +23,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>anything else is {@code String.valueOf(value.getValue())}.</li>
  * </ul>
  *
- * <p>File values are recognised without linking the optional file-parameters plugin: core's
- * {@link FileParameterValue}, every subclass of the plugin's
- * {@value #FILE_PARAMETERS_VALUE} (by class name), and any other value whose raw value is an
- * uploaded file item or a {@link File}.
+ * <p>File values are core's {@link FileParameterValue}, the file values of the optional
+ * file-parameters plugin when it is installed ({@link FileParametersSupport}), and any other value
+ * whose raw value is an uploaded file item or a {@link File}.
  */
 @Restricted(NoExternalUse.class)
 public final class ParameterDisplay {
 
     /** Display prefix of a file value (D-72). */
     public static final String FILE_PREFIX = "[file]";
-
-    /** Base class of the file-parameters plugin's values (stashedFile, base64File); not linked. */
-    static final String FILE_PARAMETERS_VALUE = "io.jenkins.plugins.file_parameters.AbstractFileParameterValue";
 
     private ParameterDisplay() {
     }
@@ -100,21 +96,11 @@ public final class ParameterDisplay {
 
     /** Whether {@code value} is a file value (see the class description). */
     public static boolean isFile(ParameterValue value) {
-        if (value instanceof FileParameterValue || isA(value, FILE_PARAMETERS_VALUE)) {
+        if (value instanceof FileParameterValue || FileParametersSupport.isFileValue(value)) {
             return true;
         }
         Object raw = value.getValue();
         return raw instanceof org.apache.commons.fileupload2.core.FileItem || raw instanceof File;
-    }
-
-    /** Whether {@code object}'s class is, or extends, the class named {@code className}. */
-    static boolean isA(@CheckForNull Object object, String className) {
-        for (Class<?> type = object == null ? null : object.getClass(); type != null; type = type.getSuperclass()) {
-            if (type.getName().equals(className)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** The original file name of a file value without any directory part, or {@code null}. */
@@ -123,8 +109,8 @@ public final class ParameterDisplay {
         String name;
         if (value instanceof FileParameterValue) {
             name = ((FileParameterValue) value).getOriginalFileName();
-        } else if (isA(value, FILE_PARAMETERS_VALUE)) {
-            name = pluginFileName(value);
+        } else if (FileParametersSupport.isFileValue(value)) {
+            name = FileParametersSupport.fileName(value);
         } else {
             Object raw = value.getValue();
             if (raw instanceof org.apache.commons.fileupload2.core.FileItem) {
@@ -136,20 +122,6 @@ public final class ParameterDisplay {
             }
         }
         return baseName(name);
-    }
-
-    /**
-     * {@code AbstractFileParameterValue#getFilename()} of the file-parameters plugin, called
-     * reflectively because the plugin is optional; {@code null} when it cannot be read.
-     */
-    @CheckForNull
-    private static String pluginFileName(ParameterValue value) {
-        try {
-            Object name = value.getClass().getMethod("getFilename").invoke(value);
-            return name instanceof String ? (String) name : null;
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return null;
-        }
     }
 
     /** The last segment of {@code name} after any {@code /} or {@code \}, or {@code null}. */
