@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.ops;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
 import hudson.model.Job;
 import hudson.model.ParameterValue;
@@ -27,6 +28,7 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -51,6 +53,9 @@ public final class IncidentService {
 
     /** SPEC item 11: the console excerpt keeps at most the last 100 lines. */
     private static final int LOG_TAIL_LINES = 100;
+
+    /** Shape of an incident id ({@link Ids#newId}, generously) checked before any lookup (D-72a). */
+    private static final Pattern INCIDENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
 
     private static final IncidentService INSTANCE = new IncidentService();
 
@@ -223,20 +228,90 @@ public final class IncidentService {
         String reason = "Rerun requested from incident " + incidentId
                 + " (failed run " + incident.getRunId() + ")";
         List<ParameterValue> values = RerunParameters.recover(job, incident);
-        // Created outside this service's lock: the request service takes its own lock and
-        // there is no call path back into this service from request creation. A refused
-        // creation disposes of the file copies made for it.
-        RunRequest request = RunRequestService.get().create(job, values,
-                reason, approvers, incidentId);
+        // Created outside this service's lock: the request service takes its own lock and calls
+        // back into this service only after releasing it (#recordRerunRequest, which also links
+        // the request to the incident). A refused creation disposes of the file copies made for it.
+        return RunRequestService.get().create(job, values, reason, approvers, incidentId);
+    }
+
+    /**
+     * D-72a (SPEC item 11): the incident a run request submitted from the Request Run form may be
+     * linked to, when an incident rerun fell back to that form and the form carried the incident
+     * id back. Returns the stored incident's id only when all of these hold, else {@code null}:
+     * <ul>
+     *   <li>{@code incidentId} has the shape of an incident id and the incident exists;</li>
+     *   <li>it belongs to {@code job} (by full name);</li>
+     *   <li>the current user holds {@code BatchControl/ViewHistory} (the Incidents screen, where
+     *       the rerun button is) and may request a run of {@code job} ({@code BatchControl/Request}
+     *       and {@code Item/Read}, {@link RunRequestService#canRequest}), the rights of a rerun.</li>
+     * </ul>
+     * The value comes from a form field, so it is never trusted: a bad reference is ignored, never
+     * an error, and the answer reveals nothing a rerun would not. The caller passes the result to
+     * {@link RunRequestService#create(Job, List, String, List, String)}, which links the request
+     * to the incident so a successful run records {@code resolvedByRunId}. Read only.
+     */
+    @CheckForNull
+    public String linkableIncident(@CheckForNull String incidentId, @CheckForNull Job<?, ?> job) {
+        if (incidentId == null || job == null || !INCIDENT_ID.matcher(incidentId).matches()) {
+            return null;
+        }
+        try {
+            if (!Jenkins.get().hasPermission(BatchControlPermissions.VIEW_HISTORY)
+                    || !RunRequestService.get().canRequest(job)) {
+                return null;
+            }
+            Incident incident = store.loadIncident(incidentId);
+            return incident != null && job.getFullName().equals(incident.getJobFullName())
+                    ? incident.getId() : null;
+        } catch (RuntimeException e) {
+            // An unreadable record (or a realm failure) is a reference that cannot be confirmed.
+            LOGGER.log(Level.FINE, e, () -> "Ignoring the incident reference " + incidentId
+                    + " of a run request for job '" + job.getFullName() + "'");
+            return null;
+        }
+    }
+
+    /**
+     * The incident a run request for {@code job} is linked to (SPEC item 11): it must exist and
+     * belong to {@code job}. Called by request creation before anything is stored.
+     *
+     * @throws IllegalArgumentException when there is no such incident of that job
+     */
+    public Incident requireRerunTarget(String incidentId, Job<?, ?> job) {
+        Objects.requireNonNull(job, "job");
+        Incident incident = require(incidentId);
+        if (!job.getFullName().equals(incident.getJobFullName())) {
+            throw new IllegalArgumentException("Incident " + incidentId + " does not belong to job '"
+                    + job.getFullName() + "'.");
+        }
+        return incident;
+    }
+
+    /**
+     * Lists the stored run request {@code requestId} among the incident's rerun requests (the
+     * link back from the incident; the request itself carries {@code incidentId}). Called by
+     * request creation once the request is stored, outside the request service's lock; adding the
+     * same id again changes nothing. Never throws: the request is already stored and its
+     * {@code incidentId} alone drives {@code resolvedByRunId}, so a failure is only logged.
+     */
+    public void recordRerunRequest(String incidentId, String requestId) {
         lock.lock();
         try {
-            Incident reloaded = require(incidentId);
-            reloaded.addRerunRequestId(request.getId());
-            store.saveIncident(reloaded);
+            Incident incident = store.loadIncident(incidentId);
+            if (incident == null) {
+                LOGGER.warning(() -> "Cannot list rerun request " + requestId + " on missing incident " + incidentId);
+                return;
+            }
+            if (!incident.getRerunRequestIds().contains(requestId)) {
+                incident.addRerunRequestId(requestId);
+                store.saveIncident(incident);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not list rerun request " + requestId + " on incident "
+                    + incidentId);
         } finally {
             lock.unlock();
         }
-        return request;
     }
 
     /**

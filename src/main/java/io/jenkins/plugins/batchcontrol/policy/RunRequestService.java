@@ -21,6 +21,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.PendingCount;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
 import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
@@ -306,6 +307,12 @@ public final class RunRequestService {
      * here, once; the per-value length limit (D-22) applies to it. The approved build is
      * scheduled with the values unchanged.
      *
+     * <p>SPEC item 11, D-72a: a linked request names an existing incident of {@code job} (else
+     * {@link IllegalArgumentException}, nothing stored) and is listed among the incident's rerun
+     * requests once stored, whoever created it: the incident rerun, or the Request Run form after
+     * {@link IncidentService#linkableIncident} validated the reference it carried. A successful
+     * run of the request then records {@code resolvedByRunId} on the incident.
+     *
      * <p>The request takes over the temporary files of the values' file parameters: when the
      * request is refused (permission, reason, size, approvers) they are disposed of before the
      * exception propagates ({@link ParameterFiles}).
@@ -334,7 +341,8 @@ public final class RunRequestService {
             request = RunRequest.create(job.getFullName(), submitted, display, reason,
                     requester, designated);
             if (incidentId != null) {
-                request.setIncidentId(incidentId);
+                // SPEC item 11: only an incident of this job; the id stored is the incident's own.
+                request.setIncidentId(IncidentService.get().requireRerunTarget(incidentId, job).getId());
             }
             lock.lock();
             try {
@@ -347,6 +355,11 @@ public final class RunRequestService {
             if (!stored) {
                 ParameterFiles.dispose(submitted, "a refused run request for job '" + job.getFullName() + "'");
             }
+        }
+        if (request.getIncidentId() != null) {
+            // The link back from the incident, outside this service's lock (lock order). The
+            // request's incidentId alone drives resolvedByRunId (RunRecordListener).
+            IncidentService.get().recordRerunRequest(request.getIncidentId(), request.getId());
         }
         NotificationDispatcher.run(NotificationEvent.REQUEST_CREATED, request);
         return request;

@@ -26,7 +26,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * D-72: disposal of the temporary files that typed parameter values keep until a build takes
  * them over, for values that will never reach the queue: a run request that ended without a run
  * (REJECTED, CANCELLED, EXPIRED, INVALIDATED before it was queued), a submission that was refused
- * before a request was stored, or rerun values that could not be completed. Once a request's
+ * before a request was stored, a person's own build submission that the queue gate refused, or
+ * rerun values that could not be completed. Once a request's
  * build is queued, the queue and the build own its files and nothing here touches them.
  *
  * <p>Parameter types that keep such a file delete it themselves when their queue item is
