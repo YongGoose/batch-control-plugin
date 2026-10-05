@@ -7,6 +7,13 @@ import csv, io, json, re, sys
 from urllib.parse import urlparse, parse_qsl
 from lib import Session, close, BASE
 import lib
+import datetime
+
+# The controller's current/previous month and a 30-day range ending today (the original run used the literals
+# 2026-10, 2026-09 and 2026-09-05..2026-10-04 of its day, 2026-10-04).
+MONTH, PREV = lib.month(), lib.month(-1)
+TO = lib.jenkins_today()
+FROM = TO - datetime.timedelta(days=29)
 
 UI = sys.argv[1]
 ROLES = sys.argv[2:] or ["approver-1", "admin", "manager"]
@@ -144,7 +151,7 @@ def history(role):
               url=s.page.url.replace(BASE, ""), statuses=sts2)
 
     # H4: "Monthly summary" and "Monthly aggregate as JSON" links from the filtered page
-    s.go("/batch-control/history/?kind=runs&job=fast&from=2026-09-05&to=2026-10-04")
+    s.go(f"/batch-control/history/?kind=runs&job=fast&from={FROM}&to={TO}")
     links = {a.inner_text().strip(): a.get_attribute("href") for a in s.page.locator("#main-panel a").all()
              if a.inner_text().strip() in ("Monthly summary", "Monthly aggregate as JSON")}
     info = {"links": links}
@@ -153,12 +160,12 @@ def history(role):
         info.update(status=st, type=ct.split(";")[0], body=body[:200])
     s.shot(["#main-panel a:has-text('Monthly aggregate as JSON')", "#main-panel a:has-text('Monthly summary')"], f"{tag}-H4-links")
     check(role, "H4 JSON export 200 application/json for the filtered month (month-level aggregate, by design not per job)",
-          info.get("status") == 200 and "json" in info.get("type", "") and "month=2026-10" in links.get("Monthly aggregate as JSON", ""), **info)
+          info.get("status") == 200 and "json" in info.get("type", "") and f"month={MONTH}" in links.get("Monthly aggregate as JSON", ""), **info)
     if "Monthly summary" in links:
         with s.page.expect_navigation():
             s.page.locator("#main-panel a", has_text="Monthly summary").first.click()
         mon = {"url": s.page.url.replace(BASE, ""), "nav": [a.get_attribute("href") for a in s.page.locator("#main-panel a[href*='month=']").all()][:6]}
-        prev = s.page.locator("#main-panel a[href*='month=2026-09']")
+        prev = s.page.locator(f"#main-panel a[href*='month={PREV}']")
         if prev.count():
             with s.page.expect_navigation():
                 prev.first.click()
@@ -175,12 +182,12 @@ def month_page(role, section):
     tag = f"D7-{UI}-{role}-{section}"
     s.go(f"/batch-control/{section}/")
     n0 = rows(s).count()
-    s.page.fill("#main-panel input[name=month]", "2026-10")
+    s.page.fill("#main-panel input[name=month]", MONTH)
     hidden = submit(s, "Show")
     keys = [k for k, _ in q(s.page.url)]
     n1 = rows(s).count()
     s.shot(["#main-panel form[data-batch-control-get-form]", "#main-panel table"], f"{tag}-show")
-    check(role, f"{section} Show month=2026-10: URL only month", keys == ["month"] and dict(q(s.page.url))["month"] == "2026-10",
+    check(role, f"{section} Show month={MONTH}: URL only month", keys == ["month"] and dict(q(s.page.url))["month"] == MONTH,
           url=s.page.url.replace(BASE, ""), keys=keys, hidden_before_submit=hidden)
     check(role, f"{section} rows after Show equal the default month", n1 == n0 and n1 > 0, rows_default=n0, rows_shown=n1)
     pager = [a.get_attribute("href") for a in s.page.locator("#main-panel a[href*='page=']").all()]
@@ -190,16 +197,16 @@ def month_page(role, section):
             s.page.locator("#main-panel a[href*='page=2']").first.click()
         d = dict(q(s.page.url))
         second = s.page.locator("#main-panel table tbody tr").first.inner_text()[:60]
-        check(role, f"{section} pager keeps month", d.get("month") == "2026-10" and d.get("page") == "2" and first != second and not (set(d) & FORBIDDEN),
+        check(role, f"{section} pager keeps month", d.get("month") == MONTH and d.get("page") == "2" and first != second and not (set(d) & FORBIDDEN),
               url=s.page.url.replace(BASE, ""), pager=pager)
     else:
         check(role, f"{section} pager (not shown: fewer rows than a page)", True, rows=n1, note="no pager on this month")
     # previous month via the input and via the link
     s.go(f"/batch-control/{section}/")
-    s.page.fill("#main-panel input[name=month]", "2026-09")
+    s.page.fill("#main-panel input[name=month]", PREV)
     submit(s, "Show")
     keys = [k for k, _ in q(s.page.url)]
-    check(role, f"{section} Show month=2026-09 clean", keys == ["month"], url=s.page.url.replace(BASE, ""), rows=rows(s).count())
+    check(role, f"{section} Show month={PREV} clean", keys == ["month"], url=s.page.url.replace(BASE, ""), rows=rows(s).count())
     cons = [c for c in s.console if not any(k in c for k in KNOWN)]
     check(role, f"{section} console/HTTP>=400", not cons and not s.bad, console=cons[:5], bad=s.bad[:5])
     s.done()

@@ -30,3 +30,27 @@ def mails(query=""):
 def mail_body(mid):
     import requests
     return requests.get(f"http://localhost:8025/api/v1/message/{mid}").json()
+
+
+# Dates of the controller's clock (CI portability, 2026-10-05). The plugin files changes and incidents per month of
+# the JVM default zone, so the drivers ask Jenkins for "today" instead of using the host clock or a literal date:
+# def07.py and round3.py were written on 2026-10-04 with that day's month literals.
+import datetime  # noqa: E402
+
+_TODAY = None
+
+
+def jenkins_today():
+    global _TODAY
+    if _TODAY is None:
+        out = groovy("return java.time.LocalDate.now().toString()")
+        _TODAY = datetime.date.fromisoformat(out.replace("Result:", "").strip())
+    return _TODAY
+
+
+def month(offset=0):
+    """yyyy-MM of the controller's current month (offset -1: the previous month)."""
+    d = jenkins_today().replace(day=1)
+    for _ in range(-offset):
+        d = (d - datetime.timedelta(days=1)).replace(day=1)
+    return d.strftime("%Y-%m")

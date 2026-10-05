@@ -173,8 +173,8 @@ return ops.items*.name""")
                                            or "permission" in info.get("text", "").lower()), **info)
     b.done()
     ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
-    recs = groovy("""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/changes/2026-10.jsonl')
-return f.readLines().findAll{ it.contains('ops/fo-new') || it.contains('ops/del-me') }.join('\\n')""")
+    recs = groovy("""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/changes/%s.jsonl')
+return f.readLines().findAll{ it.contains('ops/fo-new') || it.contains('ops/del-me') }.join('\\n')""" % lib.month())
     lines = [json.loads(x) for x in re.findall(r"\{.*?\}", recs)]
     by_fonly = [x for x in lines if x.get("user") == "fonly"]
     newest = {t: max((x for x in by_fonly if x["type"] == t), key=lambda x: x["at"], default=None) for t in ("CREATE", "DELETE")}
@@ -326,7 +326,8 @@ def sec_E():
         with s.page.expect_navigation() as nav:
             s.page.locator("#main-panel a[href*='history']").first.click()
         landing = (nav.value.status, s.page.url.replace(BASE, ""))
-    total = api("admin", "/batch-control/history/runs.csv?from=2026-09-01&to=2026-10-31").text.count("\n") - 1
+    # the previous and the current month of the controller (the original literal: 2026-09-01..2026-10-31)
+    total = api("admin", f"/batch-control/history/runs.csv?from={lib.month(-1)}-01&to={lib.jenkins_today()}").text.count("\n") - 1
     check("E", "dashboard shows exactly 50 runs (more exist), 2 History links, link lands on History", rows == 50 and total > 50 and len(hist) == 2
           and landing and landing[0] == 200 and "/batch-control/history/" in landing[1], rows=rows, runs_total=total, first=first, history_links=hist,
           landing=landing, intro=intro)
