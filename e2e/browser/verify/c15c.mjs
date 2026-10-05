@@ -3,7 +3,7 @@ import { row, ev } from '../audit/rec.mjs';
 import { formPost, uiRevoke } from '../audit/restsubmit.mjs';
 const T = String(Date.now()).slice(-4); const gid = (u) => u.match(/(\d{8}-\d{6}-\w+)/)[1];
 const { page } = await login('requester');
-const g = await requestGrant(page, { type: 'FOLDER', scope: 'team', actions: ['CREATE', 'DELETE'], pattern: 'app-ok', minutes: 15, reason: `C-15 ${T} create+delete restricted` }); await decide(g.url);
+const g = await requestGrant(page, { scope: 'team', actions: ['CREATE', 'DELETE'], pattern: 'app-ok', minutes: 15, reason: `C-15 ${T} create+delete restricted` }); await decide(g.url);
 const cfg = (await api('requester', '/job/team/job/app-1/configure')).status;
 const v0 = (await changeRows(/,GRANT_VIOLATION,/)).length;
 const r1 = await formPost('requester', `/job/team/job/app-1/confirmRename?newName=evil-${T}&name=app-1`, {});

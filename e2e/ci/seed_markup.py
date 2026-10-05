@@ -28,7 +28,7 @@ rid = created(api("requester", "/job/batch-pipeline/batch-control/submit", "POST
                   data=[("reason", PROBE), ("approvers", "approver-1")]), "run request")
 r = api("approver-1", f"/batch-control/requests/{rid}/reject", "POST", data={"comment": PROBE})
 assert r.status_code in (200, 302), ("reject run request", r.status_code)
-# D-71: the grant form names one item (scopeFullName, no scopeType). If the probe cannot be filed, the run request
+# D-71: the grant form names one item (scopeFullName; no scope type field). If the probe cannot be filed, the run request
 # alone carries it and a WARN line says so (the grant drivers report the form itself).
 fields = [("scopeFullName", "prod/x"), ("actions", "CONFIGURE"), ("durationMinutes", "15"), ("reason", PROBE), ("approvers", "approver-1")]
 r = api("requester", "/batch-control/grants/create", "POST", data=fields)

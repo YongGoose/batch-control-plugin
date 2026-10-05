@@ -11,7 +11,7 @@ const rq = await login('requester'); const p = rq.page;
 if (on('JOB')) {
   // B7-02..B7-08
   const c0 = await cfgStatus('requester', '/job/batch-daily/configure');
-  const g = await requestGrant(p, { type: 'JOB', scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-02 ${tag}: edit the batch-daily description` });
+  const g = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-02 ${tag}: edit the batch-daily description` });
   const gid = gidOf(g.url);
   await p.goto(`${BASE}/batch-control/grants/`);
   const lr = p.locator('#main-panel table').first().locator('tbody tr', { hasText: gid }).first();
@@ -51,7 +51,7 @@ if (on('JOB')) {
   await uiRevoke(gid); await ad.context.close();
 }
 if (on('B7-09')) {
-  const g = await requestGrant(p, { type: 'JOB', scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 1, reason: `Audit B7-09 ${tag}: one-minute window` });
+  const g = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 1, reason: `Audit B7-09 ${tag}: one-minute window` });
   await decide(g.url, 'approve', 'ok');
   await p.goto(`${BASE}/job/batch-daily/configure`); await p.waitForTimeout(1500);
   const before = (await api('admin', '/job/batch-daily/config.xml', { raw: true })).text;
@@ -70,13 +70,13 @@ if (on('B7-09')) {
 let folderGid;
 if (on('FOLDER')) {
   // B7-12 FOLDER team CONFIGURE
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-12 ${tag}: folder window` });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-12 ${tag}: folder window` });
   await decide(g.url, 'approve', 'ok');
   const a = await cfgStatus('requester', '/job/team/job/app-1/configure'), b = await cfgStatus('requester', '/job/team/configure'), c = await cfgStatus('requester', '/job/batch-cron/configure');
   row('B7-12', { roles: 'requester', V: 'n.a.', G: `${a === 200 && b === 200 && c === 403 ? '✓' : '✗'} FOLDER team CONFIGURE: team/app-1 ${a}, team ${b}, batch-cron ${c}`, R: 'n.a.', C: 'n.a.', E: '✓ text' });
   await uiRevoke(gidOf(g.url));
   // B7-13 / B7-14 FOLDER team CREATE, no restriction
-  const g2 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B7-13 ${tag}: create without restriction` });
+  const g2 = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B7-13 ${tag}: create without restriction` });
   await decide(g2.url, 'approve', 'ok'); const gid2 = gidOf(g2.url);
   await p.goto(`${BASE}/job/team/`); await p.locator('#side-panel a:has-text("New Item")').click(); await p.waitForLoadState('load');
   const name = `app-free-${T}`; await p.locator('#name').fill(name); await p.waitForTimeout(1000);
@@ -94,7 +94,7 @@ if (on('FOLDER')) {
   row('B7-14', { roles: 'requester', V: `${!rootSb.includes('New Item') ? '✓' : '✗'} root sidebar without New Item [${rootSb.join(', ').slice(0, 80)}]`, G: `${nj === 403 && ci.status === 403 && exists === 404 ? '✓' : '✗'} /view/all/newJob ${nj}, POST /createItem ${ci.status}, nothing created (${exists})`, R: '✓ nothing offered; typed URLs get core 403', C: 'n.a.', E: '✓ text' });
   await uiRevoke(gid2);
   // B7-16..B7-20 regex restriction
-  const g3 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE', 'DELETE'], pattern: '/app-[0-9]+/', minutes: 15, reason: `Audit B7-16 ${tag}: regex restriction` });
+  const g3 = await requestGrant(p, { scope: 'team', actions: ['CREATE', 'DELETE'], pattern: '/app-[0-9]+/', minutes: 15, reason: `Audit B7-16 ${tag}: regex restriction` });
   await decide(g3.url, 'approve', 'ok'); folderGid = gidOf(g3.url);
   const ok = `app-${T}`; const bad = `app-x${T}`;
   const v0 = (await changeRows(/,GRANT_VIOLATION,/)).length;
@@ -133,7 +133,7 @@ if (on('FOLDER')) {
   row('B7-21', { roles: 'requester', V: '✓ Delete Project offered under the DELETE window', G: `${gone === 404 ? '✓' : '✗'} team/${ok} deleted (${gone})`, R: 'n.a.', C: `${dr.includes(folderGid) ? '✓' : '✗'} DELETE record with grant ${folderGid}`, E: '✓ text (the record is on Change Records)' });
   await uiRevoke(folderGid);
   // B7-20 CLI trailing space under an exact restriction
-  const g4 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: `app-c${T}`, minutes: 15, reason: `Audit B7-20 ${tag}: exact name` });
+  const g4 = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: `app-c${T}`, minutes: 15, reason: `Audit B7-20 ${tag}: exact name` });
   await decide(g4.url, 'approve', 'ok');
   let cli; try { cli = execSync(`echo '<project><builders/></project>' | ../scripts/cli.sh requester create-job "team/app-c${T} " 2>&1; echo "EXIT=$?"`, { shell: '/bin/bash' }).toString(); } catch (e) { cli = (e.stdout || '').toString() + ' EXIT=' + e.status; }
   const ex = (await api('admin', `/job/team/job/app-c${T}%20/api/json`)).status, ex2 = (await api('admin', `/job/team/job/app-c${T}/api/json`)).status;
@@ -141,7 +141,7 @@ if (on('FOLDER')) {
   await uiRevoke(gidOf(g4.url));
 }
 if (on('B7-17')) {
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/app-[/', minutes: 15, reason: `Audit B7-17 ${tag}: invalid regex` });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: '/app-[/', minutes: 15, reason: `Audit B7-17 ${tag}: invalid regex` });
   const s = await shot(p, '#main-panel', 'B7-17-invalid-regex', { pad: 8 });
   const kept = await p.locator('input[name="createNamePattern"]').count();
   row('B7-17', { roles: 'requester', V: 'n.a.', G: `${g.error ? '✓' : '✗'} pattern "/app-[/" refused at submission, nothing stored`, R: `✗ "${(g.error || '').slice(0, 110)}" on a bare Error page; the form is ${kept ? 'kept' : 'gone with everything typed'} (DEF-09)`, C: 'n.a.', E: s ? '✓ B7-17-invalid-regex' : '✗', defect: 'DEF-09 (known)' });
@@ -163,19 +163,19 @@ if (on('B7-22')) {
   await cf.context.close();
 }
 if (on('B7-24')) {
-  const g = await requestGrant(p, { type: 'JOB', scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-24 ${tag}: to be rejected` });
+  const g = await requestGrant(p, { scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-24 ${tag}: to be rejected` });
   const a = await login('approver-1'); await a.page.goto(g.url);
   const [r] = await Promise.all([a.page.waitForNavigation().catch(() => null), a.page.locator('form[name="reject"] button').first().click()]);
   const t = await mainText(a.page);
   await a.page.goto(g.url); await a.page.fill('form[name="reject"] textarea[name="comment"]', 'Not this week.'); await Promise.all([a.page.waitForLoadState('load'), a.page.locator('form[name="reject"] button').first().click()]);
   await p.goto(g.url); const t2 = await mainText(p); const s = await shot(p, '#main-panel table', 'B7-24-grant-rejected', { pad: 8 });
-  const g2 = await requestGrant(p, { type: 'JOB', scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-24 ${tag}: to be cancelled` });
+  const g2 = await requestGrant(p, { scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-24 ${tag}: to be cancelled` });
   await uiCancel(p, g2.url); await p.goto(g2.url); const t3 = await mainText(p);
   row('B7-24', { roles: 'approver-1, requester', V: '✓ Reject for the designated approver, Cancel Request for the requester', G: `${/REJECTED/.test(t2) && /CANCELLED/.test(t3) ? '✓' : '✗'} reject with comment -> REJECTED, decided by approver-1, comment shown; requester cancel -> CANCELLED`, R: `✗ reject without comment -> ${r && r.status()} "${t.slice(0, 70)}": bare Error page (DEF-09)`, C: `${/Decided by approver-1/.test(t2) ? '✓' : '✗'} decision on the detail`, E: s ? '✓ B7-24-grant-rejected' : '✗', defect: 'DEF-09 (known)' });
   await a.context.close();
 }
 if (on('B7-25')) {
-  const g = await requestGrant(p, { type: 'JOB', scope: 'team/secret-job', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-25 ${tag}: unreadable job` });
+  const g = await requestGrant(p, { scope: 'team/secret-job', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-25 ${tag}: unreadable job` });
   const s = await shot(p, '#main-panel', 'B7-25-unreadable-scope', { pad: 8 });
   row('B7-25', { roles: 'requester', V: 'n.a.', G: `${g.error ? '✓' : '✗'} CONFIGURE on team/secret-job (not readable for him) refused, nothing stored`, R: `${g.error && /No such job/.test(g.error) ? '✗' : '✗'} "${(g.error || '').slice(0, 80)}" (the right answer: it does not reveal the job) on a bare Error page that drops the form (DEF-09)`, C: 'n.a.', E: s ? '✓ B7-25-unreadable-scope' : '✗', defect: 'DEF-09 (known)' });
 }
@@ -183,7 +183,7 @@ if (on('B7-27')) {
   const J = 'batch-upstream';
   const last = (await job(J, 'lastSuccessfulBuild[number]')).lastSuccessfulBuild.number;
   await p.goto(`${BASE}/job/${J}/${last}/`); const before = (await sidebar(p)).includes('Replay');
-  const g = await requestGrant(p, { type: 'JOB', scope: J, actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-27 ${tag}: Replay under a window` });
+  const g = await requestGrant(p, { scope: J, actions: ['CONFIGURE'], minutes: 15, reason: `Audit B7-27 ${tag}: Replay under a window` });
   await decide(g.url, 'approve', 'ok');
   await p.goto(`${BASE}/job/${J}/${last}/`); const sb = await sidebar(p);
   const s = await shot(p, '#side-panel #tasks, #side-panel', 'B7-27-replay-under-window', { pad: 8 });

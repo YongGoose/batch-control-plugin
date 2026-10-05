@@ -7,7 +7,7 @@ const only = process.argv.slice(2); const on = (x) => !only.length || only.inclu
 const rq = await login('requester'); const p = rq.page;
 const cfg = async (u, path) => (await api(u, path)).status;
 if (on('C-07')) {
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify C-07 ${T}` }); await decide(g.url);
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify C-07 ${T}` }); await decide(g.url);
   await p.goto(`${BASE}/job/team/newJob`); await p.fill('#name', `app-c07-${T}`); await p.locator('label:has-text("Freestyle project")').first().click();
   await Promise.all([p.waitForNavigation(), p.locator('#ok-button').click()]); await Promise.all([p.waitForNavigation(), p.locator('button[name="Submit"]').click()]);
   const own = await cfg('requester', `/job/team/job/app-c07-${T}/configure`); const other = await cfg('requester', '/job/team/job/app-1/configure'); const folder = await cfg('requester', '/job/team/configure');
@@ -50,8 +50,8 @@ if (on('C-13')) {
   row('C-13', { roles: 'admin (script)', V: 'n.a.', G: `${c1 === c0 + 1 ? '✓' : '✗'} an edit that changes only text looking like plugin="mailer@1.0" -> plugin="evil@6.6" inside the description is recorded (${c0} -> ${c1}), so the plugin-version normaliser does not hide it`, R: 'n.a.', C: `✓ the record carries the diff (${diff.split('\n').filter((l) => /^[+-]\s/.test(l)).slice(0, 2).join(' / ').slice(0, 120)})`, E: '✓ text (diff in audit.log)' });
 }
 if (on('C-15')) {
-  const g1 = await requestGrant(p, { type: 'JOB', scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Verify C-15 ${T} configure` }); await decide(g1.url);
-  const g2 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE', 'DELETE'], pattern: 'app-ok', minutes: 15, reason: `Verify C-15 ${T} create+delete` }); await decide(g2.url);
+  const g1 = await requestGrant(p, { scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Verify C-15 ${T} configure` }); await decide(g1.url);
+  const g2 = await requestGrant(p, { scope: 'team', actions: ['CREATE', 'DELETE'], pattern: 'app-ok', minutes: 15, reason: `Verify C-15 ${T} create+delete` }); await decide(g2.url);
   const v0 = (await changeRows(/,GRANT_VIOLATION,/)).length;
   const r1 = await formPost('requester', '/job/team/job/app-1/confirmRename', { newName: `evil-${T}` });
   const r2 = await formPost('requester', `/job/team/job/app-1/confirmRename?newName=evil2-${T}&name=app-1`, {});
@@ -62,7 +62,7 @@ if (on('C-15')) {
   row('C-15', { roles: 'requester (CONFIGURE on team/app-1 + CREATE/DELETE on team restricted to app-ok)', V: 'n.a.', G: `${e1 === 404 && still === 200 ? '✓' : '✗'} confirmRename to evil-${T} -> ${r1.status}, with name= in the query -> ${r2.status}; team/app-1 kept (${still}), evil absent`, R: `${/app-ok|restriction|not allowed/.test(r1.msg + r2.msg) ? '✓' : '✗'} "${r1.msg.slice(0, 140)}"`, C: `${v1 > v0 ? '✓' : '✗'} GRANT_VIOLATION (${v0} -> ${v1})`, E: '✓ text' });
 }
 if (on('C-16')) {
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/(a|a)*\\1b/', minutes: 15, reason: `Verify C-16 ${T}` });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: '/(a|a)*\\1b/', minutes: 15, reason: `Verify C-16 ${T}` });
   let res = g.error ? `refused at submission: ${g.status} ${(await p.locator('#main-panel .error').allInnerTexts()).join(' / ')}` : 'accepted';
   let tm = '-';
   if (!g.error) {

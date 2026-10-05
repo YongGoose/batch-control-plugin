@@ -232,9 +232,8 @@ requests work with the default read-only token.
   2-3 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT` (default 2700 s) bounds one step.
 - Independence from the request form: `run.sh` and `shard.py` only start Jenkins, run the listed drivers and judge
   their output. The drivers that fill the grant form (`round3.py`, `actions.py`, `jobui.py`, the crawl's dialog
-  cycles) will be updated for D-71/D-72 with the form on the integration branch; the CI-only seed `ci/seed_markup.py`
-  already files its grant probe with or without the old `scopeType` field (and goes on with the run request probe
-  alone, printing a `WARN`, if neither works). `BC_UNITS` runs a subset while a driver is being updated.
+  cycles) post the D-71 form (one item name, no scope type field); `ci/seed_markup.py` goes on with the run request
+  probe alone, printing a `WARN`, if its grant probe cannot be filed. `BC_UNITS` runs a subset while a driver is being updated.
 - Tools chosen (and not chosen): changed-line coverage by [diff-cover](https://github.com/Bachmann1234/diff_cover)
   (reads JaCoCo XML; `coverage-diff.py` adds only the JaCoCo CLI calls, the class-mismatch check, the list of
   non-measurable files and the capped annotations). A PR-comment action such as `madrapps/jacoco-report` would need
@@ -379,6 +378,9 @@ ViewHistory, no Build), `team/sub/deep-job` and `prod/`. Scenarios: `b_d38a.py`,
 
 ## e2e-11 driver (`r11/`)
 
+(e2e-16: `s_folder_only.py` and `s_folder_only_ui.py`, which checked the reach of the D-65 folder-only window, were
+removed with that scope type; their D-71 counterparts are `r16/items.py` F and D and `r14/round3.py` A.)
+
 Round E2E-6 (hosting review round 3, 2026-10-04). `r11/lib.py` is `r10/lib.py` with screenshots in
 `screenshots/run-11/` and logs in `r11/out/`. Fresh JENKINS_HOME under `compose.prefix.yml`, arranged with
 `r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py` and `r11/arrange.py` (users `classic`, the requester's
@@ -386,8 +388,7 @@ permissions with the new job page turned off, and `fonly`, Read+Move+RequestGran
 multibranch `ops/mb`, the non-approval job `fast`). `seed_fast.py` queues 60 admin builds of `fast` for the
 dashboard bound. Scenarios: `s_dialogs.py [ADGH]` (grant and Request Run dialogs on the new UI, D-60, unknown ids),
 `s_rundlg_err.py`, `s_approve.py <run id> <grant id>`, `s_classic.py` (classic sidebar dialogs, folder-page dialog
-filing the FOLDER_ONLY window), `approve_api.py` / `grant_api.py` (arrangement over HTTP), `s_folder_only.py`,
-`s_folder_only_ui.py`, `move.py` (copy of `r10/move.py`), `s_revoke.py` / `s_revoke_holder.py`, `s_activation.py`,
+filing a window on the folder), `approve_api.py` / `grant_api.py` (arrangement over HTTP), `move.py` (copy of `r10/move.py`), `s_revoke.py` / `s_revoke_holder.py`, `s_activation.py`,
 `s_pages.py`, `s_width.py`, `s_tabs.py` (turns `new-build-page.flag` on for admin and back), `s_modellink.py`,
 `s_lacks_build.py`, `s_newmenu.py`, `s_d38b.py`, `r_role.py` and `d59b.py` (both replace the matrix profile; re-run
 the arrange scripts afterwards), `s_dark_monitor.py`, and `j25.py` for the Java 25 smoke under `compose.jdk25.yml`.

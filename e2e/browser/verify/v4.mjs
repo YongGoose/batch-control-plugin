@@ -53,7 +53,7 @@ if (false) {
   R('B1-12', 'B1-12-over-maximum', { ...st, errs: st.errs.map((e) => e + (key ? ' [names maxGrantMinutes]' : '')) }, { roles: 'admin (max 20), requester', s }); }
 if (false) {
 // B7-17 invalid regex, B7-25 unreadable scope
-for (const [id, opts] of [['B7-17', { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/app-[/' }], ['B7-25', { type: 'JOB', scope: 'team/secret-job', actions: ['CONFIGURE'] }]]) {
+for (const [id, opts] of [['B7-17', { scope: 'team', actions: ['CREATE'], pattern: '/app-[/' }], ['B7-25', { scope: 'team/secret-job', actions: ['CONFIGURE'] }]]) {
   await p.goto(`${BASE}/batch-control/grants/`); await p.fill('input[name="scopeFullName"]', opts.scope);
   for (const a of opts.actions) { const b = p.locator(`input[name="actions"][value="${a}"]`); if (!(await b.isChecked())) await b.locator('xpath=following-sibling::label[1]').click(); }
   if (opts.pattern) await p.fill('input[name="createNamePattern"]', opts.pattern);
@@ -63,7 +63,7 @@ for (const [id, opts] of [['B7-17', { type: 'FOLDER', scope: 'team', actions: ['
   R(id, `${id}-refused`, st, { s });
 }
 // B7-24 grant reject without comment
-{ const g = await requestGrant(p, { type: 'JOB', scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Verify B7-24 ${T}` });
+{ const g = await requestGrant(p, { scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 15, reason: `Verify B7-24 ${T}` });
   const a = await login('approver-1'); await a.page.goto(g.url);
   const [r] = await Promise.all([a.page.waitForNavigation().catch(() => null), a.page.locator('form[name="reject"] button').first().click()]);
   const st = await submitState(a.page, r); const s = await shot(a.page, ['form[name="reject"]', '#main-panel .error'], 'B7-24-grant-reject-no-comment', { pad: 8 });

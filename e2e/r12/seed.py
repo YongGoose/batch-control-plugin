@@ -34,7 +34,7 @@ def act_req(user, job, action, reason, approvers=("approver-1",)):
     return loc_id(r)
 
 
-def grant_req(user, stype, scope, actions, minutes, reason, approvers=("approver-1",)):
+def grant_req(user, scope, actions, minutes, reason, approvers=("approver-1",)):  # D-71: one item, no scope type
     data = [("scopeFullName", scope), ("durationMinutes", str(minutes)), ("reason", reason)]
     data += [("actions", a) for a in actions] + [("approvers", a) for a in approvers]
     r = api(user, "/batch-control/grants/create", "POST", data=data)
@@ -78,23 +78,23 @@ ids["act_cancelled"] = act_req("requester", "batch-pt-source", "ACTIVATE", "Chan
 decide("requester", "activations", ids["act_cancelled"], "cancel")
 
 # --- grants
-ids["g_active_job"] = grant_req("requester", "JOB", "batch-daily", ["CONFIGURE"], 60, "Fix the DATE default")
+ids["g_active_job"] = grant_req("requester", "batch-daily", ["CONFIGURE"], 60, "Fix the DATE default")
 decide("approver-1", "grants", ids["g_active_job"], "approve")
-ids["g_active_folder"] = grant_req("requester", "FOLDER", "team", ["CONFIGURE", "CREATE"], 60, "Team folder clean-up")
+ids["g_active_folder"] = grant_req("requester", "team", ["CONFIGURE", "CREATE"], 60, "Team folder clean-up")
 decide("approver-1", "grants", ids["g_active_folder"], "approve")
 ids["g_active_fonly"] = grant_req("fonly", "ITEM", "ops", ["CREATE", "CONFIGURE"], 60, "Ops folder work")  # D-71: Delete on a folder is refused
 decide("approver-1", "grants", ids["g_active_fonly"], "approve")
-ids["g_expired"] = grant_req("requester", "JOB", "prod/x", ["CONFIGURE"], 1, "Short window that will expire")
+ids["g_expired"] = grant_req("requester", "prod/x", ["CONFIGURE"], 1, "Short window that will expire")
 decide("approver-1", "grants", ids["g_expired"], "approve")
-ids["g_revoked"] = grant_req("requester", "JOB", "prod/y", ["CONFIGURE"], 60, "Window to be revoked")
+ids["g_revoked"] = grant_req("requester", "prod/y", ["CONFIGURE"], 60, "Window to be revoked")
 decide("approver-1", "grants", ids["g_revoked"], "approve")
 ids["g_revoked_status"] = decide("manager", "grants", ids["g_revoked"], "revoke")
-ids["g_rejected"] = grant_req("requester", "JOB", "prod/z", ["DELETE"], 15, "Delete old job")
+ids["g_rejected"] = grant_req("requester", "prod/z", ["DELETE"], 15, "Delete old job")
 decide("approver-1", "grants", ids["g_rejected"], "reject", "Keep it")
-ids["g_cancelled"] = grant_req("requester", "JOB", "team/app-1", ["CONFIGURE"], 15, "Not needed after all")
+ids["g_cancelled"] = grant_req("requester", "team/app-1", ["CONFIGURE"], 15, "Not needed after all")
 decide("requester", "grants", ids["g_cancelled"], "cancel")
-ids["g_pending_job"] = grant_req("requester", "JOB", "batch-pipeline", ["CONFIGURE"], 30, "Pipeline script fix", ("approver-1", "approver-2"))
-ids["g_pending_folder"] = grant_req("requester", "FOLDER", "prod", ["CREATE"], 15, "New prod job")
+ids["g_pending_job"] = grant_req("requester", "batch-pipeline", ["CONFIGURE"], 30, "Pipeline script fix", ("approver-1", "approver-2"))
+ids["g_pending_folder"] = grant_req("requester", "prod", ["CREATE"], 15, "New prod job")
 
 # --- changes under windows (a change record per save)
 r = api("requester", "/job/batch-daily/submitDescription", "POST", data={"description": "Daily batch (edited under window e2e-12)"})

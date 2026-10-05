@@ -4,7 +4,7 @@ import re, time
 from lib import Session, close, api, log, clean
 res = {}
 
-def request(user, typ, name, actions, minutes, tag, pattern=None):
+def request(user, name, actions, minutes, tag, pattern=None):
     s = Session(user)
     s.go("/batch-control/grants/")
     f = s.page.locator("form[name=createGrantRequest]")
@@ -47,7 +47,7 @@ def request(user, typ, name, actions, minutes, tag, pattern=None):
 # C3a CONFIGURE window on team/app-1, then configure in the browser
 res["before_configure"] = api("requester", "/job/team/job/app-1/configure").status_code
 # approve the pending one from the first attempt (20261003-124407-kd19ne) via the same browser path
-res["C3a"] = request("requester", "JOB", "team/app-1", ["CONFIGURE"], 15, "C3a")
+res["C3a"] = request("requester", "team/app-1", ["CONFIGURE"], 15, "C3a")
 s = Session("requester")
 r = s.go("/job/team/job/app-1/configure")
 res["C3a"]["configure_page"] = r.status
@@ -73,7 +73,7 @@ ch = clean(api("admin", "/batch-control/changes/").text)
 res["C3b"]["violation"] = re.findall(r"GRANT_VIOLATION team/app-1 requester .{0,200}", ch)[:1]
 
 # C3c CREATE window on folder team (name restriction /e2e7-.*/), create in browser; refused other name
-res["C3c"] = request("requester", "FOLDER", "team", ["CREATE", "DELETE"], 15, "C3c", pattern="/e2e7-.*/")
+res["C3c"] = request("requester", "team", ["CREATE", "DELETE"], 15, "C3c", pattern="/e2e7-.*/")
 s = Session("requester")
 r = s.go("/job/team/newJob")
 res["C3c"]["newJob_page"] = r.status

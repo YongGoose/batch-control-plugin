@@ -1,5 +1,5 @@
 """R4-9/R4-14: dialogs from the classic job sidebar (user `classic`, new job page off) and from a folder page
-(user `fonly`, one-item window on the folder ops, D-71; used by s_folder_only.py)."""
+(user `fonly`, one-item window on the folder ops, D-71)."""
 import re
 from lib import Session, close, api, log
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"

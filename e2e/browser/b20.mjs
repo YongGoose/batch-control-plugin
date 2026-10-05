@@ -3,7 +3,7 @@ import { login, close, shot, api, BASE, log, requestGrant, decide, setGlobal, ch
 const L = 'section-b.log';
 const rq = await login('requester');
 const g1 = await requestGrant(rq.page, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 30, reason: 'Window 1 open when change control goes off (B20-01).' }); await decide(g1.url);
-const g2 = await requestGrant(rq.page, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], minutes: 30, reason: 'Window 2 open when change control goes off (B20-01).' }); await decide(g2.url);
+const g2 = await requestGrant(rq.page, { scope: 'team', actions: ['CONFIGURE'], minutes: 30, reason: 'Window 2 open when change control goes off (B20-01).' }); await decide(g2.url);
 const cBefore = [(await rq.page.goto(`${BASE}/job/batch-daily/configure`)).status(), (await rq.page.goto(`${BASE}/job/team/job/app-1/configure`)).status()];
 const snap = { changes: (await api('admin', '/batch-control/history/changes.csv')).text, requests: (await api('admin', '/batch-control/history/requests.csv')).text };
 const rev0 = (await changeRows(/,GRANT_REVOKE,/)).length;

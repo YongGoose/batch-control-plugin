@@ -8,7 +8,7 @@ const T = String(Date.now()).slice(-4); const gidOf = (u) => u.match(/(\d{8}-\d{
 const only = process.argv.slice(2); const on = (x) => !only.length || only.includes(x);
 const rq = await login('requester'); const p = rq.page;
 if (on('expired')) {
-  const g = await requestGrant(p, { type: 'JOB', scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 1, reason: `Verify B7-09 ${T}: one-minute window` });
+  const g = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 1, reason: `Verify B7-09 ${T}: one-minute window` });
   await decide(g.url, 'approve', 'ok'); const gid = gidOf(g.url);
   await p.goto(`${BASE}/job/batch-daily/configure`); await p.waitForTimeout(1500);
   const before = (await api('admin', '/job/batch-daily/config.xml', { raw: true })).text;
@@ -29,7 +29,7 @@ if (on('expired')) {
   row('B7-10', { roles: 'requester', V: `${pre ? '✓' : '✗'} "Request again" offered on the ended window`, G: `${pre && pre.type === 'JOB' && pre.scope === 'batch-daily' && pre.conf ? '✓' : '✗'} the ended window is listed (${rowTxt.find((x) => /expired|ended|Expired/i.test(x)) ? 'status says so' : 'status: ' + (rowTxt[0] || '').slice(0, 60)}); Request again prefills ${JSON.stringify(pre)}`, R: 'n.a.', C: 'n.a.', E: s2 ? '✓ B7-10-ended-grant-request-again' : '✗' });
 }
 if (on('restrict')) {
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: `app-v${T}`, minutes: 15, reason: `Verify DEF-19 ${T}: exact name` });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: `app-v${T}`, minutes: 15, reason: `Verify DEF-19 ${T}: exact name` });
   const ap = await login('approver-1'); await ap.page.goto(g.url); const at = await mainText(ap.page); await ap.context.close();
   await decide(g.url, 'approve', 'ok'); const gid = gidOf(g.url);
   await p.goto(`${BASE}/job/team/`);
@@ -88,7 +88,7 @@ if (on('veto')) {
   row('B7-22', { roles: 'configurer (standing Configure+Delete, no RequestGrant)', V: 'n.a.', G: `${kept === 200 ? '✓' : '✗'} job kept`, R: `${!c.links.some((l) => /grants/.test(l)) && /ask|administrator|RequestGrant/i.test(c.t) && !/^Error/.test(c.t) ? '✓' : '✗'} HTTP ${c.st} "${c.t.slice(0, 200)}"; links ${c.links.join(', ') || 'none'} (DEF-26)`, C: 'n.a.', E: c.s ? '✓ B7-22-delete-veto' : '✗' });
 }
 if (on('mail')) {
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE', 'DELETE'], pattern: `app-m${T}`, minutes: 15, reason: `Verify DEF-24 ${T}: mail content` });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE', 'DELETE'], pattern: `app-m${T}`, minutes: 15, reason: `Verify DEF-24 ${T}: mail content` });
   const gid = gidOf(g.url);
   const m1 = await findMail(`to:approver-1@e2e.local ${gid}`); const t1 = m1 ? await mailText(m1) : '';
   await decide(g.url, 'approve', 'ok');

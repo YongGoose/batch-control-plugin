@@ -7,7 +7,7 @@ ev(`active grants: ${JSON.stringify(act)}`);
 for (const a of act) { const id = (a.match(/^(\d{8}-\d{6}-\w+)/) || [])[1]; if (id) ev(`revoke ${id}: ${await uiRevoke(id)}`); }
 const rq = await login('requester'); const p = rq.page;
 const T = String(Date.now()).slice(-4);
-const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B9-04 ${T}: create under the guard (15 min)` });
+const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B9-04 ${T}: create under the guard (15 min)` });
 await decide(g.url);
 const nm = `app-c35-${T}`;
 await p.goto(`${BASE}/job/team/newJob`); await p.fill('#name', nm); await p.locator('label:has-text("Freestyle project")').first().click();

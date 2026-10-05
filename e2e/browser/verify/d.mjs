@@ -25,7 +25,7 @@ if (on('D-02')) {
 }
 if (on('D-07')) {
   const rq = await login('requester'); const p = rq.page;
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify D-07 ${T}` }); await decide(g.url);
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify D-07 ${T}` }); await decide(g.url);
   const J = `app-d07-${T}`;
   await p.goto(`${BASE}/job/team/newJob`); await p.fill('#name', J); await p.locator('label:has-text("Freestyle project")').first().click();
   await Promise.all([p.waitForNavigation(), p.locator('#ok-button').click()]); await p.waitForTimeout(1500);

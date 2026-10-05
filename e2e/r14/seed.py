@@ -5,7 +5,7 @@ Run requests: pending (requester, reqonly, opsreq, nested job), executed, reject
 Activations: ACTIVATE approved (batch-cron), HOLD pending (batch-cron), ACTIVATE pending (batch-upstream),
 ACTIVATE rejected/cancelled. Grants (one-item windows, D-71; the scope type selector is gone): pending on a job and on
 a folder, active on jobs (batch-daily, team/app-1) and on the folders team (Configure+Create) and ops (Configure; the
-former FOLDER_ONLY window, whose Delete is refused at submission since D-71), ended (expired), revoked,
+former folder-only window of D-65, whose Delete is refused at submission since D-71), ended (expired), revoked,
 rejected, cancelled. Changes under a window (each on the window's own item), incidents (FAILURE/UNSTABLE), a list view.
 Ids are written to out/ids.json for the crawler."""
 import json, re, time
@@ -37,7 +37,7 @@ def act_req(user, job, action, reason, approvers=("approver-1",)):
 
 
 def grant_req(user, scope, actions, minutes, reason, approvers=("approver-1",)):
-    """D-71: a window names one item (scopeFullName); there is no scopeType field any more."""
+    """D-71: a window names one item (scopeFullName); there is no scope type field any more."""
     data = [("scopeFullName", scope), ("durationMinutes", str(minutes)), ("reason", reason)]
     data += [("actions", a) for a in actions] + [("approvers", a) for a in approvers]
     r = api(user, "/batch-control/grants/create", "POST", data=data)
@@ -85,7 +85,7 @@ ids["g_active_job"] = grant_req("requester", "batch-daily", ["CONFIGURE"], 60, "
 decide("approver-1", "grants", ids["g_active_job"], "approve")
 ids["g_active_folder"] = grant_req("requester", "team", ["CONFIGURE", "CREATE"], 60, "Team folder clean-up")
 decide("approver-1", "grants", ids["g_active_folder"], "approve")
-# D-71: the former FOLDER_ONLY window on ops asked for Delete as well; Delete on a folder is refused at submission now
+# D-71: the former folder-only window (D-65) on ops asked for Delete as well; Delete on a folder is refused at submission now
 ids["g_fonly_delete_refused"] = api("fonly", "/batch-control/grants/create", "POST", data=[
     ("scopeFullName", "ops"), ("actions", "CREATE"), ("actions", "CONFIGURE"), ("actions", "DELETE"), ("durationMinutes", "60"),
     ("reason", "Ops folder work incl. delete"), ("approvers", "approver-1")]).status_code

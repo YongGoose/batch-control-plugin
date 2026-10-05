@@ -288,7 +288,7 @@ export const errText = (t) => (t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').m
  *  D-71: a window names one item (scopeFullName); there is no scope type selector, so `type` is ignored
  *  (kept in the signature so callers need not change). #107: the "New job name restriction" field lives in an
  *  optionalBlock that is hidden until Create is ticked, so the CREATE action is checked before the pattern is filled. */
-export async function requestGrant(page, { type = 'JOB', scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
+export async function requestGrant(page, { scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
   await page.goto(`${BASE}/batch-control/grants/`);
   await page.waitForSelector('input[name="scopeFullName"]');
   await page.fill('input[name="scopeFullName"]', scope);

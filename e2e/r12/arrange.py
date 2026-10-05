@@ -1,7 +1,7 @@
 """e2e-11 arrangement (script console, admin; arrangement only).
 classic: requester's global permissions, new job page turned off (classic sidebar checks).
 fonly: Read + Item/Move + RequestGrant globally (holder of the one-item window on the folder ops, D-71; was the
-FOLDER_ONLY window of D-65).
+folder-only window of D-65).
 ops/a (job), ops/sub (folder) with ops/sub/b, ops/mb (multibranch), ops/sub2 (target for moves),
 fast (non-approval job, `true`) for the dashboard seed (R4-13)."""
 from lib import groovy, ENV
