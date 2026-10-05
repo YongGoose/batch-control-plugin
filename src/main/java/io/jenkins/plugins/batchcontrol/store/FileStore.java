@@ -1,5 +1,7 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import com.thoughtworks.xstream.core.util.HierarchicalStreams;
+import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ParameterValue;
 import hudson.util.XStream2;
@@ -218,16 +220,34 @@ public final class FileStore implements Store {
     /** Suffix of a run request's typed values file, {@code <id>.values.xml} (D-74). */
     private static final String VALUES_SUFFIX = ".values.xml";
 
-    /** The request file of {@code id}, or {@code null} for an id naming a values file. */
+    /** The id suffix that would name a values file instead of a request file. */
+    private static final String VALUES_ID_SUFFIX = ".values";
+
+    /**
+     * The request file of {@code id}, or {@code null} when {@code id} is not a store identifier
+     * (S-39-01, {@link PathCodec#isId}): such an id names no request. The identifier shape already
+     * excludes {@code .}; the values suffix is refused in any letter case as well (defence in depth,
+     * case-insensitive file systems), so no id can name the values file.
+     */
     @CheckForNull
     private Path runRequestFile(String id) {
         Objects.requireNonNull(id, "id");
-        return id.endsWith(".values") ? null : PathCodec.resolveUnder(runRequestDir(), id + ".xml");
+        if (!PathCodec.isId(id) || endsWithIgnoreCase(id, VALUES_ID_SUFFIX)) {
+            return null;
+        }
+        return PathCodec.resolveId(runRequestDir(), id, ".xml");
     }
 
+    /** The values file of {@code id}, or {@code null} when {@code id} is not a store identifier (S-39-01). */
+    @CheckForNull
     private Path runRequestValuesFile(String id) {
         Objects.requireNonNull(id, "id");
-        return PathCodec.resolveUnder(runRequestDir(), id + VALUES_SUFFIX);
+        return runRequestFile(id) == null ? null : PathCodec.resolveId(runRequestDir(), id, VALUES_SUFFIX);
+    }
+
+    private static boolean endsWithIgnoreCase(String text, String suffix) {
+        return text.length() >= suffix.length()
+                && text.regionMatches(true, text.length() - suffix.length(), suffix, 0, suffix.length());
     }
 
     @Override
@@ -280,7 +300,10 @@ public final class FileStore implements Store {
             return null;
         }
         try {
-            return readRunRequest(file);
+            RunRequest request = readRunRequest(file);
+            // The file found must be this request's own: on a case-insensitive file system another
+            // spelling of the id reaches the same file, and that spelling names no request.
+            return request != null && id.equals(request.getId()) ? request : null;
         } catch (NoSuchFileException e) {
             return null;
         } catch (IOException e) {
@@ -292,38 +315,45 @@ public final class FileStore implements Store {
     @CheckForNull
     public List<ParameterValue> loadRunRequestValues(String id) {
         Path file = runRequestValuesFile(id);
-        if (!Files.isRegularFile(file)) {
+        if (file == null || !Files.isRegularFile(file)) {
             return null;
         }
-        Object read;
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            read = xstream.fromXML(reader);
+        RunRequestValues read;
+        try {
+            read = readXml(file, RunRequestValues.class, "parameter values file");
         } catch (NoSuchFileException e) {
             return null;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load the parameter values of run request " + id, e);
         }
-        if (!(read instanceof RunRequestValues) || !id.equals(((RunRequestValues) read).requestId())) {
+        if (read == null || !id.equals(read.requestId())) {
             throw new UncheckedIOException(new IOException("The parameter values file of run request " + id
                     + " does not hold the values of that request"));
         }
-        return ((RunRequestValues) read).values();
+        return read.values();
     }
 
     @Override
     public void deleteRunRequestValues(String id) {
-        deleteFile(runRequestValuesFile(id), "parameter values of run request " + id);
+        Path file = runRequestValuesFile(id);
+        if (file != null) {
+            deleteFile(file, "parameter values of run request " + id);
+        }
     }
 
     @Override
     public List<RunRequest> listRunRequests() {
         List<RunRequest> all = new ArrayList<>();
         for (Path file : listXmlFiles(runRequestDir(), "run request")) {
-            if (file.toString().endsWith(VALUES_SUFFIX)) {
+            Path name = file.getFileName();
+            if (name == null || endsWithIgnoreCase(name.toString(), VALUES_SUFFIX)) {
                 continue; // typed values, read only through loadRunRequestValues (D-74)
             }
             try {
-                all.add(readRunRequest(file));
+                RunRequest request = readRunRequest(file);
+                if (request != null) {
+                    all.add(request);
+                }
             } catch (NoSuchFileException e) {
                 // Deleted between listing and reading; skip.
             } catch (IOException e) {
@@ -336,10 +366,14 @@ public final class FileStore implements Store {
         return all;
     }
 
+    /**
+     * The run request in {@code file}, or {@code null} (logged) when the file holds something else
+     * (S-39-01): its root element is checked before anything else of it is read, so no other
+     * object, a values file in particular, is ever materialised here.
+     */
+    @CheckForNull
     private RunRequest readRunRequest(Path file) throws IOException {
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return (RunRequest) xstream.fromXML(reader);
-        }
+        return readXml(file, RunRequest.class, "run request");
     }
 
     @Override
@@ -404,7 +438,7 @@ public final class FileStore implements Store {
 
     @Override
     public GrantRequest loadGrantRequest(String id) {
-        return loadXmlEntity(grantRequestDir(), id, GrantRequest.class, "grant request");
+        return loadXmlEntity(grantRequestDir(), id, GrantRequest.class, GrantRequest::getId, "grant request");
     }
 
     @Override
@@ -449,7 +483,7 @@ public final class FileStore implements Store {
 
     @Override
     public Grant loadGrant(String id) {
-        return loadXmlEntity(grantDir(), id, Grant.class, "grant");
+        return loadXmlEntity(grantDir(), id, Grant.class, Grant::getId, "grant");
     }
 
     @Override
@@ -468,7 +502,8 @@ public final class FileStore implements Store {
 
     @Override
     public ActivationRequest loadActivationRequest(String id) {
-        return loadXmlEntity(activationRequestDir(), id, ActivationRequest.class, "activation request");
+        return loadXmlEntity(activationRequestDir(), id, ActivationRequest.class, ActivationRequest::getId,
+                "activation request");
     }
 
     @Override
@@ -792,7 +827,7 @@ public final class FileStore implements Store {
 
     @Override
     public Incident loadIncident(String id) {
-        return loadXmlEntity(incidentDir(), id, Incident.class, "incident");
+        return loadXmlEntity(incidentDir(), id, Incident.class, Incident::getId, "incident");
     }
 
     @Override
@@ -945,7 +980,7 @@ public final class FileStore implements Store {
 
     private boolean deleteIncidentXml(String id) {
         try {
-            return deleteFile(PathCodec.resolveUnder(incidentDir(), id + ".xml"), "incident " + id);
+            return deleteFile(PathCodec.resolveId(incidentDir(), id, ".xml"), "incident " + id);
         } catch (IllegalArgumentException e) {
             return false; // not a valid id; nothing of ours to delete
         }
@@ -970,7 +1005,8 @@ public final class FileStore implements Store {
                     continue;
                 }
                 deleteRunRequestValues(id); // normally gone already, when the request ended (D-74)
-                if (deleteFile(PathCodec.resolveUnder(runRequestDir(), id + ".xml"), "run request " + id)) {
+                // The id is a store identifier: the request was just loaded under it (S-39-01).
+                if (deleteFile(PathCodec.resolveId(runRequestDir(), id, ".xml"), "run request " + id)) {
                     runRequests++;
                 }
             }
@@ -994,7 +1030,7 @@ public final class FileStore implements Store {
                     // the grant file is kept until every item on it has been reviewed or deleted.
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(grantDir(), id + ".xml"), "grant " + id)) {
+                if (deleteFile(PathCodec.resolveId(grantDir(), id, ".xml"), "grant " + id)) {
                     grantIds.add(id);
                 }
             }
@@ -1018,7 +1054,7 @@ public final class FileStore implements Store {
                 if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(grantRequestDir(), id + ".xml"), "grant request " + id)) {
+                if (deleteFile(PathCodec.resolveId(grantRequestDir(), id, ".xml"), "grant request " + id)) {
                     grantRequests++;
                 }
             }
@@ -1037,7 +1073,7 @@ public final class FileStore implements Store {
                 if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(activationRequestDir(), id + ".xml"),
+                if (deleteFile(PathCodec.resolveId(activationRequestDir(), id, ".xml"),
                         "activation request " + id)) {
                     activationRequests++;
                 }
@@ -1111,8 +1147,16 @@ public final class FileStore implements Store {
 
     // ---------------------------------------------------------------- I/O helpers
 
-    /** Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}). */
+    /**
+     * Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}).
+     *
+     * @throws IllegalArgumentException if {@code id} is not a store identifier (S-39-01): an entity
+     *         is only ever written under a name it can also be loaded by
+     */
     private void saveXmlEntity(Path dir, String id, Object entity, String what) {
+        if (!PathCodec.isId(id)) {
+            throw new IllegalArgumentException("Invalid " + what + " id: " + id);
+        }
         saveXmlFile(dir, id + ".xml", id, entity, what + " " + id);
     }
 
@@ -1158,18 +1202,60 @@ public final class FileStore implements Store {
         }
     }
 
-    private <T> T loadXmlEntity(Path dir, String id, Class<T> type, String what) {
+    /**
+     * The entity {@code id} of {@code type} stored in {@code dir}, or {@code null}: also when
+     * {@code id} is not a store identifier (S-39-01, {@link PathCodec#isId}), when the file holds
+     * something else, and when the entity in it has another id (another spelling of the id reaching
+     * the same file on a case-insensitive file system).
+     */
+    @CheckForNull
+    private <T> T loadXmlEntity(Path dir, String id, Class<T> type, Function<T, String> idOf, String what) {
         Objects.requireNonNull(id, "id");
-        Path file = PathCodec.resolveUnder(dir, id + ".xml");
+        if (!PathCodec.isId(id)) {
+            return null;
+        }
+        Path file = PathCodec.resolveId(dir, id, ".xml");
         if (!Files.isRegularFile(file)) {
             return null;
         }
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return type.cast(xstream.fromXML(reader));
+        try {
+            T entity = readXml(file, type, what);
+            return entity != null && id.equals(idOf.apply(entity)) ? entity : null;
         } catch (NoSuchFileException e) {
             return null;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to load " + what + " " + id, e);
+        }
+    }
+
+    /**
+     * Reads the XStream XML file {@code file} as a {@code type}, or returns {@code null} (logged) when
+     * its root element names another class (S-39-01). The root element is checked before anything
+     * else in the file is read, so a file holding another object is never materialised, whatever
+     * its size: XStream names the root after the object's class (no store class has an alias, and
+     * all of them are final), so anything else is not a {@code type}. The reader is the one
+     * {@link XStream2} itself creates for {@code fromXML}.
+     */
+    @CheckForNull
+    private <T> T readXml(Path file, Class<T> type, String what) throws IOException {
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            HierarchicalStreamReader xml = XStream2.getDefaultDriver().createReader(reader);
+            try {
+                String classAttribute = HierarchicalStreams.readClassAttribute(xml, xstream.getMapper());
+                String declared = classAttribute != null ? classAttribute : xml.getNodeName();
+                if (!xstream.getMapper().serializedClass(type).equals(declared)) {
+                    LOGGER.warning(() -> "Not reading " + file + ": it holds a " + declared + ", not a " + what);
+                    return null;
+                }
+                Object read = xstream.unmarshal(xml);
+                if (!type.isInstance(read)) {
+                    LOGGER.warning(() -> "Not using " + file + ": it does not hold a " + what);
+                    return null;
+                }
+                return type.cast(read);
+            } finally {
+                xml.close();
+            }
         }
     }
 
@@ -1196,8 +1282,11 @@ public final class FileStore implements Store {
     private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
         List<T> entities = new ArrayList<>();
         for (Path file : listXmlFiles(dir, what)) {
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                entities.add(type.cast(xstream.fromXML(reader)));
+            try {
+                T entity = readXml(file, type, what);
+                if (entity != null) {
+                    entities.add(entity);
+                }
             } catch (NoSuchFileException e) {
                 // Deleted between listing and reading; skip.
             } catch (IOException e) {
