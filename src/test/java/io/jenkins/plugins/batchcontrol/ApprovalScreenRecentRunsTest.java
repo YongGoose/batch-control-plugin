@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -268,9 +269,9 @@ public class ApprovalScreenRecentRunsTest {
     public void t_ui_05_approvedStateIsBoundToTheUnexecutedRequest() throws Exception {
         // (1) APPROVED, not executed yet - matrix note 16: quiet down keeps the submission idle
         RunRequest approved = createNoticeRequest("notice: approved not run");
-        j.jenkins.doQuietDown();
-        approveAs(READING_APPROVER, approved.getId(), "notice-approved-comment");
-        j.jenkins.getQueue().clear();
+        // the queue refuses the approved submission, so it stays APPROVED and unexecuted without a
+        // cancelled queue item (D-72b (7); note 265)
+        QueueRefusalFixtures.refusedBeforeTheGate(noticeJob, () -> approveAs(READING_APPROVER, approved.getId(), "notice-approved-comment"));
         RunRequest reloadedApproved = RunRequestService.get().load(approved.getId());
         assertEquals(RequestStatus.APPROVED, reloadedApproved.getStatus());
         assertNull(reloadedApproved.getExecutedRunId(), "fixture: the approved request must not have executed yet");
@@ -280,7 +281,6 @@ public class ApprovalScreenRecentRunsTest {
         assertTrue(approvedHtml.contains(APPROVED_NOTICE), "the post-approval notice must be rendered while the request is approved and "
                         + "not yet executed");
         assertNoRunDisclosed("an approved but unexecuted request", NOTICE_JOB, approvedHtml);
-        j.jenkins.doCancelQuietDown();
 
         // (2) EXECUTED
         RunRequest executed = createNoticeRequest("notice: executed");
@@ -454,6 +454,11 @@ public class ApprovalScreenRecentRunsTest {
             return RunRequestService.get().create(noticeJob, new LinkedHashMap<String, String>(),
                     reason, READING_APPROVER);
         }
+    }
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures, note 265). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
     }
 
     private void approveAs(String userId, String requestId, String comment) {

@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import com.thoughtworks.xstream.io.HierarchicalStreamDriver;
 import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
@@ -16,11 +17,13 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -120,6 +123,8 @@ public final class FileStore implements Store {
 
     private final ReentrantLock[] writeLocks = new ReentrantLock[LOCK_STRIPES];
     private final XStream2 xstream = new XStream2();
+    /** The reader side of {@link #xstream}'s driver, for the listing read of run requests (D-72b). */
+    private final HierarchicalStreamDriver readerDriver = XStream2.getDefaultDriver();
 
     /** Guards the lazy (re)build of {@link #index}. */
     private final Object indexMonitor = new Object();
@@ -212,23 +217,298 @@ public final class FileStore implements Store {
 
     // ---------------------------------------------------------------- run requests
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>D-72b (5): an object read without its typed values ({@link RunRequest#typedValuesOmitted()})
+     * is written with the stored values unchanged: its other fields are serialized and the stored
+     * {@code <parameterValues>} element, always the last child of the root, is copied byte for byte
+     * from the current file, so the values are not deserialized for a status change.
+     */
     @Override
     public void saveRunRequest(RunRequest request) {
         Objects.requireNonNull(request, "request");
-        saveXmlEntity(runRequestDir(), request.getId(), request, "run request");
+        if (request.typedValuesOmitted()) {
+            saveRunRequestKeepingValues(request);
+        } else {
+            saveXmlEntity(runRequestDir(), request.getId(), request, "run request");
+        }
         index().put(request);
     }
 
+    /** D-72b (5): the listing read, without the typed values (see {@link Store#loadRunRequest}). */
     @Override
     public RunRequest loadRunRequest(String id) {
-        return loadXmlEntity(runRequestDir(), id, RunRequest.class, "run request");
+        Objects.requireNonNull(id, "id");
+        Path file = PathCodec.resolveUnder(runRequestDir(), id + ".xml");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return readRunRequest(file, false);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load run request " + id, e);
+        }
+    }
+
+    @Override
+    public RunRequest loadRunRequestWithValues(String id) {
+        Objects.requireNonNull(id, "id");
+        Path file = PathCodec.resolveUnder(runRequestDir(), id + ".xml");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            return readRunRequest(file, true);
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load run request " + id, e);
+        }
     }
 
     @Override
     public List<RunRequest> listRunRequests() {
-        List<RunRequest> all = listXmlEntities(runRequestDir(), RunRequest.class, "run request");
+        List<RunRequest> all = new ArrayList<>();
+        for (Path file : listXmlFiles(runRequestDir(), "run request")) {
+            try {
+                all.add(readRunRequest(file, false));
+            } catch (NoSuchFileException e) {
+                // Deleted between listing and reading; skip.
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to load run request file " + file, e);
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Skipping unreadable run request file " + file, e);
+            }
+        }
         all.sort(OLDEST_FIRST_RUNREQUEST);
         return all;
+    }
+
+    /** The root child holding a run request's typed values (D-72), its last element. */
+    private static final String TYPED_VALUES_ELEMENT = "parameterValues";
+
+    /**
+     * Reads one run request file. With {@code withValues} the whole file is deserialized. Without,
+     * reading stops at the typed values ({@link StopAtChildReader}), which are neither parsed nor
+     * deserialized, and the object is marked accordingly. A file whose typed values are not its last
+     * element (written by an unreleased D-72 build) is read in full instead, so no field is lost.
+     */
+    private RunRequest readRunRequest(Path file, boolean withValues) throws IOException {
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            if (withValues) {
+                return (RunRequest) xstream.fromXML(reader);
+            }
+            StopAtChildReader stopping = new StopAtChildReader(readerDriver.createReader(reader), TYPED_VALUES_ELEMENT);
+            RunRequest request;
+            try {
+                request = (RunRequest) xstream.unmarshal(stopping);
+            } finally {
+                stopping.close();
+            }
+            if (!stopping.stopped()) {
+                return request; // no typed values in the file
+            }
+            if (!typedValuesLast(file)) {
+                // Reading stopped before fields that follow the typed values (status, ticket,
+                // ...); the object would miss them, so the file is read in full instead.
+                LOGGER.fine(() -> "Run request file " + file
+                        + " keeps its typed values before other fields; read in full");
+                return readRunRequest(file, true);
+            }
+            request.markTypedValuesOmitted();
+            return request;
+        }
+    }
+
+    /**
+     * D-72b (5): writes {@code request}, read without its typed values, keeping the stored values:
+     * the serialized request up to its closing root tag, then the stored {@code <parameterValues>}
+     * element copied from the current file, then the closing tag; atomically, like every entity.
+     * When the stored element cannot be located (the values were removed meanwhile, or the file has
+     * another shape) the stored values are read and the request is written in full.
+     */
+    private void saveRunRequestKeepingValues(RunRequest request) {
+        String id = request.getId();
+        Path dir = runRequestDir();
+        Path target = PathCodec.resolveUnder(dir, id + ".xml");
+        String what = "run request " + id;
+        ReentrantLock lock = lockFor(target);
+        lock.lock();
+        try {
+            String xml = xstream.toXML(request); // the typed values field is null, so not written
+            int close = xml.lastIndexOf("</");
+            long[] section = close < 0 ? null : typedValuesSection(target, xml.substring(close));
+            if (section == null) {
+                RunRequest stored = Files.isRegularFile(target) ? readRunRequest(target, true) : null;
+                request.restoreTypedValues(stored == null || !stored.holdsTypedValues()
+                        ? null : stored.parameterValues());
+                saveXmlFile(dir, id + ".xml", id, request, what);
+                return;
+            }
+            Files.createDirectories(dir);
+            Path tmp = Files.createTempFile(dir, id, ".tmp");
+            boolean moved = false;
+            try {
+                try (OutputStream out = Files.newOutputStream(tmp);
+                     FileChannel in = FileChannel.open(target, StandardOpenOption.READ)) {
+                    out.write(xml.substring(0, close).getBytes(StandardCharsets.UTF_8));
+                    copyRange(in, section[0], section[1], out);
+                    out.write(xml.substring(close).getBytes(StandardCharsets.UTF_8));
+                }
+                moveAtomically(tmp, target);
+                moved = true;
+            } finally {
+                if (!moved) {
+                    deleteQuietly(tmp);
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof StoreWriteException) {
+                throw (StoreWriteException) e;
+            }
+            throw new StoreWriteException("The " + what + " could not be saved; nothing was changed.", e);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** How much of a request file's end {@link #typedValuesLast} reads. */
+    private static final int TAIL_BYTES = 512;
+
+    /**
+     * The end of a file whose last root child is the typed values element: its closing tag (or the
+     * element itself when empty), then only the closing root tag. XStream escapes {@code <} in
+     * every text and attribute, and the values' own children are value elements, so this end can
+     * only belong to a root child named {@code parameterValues}.
+     */
+    private static final java.util.regex.Pattern TYPED_VALUES_TAIL = java.util.regex.Pattern.compile(
+            "(?:</" + TYPED_VALUES_ELEMENT + ">|<" + TYPED_VALUES_ELEMENT + "(?:\\s[^<>]*)?/>)\\s*</[^<>/\\s]+>\\s*$");
+
+    /**
+     * Whether the typed values element is the last child of the root of {@code file}, read from the
+     * file's last bytes only. The listing read omits the values only then: everything else was read
+     * before them.
+     */
+    private static boolean typedValuesLast(Path file) throws IOException {
+        try (FileChannel in = FileChannel.open(file, StandardOpenOption.READ)) {
+            long size = in.size();
+            int length = (int) Math.min(size, TAIL_BYTES);
+            ByteBuffer tail = ByteBuffer.allocate(length);
+            long position = size - length;
+            while (tail.hasRemaining()) {
+                int read = in.read(tail, position + tail.position());
+                if (read <= 0) {
+                    return false;
+                }
+            }
+            // The tail may start inside a multi-byte character; the tags matched are ASCII.
+            String text = new String(tail.array(), StandardCharsets.UTF_8);
+            return TYPED_VALUES_TAIL.matcher(text).find();
+        }
+    }
+
+    /** The line that opens the typed values element: a direct child of the root (two-space indent). */
+    private static final byte[] TYPED_VALUES_START =
+            ("\n  <" + TYPED_VALUES_ELEMENT).getBytes(StandardCharsets.US_ASCII);
+
+    /**
+     * The byte range {@code [start, end)} of the stored typed values element of {@code file}: from
+     * the start of its line to the closing root tag {@code closingTag}, which must end the file.
+     * {@code null} when there is no such element or the file does not end with that tag. XStream
+     * escapes {@code <} in every text and attribute, so the opening line can only be the element.
+     */
+    private static long[] typedValuesSection(Path file, String closingTag) throws IOException {
+        byte[] closing = closingTag.getBytes(StandardCharsets.UTF_8);
+        try (FileChannel in = FileChannel.open(file, StandardOpenOption.READ)) {
+            long size = in.size();
+            long end = size - closing.length;
+            if (end <= 0) {
+                return null;
+            }
+            ByteBuffer tail = ByteBuffer.allocate(closing.length);
+            while (tail.hasRemaining() && in.read(tail, end + tail.position()) > 0) {
+                // fill
+            }
+            if (tail.hasRemaining() || !java.util.Arrays.equals(tail.array(), closing)) {
+                return null;
+            }
+            long start = indexOf(in, TYPED_VALUES_START, end);
+            if (start < 0) {
+                return null;
+            }
+            long sectionStart = start + 1; // after the line feed
+            int after = sectionStart + TYPED_VALUES_START.length - 1 < end
+                    ? byteAt(in, sectionStart + TYPED_VALUES_START.length - 1) : -1;
+            if (after != '>' && after != ' ' && after != '/') {
+                return null; // another element whose name starts with the same letters
+            }
+            return new long[] {sectionStart, end};
+        } catch (NoSuchFileException e) {
+            return null;
+        }
+    }
+
+    /** The first offset before {@code limit} where {@code needle} occurs in {@code in}, or -1. */
+    private static long indexOf(FileChannel in, byte[] needle, long limit) throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
+        long base = 0;
+        int carry = 0;
+        byte[] window = new byte[buffer.capacity() + needle.length];
+        while (base < limit) {
+            buffer.clear();
+            int read = in.read(buffer, base);
+            if (read <= 0) {
+                return -1;
+            }
+            System.arraycopy(buffer.array(), 0, window, carry, read);
+            int available = carry + read;
+            long windowStart = base - carry;
+            for (int i = 0; i + needle.length <= available; i++) {
+                if (windowStart + i + needle.length > limit) {
+                    return -1;
+                }
+                boolean match = true;
+                for (int k = 0; k < needle.length; k++) {
+                    if (window[i + k] != needle[k]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    return windowStart + i;
+                }
+            }
+            carry = Math.min(needle.length - 1, available);
+            System.arraycopy(window, available - carry, window, 0, carry);
+            base += read;
+        }
+        return -1;
+    }
+
+    private static int byteAt(FileChannel in, long position) throws IOException {
+        ByteBuffer one = ByteBuffer.allocate(1);
+        return in.read(one, position) == 1 ? one.get(0) : -1;
+    }
+
+    /** Copies the bytes {@code [from, to)} of {@code in} to {@code out}. */
+    private static void copyRange(FileChannel in, long from, long to, OutputStream out) throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
+        long position = from;
+        while (position < to) {
+            buffer.clear();
+            if (to - position < buffer.capacity()) {
+                buffer.limit((int) (to - position));
+            }
+            int read = in.read(buffer, position);
+            if (read <= 0) {
+                throw new IOException("Unexpected end of file while copying the typed values");
+            }
+            out.write(buffer.array(), 0, read);
+            position += read;
+        }
     }
 
     @Override
@@ -1015,14 +1295,34 @@ public final class FileStore implements Store {
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, tmpPrefix, ".tmp");
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                xstream.toXML(entity, writer);
+            boolean moved = false;
+            try {
+                try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                    xstream.toXML(entity, writer);
+                }
+                moveAtomically(tmp, target);
+                moved = true;
+            } finally {
+                if (!moved) {
+                    // S-35-03: the partly written temporary file of a failed save is removed.
+                    deleteQuietly(tmp);
+                }
             }
-            moveAtomically(tmp, target);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to save " + what, e);
+        } catch (IOException | RuntimeException e) {
+            // S-35-03: XStream refuses some content with a RuntimeException (U+0000, for one), so
+            // every failure ends here, as one exception type the web layer shows as a refusal.
+            throw new StoreWriteException("The " + what + " could not be saved; nothing was stored.", e);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** Deletes a temporary file of a failed write; a failure to do so is only logged. */
+    private static void deleteQuietly(Path tmp) {
+        try {
+            Files.deleteIfExists(tmp);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Could not delete the temporary file " + tmp, e);
         }
     }
 
@@ -1041,24 +1341,29 @@ public final class FileStore implements Store {
         }
     }
 
-    private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
-        List<T> entities = new ArrayList<>();
-        if (!Files.isDirectory(dir)) {
-            return entities;
-        }
+    /** The {@code *.xml} files of {@code dir}, sorted by name; empty when it does not exist. */
+    private static List<Path> listXmlFiles(Path dir, String what) {
         List<Path> files = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return files;
+        }
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.xml")) {
             for (Path file : stream) {
                 files.add(file);
             }
         } catch (NoSuchFileException e) {
-            return entities;
+            return new ArrayList<>();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list " + what + " files in " + dir, e);
         }
         // Same directory for every entry, so the full path sorts identically to the file name.
         files.sort(Comparator.comparing(Path::toString));
-        for (Path file : files) {
+        return files;
+    }
+
+    private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
+        List<T> entities = new ArrayList<>();
+        for (Path file : listXmlFiles(dir, what)) {
             try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
                 entities.add(type.cast(xstream.fromXML(reader)));
             } catch (NoSuchFileException e) {
@@ -1082,8 +1387,16 @@ public final class FileStore implements Store {
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, "write", ".tmp");
-            Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
-            moveAtomically(tmp, target);
+            boolean moved = false;
+            try {
+                Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+                moveAtomically(tmp, target);
+                moved = true;
+            } finally {
+                if (!moved) {
+                    deleteQuietly(tmp);
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write " + what, e);
         } finally {

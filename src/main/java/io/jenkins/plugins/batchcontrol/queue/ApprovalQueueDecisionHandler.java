@@ -18,6 +18,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.policy.ActivationService;
+import io.jenkins.plugins.batchcontrol.policy.ParameterFiles;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
@@ -75,6 +76,12 @@ import org.kohsuke.stapler.StaplerRequest2;
  * {@link #TRIGGER_AUDIT_INTERVAL} through {@link BlockedAttemptAudit}. The append is the only
  * store I/O on this path and it touches one file under that file's own lock stripe (#18), so it
  * never waits behind retention or any other bulk work.
+ *
+ * <p>D-72: a refused submission never reaches the queue, so no queue listener deletes the
+ * temporary files of its file parameter values. When a person's own submission (step 4, the D-60
+ * path) or a build-token submission (step 3) is refused, those files are disposed of before the
+ * refusal is thrown ({@link #disposeOwnValues}); re-runs, marker and unattended submissions are
+ * left alone, since their values may belong to another build.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -476,7 +483,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                                 + job.getFullName() + "'");
                     }
                     if (isTokenBuildEndpoint(job)) {
-                        throw new RemoteRunRefusal(remoteRefusedMessage(job));
+                        RemoteRunRefusal refused = new RemoteRunRefusal(remoteRefusedMessage(job));
+                        // D-72: the token endpoint built these values from this request; they
+                        // never reach the queue, so their temporary files go now.
+                        disposeOwnValues(job, causes, actions);
+                        throw refused;
                     }
                     return false;
                 }
@@ -511,7 +522,12 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                         }
                         // D-60: a re-run carries its source build's values, not a new submission;
                         // its refusal page does not pre-fill the request form.
-                        throw refusal(job, causes, own == null ? submittedValues(actions) : null);
+                        RuntimeException refused = refusal(job, causes, own == null ? submittedValues(actions) : null);
+                        // D-72: the person's own submission is never queued, so the temporary
+                        // files of its values go now (the refusal carries no file, #115). Built
+                        // first: the refusal has taken what it carries from the values.
+                        disposeOwnValues(job, causes, actions);
+                        throw refused;
                     }
                 }
             }
@@ -931,6 +947,49 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
         return values;
+    }
+
+    /**
+     * D-72: disposes of the temporary files held by the parameter values of a refused submission
+     * that are its own: values built for this submission (the build form, the parameters dialog of
+     * the new job page, {@code build}/{@code buildWithParameters}, the CLI), which nothing will
+     * ever queue, so no queue listener would delete their files. Called only on a refusal, after
+     * the refusal has been built and right before it is thrown; an accepted submission never gets
+     * here.
+     *
+     * <p>A re-run is left alone ({@link #carriesOwnValues}): a Retry, Rebuild, Pipeline Replay or
+     * Rebuild, or Restart from Stage carries the values of the build it repeats, and their files
+     * may still belong to that build (core keeps a Pipeline build's file parameter in its
+     * temporary file). So are the approval marker's submissions (step 1: the values of a stored
+     * request, whose own end disposes of them) and unattended submissions, whose values may be
+     * shared with another build. A disposal failure is logged and never replaces the refusal.
+     */
+    private static void disposeOwnValues(Job<?, ?> job, List<Cause> causes, List<Action> actions) {
+        if (!carriesOwnValues(causes, actions)) {
+            return;
+        }
+        try {
+            List<ParameterValue> values = new ArrayList<>();
+            for (Action action : actions) {
+                if (action instanceof ParametersAction) {
+                    values.addAll(((ParametersAction) action).getAllParameters());
+                }
+            }
+            ParameterFiles.dispose(values, "a refused build submission of job '" + job.getFullName() + "'");
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not dispose of the temporary parameter files of a refused"
+                    + " build submission of job '" + job.getFullName() + "'");
+        }
+    }
+
+    /**
+     * Whether a submission's parameter values are its own (D-72), not copied from an earlier build:
+     * it is no re-run, neither a naginator Retry (automatic or clicked), a Rebuild or a Pipeline
+     * Replay ({@link #lastRerunKind}) nor a Pipeline Rebuild or Restart from Stage
+     * ({@link #isScriptRerun}).
+     */
+    private static boolean carriesOwnValues(List<Cause> causes, List<Action> actions) {
+        return lastRerunKind(causes) == null && !isScriptRerun(actions);
     }
 
     /** The plain-text refusal of a build-token submission (e2e re-audit DEF-33/34). */

@@ -1,9 +1,11 @@
 package io.jenkins.plugins.batchcontrol.model;
 
+import hudson.model.ParameterValue;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Ids;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,21 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 /**
  * A request to run a specific job with a fixed set of parameters (SPEC section 3).
  * Persisted as XStream XML at {@code requests/run/<id>.xml}.
+ *
+ * <p>D-72: the request keeps two forms of its parameters. {@code parameterValues} holds the
+ * submitted {@link ParameterValue} objects as XStream writes them (a {@code Secret} field in
+ * Jenkins' encrypted form); the approved build is scheduled with them unchanged. They are read
+ * only through {@link #parameterValues()}, which is deliberately not a getter, so neither Jelly
+ * nor Stapler can reach them. {@code parameters} is the masked display map derived from them once
+ * at submission ({@link #getParameters()}), the only form shown or written anywhere else.
+ *
+ * <p>D-72b (5): {@code parameterValues} is declared last, so it is the last element of the file.
+ * The store reads a request for listings, badges, pages and periodic work without it: it stops
+ * reading at that element, so the values are neither parsed nor deserialized, and marks the
+ * object ({@link #typedValuesOmitted()}). Such an object refuses {@link #parameterValues()}; only
+ * {@code Store#loadRunRequestWithValues} reads them. The values are removed from the file
+ * ({@link #removeTypedValues()}) when the approved run starts or the request ends; the masked map
+ * stays as the record.
  *
  * <p>Timestamps are persisted as epoch milliseconds ({@code long}) because the Jenkins XStream
  * class filter does not allow {@code java.time.Instant}; the accessors expose {@link Instant}.
@@ -71,6 +88,7 @@ public final class RunRequest {
 
     private final String id;
     private final String jobFullName;
+    /** D-72: the masked display map derived from {@link #parameterValues} at submission. */
     private final Map<String, String> parameters;
     private final String reason;
     private final String requester;
@@ -104,11 +122,31 @@ public final class RunRequest {
     private Long expiryBaseMillis;
     /** Human-readable history note for an INVALIDATED request (D-21: target renamed/moved). */
     private String invalidationReason;
+    /**
+     * D-72b (7), security-35 S-35-07: when the queue item of the approved run was cancelled, or
+     * {@code null}. Such a run is never submitted again (startup recovery skips it), and its
+     * files are disposed of when the request ends.
+     */
+    private Long queueCancelledAtMillis;
+    /**
+     * D-72: the submitted typed values; {@code null} in files written before they existed and
+     * once they were removed (D-72b (5)). Declared last on purpose: XStream writes fields in
+     * declaration order, and the store's listing read stops at this element (see the class
+     * description). Not final: the values are removed when the run starts or the request ends.
+     */
+    private List<ParameterValue> parameterValues;
+    /**
+     * D-72b (5): this object was read without its typed values although the file holds them.
+     * Never persisted (transient); set only by the store.
+     */
+    private transient boolean typedValuesOmitted;
 
-    private RunRequest(String id, String jobFullName, Map<String, String> parameters, String reason,
-                       String requester, List<String> approvers, RequestStatus status, Instant createdAt) {
+    private RunRequest(String id, String jobFullName, List<ParameterValue> parameterValues,
+                       Map<String, String> parameters, String reason, String requester, List<String> approvers,
+                       RequestStatus status, Instant createdAt) {
         this.id = id;
         this.jobFullName = jobFullName;
+        this.parameterValues = new ArrayList<>(parameterValues);
         this.parameters = new LinkedHashMap<>(parameters);
         this.reason = reason;
         this.requester = requester;
@@ -119,14 +157,33 @@ public final class RunRequest {
 
     /**
      * Creates a new PENDING request with a random UUID id (D-68) and its creation time
-     * from {@link BatchClock}.
+     * from {@link BatchClock}, holding the typed {@code values} and the masked display map
+     * {@code parameters} derived from them (D-72). Only {@code policy.RunRequestService} derives
+     * the map and calls this.
+     */
+    public static RunRequest create(String jobFullName, List<ParameterValue> values, Map<String, String> parameters,
+                                    String reason, String requester, List<String> approvers) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Objects.requireNonNull(values, "values");
+        Objects.requireNonNull(parameters, "parameters");
+        List<ParameterValue> present = new ArrayList<>(values.size());
+        for (ParameterValue value : values) {
+            if (value != null) {
+                present.add(value);
+            }
+        }
+        return new RunRequest(Ids.newRequestId(), jobFullName, present, parameters, reason, requester, approvers,
+                RequestStatus.PENDING, BatchClock.now());
+    }
+
+    /**
+     * Creates a new PENDING request that holds only a display map and no typed values (store
+     * fixtures). With an empty map an approval runs the build without parameters; otherwise the
+     * typed values do not match the displayed ones and an approval is refused (D-72b (1)).
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, List<String> approvers) {
-        Objects.requireNonNull(jobFullName, "jobFullName");
-        Objects.requireNonNull(parameters, "parameters");
-        return new RunRequest(Ids.newRequestId(), jobFullName, parameters, reason, requester, approvers,
-                RequestStatus.PENDING, BatchClock.now());
+        return create(jobFullName, List.of(), parameters, reason, requester, approvers);
     }
 
     /** Single-approver form, kept for callers written before D-37. */
@@ -151,9 +208,78 @@ public final class RunRequest {
         return jobFullName;
     }
 
-    /** A defensive copy; the stored parameters never change after creation. */
+    /**
+     * The masked display map (D-72): a sensitive value is {@code ********}, a file value
+     * {@code [file] <original file name>}. A defensive copy; it never changes after creation.
+     */
     public Map<String, String> getParameters() {
         return parameters == null ? new LinkedHashMap<>() : new LinkedHashMap<>(parameters);
+    }
+
+    /**
+     * D-72: the submitted typed values, unmodifiable and possibly empty, including original
+     * secrets and file values; an element that could not be loaded is {@code null}. For
+     * scheduling the approved build and disposing of its files only; never displayed.
+     * Deliberately not a bean getter, so Jelly property access and Stapler URL binding cannot
+     * reach it.
+     *
+     * @throws IllegalStateException when this object was read without its typed values
+     *         ({@link #typedValuesOmitted()}): an empty list here would schedule the build with
+     *         the job's defaults instead of the approved values, so it fails closed
+     */
+    @Restricted(NoExternalUse.class)
+    public List<ParameterValue> parameterValues() {
+        if (typedValuesOmitted) {
+            throw new IllegalStateException("Run request " + id + " was read without its typed parameter values");
+        }
+        return parameterValues == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(parameterValues));
+    }
+
+    /**
+     * D-72b (5): whether this object was read without the typed values its file holds. Saving
+     * such an object keeps the stored values unchanged.
+     */
+    @Restricted(NoExternalUse.class)
+    public boolean typedValuesOmitted() {
+        return typedValuesOmitted;
+    }
+
+    /**
+     * D-72b (3, 5): whether the stored request holds typed values: read with them, or read
+     * without them although the file holds them. {@code false} for a request stored before D-72
+     * and for one whose values were removed when its run started or it ended.
+     */
+    @Restricted(NoExternalUse.class)
+    public boolean holdsTypedValues() {
+        return typedValuesOmitted || parameterValues != null;
+    }
+
+    /** D-72b (5): only the store marks an object read without its typed values. */
+    @Restricted(NoExternalUse.class)
+    public void markTypedValuesOmitted() {
+        this.parameterValues = null;
+        this.typedValuesOmitted = true;
+    }
+
+    /**
+     * D-72b (5): only the store puts the stored typed values back on an object read without
+     * them (to save it in full when the stored values cannot be kept as they are).
+     */
+    @Restricted(NoExternalUse.class)
+    public void restoreTypedValues(List<ParameterValue> values) {
+        this.parameterValues = values == null ? null : new ArrayList<>(values);
+        this.typedValuesOmitted = false;
+    }
+
+    /**
+     * D-72b (5): removes the typed values, so the next save writes the request without them;
+     * the masked display map stays. Only the policy service calls this, when the approved run
+     * starts or the request ends.
+     */
+    @Restricted(NoExternalUse.class)
+    public void removeTypedValues() {
+        this.parameterValues = null;
+        this.typedValuesOmitted = false;
     }
 
     public String getReason() {
@@ -307,6 +433,19 @@ public final class RunRequest {
 
     public String getInvalidationReason() {
         return invalidationReason;
+    }
+
+    /**
+     * D-72b (7): when the queue item of the approved run was cancelled, or {@code null}. The
+     * request stays APPROVED until the approved-run timeout ends it; it is never submitted again.
+     */
+    public Instant getQueueCancelledAt() {
+        return queueCancelledAtMillis == null ? null : Instant.ofEpochMilli(queueCancelledAtMillis);
+    }
+
+    /** Only the policy service records the cancellation of the approved run's queue item. */
+    public void setQueueCancelledAt(Instant queueCancelledAt) {
+        this.queueCancelledAtMillis = queueCancelledAt == null ? null : queueCancelledAt.toEpochMilli();
     }
 
     public void setInvalidationReason(String invalidationReason) {

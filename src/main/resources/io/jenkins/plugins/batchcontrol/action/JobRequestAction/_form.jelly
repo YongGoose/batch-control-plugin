@@ -6,12 +6,29 @@
      with each message next to its field and the reason, approvers and parameter values kept.
      DEF-12: a user who may not submit is told so (D-38a: Request and Job/Read suffice). D-60: a
      refused build submission arrives with its values (p.<name>). The action is absolute because
-     a refusal is rendered at .../batch-control/submit. -->
+     a refusal is rendered at .../batch-control/submit.
+     D-72: the form posts multipart/form-data, so file parameters are uploaded with it (core's
+     dialog posts it as FormData when it holds a file input, with the crumb header; on the page
+     core's script puts the crumb in the action's query string for a multipart form). The dialog's
+     action carries ?dialog=true as well as the hidden field, so a submission refused before its
+     body is read (over the size cap, HTTP 413) is still answered with the dialog view. A refused
+     submission never shows a password or a file again, and says which ones to provide again; so
+     do a refused direct build (D-60; files are not carried, issue #115) and a rerun that continues
+     here because a value of the failed run could not be recovered (fromRerun). D-72a: that form
+     carries the incident id back in the hidden field fromRerun (and in the action's query
+     string), and the request is linked to the incident once the server has validated it again. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="errors" value="${it.formErrors}"/>
   <j:set var="bcCanSubmit" value="false"/>
-  <f:form method="post" action="${rootURL}/${it.job.url}batch-control/submit" name="batch-control-request">
+  <!-- D-72a: the incident reference, validated (JobRequestAction#getRerunIncidentId, the rule
+       doSubmit links by): from fromRerun on the GET, from the submission on a refusal. It travels
+       back in the hidden field and in the action's query string (submitQuery, with ?dialog=true),
+       so a submission over the size cap, whose body is never read, still keeps it; the server
+       validates it again on submission. -->
+  <j:set var="bcRerunId" value="${it.rerunIncidentId}"/>
+  <f:form method="post" action="${rootURL}/${it.job.url}batch-control/submit${it.submitQuery(bcDialog ? true : false)}"
+          name="batch-control-request" enctype="multipart/form-data">
     <j:if test="${bcDialog}">
       <input type="hidden" name="dialog" value="true"/>
     </j:if>
@@ -40,15 +57,40 @@
           approvers and confirm the parameters; the build starts automatically once any one of
           them approves the request.
         </p>
-        <j:if test="${!errors.present and it.prefilled}">
-          <div class="jenkins-alert jenkins-alert-info" role="status">
-            The build was not started: this job only runs through an approved run request. The
-            parameter values you entered are filled in below; enter any password parameters again.
-          </div>
-        </j:if>
+        <j:set var="bcReenter" value="${it.reenterParameterNames}"/>
+        <j:choose>
+          <j:when test="${bcRerunId != null}">
+            <input type="hidden" name="fromRerun" value="${bcRerunId}"/>
+            <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-notice="rerun">
+              <j:if test="${!errors.present}">
+                No rerun request was created yet: not every parameter value of the failed run of
+                incident <a href="${rootURL}/batch-control/incidents/${bcRerunId}/">${bcRerunId}</a>
+                could be recovered (a file the build has already removed, for example). The values
+                that could be recovered, if any, are filled in below; check every parameter. File and
+                password parameter values must be provided again<j:if test="${!empty(bcReenter)}">:
+                <j:forEach var="n" items="${bcReenter}" varStatus="st">${st.index > 0 ? ', ' : ''}<b>${n}</b></j:forEach></j:if>.
+              </j:if>
+              The request you submit here will be linked to incident
+              <a href="${rootURL}/batch-control/incidents/${bcRerunId}/">${bcRerunId}</a>, like a
+              rerun requested on the incident: if its run succeeds, the incident records it as the
+              run that resolved it (the incident's status is still changed by hand).
+            </div>
+          </j:when>
+          <j:when test="${!errors.present and it.prefilled}">
+            <j:set var="bcFiles" value="${it.fileParameterNames}"/>
+            <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-notice="prefilled">
+              The build was not started: this job only runs through an approved run request. The
+              parameter values you entered are filled in below; enter any password parameters again.
+              <j:if test="${!empty(bcFiles)}">
+                Files are not carried over: select the file again for
+                <j:forEach var="n" items="${bcFiles}" varStatus="st">${st.index > 0 ? ', ' : ''}<b>${n}</b></j:forEach>.
+              </j:if>
+            </div>
+          </j:when>
+        </j:choose>
         <bc:formError errors="${errors}"/>
         <f:entry title="Reason" description="Why this run is needed (required).">
-          <f:textarea name="reason" value="${errors.value('reason')}"/>
+          <f:textarea name="reason" value="${errors.present ? errors.value('reason') : (bcRerunId == null ? '' : it.rerunReason)}"/>
           <bc:fieldError errors="${errors}" field="reason"/>
         </f:entry>
         <!-- D-37: posted as repeated "approvers" fields, one user id per checked box. A single
@@ -59,7 +101,7 @@
           <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
             <div class="jenkins-!-margin-bottom-1">
               <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
-                          title="${a}" checked="${errors.present ? errors.checked('approvers', a) : singleApprover}"/>
+                          title="${a}" checked="${errors.inputKept ? errors.checked('approvers', a) : singleApprover}"/>
             </div>
           </j:forEach>
           <bc:fieldError errors="${errors}" field="approvers"/>
@@ -67,9 +109,20 @@
         <j:if test="${!empty(it.parameterDefinitions)}">
           <f:section title="Parameters"/>
           <bc:fieldError errors="${errors}" field="parameters"/>
+          <!-- D-72: a refused submission never shows a password or a file again. -->
+          <j:if test="${errors.inputKept and !empty(bcReenter)}">
+            <div class="jenkins-alert jenkins-alert-warning" role="status" data-batch-control-notice="reenter">
+              Passwords and files are not kept when a request is refused: enter the password or
+              select the file again for
+              <j:forEach var="n" items="${bcReenter}" varStatus="st">${st.index > 0 ? ', ' : ''}<b>${n}</b></j:forEach>.
+            </div>
+          </j:if>
           <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
             <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
             <st:include it="${parameterDefinition}" page="index.jelly"/>
+            <!-- D-72b: a refusal of this parameter (a repeated name, a value its definition or the
+                 service refused) is shown right below it. -->
+            <bc:fieldError errors="${errors}" field="${it.parameterField(parameterDefinition.name)}"/>
           </j:forEach>
         </j:if>
       </j:otherwise>

@@ -27,6 +27,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -43,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * but no build starts) and then restarting the session, so both a restored queue item and
  * the startup recovery could try to run the request; requestId-based idempotency must
  * leave exactly one build.
+ *
+ * T-04-02 and T-07-04 reach "approved, never submitted" by letting the queue refuse the approved
+ * submission ({@link QueueRefusalFixtures}). They used to clear the queue after approving under
+ * quiet-down; under D-72b (7) a cancelled approved queue item is no longer resubmitted, so that
+ * fixture would now model a different case (matrix note 265; T-05-87 pins that case).
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
@@ -68,9 +74,10 @@ public class RestartRecoveryTest {
             FreeStyleProject job = prepare(r);
             RunRequest request = createAsU1(r, job);
 
-            r.jenkins.doQuietDown();          // approval is recorded but no build can start
-            approveAsA1(request.getId());
-            r.jenkins.getQueue().clear();     // drop the queue item: approved, never submitted
+            // the queue refuses the approved submission, so the request is approved and never
+            // submitted (not a cancelled queue item: D-72b (7), matrix note 265)
+            QueueRefusalFixtures.refusedBeforeTheGate(job, () -> approveAsA1(request.getId()));
+            assertTrue(r.jenkins.getQueue().isEmpty(), "premise: nothing was queued");
 
             requestId = request.getId();
             assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(requestId).getStatus());
@@ -105,9 +112,9 @@ public class RestartRecoveryTest {
 
             FreeStyleProject job = prepare(r);
             RunRequest request = createAsU1(r, job);
-            r.jenkins.doQuietDown();
-            approveAsA1(request.getId());
-            r.jenkins.getQueue().clear();
+            // approved and never submitted, without cancelling a queue item (D-72b (7), note 265)
+            QueueRefusalFixtures.refusedBeforeTheGate(job, () -> approveAsA1(request.getId()));
+            assertTrue(r.jenkins.getQueue().isEmpty(), "premise: nothing was queued");
 
             requestId = request.getId();
             assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(requestId).getStatus());
@@ -157,6 +164,11 @@ public class RestartRecoveryTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures, note 265). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
+    }
 
     /** Installs a persistable security setup, run control and the protected job. */
     private FreeStyleProject prepare(JenkinsRule r) throws Exception {

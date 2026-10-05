@@ -61,9 +61,10 @@ public final class RunLinks {
     }
 
     /**
-     * One-line {@code name=value} rendering of a parameter map for table cells. Values arrive
-     * already masked from the store (secret parameters are persisted masked); output is escaped
-     * by the Jelly default.
+     * One-line {@code name=value} rendering of a parameter map for table cells and CSV. Values
+     * arrive already masked from the store (D-72: the display map derived once by
+     * {@code store.ParameterDisplay}, a secret as {@code ********}, a file as
+     * {@code [file] <name>}); output is escaped by the Jelly default.
      */
     public static String formatParameters(@CheckForNull Map<String, String> parameters) {
         if (parameters == null || parameters.isEmpty()) {

@@ -22,7 +22,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * delete API (retention cleanup is the only deletion path; config
  * snapshots are working data, not records, and keep only the latest version).
  *
- * <p>All methods throw {@link java.io.UncheckedIOException} on I/O failure.
+ * <p>All methods throw {@link java.io.UncheckedIOException} on I/O failure, except that a failed
+ * save of an XML entity (request, grant, incident, activation) throws {@link StoreWriteException}
+ * and leaves nothing behind (D-72b (2), security-35 S-35-03).
  */
 @Restricted(NoExternalUse.class)
 public interface Store {
@@ -42,19 +44,38 @@ public interface Store {
     default void warmUp() {
     }
 
-    /** Writes (or rewrites, on a status transition) the request XML atomically. */
+    /**
+     * Writes (or rewrites, on a status transition) the request XML atomically. A request read
+     * without its typed values ({@link RunRequest#typedValuesOmitted()}) is written with the stored
+     * values unchanged; one whose values were removed ({@link RunRequest#removeTypedValues()}) is
+     * written without them (D-72b (5)).
+     *
+     * @throws StoreWriteException when it cannot be written; nothing is left behind
+     */
     void saveRunRequest(RunRequest request);
 
-    /** Loads a request by id, or returns {@code null} if it does not exist. */
+    /**
+     * Loads a request by id without its typed values, or returns {@code null} if it does not exist
+     * (D-72b (5), security-35 S-35-02): every field but {@code parameterValues} is read, the values
+     * are neither parsed nor deserialized, and {@link RunRequest#parameterValues()} of the result
+     * refuses. The read for screens, badges, listings and periodic work.
+     */
     RunRequest loadRunRequest(String id);
 
-    /** Loads every stored run request, sorted by id (creation order). */
+    /**
+     * Loads a request by id with its typed values (D-72), or returns {@code null}. Only for what
+     * needs the values: checking and scheduling an approval, and disposing of the values' files.
+     */
+    RunRequest loadRunRequestWithValues(String id);
+
+    /** Loads every stored run request without its typed values, sorted by creation time. */
     List<RunRequest> listRunRequests();
 
     /**
-     * Loads the PENDING and APPROVED run requests only, sorted by id (#13). Served from the
-     * in-memory entity index, so closed requests are never read; this is what the per-minute
-     * expiry work, startup recovery and rename invalidation iterate.
+     * Loads the PENDING and APPROVED run requests only, without their typed values, sorted by
+     * creation time (#13). Served from the in-memory entity index, so closed requests are never
+     * read; this is what the per-minute expiry work, startup recovery and rename invalidation
+     * iterate.
      */
     List<RunRequest> listOpenRunRequests();
 
