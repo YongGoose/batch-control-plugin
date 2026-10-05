@@ -17,10 +17,12 @@ import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
@@ -56,6 +58,14 @@ public final class GrantService {
 
     /** All known grants (active or not); guarded by {@code this}. */
     private List<Grant> cache;
+
+    /**
+     * D-71c (security-36 S-36-03): ids of grants unbound in memory whose file could not be written
+     * yet; guarded by {@code this}. Every copy of such a grant that enters the cache is unbound
+     * again, and the write is retried on the next unbinding, the next registration, the next write
+     * of that grant and by the expiry periodic work, until it succeeds.
+     */
+    private final Set<String> unsavedUnbindings = new LinkedHashSet<>();
 
     private GrantService() {
     }
@@ -931,6 +941,18 @@ public final class GrantService {
         List<Grant> grants = grants();
         grants.removeIf(existing -> existing.getId().equals(grant.getId()));
         grants.add(grant);
+        retryUnsavedUnbindings();
+    }
+
+    /**
+     * D-71c (security-36 S-36-03 (i)): unbinds the grant {@code grantId} from its item for good,
+     * because the item it was approved for is no longer at its name (called by
+     * {@code policy.GrantRequestService} right after registering it, when the item was deleted and
+     * another one created at the name while the approval ran). No-op for an unknown or already
+     * unbound grant.
+     */
+    public synchronized void unbindGrant(String grantId, String why) {
+        unbindWhere(grant -> grantId.equals(grant.getId()), why);
     }
 
     /**
@@ -1046,40 +1068,70 @@ public final class GrantService {
      * down, or a crash came between deleting it and handling the deletion.
      */
     public synchronized void unbindMissingItems(Predicate<String> exists) {
-        unbindWhere(scope -> !exists.test(scope), "no longer exists");
+        unbindWhere(grant -> !exists.test(grant.getScope().getFullName()), "no longer exists");
     }
 
     /** Unbinds the windows naming {@code fullName} or an item below it. */
-    private void unbindAt(@CheckForNull String fullName, String why) {
+    private synchronized void unbindAt(@CheckForNull String fullName, String why) {
         if (fullName == null || fullName.isEmpty()) {
             return;
         }
-        unbindWhere(scope -> scope.equals(fullName) || scope.startsWith(fullName + "/"), why);
+        unbindWhere(grant -> {
+            String scope = grant.getScope().getFullName();
+            return scope.equals(fullName) || scope.startsWith(fullName + "/");
+        }, why);
     }
 
-    /** Unbinds the active, still bound windows whose scope full name {@code affected} accepts. */
-    private void unbindWhere(Predicate<String> affected, String why) {
+    /**
+     * Unbinds the active, still bound windows (with a non-empty scope full name) that
+     * {@code affected} accepts. The cached copy is unbound first, so the window stops conferring
+     * at once; a file that cannot be written is retried ({@link #unsavedUnbindings}).
+     */
+    private synchronized void unbindWhere(Predicate<Grant> affected, String why) {
+        retryUnsavedUnbindings();
         Instant now = BatchClock.now();
         for (Grant cached : new ArrayList<>(grants())) {
             String scope = cached.getScope() == null ? null : cached.getScope().getFullName();
             if (!cached.isActiveAt(now) || cached.getItemIdentity() == null || scope == null || scope.isEmpty()
-                    || !affected.test(scope)) {
+                    || !affected.test(cached)) {
                 continue;
             }
             cached.clearItemIdentity(); // effective at once, whatever happens to the file
-            try {
-                Grant grant = store.loadGrant(cached.getId());
-                if (grant != null && grant.getItemIdentity() != null) {
-                    grant.clearItemIdentity();
-                    store.saveGrant(grant);
-                    replaceInCache(grant);
-                }
-            } catch (RuntimeException e) {
-                LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + cached.getId()
-                        + " as no longer applying to '" + scope + "'; it confers nothing until the next restart,"
-                        + " where it is unbound again", e);
-            }
+            unsavedUnbindings.add(cached.getId());
+            saveUnbinding(cached.getId());
             LOGGER.info(() -> "Grant " + cached.getId() + " no longer applies: its item '" + scope + "' " + why);
+        }
+    }
+
+    /**
+     * D-71c (security-36 S-36-03 (ii)): retries writing every unbinding whose file could not be
+     * written. Called by the expiry periodic work and on every unbinding and registration.
+     */
+    public synchronized void retryUnsavedUnbindings() {
+        for (String id : new ArrayList<>(unsavedUnbindings)) {
+            saveUnbinding(id);
+        }
+    }
+
+    /**
+     * Writes the unbinding of grant {@code id} to its file; on success (or when there is nothing
+     * left to write) the id leaves {@link #unsavedUnbindings}, otherwise it stays for a retry.
+     */
+    private synchronized void saveUnbinding(String id) {
+        try {
+            Grant grant = store.loadGrant(id);
+            if (grant != null && grant.getItemIdentity() != null) {
+                grant.clearItemIdentity();
+                store.saveGrant(grant);
+            }
+            unsavedUnbindings.remove(id);
+            if (grant != null) {
+                replaceInCache(grant);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + id + " as no longer bound to its"
+                    + " item; it confers nothing, and the write is retried on the next item event and by the"
+                    + " periodic expiry work", e);
         }
     }
 
@@ -1324,11 +1376,31 @@ public final class GrantService {
         }
         if (cache == null) {
             cache = new ArrayList<>(store.listGrants());
+            for (Grant grant : cache) {
+                if (unsavedUnbindings.contains(grant.getId())) {
+                    grant.clearItemIdentity(); // S-36-03: the file still carries the old binding
+                }
+            }
         }
         return cache;
     }
 
+    /**
+     * Puts {@code grant} in the cache in place of the copy with the same id. A copy of a grant
+     * whose unbinding is not written yet is unbound before it enters the cache (S-36-03): any write
+     * of that grant loaded from its file would otherwise bring the old binding back.
+     */
     private synchronized void replaceInCache(Grant grant) {
+        if (unsavedUnbindings.contains(grant.getId()) && grant.getItemIdentity() != null) {
+            grant.clearItemIdentity();
+            try {
+                store.saveGrant(grant);
+                unsavedUnbindings.remove(grant.getId());
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not save grant " + grant.getId()
+                        + " as no longer bound to its item; retried later", e);
+            }
+        }
         List<Grant> grants = grants();
         ListIterator<Grant> it = grants.listIterator();
         boolean replaced = false;

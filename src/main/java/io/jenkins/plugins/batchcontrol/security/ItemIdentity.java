@@ -50,8 +50,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *   <li>a window also compares the item's kind (S-34-03).</li>
  * </ul>
  * What remains is a directory put in place on disk with "Reload Configuration from Disk", or
- * between a shutdown and a start, by someone with file-system access to {@code $JENKINS_HOME} and
- * Overall/Administer, which is administrator territory (SPEC section 7).
+ * between a shutdown and a start, by someone with file-system access to {@code $JENKINS_HOME} (the
+ * per-item reload itself needs only Item/Configure; security-36 S-36-04), which is administrator
+ * territory (SPEC section 7).
  * Not chosen: adding the directory's birth time (Java 21 on Linux reports the last-modified time
  * instead, which changes with every save, so windows would stop working at random), and a marker
  * file with a random id inside the item's directory (a new file in core's directories, outside the

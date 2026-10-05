@@ -358,6 +358,18 @@ public final class GrantRequestService {
         }
     }
 
+    /**
+     * D-71c (S-36-03 (i)): whether {@code item} is still the item at {@code fullName}, as the caller
+     * sees it; {@code false} when another item, or none the caller may see, is there.
+     */
+    private static boolean stillAtName(Item item, String fullName) {
+        try {
+            return Jenkins.get().getItemByFullName(fullName) == item;
+        } catch (AccessDeniedException e) {
+            return false;
+        }
+    }
+
     // ---------------------------------------------------------------- decisions (SPEC 3, 8)
 
     /**
@@ -424,6 +436,16 @@ public final class GrantRequestService {
             // Registration persists the grant and makes it effective in the same critical
             // section, so approval and effectiveness are atomic.
             GrantService.get().register(grant);
+            // D-71c (security-36 S-36-03 (i)): item events do not take this lock, so the item may have
+            // been deleted, and another one created at its name, between the identity read above and
+            // the registration; the window would then carry the deleted directory's identity, which
+            // the file system may hand to the new one. From the registration on, every event at the
+            // name sees the window, so one check here closes the gap: the window stays bound only if
+            // the very item approved is still at that name, looked up as the approver who saw it a
+            // moment ago (anything else, including an item they cannot see, unbinds: fail-closed).
+            if (!stillAtName(item, grant.getScope().getFullName())) {
+                GrantService.get().unbindGrant(grant.getId(), "was replaced while the window was being approved");
+            }
             LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
                     + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
             created = grant;
