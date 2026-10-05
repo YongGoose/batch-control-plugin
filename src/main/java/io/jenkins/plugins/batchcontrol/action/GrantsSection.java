@@ -19,7 +19,6 @@ import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
@@ -951,11 +950,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return java.time.Duration.between(grant.getGrantedAt(), grant.getExpiresAt()).toMinutes();
     }
 
-    /** Every stored grant by id, once per rendering (the store reads one file per grant). */
+    /**
+     * Every known grant by id, once per rendering, as the permission checks see it (D-74): read
+     * through {@link GrantService#listAll()} so these lists agree with {@link GrantService#listActive()}.
+     */
     private Map<String, Grant> grantsById() {
         if (grantsById == null) {
             Map<String, Grant> byId = new LinkedHashMap<>();
-            for (Grant grant : Store.get().listGrants()) {
+            for (Grant grant : GrantService.get().listAll()) {
                 byId.put(grant.getId(), grant);
             }
             grantsById = byId;
