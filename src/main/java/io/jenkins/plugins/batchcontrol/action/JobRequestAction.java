@@ -19,6 +19,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.ParameterFiles;
 import io.jenkins.plugins.batchcontrol.policy.RequestBodyLimit;
+import io.jenkins.plugins.batchcontrol.policy.RequestTooLargeException;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
@@ -497,7 +498,8 @@ public class JobRequestAction implements Action {
      * refusals are filed by {@link #fileServiceRefusal}: a message about one of the job's
      * parameters below it, the reason's next to the reason, and a failed save
      * ({@link StoreWriteException}) above the form, always as the re-rendered form (HTTP 400),
-     * never an error page.
+     * never an error page. A request over the kept-size cap ({@link RequestTooLargeException}) is
+     * answered with HTTP 413, like an oversized body.
      */
     @RequirePOST
     public void doSubmit(StaplerRequest2 req, StaplerResponse2 rsp)
@@ -566,6 +568,11 @@ public class JobRequestAction implements Action {
                     rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
                             + Util.rawEncode(request.getId()) + "/");
                     return;
+                } catch (RequestTooLargeException e) {
+                    // security-37 S-37-01: what the request would keep is over the cap. The service
+                    // stored nothing and disposed of the values' files: 413, like an oversized body.
+                    refuseTooLarge(req, rsp, rerunIncident, e.getMessage(), Dialogs.refusalView(req, "index.jelly"));
+                    return;
                 } catch (IllegalArgumentException | IllegalStateException e) {
                     // D-72b: StoreWriteException (a failed save) is an IllegalStateException too.
                     fileServiceRefusal(errors, e);
@@ -617,18 +624,27 @@ public class JobRequestAction implements Action {
         // D-72a: the incident reference survives from the action's query string alone (the body
         // is not read), validated like the hidden field; a crafted value is ignored.
         String rerunIncident = IncidentService.get().linkableIncident(RequestRunPrefill.rerunFromQuery(req), job);
-        if (rerunIncident != null) {
-            req.setAttribute(RERUN_ATTRIBUTE, rerunIncident);
-        }
-        FormErrors errors = new FormErrors(FORM).withoutInput().message(
+        refuseTooLarge(req, rsp, rerunIncident,
                 "The request was not submitted: it is larger than the limit of "
                 + sizeText(RequestBodyLimit.maxRequestBodyBytes())
                 + " for a run request. Nothing was saved, and what"
                 + " you entered could not be kept. Fill in the form again with smaller files, or"
-                + " ask a Jenkins administrator to raise the limit.");
-        errors.render(req, rsp, this,
-                Dialogs.fromDialogQuery(req) ? Dialogs.DIALOG_VIEW : "index.jelly",
-                HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+                + " ask a Jenkins administrator to raise the limit.",
+                Dialogs.fromDialogQuery(req) ? Dialogs.DIALOG_VIEW : "index.jelly");
+    }
+
+    /**
+     * D-72, security-37 S-37-01: renders a size refusal as HTTP 413 with the request form, empty
+     * ({@link FormErrors#withoutInput()}), {@code message} above it, in {@code view}, keeping the
+     * already validated incident reference ({@code rerunIncident}, D-72a) when there is one.
+     */
+    private void refuseTooLarge(StaplerRequest2 req, StaplerResponse2 rsp, @CheckForNull String rerunIncident,
+            String message, String view) throws IOException, ServletException {
+        if (rerunIncident != null) {
+            req.setAttribute(RERUN_ATTRIBUTE, rerunIncident);
+        }
+        new FormErrors(FORM).withoutInput().message(message)
+                .render(req, rsp, this, view, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
     }
 
     /**
