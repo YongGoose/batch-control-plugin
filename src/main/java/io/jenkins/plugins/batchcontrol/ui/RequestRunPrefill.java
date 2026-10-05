@@ -9,6 +9,8 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
 import hudson.model.SimpleParameterDefinition;
 import hudson.util.Secret;
+import jakarta.servlet.http.HttpServletRequest;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -232,6 +234,33 @@ public final class RequestRunPrefill {
         }
         String text = req.getParameter(PREFIX + definition.getName());
         return text == null || text.length() > MAX_VALUE_LENGTH ? null : text;
+    }
+
+    /**
+     * D-72a: the raw {@value #FROM_RERUN} value of {@code req}'s query string alone (never its
+     * body), URL-decoded, or {@code null}. The Request Run form's action carries the validated
+     * incident reference there as well as in its hidden field, so that a submission refused before
+     * its body may be read (over the D-72 size cap) can still show the form linked to the incident.
+     * Unvalidated: the caller passes it to {@code IncidentService#linkableIncident} and ignores what
+     * that check refuses, exactly like the hidden field.
+     */
+    @CheckForNull
+    public static String rerunFromQuery(@CheckForNull HttpServletRequest req) {
+        String query = req == null ? null : req.getQueryString();
+        if (query == null) {
+            return null;
+        }
+        for (String pair : query.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && FROM_RERUN.equals(pair.substring(0, eq))) {
+                try {
+                    return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    return null; // a malformed escape is no reference
+                }
+            }
+        }
+        return null;
     }
 
     private static String encode(String text) {

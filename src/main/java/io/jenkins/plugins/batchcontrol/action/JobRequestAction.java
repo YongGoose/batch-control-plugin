@@ -290,7 +290,8 @@ public class JobRequestAction implements Action {
      * D-72, D-72a (SPEC item 11): the id of the incident whose rerun continues on this form, or
      * {@code null}. On a GET it comes from {@value RequestRunPrefill#FROM_RERUN}{@code =<id>}; on a
      * refused submission it is the reference {@link #doSubmit} validated (the hidden field of the
-     * same name), and nothing is read from the body here. Either way the id counts only when
+     * same name, or the action's query string when the body was over the size cap and never
+     * read), and nothing is read from the body here. Either way the id counts only when
      * {@link IncidentService#linkableIncident} accepts it (an existing incident of this job, and a
      * viewer holding {@code BatchControl/ViewHistory} who may request a run of the job, the rights
      * of the rerun itself), the same rule {@link #doSubmit} links the request by; anything else is
@@ -307,8 +308,8 @@ public class JobRequestAction implements Action {
         }
         String reference;
         if (getFormErrors().isPresent()) {
-            // A refusal: the reference doSubmit validated (none on a body over the size cap, which
-            // is never read). Checked again in case the incident went away in the meantime.
+            // A refusal: the reference doSubmit validated (on a body over the size cap, from the
+            // action's query string alone). Checked again in case the incident went away since.
             Object validated = req.getAttribute(RERUN_ATTRIBUTE);
             reference = validated instanceof String ? (String) validated : null;
         } else if ("GET".equals(req.getMethod())) {
@@ -337,6 +338,27 @@ public class JobRequestAction implements Action {
         }
         return incident == null ? "" : "Rerun requested from incident " + incidentId
                 + " (failed run " + incident.getRunId() + ")";
+    }
+
+    /**
+     * D-66, D-72a: the query string of the request form's action, with its {@code ?}, or empty:
+     * {@code dialog=true} for the dialog form ({@link Dialogs#fromDialogQuery}) and
+     * {@value RequestRunPrefill#FROM_RERUN}{@code =<id>} when the form continues an incident rerun
+     * ({@link #getRerunIncidentId()}, already validated). Both travel in the query string as well
+     * as in hidden fields so that a submission refused before its body is read (over the size cap)
+     * is still answered with the right view and the incident reference; {@link #doSubmit} reads
+     * the hidden field first and validates the reference again wherever it comes from.
+     */
+    public String submitQuery(boolean dialog) {
+        List<String> parts = new ArrayList<>(2);
+        if (dialog) {
+            parts.add(Dialogs.PARAMETER + "=true");
+        }
+        String rerunIncidentId = getRerunIncidentId();
+        if (rerunIncidentId != null) {
+            parts.add(RequestRunPrefill.FROM_RERUN + "=" + Util.rawEncode(rerunIncidentId));
+        }
+        return parts.isEmpty() ? "" : "?" + String.join("&", parts);
     }
 
     /** The refusal of the last submission on this request, or an empty one (DEF-09). */
@@ -524,18 +546,20 @@ public class JobRequestAction implements Action {
     }
 
     /**
-     * D-72a: the raw {@value RequestRunPrefill#FROM_RERUN} field of a submission, unvalidated: the
-     * plain field (the rendered form's hidden input, or a script's field), else the same name in
-     * the {@code json} blob. Only ever passed to {@link IncidentService#linkableIncident}.
+     * D-72a: the raw incident reference of a submission, unvalidated. The hidden field
+     * {@value RequestRunPrefill#FROM_RERUN} is the primary carrier: its value in the {@code json}
+     * blob of the rendered form, else the plain field ({@code getParameter}, which for a multipart
+     * body reads the body's part first), else the action's query string
+     * ({@link RequestRunPrefill#rerunFromQuery}). Only ever passed to
+     * {@link IncidentService#linkableIncident}, so a crafted value in any of them is ignored alike.
      */
     @CheckForNull
     private static String rerunReference(StaplerRequest2 req, @CheckForNull JSONObject formData) {
-        String raw = req.getParameter(RequestRunPrefill.FROM_RERUN);
-        if (raw == null && formData != null) {
-            Object value = formData.opt(RequestRunPrefill.FROM_RERUN);
-            raw = value instanceof String ? (String) value : null;
+        if (formData != null && formData.opt(RequestRunPrefill.FROM_RERUN) instanceof String) {
+            return formData.getString(RequestRunPrefill.FROM_RERUN);
         }
-        return raw;
+        String field = req.getParameter(RequestRunPrefill.FROM_RERUN);
+        return field != null ? field : RequestRunPrefill.rerunFromQuery(req);
     }
 
     /**
@@ -543,10 +567,18 @@ public class JobRequestAction implements Action {
      * empty, with a message saying why: nothing of the body is read (the view never reads the
      * submitted fields, {@link FormErrors#withoutInput()}), so no request is created and no
      * uploaded file is stored. The dialog is recognised by its action's query string
-     * ({@link Dialogs#fromDialogQuery}), never by a body field.
+     * ({@link Dialogs#fromDialogQuery}), never by a body field, and so is the incident reference of
+     * a rerun that continues on the form (D-72a, {@link RequestRunPrefill#rerunFromQuery}), kept
+     * only when {@link IncidentService#linkableIncident} accepts it.
      */
     private void refuseOversizedBody(StaplerRequest2 req, StaplerResponse2 rsp)
             throws IOException, ServletException {
+        // D-72a: the incident reference survives from the action's query string alone (the body
+        // is not read), validated like the hidden field; a crafted value is ignored.
+        String rerunIncident = IncidentService.get().linkableIncident(RequestRunPrefill.rerunFromQuery(req), job);
+        if (rerunIncident != null) {
+            req.setAttribute(RERUN_ATTRIBUTE, rerunIncident);
+        }
         FormErrors errors = new FormErrors(FORM).withoutInput().message(
                 "The request was not submitted: it is larger than the limit of "
                 + sizeText(RequestBodyLimit.maxRequestBodyBytes())

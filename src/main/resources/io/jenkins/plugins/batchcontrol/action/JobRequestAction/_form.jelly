@@ -15,13 +15,19 @@
      submission never shows a password or a file again, and says which ones to provide again; so
      do a refused direct build (D-60; files are not carried, issue #115) and a rerun that continues
      here because a value of the failed run could not be recovered (fromRerun). D-72a: that form
-     carries the incident id back in the hidden field fromRerun, and the request is linked to the
-     incident once the server has validated it again. -->
+     carries the incident id back in the hidden field fromRerun (and in the action's query
+     string), and the request is linked to the incident once the server has validated it again. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="errors" value="${it.formErrors}"/>
   <j:set var="bcCanSubmit" value="false"/>
-  <f:form method="post" action="${rootURL}/${it.job.url}batch-control/submit${bcDialog ? '?dialog=true' : ''}"
+  <!-- D-72a: the incident reference, validated (JobRequestAction#getRerunIncidentId, the rule
+       doSubmit links by): from fromRerun on the GET, from the submission on a refusal. It travels
+       back in the hidden field and in the action's query string (submitQuery, with ?dialog=true),
+       so a submission over the size cap, whose body is never read, still keeps it; the server
+       validates it again on submission. -->
+  <j:set var="bcRerunId" value="${it.rerunIncidentId}"/>
+  <f:form method="post" action="${rootURL}/${it.job.url}batch-control/submit${it.submitQuery(bcDialog ? true : false)}"
           name="batch-control-request" enctype="multipart/form-data">
     <j:if test="${bcDialog}">
       <input type="hidden" name="dialog" value="true"/>
@@ -52,10 +58,6 @@
           them approves the request.
         </p>
         <j:set var="bcReenter" value="${it.reenterParameterNames}"/>
-        <!-- D-72a: the incident reference, validated (JobRequestAction#getRerunIncidentId, the
-             rule doSubmit links by): from fromRerun on the GET, from the submission on a refusal.
-             It travels back in the hidden field; the server validates it again on submission. -->
-        <j:set var="bcRerunId" value="${it.rerunIncidentId}"/>
         <j:choose>
           <j:when test="${bcRerunId != null}">
             <input type="hidden" name="fromRerun" value="${bcRerunId}"/>
