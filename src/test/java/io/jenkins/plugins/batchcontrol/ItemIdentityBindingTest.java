@@ -51,8 +51,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * same as a refused move, D-73 coalescing applies). The stored scope is the item's canonical full
  * name, whatever spelling was typed." And line 168: "Renaming follows core's rule: Configure on the
  * item (one CONFIGURE window on it), or else both Delete on it and Create in its parent." Matrix
- * rows T-08-130, T-08-131, T-08-133 .. T-08-137, T-08-146, T-08-147 (note 262); the role-strategy
- * variant of S-34-01 is T-08-132 ({@link ItemIdentityRoleStrategyTest}).
+ * rows T-08-130, T-08-131, T-08-133 .. T-08-137, T-08-146, T-08-147 (note 262) and T-08-154
+ * (note 264, the folder rename refusal's field check and page); the role-strategy variant of
+ * S-34-01 is T-08-132 ({@link ItemIdentityRoleStrategyTest}), the D-71b item events are
+ * {@link ItemBindingEventsTest}.
  *
  * <p>Layout (security-34 Probe A): folder {@code ops} with the job {@code ops/prod}, folder
  * {@code sandbox} with the job {@code sandbox/prod}, folder {@code dest}; every description is
@@ -377,7 +379,72 @@ public class ItemIdentityBindingTest {
         assertNull(j.jenkins.getItemByFullName("ops-old"));
     }
 
+    /**
+     * T-08-154 (D-71a ruling 2, SPEC 8 line 169; the refusal's screens, ui-dev contract; usability
+     * line: a refusal names what is refused in plain words): u1 holds CONFIGURE windows on the
+     * folder {@code sandbox} and on the job {@code sandbox/prod}. The rename page's field check
+     * ({@code GET job/sandbox/checkNewName?newName=sandbox-old}) answers 200 with an error that
+     * reads "Renaming 'sandbox' (Folder) is not allowed"; the rename itself ({@code POST
+     * confirmRename} from a browser, Accept text/html) answers 400 with a page whose text reads the
+     * same and "Nothing was renamed."; nothing is renamed. The one GRANT_VIOLATION of that refused
+     * POST is T-08-130's (same fixture and request), not repeated here. Guards: the same field check
+     * by c1 (standing Item/Configure) and u1's field check of a rename of the job
+     * {@code sandbox/prod} (allowed by its CONFIGURE window, core's rule) are not errors and say
+     * nothing is not allowed.
+     */
+    @Test
+    public void t_08_154_folderRenameRefusalIsExplainedOnTheFieldAndThePage() throws Exception {
+        openWindow("u1", "sandbox", "CONFIGURE");
+        openWindow("u1", "sandbox/prod", "CONFIGURE");
+        String refused = "Renaming 'sandbox' (Folder) is not allowed";
+
+        WebResponse check = ApproverFormFixtures.get(j, "u1", sandbox.getUrl() + "checkNewName?newName=sandbox-old");
+        assertEquals(200, check.getStatusCode(), "the field check answers a validation result: " + ApproverFormFixtures.excerpt(check.getContentAsString()));
+        assertEquals("error", validationKind(check), "the field check must be an error for u1: " + ApproverFormFixtures.excerpt(check.getContentAsString()));
+        assertTrue(visible(check.getContentAsString()).contains(refused), "the field check must say '" + refused + "': "
+                + visible(check.getContentAsString()));
+
+        JenkinsRule.WebClient browser = UsabilityFixtures.clientNoJs(j, "u1");
+        browser.getOptions().setRedirectEnabled(false);
+        WebRequest post = new WebRequest(browser.createCrumbedUrl(sandbox.getUrl() + "confirmRename"), HttpMethod.POST);
+        post.setRequestParameters(List.of(new NameValuePair("newName", "sandbox-old")));
+        post.setAdditionalHeader("Accept", "text/html,application/xhtml+xml");
+        org.htmlunit.Page answer = browser.getPage(post);
+        String text = UsabilityFixtures.text(answer);
+        assertEquals(400, answer.getWebResponse().getStatusCode(), "the refused rename answers 400: " + ApproverFormFixtures.excerpt(text));
+        assertTrue(text.contains(refused), "the refusal page must say '" + refused + "': " + ApproverFormFixtures.excerpt(text));
+        assertTrue(text.contains("Nothing was renamed."), "the refusal page must say 'Nothing was renamed.': " + ApproverFormFixtures.excerpt(text));
+        assertNotNull(j.jenkins.getItemByFullName("sandbox"), "the folder keeps its name");
+        assertNotNull(j.jenkins.getItemByFullName("sandbox/prod"), "the job inside keeps its full name");
+        assertNull(j.jenkins.getItemByFullName("sandbox-old"), "nothing carries the new name");
+
+        WebResponse standing = ApproverFormFixtures.get(j, "c1", sandbox.getUrl() + "checkNewName?newName=sandbox-old");
+        assertEquals(200, standing.getStatusCode());
+        assertFalse("error".equals(validationKind(standing)), "guard: c1's field check (standing Configure) is no error: "
+                + ApproverFormFixtures.excerpt(standing.getContentAsString()));
+        assertFalse(visible(standing.getContentAsString()).contains("not allowed"), "guard: c1 is not told the rename is not allowed");
+        WebResponse jobCheck = ApproverFormFixtures.get(j, "u1", sandboxProd.getUrl() + "checkNewName?newName=prod2");
+        assertEquals(200, jobCheck.getStatusCode());
+        assertFalse("error".equals(validationKind(jobCheck)), "guard: renaming the job through its CONFIGURE window is no error: "
+                + ApproverFormFixtures.excerpt(jobCheck.getContentAsString()));
+        assertFalse(visible(jobCheck.getContentAsString()).contains("not allowed"), "guard: u1 is not told the job rename is not allowed");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** The FormValidation kind of a validation answer ({@code <div class=ok|warning|error>}), or "". */
+    private static String validationKind(WebResponse r) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("class=[\"']?(ok|warning|error)\\b").matcher(r.getContentAsString());
+        return m.find() ? m.group(1) : "";
+    }
+
+    /** Visible text of a markup fragment: tags removed, entities decoded, whitespace collapsed. */
+    private static String visible(String html) {
+        String s = html.replaceAll("<[^>]*>", " ")
+                .replace("&#039;", "'").replace("&#39;", "'").replace("&apos;", "'").replace("&quot;", "\"").replace("&#34;", "\"")
+                .replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        return s.replaceAll("\\s+", " ").trim();
+    }
 
     /** Files a window on {@code fullName} through the form as {@code user}; a1 approves it. */
     private void openWindow(String user, String fullName, String... actions) throws Exception {

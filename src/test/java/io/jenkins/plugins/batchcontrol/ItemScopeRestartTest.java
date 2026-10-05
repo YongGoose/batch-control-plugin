@@ -21,9 +21,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.htmlunit.WebResponse;
@@ -35,6 +37,7 @@ import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -42,7 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (note 260) and T-08-145 (note 262): an ITEM window and the item kind it records survive a
  * restart with their reach unchanged, and a stored window or request with one of the earlier scope
  * types is not converted (D-69), so it confers nothing after the restart while an intact one next
- * to it still loads.
+ * to it still loads. T-08-151 (note 264, D-71b): a window whose item vanished while Jenkins was
+ * down is unbound at startup.
  *
  * <p>The grant file is located as ARCHITECTURE section 5 describes ({@code batch-control/grants/<id>.xml})
  * and is read only for premises; the earlier-type file is made from a file the current plugin
@@ -63,6 +67,8 @@ public class ItemScopeRestartTest {
     private String staleWindowId;
     private final Map<String, String> staleRequestIds = new LinkedHashMap<>();
     private String intactRequestId;
+    private final Map<String, String> startupWindowIds = new LinkedHashMap<>();
+    private Path home;
 
     /**
      * T-08-106 (rewritten for D-71; was the D-65 FOLDER/FOLDER_ONLY restart row): u1's CONFIGURE
@@ -217,6 +223,66 @@ public class ItemScopeRestartTest {
             ApproverFormFixtures.assertSuccess(ApproverFormFixtures.decideGrant(r, "a1", intactRequestId, "approve", "ok"),
                     "guard: approval of the intact request");
             assertTrue(can("u1", c, Item.CONFIGURE), "guard: the intact request's window confers Configure on ops/c");
+        });
+    }
+
+    /**
+     * T-08-151 (D-71b "at startup, windows whose item no longer exists are unbound"): u1 holds
+     * CONFIGURE windows on the job {@code ops/a}, the folder {@code ops/sub}, the job
+     * {@code ops/sub/b} inside it, and the job {@code ops/c}. While Jenkins is down the directories
+     * of {@code ops/a} and {@code ops/sub} are deleted (core fires no item event). After the start
+     * the three windows whose item is gone are shown unbound (Active list and detail page, the exact
+     * documented text) and no longer record an identity (ARCHITECTURE 5); after the administrator
+     * creates {@code ops/a} and {@code ops/sub/b} again, u1 holds no Configure on them and they are
+     * still shown unbound. Guard: the window on {@code ops/c}, whose item survived, is shown bound,
+     * still records its identity and confers Configure on {@code ops/c}.
+     */
+    @Test
+    public void t_08_151_windowWhoseItemVanishedWhileDownIsUnboundAtStartup() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            for (String name : new String[] {"ops/a", "ops/sub", "ops/sub/b", "ops/c"}) {
+                Grant window = approve(request("u1", name, GrantAction.CONFIGURE));
+                startupWindowIds.put(name, window.getId());
+                assertTrue(WindowStateFixtures.storedBinding(r, window.getId()),
+                        "premise (ARCHITECTURE 5): the window on " + name + " records its item's identity");
+                assertTrue(can("u1", r.jenkins.getItemByFullName(name), Item.CONFIGURE), "premise: the window on " + name + " confers");
+            }
+            home = r.jenkins.getRootDir().toPath();
+        });
+        for (String dir : new String[] {"jobs/ops/jobs/a", "jobs/ops/jobs/sub"}) {
+            Path path = home.resolve(dir);
+            assertTrue(Files.isDirectory(path), "premise: the item directory " + path + " exists while Jenkins is down");
+            try (Stream<Path> walk = Files.walk(path)) {
+                for (Path p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.delete(p);
+                }
+            }
+        }
+        session.then(r -> {
+            assertNull(r.jenkins.getItemByFullName("ops/a"), "premise: ops/a is gone after the start");
+            assertNull(r.jenkins.getItemByFullName("ops/sub"), "premise: ops/sub is gone after the start");
+            for (String name : new String[] {"ops/a", "ops/sub", "ops/sub/b"}) {
+                String id = startupWindowIds.get(name);
+                WindowStateFixtures.assertShownUnbound(r, "u1", id, "D-71b: the window on " + name + " whose item vanished while Jenkins was down");
+                assertFalse(WindowStateFixtures.storedBinding(r, id), "D-71b: the stored window on " + name + " must no longer record an identity");
+            }
+            String onC = startupWindowIds.get("ops/c");
+            WindowStateFixtures.assertShownBound(r, "u1", onC, "guard: the window on ops/c, whose item survived");
+            assertTrue(WindowStateFixtures.storedBinding(r, onC), "guard: the window on ops/c still records its item's identity");
+            assertTrue(can("u1", r.jenkins.getItemByFullName("ops/c"), Item.CONFIGURE), "guard: the window on ops/c still confers after the start");
+
+            Item a;
+            Item b;
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator creates the names again
+                Folder ops = (Folder) r.jenkins.getItemByFullName("ops");
+                a = ops.createProject(FreeStyleProject.class, "a");
+                Folder sub = ops.createProject(Folder.class, "sub");
+                b = sub.createProject(FreeStyleProject.class, "b");
+            }
+            assertFalse(can("u1", a, Item.CONFIGURE), "D-71b: no window may reach the re-created ops/a");
+            assertFalse(can("u1", b, Item.CONFIGURE), "D-71b: no window may reach the re-created ops/sub/b");
+            WindowStateFixtures.assertShownUnbound(r, "u1", startupWindowIds.get("ops/a"), "D-71b: the window on ops/a after the name was re-created");
         });
     }
 
