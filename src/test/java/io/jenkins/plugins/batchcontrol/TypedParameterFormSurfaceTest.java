@@ -59,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The D-72 surface of the Request Run form (ui-dev 68f52c3, as documented in its commit message,
- * LIMITATIONS items 16, 31 and 49 and the coordinator's list; matrix note 263): the 413 answer of
+ * LIMITATIONS items 16, 32 and 48 and the coordinator's list; matrix notes 263, 265): the 413 answer of
  * an over-size submission re-renders the form with the reason, on the page and in the dialog
  * ({@code submit?dialog=true}); the notices marked {@code data-batch-control-notice} ({@code rerun}
  * on the rerun fallback form, {@code prefilled} on the D-60 carry-over, {@code reenter} on a 400

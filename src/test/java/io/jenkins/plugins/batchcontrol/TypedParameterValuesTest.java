@@ -57,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
@@ -85,7 +86,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * file-parameters plugin's {@code stashedFile} and {@code base64File}; the approved build receives
  * exactly those values, the original secret and file included; every textual form shows a masked
  * map ({@code ********} for a sensitive value, {@code [file] <original name>} for a file). Matrix
- * rows T-05-41 .. T-05-50 (note 260).
+ * rows T-05-41 .. T-05-50 (note 260); T-05-93, T-05-96 and T-05-97 (note 265: another
+ * Secret-carrying type, no file content in the store, run control off).
  *
  * <p>Requests are submitted through the job's Request Run form as a browser does (multipart, the
  * file chosen in the parameter's own file control) wherever the row is about the form, and through
@@ -246,7 +248,9 @@ public class TypedParameterValuesTest {
      * approved Pipeline build byte for byte ({@code withFileParameter}, {@code B64_FILENAME});
      * neither its Base64 text nor its content appears on the request detail page, the dashboard, the
      * history screens or the CSV exports, which show {@code [file] payload.bin}; in the store the
-     * Base64 lives only inside the request's own file and the content nowhere.
+     * Base64 lives only inside the request's own file while it is pending, nowhere once the approved
+     * run has started (D-72b (5); note 265 moved the "own file" check before the approval), and the
+     * decoded content never.
      */
     @Test
     public void t_05_44_base64FileReachesTheRunAndNeverAppearsAsText() throws Exception {
@@ -263,6 +267,10 @@ public class TypedParameterValuesTest {
         String id = submitRequest(j, "u1", job, Map.of("DATE", PLAIN),
                 Map.of("B64", uploadFile("payload.bin", content)));
         assertEquals(fileDisplay("payload.bin"), RunRequestService.get().load(id).getParameters().get("B64"));
+        String requestFile = "requests/run/" + id + ".xml";
+        assertEquals(List.of(requestFile), storeFilesContaining(j, base64.substring(0, 32)),
+                "while pending, the Base64 must live inside the request's own file and nowhere else in the store");
+        assertTrue(storeFilesContaining(j, base64).contains(requestFile), "while pending, the request file must hold the whole Base64 (D-72)");
 
         approve(id);
         j.waitUntilNoActivity();
@@ -290,11 +298,9 @@ public class TypedParameterValuesTest {
             assertAbsent(surface, body, forbidden);
         }
 
-        String requestFile = "requests/run/" + id + ".xml";
-        assertEquals(List.of(requestFile), storeFilesContaining(j, base64.substring(0, 32)),
-                "the Base64 must live inside the request's own file and nowhere else in the store"
-                + " (run records, incidents, changes and CSV sources hold the masked form)");
-        assertTrue(storeFilesContaining(j, base64).contains(requestFile), "the request file must hold the whole Base64 (D-72)");
+        assertEquals(List.of(), storeFilesContaining(j, base64.substring(0, 32)),
+                "after the run the Base64 must be nowhere in the store: the request file drops its typed values once the approved"
+                + " run starts (D-72b (5)), and run records, incidents, changes and CSV sources hold the masked form");
         assertEquals(List.of(), storeFilesContaining(j, B64_MARKER), "the decoded content must not be written anywhere in the store");
     }
 
@@ -527,7 +533,129 @@ public class TypedParameterValuesTest {
         assertTrue(job.getBuilds().isEmpty(), "nothing runs before an approval");
     }
 
+    /**
+     * T-05-93 (S7 m-1): a parameter value of another type that carries a {@code Secret} field (not a
+     * {@code PasswordParameterValue}, not flagged sensitive) given to the typed service overload:
+     * the request's file holds it only in Jenkins' encrypted form, no store file holds the
+     * plaintext, the display map, the detail page, {@code requests.csv} and the history show
+     * {@code ********}; the approved build receives the original, and afterwards no store file
+     * (run records included) and neither {@code runs.csv} nor the runs history holds the plaintext.
+     * Guard: the plain value next to it is stored and shown verbatim.
+     */
+    @Test
+    public void t_05_93_otherSecretCarryingValueIsStoredEncryptedAndDelivered() throws Exception {
+        String secret = "t0ken-s3cr3t-d72b-Pz7";
+        FreeStyleProject job = j.createFreeStyleProject("token-x");
+        addParameters(job, new CustomParameterFixtures.TokenParameterDefinition("KEY"),
+                new StringParameterDefinition("PLAIN", "plain-default"));
+        job.getBuildersList().add(new TypedParameterFixtures.CaptureEnv(false, "KEY", "PLAIN"));
+        setBatchControl(job, new BatchControlJobProperty(true));
+
+        List<ParameterValue> values = new ArrayList<>();
+        values.add(new CustomParameterFixtures.TokenParameterValue("KEY", Secret.fromString(secret)));
+        values.add(new StringParameterValue("PLAIN", PLAIN));
+        String id = createTyped(job, values).getId();
+
+        assertEquals(MASK, RunRequestService.get().load(id).getParameters().get("KEY"), "a Secret value is shown as " + MASK);
+        assertEquals(PLAIN, RunRequestService.get().load(id).getParameters().get("PLAIN"));
+        assertTrue(TypedParameterFixtures.holdsEncrypted(TypedParameterFixtures.requestFile(j, id), secret),
+                "the request's file must hold the Secret field in Jenkins' encrypted form");
+        assertEquals(List.of(), storeFilesContaining(j, secret), "no store file may hold the plaintext");
+        assertFalse(storeFilesContaining(j, PLAIN).isEmpty(), "guard: the plain value is in the store, so the scan reads the right place");
+        String detail = readable(j, "a1", "batch-control/requests/" + id + "/");
+        assertTrue(detail.contains(MASK) && detail.contains(PLAIN), "the detail page shows the mask and the plain value");
+        assertAbsent("the request detail", detail, List.of(secret));
+        assertAbsent("requests.csv", readable(j, "viewer", "batch-control/history/requests.csv"), List.of(secret));
+        assertAbsent("the requests history", readable(j, "viewer", "batch-control/history/?kind=requests"), List.of(secret));
+
+        approve(id);
+        j.waitUntilNoActivity();
+        FreeStyleBuild build = job.getBuildByNumber(1);
+        assertNotNull(build, "the approved request must run");
+        j.assertBuildStatusSuccess(build);
+        assertEquals(secret, TypedParameterFixtures.CaptureEnv.seen("token-x", 1, "KEY"), "the approved build must receive the original secret");
+        assertEquals(PLAIN, TypedParameterFixtures.CaptureEnv.seen("token-x", 1, "PLAIN"));
+        assertEquals(List.of(), storeFilesContaining(j, secret), "after the run no store file (run records included) holds the plaintext");
+        String runsCsv = readable(j, "viewer", "batch-control/history/runs.csv");
+        assertTrue(runsCsv.contains(PLAIN), "guard: runs.csv lists the run with its plain value");
+        assertAbsent("runs.csv", runsCsv, List.of(secret));
+        assertAbsent("the runs history", readable(j, "viewer", "batch-control/history/?kind=runs"), List.of(secret));
+    }
+
+    /**
+     * T-05-96 (S7 m-10 (a)): Batch Control does not copy file content: a core {@code file} request
+     * (Freestyle) and a {@code stashedFile} request (Pipeline) submitted on the form leave neither
+     * file's content, nor its Base64, in any file of the Batch Control store, while pending and
+     * after the approved runs. Guard: the store does hold the request ({@code [file] <name>}).
+     */
+    @Test
+    public void t_05_96_coreAndStashedFileContentIsNeverInTheStore() throws Exception {
+        byte[] coreContent = payload(CORE_MARKER, 2500);
+        byte[] stashContent = payload(STASH_MARKER, 2500);
+        FreeStyleProject core = coreFileJob("scan-core");
+        WorkflowJob stash = pipeline("scan-stash", "node {\n  unstash 'DATA'\n}\n", new StashedFileParameterDefinition("DATA"));
+        String coreId = submitRequest(j, "u1", core, Map.of("DATE", PLAIN), Map.of("UPLOAD", uploadFile("scan.csv", coreContent)));
+        String stashId = submitRequest(j, "u1", stash, Map.of(), Map.of("DATA", uploadFile("scan.bin", stashContent)));
+        List<String> forbidden = List.of(CORE_MARKER, STASH_MARKER,
+                Base64.getEncoder().encodeToString(coreContent).substring(0, 32),
+                Base64.getEncoder().encodeToString(stashContent).substring(0, 32));
+
+        assertFalse(storeFilesContaining(j, fileDisplay("scan.csv")).isEmpty(), "guard: the store holds the core file request");
+        assertFalse(storeFilesContaining(j, fileDisplay("scan.bin")).isEmpty(), "guard: the store holds the stashed file request");
+        for (String needle : forbidden) {
+            assertEquals(List.of(), storeFilesContaining(j, needle), "while pending, no store file may hold file content: " + needle);
+        }
+
+        approve(coreId);
+        approve(stashId);
+        j.waitUntilNoActivity();
+        j.assertBuildStatusSuccess(core.getBuildByNumber(1));
+        j.assertBuildStatusSuccess(stash.getBuildByNumber(1));
+        for (String needle : forbidden) {
+            assertEquals(List.of(), storeFilesContaining(j, needle), "after the runs, no store file may hold file content: " + needle);
+        }
+    }
+
+    /**
+     * T-05-97 (S7 m-10 (d), SPEC item 1): with run control off, an approval-required job with a core
+     * file parameter behaves as Jenkins does: core's build form submitted with a file queues and
+     * runs the build, whose workspace file holds exactly the uploaded bytes; no run request is
+     * created and the upload is not disposed of before the build used it.
+     */
+    @Test
+    public void t_05_97_runControlOffLeavesTypedSubmissionsUnchanged() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setRunControlEnabled(false);
+        cfg.save();
+        byte[] content = payload("switch-off-marker-Vd97", 3000);
+        FreeStyleProject job = coreFileJob("off-x");
+        assertTrue(job.getProperty(BatchControlJobProperty.class).isApprovalRequired(), "premise: the job is approval-required");
+        java.util.Set<String> before = ApproverFormFixtures.runRequestIds();
+
+        JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
+        org.htmlunit.html.HtmlPage formPage = wc.getPage(new java.net.URL(j.getURL(), job.getUrl() + "build?delay=0sec"));
+        HtmlForm form = formPage.getFormByName("parameters");
+        TypedParameterFixtures.setValue(form, "DATE", PLAIN);
+        TypedParameterFixtures.setFile(form, "UPLOAD", uploadFile("off.csv", content));
+        Page answer = j.submit(form);
+        assertTrue(answer.getWebResponse().getStatusCode() < 400, "core's build form must be accepted with run control off, got HTTP "
+                + answer.getWebResponse().getStatusCode());
+        j.waitUntilNoActivity();
+
+        FreeStyleBuild build = job.getBuildByNumber(1);
+        assertNotNull(build, "the build must run as in Jenkins");
+        j.assertBuildStatusSuccess(build);
+        assertArrayEquals(content, bytes(build.getWorkspace().child("UPLOAD")), "the build must receive exactly the uploaded bytes");
+        assertEquals(PLAIN, ((StringParameterValue) build.getAction(ParametersAction.class).getParameter("DATE")).getValue());
+        assertEquals(before, ApproverFormFixtures.runRequestIds(), "no run request may be created with run control off");
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** The descriptor of the Secret-carrying parameter type used by T-05-93. */
+    @TestExtension
+    public static final class TokenDescriptor extends CustomParameterFixtures.TokenDescriptorBase {
+    }
 
     private FreeStyleProject coreFileJob(String name) throws Exception {
         FreeStyleProject job = j.createFreeStyleProject(name);

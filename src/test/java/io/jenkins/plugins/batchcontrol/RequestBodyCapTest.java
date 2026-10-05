@@ -48,6 +48,7 @@ import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.tempFiles;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.uploadFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -55,7 +56,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * system property {@code io.jenkins.plugins.batchcontrol.maxRequestBodyBytes}) is refused before
  * the form is read, because requesting a run does not require Item/Build (D-38a). Frozen contract:
  * the check comes after the permission check, answers HTTP 413, creates no request and leaves
- * nothing on disk. Matrix rows T-05-59 .. T-05-64 (note 260).
+ * nothing on disk. Matrix rows T-05-59 .. T-05-64 (note 260); T-05-94 (the exact default) and
+ * T-05-95 (a chunked body is judged by its actual size, D-72b (4)) use {@link RawHttpFixtures}
+ * (note 265).
  *
  * <p>The property is set per test and cleared afterwards, so the plugin must read it when it checks
  * (the TriggerBlockedAuditTest convention; Request in the deliverable report). The body size of a
@@ -248,7 +251,92 @@ public class RequestBodyCapTest {
         assertEquals(tempBefore, tempFiles(j), "no temporary file may be left behind");
     }
 
+    /**
+     * T-05-94 (S7 m-2): with the property unset, the cap is exactly 104,857,600 bytes. A
+     * submission that declares a length of 104,857,601 bytes is refused with 413 at once (decided
+     * from the declared length, no body sent); one that declares exactly 104,857,600 bytes is not
+     * refused by the cap (any answer but 413, and without waiting for the body). Neither creates a
+     * request.
+     */
+    @Test
+    public void t_05_94_defaultCapIsExactly104857600Bytes() throws Exception {
+        System.clearProperty(CAP_PROPERTY);
+        Set<String> before = ApproverFormFixtures.runRequestIds();
+        String auth = RawHttpFixtures.basic("u1", RawHttpFixtures.apiToken("u1"));
+
+        int over = RawHttpFixtures.post(j.getURL(), job.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth),
+                RawHttpFixtures.header("Content-Type", "application/octet-stream"),
+                RawHttpFixtures.header("Content-Length", "104857601")), new byte[0], false);
+        assertEquals(413, over, "a declared length one byte over the default cap of 104857600 must answer 413");
+
+        int exact = RawHttpFixtures.post(j.getURL(), job.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth),
+                RawHttpFixtures.header("Content-Type", "application/octet-stream"),
+                RawHttpFixtures.header("Content-Length", "104857600")), new byte[0], false);
+        assertNotEquals(413, exact, "a declared length of exactly the default cap must not be refused by the cap");
+        assertEquals(before, ApproverFormFixtures.runRequestIds(), "neither probe may create a request");
+        assertNothingRan();
+    }
+
+    /**
+     * T-05-95 (D-72b (4), S7 m-3/O-1): with the cap at 64 KiB, a multipart submission sent chunked
+     * (no declared length) is judged by its actual size: a 1 KiB file is accepted (one request,
+     * {@code [file] data.csv}); an 80 KiB file is refused with 413, creates no request and keeps no
+     * temporary file. Premise: the same small body sent with a Content-Length is accepted (the raw
+     * channel and the body are valid).
+     */
+    @Test
+    public void t_05_95_chunkedBodyIsJudgedByItsActualSize() throws Exception {
+        System.setProperty(CAP_PROPERTY, Long.toString(CAP));
+        String auth = RawHttpFixtures.basic("u1", RawHttpFixtures.apiToken("u1"));
+        String boundary = "d72b-chunked-boundary-Yk95";
+        String type = "multipart/form-data; boundary=" + boundary;
+
+        byte[] small = chunkedBody(boundary, payload("chunked-small-marker-Lq95", 1024));
+        Set<String> before = ApproverFormFixtures.runRequestIds();
+        int declared = RawHttpFixtures.post(j.getURL(), job.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth), RawHttpFixtures.header("Content-Type", type),
+                RawHttpFixtures.header("Content-Length", Integer.toString(small.length))), small, false);
+        assertTrue(declared < 400, "premise: the small body with a declared length must be accepted, got HTTP " + declared);
+        assertEquals(1, created(before).size(), "premise: the declared-length body creates one request");
+
+        before = ApproverFormFixtures.runRequestIds();
+        int chunkedSmall = RawHttpFixtures.post(j.getURL(), job.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth), RawHttpFixtures.header("Content-Type", type)), small, true);
+        assertTrue(chunkedSmall < 400, "a chunked body under the cap must be accepted, got HTTP " + chunkedSmall);
+        Set<String> one = created(before);
+        assertEquals(1, one.size(), "the chunked body under the cap must create exactly one request, got " + one);
+        assertEquals(fileDisplay("data.csv"), RunRequestService.get().load(one.iterator().next()).getParameters().get("UPLOAD"));
+
+        before = ApproverFormFixtures.runRequestIds();
+        Set<Path> tempBefore = tempFiles(j);
+        byte[] large = chunkedBody(boundary, payload("chunked-large-marker-Ms95", (int) CAP + 16 * 1024));
+        int chunkedLarge = RawHttpFixtures.post(j.getURL(), job.getUrl() + "batch-control/submit", RawHttpFixtures.headers(
+                RawHttpFixtures.header("Authorization", auth), RawHttpFixtures.header("Content-Type", type)), large, true);
+        assertEquals(413, chunkedLarge, "a chunked body over the cap must answer 413");
+        assertEquals(Set.of(), created(before), "a chunked body over the cap must create no request");
+        assertEquals(tempBefore, tempFiles(j), "a chunked body over the cap must keep nothing under the temporary directories");
+        assertNothingRan();
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** The Request Run fields (reason, approver, DATE) and {@code data.csv} as UPLOAD, as multipart. */
+    private static byte[] chunkedBody(String boundary, byte[] file) throws IOException {
+        List<Object[]> parts = new ArrayList<>();
+        parts.add(RawHttpFixtures.part("reason", null, "month-end batch".getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("approvers", null, "a1".getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("DATE", null, "2026-10-01".getBytes(StandardCharsets.UTF_8)));
+        parts.add(RawHttpFixtures.part("UPLOAD", "data.csv", file));
+        return RawHttpFixtures.multipart(boundary, parts);
+    }
+
+    private static Set<String> created(Set<String> before) {
+        Set<String> now = ApproverFormFixtures.runRequestIds();
+        now.removeAll(before);
+        return now;
+    }
 
     /** Submits the Request Run form as {@code userId} with {@code content} chosen as {@code data.csv}. */
     private Page submitForm(String userId, byte[] content) throws Exception {

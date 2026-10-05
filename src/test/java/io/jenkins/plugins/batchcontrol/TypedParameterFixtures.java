@@ -387,6 +387,110 @@ final class TypedParameterFixtures {
         return out;
     }
 
+    // ------------------------------------------------------------------ the request file on disk (D-72b, note 265)
+
+    /** The names of every file in {@code requests/run/} (an absent directory is empty), temporary files included. */
+    static Set<String> requestDirListing(JenkinsRule j) throws IOException {
+        Path dir = storeDir(j).resolve("requests").resolve("run");
+        Set<String> out = new TreeSet<>();
+        if (Files.isDirectory(dir)) {
+            try (Stream<Path> paths = Files.list(dir)) {
+                paths.forEach(p -> out.add(p.getFileName().toString()));
+            }
+        }
+        return out;
+    }
+
+    /** The current text of request {@code id}'s file. */
+    static String requestXml(JenkinsRule j, String id) throws IOException {
+        return new String(Files.readAllBytes(requestFile(j, id)), StandardCharsets.UTF_8);
+    }
+
+    /** Rewrites request {@code id}'s file with {@code edit} (an edit on disk, as a pre-release file or an administrator would leave it). */
+    static String editRequestFile(JenkinsRule j, String id, java.util.function.UnaryOperator<String> edit) throws IOException {
+        Path file = requestFile(j, id);
+        String before = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        String after = edit.apply(before);
+        assertFalse(before.equals(after), "fixture: the edit must change the request file");
+        Files.write(file, after.getBytes(StandardCharsets.UTF_8));
+        return after;
+    }
+
+    private static final Pattern TYPED_SECTION = Pattern.compile("(?s)<parameterValues(?:\\s[^>]*)?>(.*?)</parameterValues>");
+
+    /** The element of the typed value named {@code name} inside the file's {@code parameterValues} (ARCHITECTURE 5). */
+    static String typedElement(String xml, String name) {
+        Matcher section = TYPED_SECTION.matcher(xml);
+        assertTrue(section.find(), "fixture: the request file must hold its typed values in parameterValues (D-72): "
+                + UsabilityFixtures.excerpt(xml));
+        Matcher element = Pattern.compile("(?s)<([A-Za-z_][\\w.$-]*)(?:\\s[^>]*)?>\\s*<name>" + Pattern.quote(name)
+                + "</name>.*?</\\1>").matcher(section.group(1));
+        assertTrue(element.find(), "fixture: a typed value named " + name + " must be stored: " + UsabilityFixtures.excerpt(section.group(1)));
+        String found = element.group();
+        assertFalse(element.find(), "fixture: exactly one typed value named " + name + " must be stored before the edit");
+        return found;
+    }
+
+    /** Adds a second typed value named {@code name} right after the first, holding {@code value} (the display map is untouched). */
+    static String duplicateTypedValue(String xml, String name, String value) {
+        String element = typedElement(xml, name);
+        String copy = element.replaceFirst("(?s)<value>.*?</value>", "<value>" + Matcher.quoteReplacement(value) + "</value>");
+        assertFalse(copy.equals(element), "fixture: the typed value " + name + " must hold a <value> to change");
+        return xml.replace(element, element + "\n    " + copy);
+    }
+
+    /** Renames the typed value {@code from} to {@code to} (the display map still names {@code from}). */
+    static String renameTypedValue(String xml, String from, String to) {
+        String element = typedElement(xml, from);
+        return xml.replace(element, element.replace("<name>" + from + "</name>", "<name>" + to + "</name>"));
+    }
+
+    /** Stores the typed value {@code name} under a class that cannot be loaded (its plugin removed, its class renamed). */
+    static String retypeTypedValue(String xml, String name, String className) {
+        String element = typedElement(xml, name);
+        Matcher open = Pattern.compile("^<([A-Za-z_][\\w.$-]*)").matcher(element);
+        assertTrue(open.find(), "fixture: the typed value must start with its element");
+        String tag = open.group(1);
+        String renamed = "<" + className + element.substring(open.end(), element.length() - ("</" + tag + ">").length())
+                + "</" + className + ">";
+        return xml.replace(element, renamed);
+    }
+
+    /** The file in the shape written before D-72: the display map but no typed values. */
+    static String withoutTypedValues(String xml) {
+        String out = xml.replaceAll("(?s)\\s*<parameterValues(?:\\s[^>]*)?>.*?</parameterValues>", "")
+                .replaceAll("\\s*<parameterValues(?:\\s[^>]*)?/>", "");
+        assertFalse(out.contains("<parameterValues"), "fixture: no typed values may remain");
+        return out;
+    }
+
+    /** Appends {@code mark} to the stored reason, so a row can prove that the plugin reads the edited file. */
+    static String markReason(String xml, String mark) {
+        assertTrue(xml.contains("</reason>"), "fixture: the request file must hold its reason");
+        return xml.replace("</reason>", mark + "</reason>");
+    }
+
+    /**
+     * Asserts that request {@code id}'s file no longer holds its typed values (D-72b (5)): none of
+     * {@code forbidden} (Base64 text, temporary file paths) and no encrypted token that decrypts to
+     * {@code secret}.
+     */
+    static void assertTypedValuesGone(JenkinsRule j, String what, String id, List<String> forbidden, String secret) throws IOException {
+        String xml = requestXml(j, id);
+        assertAbsent(what + ": the request file", xml, forbidden);
+        assertFalse(holdsEncrypted(requestFile(j, id), secret), what + ": the request file must no longer hold the secret,"
+                + " not even encrypted (D-72b (5))");
+    }
+
+    /** Asserts that request {@code id}'s file still holds its typed values: each of {@code present} and the encrypted secret. */
+    static void assertTypedValuesKept(JenkinsRule j, String what, String id, List<String> present, String secret) throws IOException {
+        String xml = requestXml(j, id);
+        for (String needle : present) {
+            assertTrue(xml.contains(needle), what + ": the request file must still hold " + describe(needle));
+        }
+        assertTrue(holdsEncrypted(requestFile(j, id), secret), what + ": the request file must still hold the encrypted secret");
+    }
+
     /** The bytes of {@code file}, which must exist. */
     static byte[] bytes(FilePath file) throws Exception {
         assertTrue(file.exists(), "the build must have produced " + file.getRemote());
@@ -433,6 +537,29 @@ final class TypedParameterFixtures {
 
         static String seen(String job, int number, String name) {
             return SEEN.get(key(job, number, name));
+        }
+    }
+
+    /**
+     * Copies the approved run request's file (found through the build's {@code ApprovedCause}) into
+     * {@link #SNAPSHOTS} while the build runs, keyed {@code <job>#<number>}, so a row can see what
+     * the file holds once the approved run has started (D-72b (5)). Test memory only; nothing is
+     * printed. A build without an {@code ApprovedCause} records nothing.
+     */
+    public static final class RequestFileSnapshot extends TestBuilder {
+        static final Map<String, String> SNAPSHOTS = new ConcurrentHashMap<>();
+
+        @Override
+        public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws IOException {
+            io.jenkins.plugins.batchcontrol.queue.ApprovedCause cause =
+                    build.getCause(io.jenkins.plugins.batchcontrol.queue.ApprovedCause.class);
+            if (cause != null) {
+                Path file = jenkins.model.Jenkins.get().getRootDir().toPath().resolve("batch-control").resolve("requests")
+                        .resolve("run").resolve(cause.getRequestId() + ".xml");
+                SNAPSHOTS.put(build.getParent().getFullName() + "#" + build.getNumber(),
+                        Files.exists(file) ? new String(Files.readAllBytes(file), StandardCharsets.UTF_8) : "<missing>");
+            }
+            return true;
         }
     }
 }
