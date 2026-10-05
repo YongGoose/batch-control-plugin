@@ -202,7 +202,9 @@ public class TypedValueRemovalTest {
     /**
      * T-05-85: an approved request whose run was never queued keeps its typed values while it can
      * still run (guard), and loses them when it ends: EXPIRED by the approved-run timeout, and
-     * INVALIDATED by a rename; the display stays.
+     * INVALIDATED by a rename; the display stays. SPEC 7: the expiry work ends every approved,
+     * unqueued request past the timeout, so the request ended by the rename is approved after the
+     * clock move and is not yet due when the expiry work runs (note 265).
      */
     @Test
     public void t_05_85_typedValuesLeaveTheFileWhenAnApprovedUnqueuedRequestEnds() throws Exception {
@@ -217,19 +219,21 @@ public class TypedValueRemovalTest {
         String expiredId = createTyped(expiring, first);
         String invalidatedId = createTyped(renamed, second);
         QueueRefusalFixtures.refusedBeforeTheGate(expiring, () -> approve(expiredId));
-        QueueRefusalFixtures.refusedBeforeTheGate(renamed, () -> approve(invalidatedId));
-        for (String id : new String[] {expiredId, invalidatedId}) {
-            assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(id).getStatus(), "premise: approved, not queued");
-        }
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(expiredId).getStatus(), "premise: approved, not queued");
         assertTypedValuesKept(j, "approved, not yet run (it can still be submitted)", expiredId, List.of(b64(first)), SECRET);
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(61)), ZoneOffset.UTC));
+        // SPEC 7 expires every approved, unqueued request past the timeout, so the second request is
+        // approved only now: the expiry work below leaves it APPROVED and only the rename ends it
+        QueueRefusalFixtures.refusedBeforeTheGate(renamed, () -> approve(invalidatedId));
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(invalidatedId).getStatus(), "premise: approved, not queued");
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
         assertEquals(RequestStatus.EXPIRED, RunRequestService.get().load(expiredId).getStatus(), "premise: expired by the approved-run timeout");
         assertTypedValuesGone(j, "the expired approval", expiredId, List.of(b64(first).substring(0, 32)), SECRET);
         assertDisplayStays(expiredId, "the expired approval");
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(invalidatedId).getStatus(), "premise: not yet due, still approved");
+        assertTypedValuesKept(j, "approved within the timeout, not yet run", invalidatedId, List.of(b64(second)), SECRET);
 
-        // the rename comes after the clock move, so only the rename can end the second request
         renamed.renameTo("strip-appr-renamed");
         assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(invalidatedId).getStatus(), "premise: invalidated");
         assertTypedValuesGone(j, "the invalidated approval", invalidatedId, List.of(b64(second).substring(0, 32)), SECRET);
