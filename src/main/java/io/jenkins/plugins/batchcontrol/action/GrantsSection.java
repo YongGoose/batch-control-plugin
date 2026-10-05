@@ -225,7 +225,10 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * {@code customDurationMinutes} (optional free number overriding the preset, capped
      * client-side at {@code maxGrantMinutes} and re-checked by the service), {@code reason},
      * {@code approvers} (repeated, one user id each; D-37) and the optional
-     * {@code createNamePattern} (exact name or {@code /regex/}, CREATE only; D-40).
+     * {@code createNamePattern} (exact name or {@code /regex/}, CREATE only; D-40). The form shows
+     * the name restriction only while Create is ticked (#107), so it is read only for a request
+     * that includes CREATE, as core's {@code f:optionalBlock} does not count the fields of a
+     * collapsed block.
      */
     @RequirePOST
     public void doCreate(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
@@ -251,7 +254,10 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         if (approvers.isEmpty()) {
             errors.field("approvers", "Check at least one approver.");
         }
-        String createNamePattern = parseCreateNamePattern(req.getParameter("createNamePattern"), errors);
+        // #107: a value left in the hidden field of an unticked Create does not count.
+        String createNamePattern = actions.contains(GrantAction.CREATE)
+                ? parseCreateNamePattern(req.getParameter("createNamePattern"), errors)
+                : null;
 
         if (errors.isEmpty()) {
             try {
@@ -404,7 +410,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /**
      * Blank means no restriction. Only the length is bounded here, before the text reaches the
-     * regex compiler; syntax, item-name validity and "CREATE only" are the service's to refuse.
+     * regex compiler; syntax and item-name validity are the service's to refuse. Called only for a
+     * request that includes CREATE (#107); the service still refuses a restriction without it.
      */
     @CheckForNull
     private static String parseCreateNamePattern(@CheckForNull String raw, FormErrors errors) {

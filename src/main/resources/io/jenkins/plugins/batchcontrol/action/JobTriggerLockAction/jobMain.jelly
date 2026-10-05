@@ -5,7 +5,7 @@
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>
   <j:if test="${!newJobPage}">
-    <j:set var="noticeStyle" value="margin-top: 1rem;"/>
+    <j:set var="noticeClass" value="jenkins-!-margin-top-3"/>
     <st:include page="notices.jelly"/>
   </j:if>
 </j:jelly>
