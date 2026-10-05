@@ -32,6 +32,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -177,15 +178,14 @@ public class RequestIntegrityTest {
         delta.addProperty(new BatchControlJobProperty(true));
         RunRequest request = createAs("u1", delta);
 
-        j.jenkins.doQuietDown(); // keep the approval from starting a build
-        approveAs("a1", request.getId());
-        j.jenkins.getQueue().clear(); // model "approved but not yet submitted"
+        // the queue refuses the approved submission: "approved but not yet submitted" without a
+        // cancelled queue item (D-72b (7); note 265)
+        QueueRefusalFixtures.refusedBeforeTheGate(delta, () -> approveAs("a1", request.getId()));
         assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(request.getId()).getStatus());
 
         delta.renameTo("delta-renamed");
         assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(request.getId()).getStatus(), "renaming an APPROVED (not yet submitted) target must invalidate the request");
 
-        j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
         assertTrue(delta.getBuilds().isEmpty(), "the invalidated approval must never execute");
     }
@@ -224,6 +224,11 @@ public class RequestIntegrityTest {
         try (ACLContext ignored = as("u1")) {
             return RunRequestService.get().create(target, parameters, reason, "a1");
         }
+    }
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures, note 265). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
     }
 
     private void approveAs(String userId, String requestId) {

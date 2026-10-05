@@ -6,6 +6,7 @@ import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.ParameterValue;
+import hudson.model.ParametersAction;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
@@ -36,6 +37,7 @@ import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
@@ -45,13 +47,16 @@ import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * SPEC item 4 (a PENDING request survives a restart) combined with item 5, D-72 (the approved build
  * receives the submitted file): a controller restart between the submission and the approval must
- * not lose the file. Matrix rows T-05-51 and T-05-52 (note 260).
+ * not lose the file. Matrix rows T-05-51 and T-05-52 (note 260). D-72b adds T-05-82 (startup
+ * recovery refuses an approved request whose stored values do not match the displayed ones) and
+ * T-05-87 (an approved run whose queue item was cancelled is not resubmitted; S-35-07) (note 265).
  *
  * <p>Persistable security as in RestartRecoveryTest (a matrix strategy, the dummy realm), so the
  * second session sees the same users and permissions.
@@ -154,7 +159,122 @@ public class TypedParameterRestartTest {
         });
     }
 
+    /**
+     * T-05-82 (S-35-01/04, fail closed at submission): two requests (TARGET) are approved while the
+     * queue refuses them before Batch Control's gate, so both are APPROVED and not queued; one
+     * request's file is then edited to hold a second typed TARGET ({@code production}). After a
+     * restart, startup recovery submits the unedited one exactly once with its value (guard), and
+     * never submits the edited one: no build (so no run with {@code production}), nothing queued,
+     * not EXECUTED.
+     */
+    @Test
+    public void t_05_82_recoveryNeverSubmitsAnApprovedRequestWhoseStoredValuesDoNotMatch() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            FreeStyleProject edited = targetJob(r, "fc-edit");
+            FreeStyleProject guard = targetJob(r, "fc-guard");
+            requestId = createAsU1(edited, List.of(new StringParameterValue("TARGET", "staging")));
+            guardId = createAsU1(guard, List.of(new StringParameterValue("TARGET", "guarded")));
+            QueueRefusalFixtures.refusedBeforeTheGate(edited, () -> approveAsA1(requestId));
+            QueueRefusalFixtures.refusedBeforeTheGate(guard, () -> approveAsA1(guardId));
+            r.waitUntilNoActivity();
+            assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(requestId).getStatus(), "premise: approved, not queued");
+            assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(guardId).getStatus(), "premise: approved, not queued");
+            assertTrue(edited.getBuilds().isEmpty() && guard.getBuilds().isEmpty(), "premise: nothing ran before the restart");
+
+            TypedParameterFixtures.editRequestFile(r, requestId,
+                    xml -> TypedParameterFixtures.duplicateTypedValue(xml, "TARGET", "production"));
+            assertTrue(TypedParameterFixtures.requestXml(r, requestId).contains("production"), "premise: the edit is on disk");
+        });
+        session.then(r -> {
+            r.waitUntilNoActivity();
+            FreeStyleProject guard = r.jenkins.getItemByFullName("fc-guard", FreeStyleProject.class);
+            assertEquals(1, guard.getBuilds().size(), "guard: startup recovery submits the unedited approval exactly once");
+            assertEquals("guarded", guard.getBuildByNumber(1).getAction(ParametersAction.class).getParameter("TARGET").getValue(),
+                    "guard: the recovered run receives its own value");
+            assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(guardId).getStatus());
+
+            FreeStyleProject edited = r.jenkins.getItemByFullName("fc-edit", FreeStyleProject.class);
+            assertTrue(edited.getBuilds().isEmpty(), "recovery must not submit a request whose stored values do not match the displayed ones");
+            assertEquals(1, edited.getNextBuildNumber(), "no build number may have been consumed");
+            assertTrue(r.jenkins.getQueue().isEmpty(), "nothing may be queued");
+            assertNotEquals(RequestStatus.EXECUTED, RunRequestService.get().load(requestId).getStatus());
+        });
+    }
+
+    /**
+     * T-05-87 (S-35-07, D-72b (7)): two requests are approved under quiet-down, so each run waits in
+     * the queue; the item of the one with a stashed file is cancelled. After a restart that request
+     * is not resubmitted (no build, not EXECUTED) and its temporary file is gone; the other one runs
+     * exactly once (guard: a queued item that was not cancelled is not lost).
+     */
+    @Test
+    public void t_05_87_cancelledApprovedQueueItemIsNotResubmittedAfterARestart() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            FreeStyleProject cancelled = r.createFreeStyleProject("cq-cancel");
+            cancelled.addProperty(new ParametersDefinitionProperty(new StashedFileParameterDefinition("DATA"),
+                    new StringParameterDefinition("DATE", "2000-01-01")));
+            setBatchControl(cancelled, new BatchControlJobProperty(true));
+            FreeStyleProject kept = r.createFreeStyleProject("cq-keep");
+            kept.addProperty(new ParametersDefinitionProperty(new StringParameterDefinition("DATE", "2000-01-01")));
+            setBatchControl(kept, new BatchControlJobProperty(true));
+
+            Set<Path> before = TypedParameterFixtures.tempFiles(r);
+            List<ParameterValue> values = new ArrayList<>();
+            values.add(new StashedFileParameterValue("DATA", TypedParameterFixtures.fileItem("cancel.bin", payload("cq-marker-Rt87", 1200))));
+            values.add(new StringParameterValue("DATE", "2026-10-01"));
+            requestId = createAsU1(cancelled, values);
+            held = TypedParameterFixtures.added(before, TypedParameterFixtures.tempFiles(r));
+            assertFalse(held.isEmpty(), "premise: the request holds a temporary file");
+            guardId = createAsU1(kept, List.of(new StringParameterValue("DATE", "2026-10-01")));
+
+            r.jenkins.doQuietDown();
+            approveAsA1(requestId);
+            approveAsA1(guardId);
+            assertEquals(2, r.jenkins.getQueue().getItems().length, "premise: both approved runs wait in the queue");
+            assertTrue(r.jenkins.getQueue().cancel(cancelled), "premise: the approved queue item is cancelled");
+            assertEquals(1, r.jenkins.getQueue().getItems().length, "premise: only the other approved run still waits");
+        });
+        session.then(r -> {
+            r.waitUntilNoActivity();
+            FreeStyleProject kept = r.jenkins.getItemByFullName("cq-keep", FreeStyleProject.class);
+            assertEquals(1, kept.getBuilds().size(), "guard: the queued, not cancelled approval runs exactly once");
+            assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(guardId).getStatus());
+
+            FreeStyleProject cancelled = r.jenkins.getItemByFullName("cq-cancel", FreeStyleProject.class);
+            assertTrue(cancelled.getBuilds().isEmpty(), "startup recovery must not resubmit an approved run whose queue item was cancelled");
+            assertEquals(1, cancelled.getNextBuildNumber(), "no build number may have been consumed");
+            assertNotEquals(RequestStatus.EXECUTED, RunRequestService.get().load(requestId).getStatus());
+            assertEquals(Set.of(), TypedParameterFixtures.stillThere(held), "the cancelled approval's temporary file must be disposed of");
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
+    }
+
+    private String guardId;
+
+    /**
+     * An approval-required Freestyle job with TARGET. (A test build step does not survive the
+     * restart, so the rows read the run's parameters instead of recording its environment.)
+     */
+    private static FreeStyleProject targetJob(JenkinsRule r, String name) throws Exception {
+        FreeStyleProject job = r.createFreeStyleProject(name);
+        job.addProperty(new ParametersDefinitionProperty(new StringParameterDefinition("TARGET", "default-target")));
+        setBatchControl(job, new BatchControlJobProperty(true));
+        return job;
+    }
+
+    private static String createAsU1(FreeStyleProject job, List<ParameterValue> values) {
+        try (ACLContext ignored = ACL.as2(User.getById("u1", true).impersonate2())) {
+            return RunRequestService.get().create(job, values, "restart hardening (D-72b)", "a1").getId();
+        }
+    }
 
     private static void prepare(JenkinsRule r) throws Exception {
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());

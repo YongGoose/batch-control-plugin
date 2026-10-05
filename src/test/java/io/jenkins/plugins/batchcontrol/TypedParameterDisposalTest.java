@@ -36,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
@@ -59,7 +60,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * SPEC item 5, D-72: file content stays where its parameter type stores it, and when a request
  * ends without a run (rejected, cancelled, expired, invalidated) Batch Control disposes of those
  * temporary files; once the approved run is queued, the queue and the build own them. Matrix rows
- * T-05-53 .. T-05-58 (note 260).
+ * T-05-53 .. T-05-58 (note 260); T-05-88, T-05-89, T-05-91 and T-05-92 add "its approved run could
+ * not be queued" with the queue refusing before and after Batch Control's gate (note 265,
+ * spec-review-S7 M-1/M-2; {@link QueueRefusalFixtures}).
  *
  * <p>"The temporary copies that belonged to the request" are measured, not assumed: the regular
  * files under {@code $JENKINS_HOME/fileParameterValueFiles} and
@@ -232,7 +235,116 @@ public class TypedParameterDisposalTest {
         assertEquals(RequestStatus.EXECUTED, RunRequestService.get().load(stashId).getStatus());
     }
 
+    // ---------------------------------------------------------------- the approved run could not be queued (note 265)
+
+    /**
+     * T-05-88 (S7 M-2, refused before the gate): with the queue refusing the job before Batch
+     * Control's gate, a1 approves: APPROVED, nothing queued, and the request's files are kept while
+     * it can still be submitted (guard); once {@code approvedRunTimeoutMinutes} passes it is EXPIRED
+     * and none of its temporary files remains; nothing ran.
+     */
+    @Test
+    public void t_05_88_approvedRunRefusedBeforeTheGateDisposesAtExpiry() throws Exception {
+        approvedRunTimeout();
+        FreeStyleProject job = twoFileJob("refuse-before-expire");
+        Held held = submitWithBothFiles(job);
+
+        QueueRefusalFixtures.refusedBeforeTheGate(job, () -> approve(held.id));
+        assertApprovedNotQueued(job, held);
+
+        expireApproval();
+        assertEquals(RequestStatus.EXPIRED, RunRequestService.get().load(held.id).getStatus());
+        assertDisposed("the approval that expired without being queued", held);
+        assertNothingRan(job);
+    }
+
+    /**
+     * T-05-89 (S7 M-1/M-2, refused after the gate): core's item-deletion veto refuses the approved
+     * submission after Batch Control's gate accepted it: APPROVED, nothing queued, the files kept
+     * while it can still be submitted (guard); at the approved-run timeout it is EXPIRED and none
+     * of its temporary files remains.
+     */
+    @Test
+    public void t_05_89_approvedRunRefusedAfterTheGateDisposesAtExpiry() throws Exception {
+        approvedRunTimeout();
+        FreeStyleProject job = twoFileJob("refuse-after-expire");
+        Held held = submitWithBothFiles(job);
+
+        QueueRefusalFixtures.refusedAfterTheGate(job, () -> approve(held.id));
+        assertApprovedNotQueued(job, held);
+
+        expireApproval();
+        assertEquals(RequestStatus.EXPIRED, RunRequestService.get().load(held.id).getStatus());
+        assertDisposed("the approval refused after the gate, then expired", held);
+        assertNothingRan(job);
+    }
+
+    /**
+     * T-05-91 (S7 M-2, D-21): an APPROVED request whose run was refused before the gate (never
+     * queued) is INVALIDATED by a rename of its job, and none of its temporary files remains.
+     */
+    @Test
+    public void t_05_91_renameOfAnApprovedNeverQueuedRequestDisposes() throws Exception {
+        FreeStyleProject job = twoFileJob("refuse-before-rename");
+        Held held = submitWithBothFiles(job);
+        QueueRefusalFixtures.refusedBeforeTheGate(job, () -> approve(held.id));
+        assertApprovedNotQueued(job, held);
+
+        job.renameTo("refuse-before-renamed");
+        assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(held.id).getStatus());
+        assertDisposed("the invalidated approval (refused before the gate)", held);
+        assertNothingRan(job);
+    }
+
+    /**
+     * T-05-92 (S7 M-1, D-21): the same with the run refused after the gate (core's item-deletion
+     * veto): the rename INVALIDATES the request and none of its temporary files remains.
+     */
+    @Test
+    public void t_05_92_renameOfAnApprovedRequestRefusedAfterTheGateDisposes() throws Exception {
+        FreeStyleProject job = twoFileJob("refuse-after-rename");
+        Held held = submitWithBothFiles(job);
+        QueueRefusalFixtures.refusedAfterTheGate(job, () -> approve(held.id));
+        assertApprovedNotQueued(job, held);
+
+        job.renameTo("refuse-after-renamed");
+        assertEquals(RequestStatus.INVALIDATED, RunRequestService.get().load(held.id).getStatus());
+        assertDisposed("the invalidated approval (refused after the gate)", held);
+        assertNothingRan(job);
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
+    }
+
+    private void approvedRunTimeout() throws Exception {
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setApprovedRunTimeoutMinutes(60);
+        cfg.save();
+        BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
+    }
+
+    private void expireApproval() {
+        BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(61)), ZoneOffset.UTC));
+        ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
+    }
+
+    private void approve(String id) {
+        try (ACLContext ignored = as("a1")) {
+            RunRequestService.get().approve(id, "approved; the queue refuses it");
+        }
+    }
+
+    /** APPROVED, nothing queued or run, and every file of the request still there (it can still be submitted, SPEC item 4). */
+    private void assertApprovedNotQueued(FreeStyleProject job, Held held) throws Exception {
+        assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(held.id).getStatus(), "premise: approved");
+        assertNothingRan(job);
+        assertEquals(held.files, stillThere(held.files), "an approved request that can still be submitted must keep its files"
+                + " (SPEC item 4: it is submitted after a restart; item 5: the build receives the original file)");
+    }
 
     /** A request id with the temporary files that appeared with its submission. */
     private static final class Held {

@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.mock_javamail.Mailbox;
 
@@ -184,9 +185,10 @@ public class RequestEndStateTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
         String pending = submitRunOk(j, "u1", job, "left pending", "a1");
         String approved = submitRunOk(j, "u1", job, "approved, not run", "a1");
-        j.jenkins.doQuietDown();
-        assertTrue(decideRun(j, "a1", approved, "approve", "ok").getStatusCode() < 400, "fixture: approval");
-        j.jenkins.getQueue().clear();
+        // the queue refuses the approved submission: approved, never queued, and no cancelled
+        // queue item (D-72b (7); note 265)
+        QueueRefusalFixtures.refusedBeforeTheGate(job,
+                () -> assertTrue(decideRun(j, "a1", approved, "approve", "ok").getStatusCode() < 400, "fixture: approval"));
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofHours(2)), ZoneOffset.UTC));
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
@@ -204,6 +206,11 @@ public class RequestEndStateTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures, note 265). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
+    }
 
     /** Waits for the approver's REQUEST_CREATED mail, then empties every mailbox, so later mails are the event's. */
     private static void settleCreationMail() throws Exception {
