@@ -454,12 +454,22 @@ public class JobRequestAction implements Action {
      * the message next to the field it concerns and the user's input kept (e2e-03 DEF-09).
      *
      * <p>D-72: the form posts {@code multipart/form-data}, so file parameters are uploaded with it,
-     * and the request keeps the submitted values with their types ({@link RunRequestService#create
-     * create(Job, List, String, List)}). Because requesting a run does not require
-     * {@code Item/Build} (D-38a), the body size is checked right after the permission checks and
-     * before this endpoint reads the body ({@link RequestBodyLimit}): a body over the cap is
-     * answered with HTTP 413 and the empty form; nothing of it is read here and nothing is created
-     * or kept. (Core's own dispatch to this URL may already have parsed a multipart body:
+     * and the request keeps the submitted values with their types ({@link RunRequestService#create(Job,
+     * List, Map, String, List, String) create}). Because requesting a run does not require
+     * {@code Item/Build} (D-38a), the size is checked in two stages (D-74 (2),
+     * {@link RequestBodyLimit}), each answered with HTTP 413 and the empty form, nothing created
+     * or kept:
+     * <ol>
+     *   <li>right after the permission checks and before this endpoint reads the body, the
+     *       declared {@code Content-Length} ({@link RequestBodyLimit#exceeds}), an early filter
+     *       that a body without a declared length passes;</li>
+     *   <li>before anything is stored, what the request would keep
+     *       ({@link RequestBodyLimit#checkKept}, in {@link RunRequestService#create(Job, List, Map,
+     *       String, List, String) create}): the values plus the uploaded parts each was created
+     *       from, measured here ({@link RequestBodyLimit#uploadedSize}) before its
+     *       {@code createValue}, since creating a value may consume its part.</li>
+     * </ol>
+     * (Core's own dispatch to this URL may already have parsed a multipart body:
      * {@code Job#getDynamic} builds the job's widgets and {@code HistoryWidget} reads a paging
      * parameter. That happens for every URL under a job, before any plugin code, and is bounded
      * only by Stapler's {@code org.kohsuke.stapler.RequestImpl.FILEUPLOAD_MAX_*} properties.)
@@ -471,8 +481,8 @@ public class JobRequestAction implements Action {
      * <p>D-72a (SPEC item 11): a submission from the form an incident rerun fell back to carries
      * the incident id in the field {@value RequestRunPrefill#FROM_RERUN}. It is read after the
      * permission and size checks, passed through {@link IncidentService#linkableIncident} and only
-     * the id that check returns goes to {@link RunRequestService#create(Job, List, String, List,
-     * String) create}, which links the request so that a successful run records
+     * the id that check returns goes to {@link RunRequestService#create(Job, List, Map, String,
+     * List, String) create}, which links the request so that a successful run records
      * {@code resolvedByRunId}; an invalid reference is ignored. A refused submission keeps the
      * validated reference on the re-rendered form.
      *
@@ -509,12 +519,10 @@ public class JobRequestAction implements Action {
         job.checkPermission(BatchControlPermissions.REQUEST);
         // D-38a: Item/Build is not required to request a run; the approval decides.
 
-        // D-72, D-72b (4): the body size cap, before this endpoint reads a single form value. A
-        // declared Content-Length decides from the headers alone and the body stays unread; a
-        // body without one (chunked) is judged by the size of what Jenkins already parsed while
-        // dispatching the URL (RequestBodyLimit#exceeds(HttpServletRequest, Job), which only
-        // measures the parts). Over the cap either way: 413, nothing created or kept.
-        if (RequestBodyLimit.exceeds(req, job)) {
+        // D-72, D-74 (2) stage 1: the declared Content-Length, before this endpoint reads a single
+        // form value; the body stays unread. An early filter only: a body without a declared
+        // length (chunked) is judged by stage 2, the kept-size check in RunRequestService#create.
+        if (RequestBodyLimit.exceeds(req)) {
             refuseOversizedBody(req, rsp);
             return;
         }
@@ -533,6 +541,8 @@ public class JobRequestAction implements Action {
         // field, with the input kept (FormErrors), instead of a bare "Error" page.
         FormErrors errors = new FormErrors(FORM);
         List<ParameterValue> submitted = new ArrayList<>();
+        // D-74 (2): the size of the uploaded parts each value was created from, by parameter name.
+        Map<String, Long> uploaded = new LinkedHashMap<>();
         boolean handedOver = false;
         try {
             List<String> approvers = List.of();
@@ -543,9 +553,9 @@ public class JobRequestAction implements Action {
             }
             try {
                 if (formData == null) {
-                    parseRawParameters(req, submitted);
+                    parseRawParameters(req, submitted, uploaded);
                 } else {
-                    parseParameters(req, formData, submitted);
+                    parseParameters(req, formData, submitted, uploaded);
                 }
             } catch (ParameterRefusal e) {
                 // D-72b (1): a repeated name or a value the definition refused, below that parameter.
@@ -563,8 +573,8 @@ public class JobRequestAction implements Action {
                 // From here the service owns the values' temporary files, on a refusal too.
                 handedOver = true;
                 try {
-                    RunRequest request = RunRequestService.get().create(job, submitted, reason, approvers,
-                            rerunIncident);
+                    RunRequest request = RunRequestService.get().create(job, submitted, uploaded, reason,
+                            approvers, rerunIncident);
                     rsp.sendRedirect2(req.getContextPath() + "/batch-control/requests/"
                             + Util.rawEncode(request.getId()) + "/");
                     return;
@@ -753,8 +763,14 @@ public class JobRequestAction implements Action {
      * refuses is reported for that parameter; both as {@link ParameterRefusal}, which the caller
      * turns into the same 400 as every other rejected submission (N-01). The values created
      * before the refusal are in {@code submitted}, so the caller disposes of their files.
+     *
+     * <p>D-74 (2): before each value is created, the size of the uploaded parts its entry can name
+     * ({@link RequestBodyLimit#partNames}) is recorded in {@code uploaded} under the parameter's
+     * name, for the kept-size check. It is measured first because creating a value may consume
+     * its part (a stashed file value deletes the part it copied).
      */
-    private void parseParameters(StaplerRequest2 req, JSONObject formData, List<ParameterValue> submitted) {
+    private void parseParameters(StaplerRequest2 req, JSONObject formData, List<ParameterValue> submitted,
+                                 Map<String, Long> uploaded) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
             return;
@@ -780,6 +796,7 @@ public class JobRequestAction implements Action {
             if (!seen.add(name)) {
                 throw new ParameterRefusal(name, repeatedNameMessage(name));
             }
+            uploaded.put(name, RequestBodyLimit.uploadedSize(req, RequestBodyLimit.partNames(jsonEntry)));
             ParameterValue value;
             try {
                 value = definition.createValue(req, jsonEntry);
@@ -806,14 +823,19 @@ public class JobRequestAction implements Action {
      * Whether a field repeated in the request is acceptable is the definition's call, as in core's
      * {@code buildWithParameters} (core's own simple parameter types refuse it); when it refuses
      * a repeated field, the message says that the parameter was submitted more than once.
+     *
+     * <p>D-74 (2): before each value is created, the size of the uploaded part named after the
+     * parameter is recorded in {@code uploaded}, as in {@link #parseParameters}.
      */
-    private void parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted) {
+    private void parseRawParameters(StaplerRequest2 req, List<ParameterValue> submitted,
+                                    Map<String, Long> uploaded) {
         ParametersDefinitionProperty property = job.getProperty(ParametersDefinitionProperty.class);
         if (property == null) {
             return;
         }
         for (ParameterDefinition definition : property.getParameterDefinitions()) {
             String name = definition.getName();
+            uploaded.put(name, RequestBodyLimit.uploadedSize(req, Collections.singletonList(name)));
             ParameterValue value;
             try {
                 value = definition.createValue(req);

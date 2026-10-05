@@ -3,13 +3,11 @@ package io.jenkins.plugins.batchcontrol.policy;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.ExtensionList;
 import hudson.model.Action;
-import hudson.model.FileParameterValue;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.Queue;
 import hudson.model.queue.QueueListener;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -27,19 +25,22 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * them over, for values that will never reach the queue: a run request that ended without a run
  * (REJECTED, CANCELLED, EXPIRED, INVALIDATED before it was queued), a submission that was refused
  * before a request was stored, a person's own build submission that the queue gate refused, or
- * rerun values that could not be completed. Once a request's
- * build is queued, the queue and the build own its files and nothing here touches them.
+ * rerun values that could not be completed. Once a request's build is queued, the queue and the
+ * build own its files and nothing here touches them.
  *
- * <p>Parameter types that keep such a file delete it themselves when their queue item is
- * cancelled, each through a {@link QueueListener} nested in the value class: core's
- * {@code FileParameterValue.CancelledQueueListener} ({@code $JENKINS_HOME/fileParameterValueFiles/})
- * and the file-parameters plugin's {@code StashedFileParameterValue.CancelledQueueListener}
- * ({@code $JENKINS_HOME/stashedFileParameterValueFiles/}). The values never entered the queue,
- * so this class hands exactly those value-specific listeners a cancelled {@link Queue.LeftItem}
- * carrying the values, which is the convention they already implement; no other queue listener
- * is called, nothing enters the queue, and neither the plugin nor a private field is linked. A
- * value type that keeps a known temporary file but has no such listener is logged, as is a
- * listener that fails; a listener logs its own failed deletions.
+ * <p>D-74 (2): why a cancelled queue item. Each parameter type that keeps such a file deletes it
+ * itself when its queue item is cancelled, through a {@link QueueListener} nested in the value
+ * class: core's {@code FileParameterValue.CancelledQueueListener}
+ * ({@code $JENKINS_HOME/fileParameterValueFiles/}) and the file-parameters plugin's
+ * {@code StashedFileParameterValue.CancelledQueueListener}
+ * ({@code $JENKINS_HOME/stashedFileParameterValueFiles/}). That listener is the only supported
+ * cleanup either type offers: neither exposes its temporary file or a delete method (core's
+ * {@code FileParameterValue#getFile2()} returns the upload, not the copy it keeps, and the
+ * file-parameters plugin, an optional plugin Batch Control does not link, has no public accessor).
+ * So this class hands exactly those value-specific listeners a cancelled {@link Queue.LeftItem}
+ * carrying the values, which is the convention they already implement; no other queue listener is
+ * called, nothing enters the queue, and no private field is read. A listener that fails is
+ * logged; a listener logs its own failed deletions.
  */
 @Restricted(NoExternalUse.class)
 public final class ParameterFiles {
@@ -68,7 +69,6 @@ public final class ParameterFiles {
         if (present.isEmpty() || jenkins == null) {
             return;
         }
-        Set<ParameterValue> attempted = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<ParameterValue> handled = Collections.newSetFromMap(new IdentityHashMap<>());
         Queue.LeftItem cancelled = null;
         for (QueueListener listener : ExtensionList.lookup(QueueListener.class)) {
@@ -85,7 +85,6 @@ public final class ParameterFiles {
             if (own.isEmpty()) {
                 continue;
             }
-            attempted.addAll(own);
             try {
                 if (cancelled == null) {
                     cancelled = cancelledItem(present, owner);
@@ -95,14 +94,6 @@ public final class ParameterFiles {
             } catch (RuntimeException e) {
                 LOGGER.log(Level.WARNING, e, () -> "Could not dispose of the temporary files of parameter(s) "
                         + names(own) + " of " + owner + " through " + listener.getClass().getName());
-            }
-        }
-        for (ParameterValue value : present) {
-            if (!attempted.contains(value)
-                    && (value instanceof FileParameterValue || ParameterDisplay.isStashedFile(value))) {
-                LOGGER.warning(() -> "Could not dispose of the temporary file of parameter '" + value.getName()
-                        + "' (" + value.getClass().getName() + ") of " + owner
-                        + ": no disposal is available for this parameter type");
             }
         }
         if (!handled.isEmpty()) {
@@ -128,15 +119,12 @@ public final class ParameterFiles {
     }
 
     /**
-     * Whether {@code value} keeps a temporary file until its build takes it over: core's
-     * {@link FileParameterValue}, the file-parameters plugin's stashed file value, or any value
-     * whose type has a value-specific queue listener (the disposal convention above). Such a value
-     * of a completed build cannot be reused as it is: its build consumed the file.
+     * Whether {@code value} keeps a temporary file until its build takes it over: its type has a
+     * value-specific queue listener (the disposal convention above), as core's file value and the
+     * file-parameters plugin's stashed file value do. Such a value of a completed build cannot be
+     * reused as it is: its build consumed the file.
      */
     public static boolean keepsTemporaryFile(ParameterValue value) {
-        if (value instanceof FileParameterValue || ParameterDisplay.isStashedFile(value)) {
-            return true;
-        }
         if (Jenkins.getInstanceOrNull() == null) {
             return false;
         }
