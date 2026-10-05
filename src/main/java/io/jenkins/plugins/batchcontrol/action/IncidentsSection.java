@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
+import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.time.Instant;
@@ -69,18 +70,15 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return new SectionAccess();
     }
 
-    /** Stapler: serves {@code /batch-control/incidents/<id>/}; {@code null} renders a 404. */
+    /**
+     * Stapler: serves {@code /batch-control/incidents/<id>/}; {@code null} renders a 404, also for
+     * every failed lookup (S-39-01, {@link RecordLookup}). Every ViewHistory holder, whom
+     * {@link #getTarget()} has admitted, may see every incident.
+     */
     @CheckForNull
     public IncidentItem getDynamic(String id) {
-        if (id == null || id.isEmpty()) {
-            return null;
-        }
-        Incident incident;
-        try {
-            incident = IncidentService.get().load(id);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        Incident incident = RecordLookup.find(id, "incident", i -> IncidentService.get().load(i),
+                Incident::getId, i -> true);
         return incident == null ? null : new IncidentItem(incident);
     }
 

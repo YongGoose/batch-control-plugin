@@ -3,8 +3,10 @@ package io.jenkins.plugins.batchcontrol.action;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Failure;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.io.IOException;
 import jenkins.model.Jenkins;
@@ -43,19 +45,15 @@ public class ActiveGrantsSection {
 
     /**
      * Stapler: serves {@code /batch-control/grants/active/<grantId>/...}; {@code null} renders a
-     * 404 when {@link GrantService} knows no grant with that id (an unsafe id matches none). An
-     * existing grant that is no longer active still resolves: {@link GrantService#revoke}
-     * rejects it with a message.
+     * 404 when {@link GrantService} knows no grant with that id, for a malformed id and for any
+     * other failed lookup (S-39-01, {@link RecordLookup}). An existing grant that is no longer
+     * active still resolves: {@link GrantService#revoke} rejects it with a message.
      */
     @CheckForNull
     public Item getDynamic(String grantId) {
-        if (grantId == null || grantId.isEmpty()) {
-            return null;
-        }
-        if (GrantService.get().find(grantId) == null) {
-            return null;
-        }
-        return new Item(grantId);
+        Grant grant = RecordLookup.find(grantId, "grant", i -> GrantService.get().find(i), Grant::getId,
+                g -> true);
+        return grant == null ? null : new Item(grant.getId());
     }
 
     /** One active grant; only carries the revoke endpoint. */
