@@ -19,7 +19,12 @@ Content checks (CI, 2026-10-05), on every page reached with status < 400, all ro
     jenkins_home, JENKINS_HOME, StoreLocation=, WEB-INF/, a Windows drive path);
   * double-escaped: an HTML entity shown as text (&lt; &gt; &amp; &quot; &apos; &#..;);
   * markup-text: "<script" shown as text;
-  * markup-live: the seeded probe's <img onerror> canary ran, or the probe (ci/seed_markup.py) does not read as typed.
+  * markup-live: the seeded probe's <img onerror> canary ran, or the probe (ci/seed_markup.py) does not read as typed;
+  * legacy-scope: a scope written with a scope type that D-71 removed ("JOB:", "FOLDER:", "FOLDER_ONLY") (e2e-16).
+Raw enum values (e2e-16): an UPPER_SNAKE_CASE constant (GRANT_REVOKE, APPROVED_REQUEST, ...), the scope prefix "ITEM:",
+or a state/action constant of the plugin's vocabulary (PENDING, APPROVED, ..., CONFIGURE, CREATE, DELETE) shown as
+text is logged as check "raw-enum" with result INFO, once per URL pattern and value, without a FAIL: showing these
+words is the known, deferred UX review item UX-4/UX-5 (owner: UX fixes only on request); summary.md lists them.
 Text inside pre/code/textarea and hidden elements is not checked. BC_CRAWL_LOG names the log (default "crawl")."""
 import json, os, re, sys, time
 from urllib.parse import urljoin, urlparse
@@ -117,9 +122,13 @@ CONTENT_JS = r"""
   const PATH = /(?:^|[\s"'(=,;:])(\/(?:var|tmp|home|opt|usr|etc|root|srv|private|Users)\/[^\s"'<>)]*)|(jenkins_home|JENKINS_HOME|StoreLocation=|WEB-INF\/|\b[A-Za-z]:\\[A-Za-z])/;
   const ENT = /&(?:lt|gt|amp|quot|apos|#\d+|#x[0-9a-fA-F]+);/;
   const desc = el => el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
-  const out = {paths: [], entities: [], script_text: [], empty_cells: [], probe: []};
+  const out = {paths: [], entities: [], script_text: [], empty_cells: [], probe: [], enums: []};
+  const SNAKE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
+  const SCOPE = /\b(ITEM|JOB|FOLDER_ONLY|FOLDER): ?(?=\S)/g;
+  const WORDS = /\b(PENDING|APPROVED|REJECTED|CANCELLED|EXPIRED|EXECUTED|INVALIDATED|CONSUMED|SUPERSEDED|OPEN|ACKNOWLEDGED|RESOLVED|ACTIVATE|HOLD|CONFIGURE|CREATE|DELETE)\b/g;
   for (const [t, el] of texts) {
     let m;
+    for (const re of [SNAKE, SCOPE, WORDS]) { re.lastIndex = 0; while ((m = re.exec(t))) out.enums.push({match: re === SCOPE ? m[1] + ':' : m[0], text: t.slice(0, 160), el: desc(el)}); }
     if ((m = PATH.exec(t))) out.paths.push({match: m[1] || m[2], text: t.slice(0, 160), el: desc(el)});
     if ((m = ENT.exec(t))) out.entities.push({match: m[0], text: t.slice(0, 160), el: desc(el)});
     if (/<script/i.test(t)) out.script_text.push({text: t.slice(0, 160), el: desc(el)});
@@ -182,6 +191,12 @@ def content_checks(s, path, pt):
     found += [("markup-text", "<script", x) for x in c["script_text"]]
     if c["canary"] or c["injected"]:
         found.append(("markup-live", "probe <img onerror> rendered as markup", {"canary": c["canary"], "injected": c["injected"]}))
+    for x in c.get("enums", []):
+        if x["match"] in ("JOB:", "FOLDER:", "FOLDER_ONLY:"):
+            found.append(("legacy-scope", x["match"], x))  # D-71 removed these scope types
+        elif ("raw-enum", pt, x["match"]) not in _content_seen:  # known UX-4/UX-5: once per pattern, for the UX section
+            _content_seen.add(("raw-enum", pt, x["match"]))
+            emit({"page": path, "pattern": pt, "kind": "content", "check": "raw-enum", "key": x["match"], "result": "INFO", "detail": x})
     for snip in c["probe"]:
         head = re.split(r"…|\.\.\.", snip)[0].rstrip()  # a list may shorten the text with an ellipsis
         if not (snip.startswith(PROBE_AS_TYPED) or (head != snip and PROBE_AS_TYPED.startswith(head))):

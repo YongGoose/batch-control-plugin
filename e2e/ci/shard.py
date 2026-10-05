@@ -53,8 +53,9 @@ SETUP = [
     ("seed", py("r14/seed.py")),
     ("seed-paging", py("r14/seed_paging.py")),
     ("seed-markup", py("ci/seed_markup.py")),
+    ("preconditions", py("ci/preconditions.py")),  # e2e-16: the seeded fixtures the drivers assume, asserted
 ]
-SETUP_WEIGHT = 3.3
+SETUP_WEIGHT = 3.4
 
 
 class Unit:
@@ -122,17 +123,26 @@ UNITS = [
         ("monitor", py("r14/s_monitor.py")),
     ], doc="e2e-12/14 G2d: error pages, list pager, incident, help, strategy monitor"),
     Unit("round3", 0.6, [("round3", py("r14/round3.py", "ABCDEFGHI"))], doc="e2e-14 R3-A..I: the e2e-11 round-3 checks"),
-    # e2e-16 (hosting review round 6: D-71..D-73, D-72a/b). Each unit arranges its own items/accounts (r16/arrange.py is
-    # idempotent) so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines.
-    Unit("r16-items", 4.0, [("r16-arrange", py("r16/arrange.py")), ("r16-items", py("r16/items.py"))],
+    # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
+    # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
+    # measured on the 2026-10-06 runs (arrangement included).
+    Unit("r16-items", 1.0, [("r16-arrange", py("r16/arrange.py")), ("r16-items", py("r16/items.py"))],
          doc="e2e-16: one-item windows on job/folder/multibranch (D-71): Configure/Create reach, legacy scope refused, kind+icon"),
-    Unit("r16-rename", 4.0, [("r16-arrange", py("r16/arrange.py")), ("r16-rename", py("r16/rename.py"))],
+    Unit("r16-rename", 0.8, [("r16-arrange", py("r16/arrange.py")), ("r16-rename", py("r16/rename.py"))],
          doc="e2e-16: no rename through a window via UI and every URL form; allowed for admin/own permission (D-71c)"),
-    Unit("r16-params", 6.5, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
-         doc="e2e-16: typed parameters (core file, stashedFile, base64File, password) page+dialog; 413, repeated name, U+0000, disposal (D-72, D-72b)"),
-    Unit("r16-rerun", 4.0, [("r16-arrange", py("r16/arrange.py")), ("r16-rerun", py("r16/rerun.py"))],
-         doc="e2e-16: incident rerun reuses the secret; stashedFile falls back to the validated prefilled form; resolvedByRunId (D-72, D-72a)"),
-    Unit("r16-names", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-names", py("r16/names.py"))],
+    Unit("r16-follow", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-follow", py("r16/follow.py"))],
+         doc="e2e-16: windows follow admin rename/move, deletion ends them and DELETE records name the deleting user (D-74, "
+             "1864bdc); refused moves once per minute (D-73); CREATE window under a naming strategy (T-08-168)"),
+    Unit("r16-params", 2.0, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
+         doc="e2e-16: typed parameters (core file, stashedFile, base64File, password) page+dialog; values file; 413 at both "
+             "stages; repeated name, U+0000, disposal (D-72, D-72b, D-74)"),
+    Unit("r16-rerun", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-rerun", py("r16/rerun.py"))],
+         doc="e2e-16: incident rerun reuses the secret/core file; stashedFile falls back to the validated prefilled form; "
+             "fromRerun validation; incident actions need ViewHistory (D-72, D-72a, SPEC 11)"),
+    Unit("r16-d60", 1.2, [("r16-arrange", py("r16/arrange.py")), ("r16-d60", py("r16/d60.py"))],
+         doc="e2e-16: refused direct build -> prefilled form: run parameter carried (T-06-103), new job page dialog, files "
+             "and secrets not carried (D-60, #115)"),
+    Unit("r16-names", 0.8, [("r16-arrange", py("r16/arrange.py")), ("r16-names", py("r16/names.py"))],
          doc="e2e-16: CREATE name restriction in the #107 optionalBlock (ticks Create before filling); exact and /regex/"),
     Unit("multibranch", 2.8, [
         ("mb-arrange", py("r15/arrange.py")),
@@ -155,6 +165,9 @@ UNITS = [
         ("flag-role-crawl", flag("true", *ROLE_CRAWL)),
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
         last=True, doc="e2e-13/14 RS: role-strategy 927 profile, then a crawl under it (replaces the strategy: last)"),
+    Unit("r16-durable", 2.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py"))],
+         last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); restarts Jenkins, "
+                        "after which JCasC has reset the arrangement's permissions (last)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
@@ -295,6 +308,9 @@ def observations():
                 "pages_with_console_errors": sum(1 for x in r if x.get("kind") == "page" and x.get("console")),
                 "content_defects": sum(1 for x in r if x.get("kind") == "content" and x.get("result") == "DEFECT"),
                 "empty_optional_columns": sorted({f'{x.get("pattern")} {x.get("key")}' for x in r if x.get("check") == "empty-optional"})[:80],
+                # e2e-16: raw enum values shown as text (INFO, the deferred UX-4/UX-5 items), per value with its URL patterns
+                "raw_enum_values": {k: sorted({x.get("pattern") for x in r if x.get("check") == "raw-enum" and x.get("key") == k})[:12]
+                                    for k in sorted({x.get("key") for x in r if x.get("check") == "raw-enum"})},
             }
     a = rows("actions.jsonl")
     if a:

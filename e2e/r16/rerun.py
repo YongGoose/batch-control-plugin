@@ -1,6 +1,6 @@
 """e2e-16: incident rerun reuses the failed run's own typed values (D-72, D-72a; SPEC item 11).
 
-usage: python rerun.py [PFS]    rows: out/rerun.jsonl, shots: R16-RERUN-*.png
+usage: python rerun.py [PFSVI]    rows: out/rerun.jsonl, shots: R16-RERUN-*.png
 P  password recoverable: an approved run of r16-fail-pw (SECRET password + MODE) fails -> incident. "Request Rerun"
    on the incident reuses the build's own values (the original secret is recovered from the build) and creates the
    request DIRECTLY; the rerun request masks the secret (********, no plaintext stored); the approved rerun build
@@ -12,7 +12,14 @@ S  stashedFile not recoverable: an approved run of r16-fail-stash (stashedFile +
    build succeeds, and the incident records resolvedByRunId
 F  core `file` recoverable: an approved run of r16-fail-file (core file UPLOAD + MODE) fails -> incident. "Request
    Rerun" recovers the core file from the build and creates the request DIRECTLY; the approved rerun build receives the
-   exact original file bytes (sha), and the incident records resolvedByRunId"""
+   exact original file bytes (sha), and the incident records resolvedByRunId
+V  the rerun link is validated, never trusted (D-72a): the Request Run form shows the rerun notice for fromRerun=<id> only
+   to a viewer with ViewHistory and only for an incident of that job; a submission carrying fromRerun is linked only
+   then (vh16: Request + ViewHistory, linked); requester (no ViewHistory), a foreign job's incident, an unknown id
+   and a hostile value make an ordinary unlinked request (no notice, nothing injected, no error)
+I  incident actions need ViewHistory (SPEC 11): requester and reqonly (Batch Control permissions, no ViewHistory) get 403
+   on acknowledge, resolve, comment and rerun, nobc (no Batch Control permission) is refused too; nothing changes;
+   auditor (ViewHistory only) may acknowledge and comment"""
 import re
 import sys
 import time
@@ -23,7 +30,7 @@ from lib import (Session, api, gv, check, note, decide, text_of, J, BASE, SECRET
                  console_ok, store_contains, next_build, wait_build, sha, make_file, fill_run_form, param_box)  # noqa: E402
 
 lib.LOGNAME[0] = "rerun"
-WANT = sys.argv[1] if len(sys.argv) > 1 else "PFS"
+WANT = sys.argv[1] if len(sys.argv) > 1 else "PFSVI"
 # The rerun is submitted from the Incidents screen (ViewHistory) and needs Request + Item/Read on the job; admin holds
 # all three, and its ViewHistory lets D-72a link the fallback request to the incident.
 HIST = "admin"
@@ -217,5 +224,101 @@ def sec_F():
           **{k: v for k, v in checks.items() if not v})
 
 
+def an_incident(job, params, files=None):
+    """The newest incident of `job`, or a new one from a failing approved run."""
+    rows = sorted([r for r in incident_ids(job).split(",") if ":" in r], key=lambda r: int(r.split(":")[1]))
+    if rows:
+        return rows[-1].split(":")[0]
+    return failing_build(job, params, files)[0]
+
+
+def request_field(rid, field):
+    return gv(f"""def f=new File(jenkins.model.Jenkins.get().rootDir,'batch-control/requests/run/{rid}.xml')
+if(!f.exists()) return ''; def x=new XmlSlurper().parse(f); return x.{field}.text()""")
+
+
+def form_rerun_view(user, job, ref):
+    """GET the job's Request Run form with fromRerun=<ref> as `user`: (status, notice shown, hidden field value, canary)."""
+    from urllib.parse import quote
+    s = Session(user)
+    r = s.go(J(job) + "/batch-control/?fromRerun=" + quote(ref, safe=""))
+    notice = s.page.locator("[data-batch-control-notice=rerun]").count()
+    hidden = s.page.locator("input[name=fromRerun]")
+    hv = hidden.first.get_attribute("value") if hidden.count() else None
+    canary = s.page.evaluate("() => window.__bcRerunCanary === 1")
+    s.shot("#main-panel", f"R16-RERUN-V-{user}-{re.sub(r'[^A-Za-z0-9]', '', ref)[:16]}")
+    s.done()
+    return (r.status if r else None), notice, hv, canary
+
+
+def raw_submit(user, job, ref, reason):
+    r = api(user, J(job) + "/batch-control/submit", "POST",
+            data=[("reason", reason), ("approvers", "approver-1"), ("MODE", "v"), ("SECRET", "x"), ("fromRerun", ref)])
+    m = re.search(r"/batch-control/requests/([0-9a-f-]{36})/", r.headers.get("Location", "") or "")
+    return r.status_code, (m.group(1) if m else None)
+
+
+def sec_V():
+    job = "r16-fail-pw"
+    iid = an_incident(job, {"SECRET": SECRET, "MODE": "v-first"})
+    foreign = an_incident("r16-fail-file", {"MODE": "v-foreign"}, files={"UPLOAD": str(make_file("v-foreign.bin", 512, "r16-v-foreign")[0])})
+    hostile = '"><script>window.__bcRerunCanary=1</script>'
+    cases = [("vh16", iid, True, "ViewHistory + Request, the job's own incident"),
+             ("requester", iid, False, "no ViewHistory"),
+             ("vh16", foreign, False, "an incident of another job"),
+             ("vh16", "20990101-000000-zzzzzz", False, "an unknown incident id"),
+             ("vh16", hostile, False, "a hostile value")]
+    for user, ref, linkable, what in cases:
+        st, notice, hv, canary = form_rerun_view(user, job, ref)
+        check("V", f"Request Run form with fromRerun ({what}) as {user}: " + ("the rerun notice and the hidden reference" if linkable
+              else "no notice, no reference carried, nothing injected"),
+              st == 200 and not canary and ((notice and hv == ref) if linkable else (not notice and not hv)),
+              status=st, notice=notice, hidden=hv, canary=canary, ref=ref[:40])
+        before = incident_field(ref, "rerunRequestIds") if re.fullmatch(INCIDENT_ID, ref) else ""
+        code, rid = raw_submit(user, job, ref, f"e2e-16 V {what}")
+        linked_ids = incident_field(ref, "rerunRequestIds") if re.fullmatch(INCIDENT_ID, ref) else ""
+        req_incident = request_field(rid, "incidentId") if rid else None
+        ok = code in (302, 303) and rid and ((rid in linked_ids and req_incident == ref) if linkable
+                                             else (rid not in linked_ids and not req_incident))
+        check("V", f"a submission carrying fromRerun ({what}) as {user} " + ("is linked to the incident" if linkable
+              else "creates an ordinary request that is not linked (no error)"), ok, status=code, request=rid,
+              request_incidentId=req_incident, linked=bool(rid and rid in linked_ids), ref=ref[:40])
+        if rid:
+            decide(user, "requests", rid, "cancel")
+
+
+def sec_I():
+    job = "r16-fail-pw"
+    iid = failing_build(job, {"SECRET": SECRET, "MODE": "i-first"})[0]
+
+    def state():
+        return incident_field(iid, "status"), gv(f"""def f=new File(jenkins.model.Jenkins.get().rootDir,'batch-control/incidents/{iid}.xml')
+def x=new XmlSlurper().parse(f); return String.valueOf(x.transitions.children().size())"""), \
+            incident_field(iid, "rerunRequestIds")
+    s0 = state()
+    rows = {}
+    for user in ("requester", "reqonly", "nobc"):
+        for ep, data in (("acknowledge", {"comment": "x"}), ("resolve", {"comment": "x"}), ("comment", {"comment": "x"}),
+                         ("rerun", {"approvers": "approver-1"})):
+            rows[f"{user} {ep}"] = api(user, f"/batch-control/incidents/{iid}/{ep}", "POST", data=data).status_code
+        rows[f"{user} GET page"] = api(user, f"/batch-control/incidents/{iid}/").status_code
+    s1 = state()
+    bc_users = all(v == 403 for k, v in rows.items() if k.split()[0] in ("requester", "reqonly") and "GET" not in k)
+    nobc = all(v in (403, 404) for k, v in rows.items() if k.startswith("nobc"))
+    check("I", "acknowledge, resolve, comment and rerun without ViewHistory: requester and reqonly 403, nobc refused (403/404); "
+          "the incident is unchanged (status, comments, rerun links)", bc_users and nobc and s0 == s1, before=s0, after=s1, **rows)
+    s = Session("requester")
+    r = s.go(f"/batch-control/incidents/{iid}/")
+    s.shot("#main-panel" if s.page.locator("#main-panel").count() else "body", "R16-RERUN-I-requester-incident")
+    page = re.sub(r"\s+", " ", s.text())[:240]
+    s.done()
+    note("I", "what requester sees on the incident page", status=r.status if r else None, text=page)
+    a = api("auditor", f"/batch-control/incidents/{iid}/acknowledge", "POST", data={"comment": "ack by auditor (ViewHistory only)"}).status_code
+    c = api("auditor", f"/batch-control/incidents/{iid}/comment", "POST", data={"comment": "comment by auditor"}).status_code
+    check("I", "auditor (ViewHistory only) may acknowledge and comment (SPEC 11: the permission that opens the Incidents screen)",
+          a in (200, 302, 303) and c in (200, 302, 303) and incident_field(iid, "status") == "ACKNOWLEDGED",
+          acknowledge=a, comment=c, status=incident_field(iid, "status"))
+
+
 if __name__ == "__main__":
-    run_sections([c for c in WANT if c in "PFS"], {"P": sec_P, "F": sec_F, "S": sec_S})
+    run_sections([c for c in WANT if c in "PFSVI"], {"P": sec_P, "F": sec_F, "S": sec_S, "V": sec_V, "I": sec_I})

@@ -1,7 +1,8 @@
 """e2e-16 arrangement (script console and REST as admin; arrangement only, no assertion about the plugin).
 
 Accounts: w16 and w16b (Overall/Read, Item/Read, View/Read, BatchControl/RequestGrant; no standing Configure, Create or
-Delete): the window holders. Items:
+Delete): the window holders; vh16 (Overall/Read, Item/Read, View/Read, BatchControl/Request, BatchControl/ViewHistory, no
+Item/Build): the incident viewer who may request a rerun (D-72a). Items:
   r16/                 regular folder: job-a, del-16, ren-job, ren-dc, ren-adm, ren-own, kinds-job; folder sub/ with sub/job-b
   r16-renf/            regular folder with inner (a folder a window holder must not rename)
   r16-pipe             Pipeline
@@ -30,10 +31,10 @@ def realm = j.getSecurityRealm()
 def BC = 'io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.'
 def R = ['hudson.model.Hudson.Read', 'hudson.model.Item.Read', 'hudson.model.View.Read']
 def s = j.getAuthorizationStrategy()
-['w16', 'w16b'].each { u ->
+['w16': [BC + 'RequestGrant'], 'w16b': [BC + 'RequestGrant'], 'vh16': [BC + 'Request', BC + 'ViewHistory']].each { u, extra ->
   if (User.getById(u, false) == null) realm.createAccount(u, "''' + pw + r'''")
   User.getById(u, true).addProperty(new hudson.tasks.Mailer.UserProperty(u + '@e2e.local'))
-  (R + [BC + 'RequestGrant']).each { pid -> s.add(Permission.fromId(pid), new PermissionEntry(AuthorizationType.USER, u)) }
+  (R + extra).each { pid -> s.add(Permission.fromId(pid), new PermissionEntry(AuthorizationType.USER, u)) }
 }
 j.save()
 def F = com.cloudbees.hudson.plugins.folder.Folder
@@ -123,3 +124,41 @@ print(gv("""def j = jenkins.model.Jenkins.get()
 def cl = j.pluginManager.uberClassLoader.loadClass('io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty')
 return ['r16-file', 'r16-stash', 'r16-fail-pw', 'r16-fail-file', 'r16-fail-stash'].collect { n -> def p = j.getItem(n).getProperty(cl)
   n + ':approvalRequired=' + (p?.approvalRequired) + ',params=' + j.getItem(n).getProperty(hudson.model.ParametersDefinitionProperty)?.parameterDefinitionNames }.join('; ')"""))
+
+# Fixture preconditions (e2e-16): what the r16 drivers assume, asserted here so a wrong fixture fails this step. Each unit
+# starts without windows of the r16 accounts (an earlier unit on the same shard may have left some), so the standing
+# permissions are what is checked.
+import json  # noqa: E402
+from lib import revoke_all  # noqa: E402
+
+print("revoked leftover windows:", {u: revoke_all(u) for u in ("w16", "w16b", "vh16")})
+
+state = json.loads(gv("""import hudson.model.*
+def j = jenkins.model.Jenkins.get()
+def cl = j.pluginManager.uberClassLoader.loadClass('io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty')
+def jobs = ['r16-file', 'r16-stash', 'r16-fail-pw', 'r16-fail-file', 'r16-fail-stash'].collectEntries { n -> def p = j.getItem(n)
+  [n, [approvalRequired: p?.getProperty(cl)?.approvalRequired,
+       params: p?.getProperty(ParametersDefinitionProperty)?.parameterDefinitions?.collect { it.name + ':' + it.class.simpleName }]] }
+def perms = [:]
+['w16', 'w16b', 'vh16'].each { id -> def a = User.getById(id, false)?.impersonate2(); def f = j.getItem('r16')
+  perms[id] = a == null ? null : [read: f.getACL().hasPermission2(a, Item.READ), configure: f.getACL().hasPermission2(a, Item.CONFIGURE),
+    create: f.getACL().hasPermission2(a, Item.CREATE), delete: f.getACL().hasPermission2(a, Item.DELETE),
+    build: j.getItem('r16-fail-pw').getACL().hasPermission2(a, Item.BUILD)] }
+return groovy.json.JsonOutput.toJson([jobs: jobs, perms: perms, fileParameters: j.pluginManager.getPlugin('file-parameters')?.isActive()])"""))
+WANT = {"r16-file": {"UPLOAD:FileParameterDefinition", "SECRET:PasswordParameterDefinition", "NOTE:StringParameterDefinition"},
+        "r16-stash": {"STASHED:StashedFileParameterDefinition", "B64:Base64FileParameterDefinition", "SECRET:PasswordParameterDefinition"},
+        "r16-fail-pw": {"SECRET:PasswordParameterDefinition", "MODE:StringParameterDefinition"},
+        "r16-fail-file": {"UPLOAD:FileParameterDefinition", "MODE:StringParameterDefinition"},
+        "r16-fail-stash": {"STASHED:StashedFileParameterDefinition", "MODE:StringParameterDefinition"}}
+bad = []
+if not state["fileParameters"]:
+    bad.append("file-parameters plugin not active")
+for n, want in WANT.items():
+    j = state["jobs"].get(n) or {}
+    if j.get("approvalRequired") is not True or not want <= set(j.get("params") or []):
+        bad.append(f"{n}: {j}")
+for u, p in state["perms"].items():
+    if p is None or not p["read"] or p["configure"] or p["create"] or p["delete"] or p["build"]:
+        bad.append(f"{u}: {p} (wants Item/Read only, no Configure/Create/Delete/Build)")
+print(("PASS " if not bad else "FAIL ") + json.dumps({"check": "r16 fixture preconditions", "problems": bad})[:1500])
+sys.exit(1 if bad else 0)

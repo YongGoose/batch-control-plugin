@@ -278,3 +278,16 @@ def fill_run_form(scope, reason, approver="approver-1", params=None, files=None)
     for name, path in (files or {}).items():
         box = param_box(scope, name)
         box.locator("input[type=file]").first.set_input_files(str(path))
+
+
+def run_files(rid):
+    """Names of the files under batch-control/requests/run/ that belong to request `rid` (D-74 (1): <id>.xml, and
+    <id>.values.xml while the typed values are kept)."""
+    out = gv(f"""def d = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/requests/run')
+return d.exists() ? (d.listFiles().findAll {{ it.name.startsWith('{rid}') }}*.name.sort().join(',')) : ''""")
+    return [x for x in out.split(",") if x]
+
+
+def run_file_text(name):
+    return gv(f"""def f = new File(jenkins.model.Jenkins.get().rootDir, 'batch-control/requests/run/{name}')
+return f.exists() ? f.getText('UTF-8') : ''""")

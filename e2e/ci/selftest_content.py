@@ -3,7 +3,7 @@
 content_checks() (taken from crawl.py's source, its module code is not executed) in headless Chromium against two
 synthetic pages. The "defects" page plants one instance of every finding the checks must report, next to look-alikes
 that must stay silent (text in <pre>, a URL path, an optional empty column); the "clean" page renders the markup probe
-correctly and must produce no finding at all. Exit 0 when both pages give exactly the expected findings.
+correctly and must produce no defect finding. The raw-enum INFO rows (e2e-16) are compared too (EXPECTED_ENUM). Exit 0 when both pages give exactly the expected findings.
 
     python e2e/ci/selftest_content.py          (BC_BROWSER_CHANNEL as for the drivers; default chromium here)
 """
@@ -47,6 +47,8 @@ DEFECTS = """<div id="main-panel"><h2>Requests</h2>
 <p>&lt;script&gt;alert(1)&lt;/script&gt;</p>
 <p>bc-markup-probe <b>b</b> &amp; "q" <img src=x onerror=window.__bcCanary=1></p>
 <pre>/var/log/in-a-pre-block-is-fine</pre>
+<p>Grant g-1 for user 'u' (ITEM:a/b) ended; type GRANT_REVOKE, status PENDING</p>
+<table><tbody><tr><th>Scope</th><td>FOLDER_ONLY: team</td></tr></tbody></table>
 <p><a href="/jenkins/job/batch-daily/">/jenkins/job/batch-daily/</a></p>
 </div>"""
 CLEAN = f"""<div id="main-panel"><h2>Requests</h2>
@@ -54,12 +56,17 @@ CLEAN = f"""<div id="main-panel"><h2>Requests</h2>
 <tbody><tr><td>r-1</td><td>batch-daily</td><td></td></tr></tbody></table>
 <p>Reason: {PROBE_HTML}</p><p>Comment: {html.escape(PROBE[:30], quote=False)}…</p>
 <p>Jobs under /jenkins/job/ops/ and the folder ops/sub; 3 &lt; 5 &amp; 7 &gt; 2</p>
-<code>/tmp/in-code-is-fine</code></div>"""
+<code>/tmp/in-code-is-fine GRANT_REVOKE ITEM:a/b</code>
+<p>Status: Approved; Folder: team; JOB_NAME is not shown as code here but MIXED_case and lower_snake are not constants</p></div>"""
 EXPECTED_DEFECTS = {("empty-cell", "Requests / Job"), ("empty-cell", "Requests / Requester"),
                     ("server-path", "/var/jenkins_home/batch-control/requests"), ("server-path", "StoreLocation="),
                     ("double-escaped", "&lt;"), ("markup-text", "<script"),
-                    ("markup-live", "probe <img onerror> rendered as markup"), ("markup-live", "probe text not as typed")}
+                    ("markup-live", "probe <img onerror> rendered as markup"), ("markup-live", "probe text not as typed"),
+                    ("legacy-scope", "FOLDER_ONLY:")}
 EXPECTED_INFO = {"Comment", "Decided by"}
+# raw-enum INFO rows (e2e-16): planted on the defects page; the clean page has look-alikes that must stay silent except
+# JOB_NAME, a real UPPER_SNAKE token in visible text (the check cannot tell a parameter name from an enum: INFO only).
+EXPECTED_ENUM = {"defects": {"ITEM:", "GRANT_REVOKE", "PENDING", "FOLDER_ONLY"}, "clean": {"JOB_NAME"}}
 
 
 def main():
@@ -75,10 +82,14 @@ def main():
             ns["content_checks"](type("S", (), {"page": page})(), "/batch-control/requests/", "/batch-control/requests/")
             got = {(r["check"], r["key"]) for r in rows if r["result"] == "DEFECT"}
             info = {r["key"] for r in rows if r["check"] == "empty-optional"}
+            enums = {r["key"] for r in rows if r["check"] == "raw-enum"}
             errors = [r for r in rows if r["result"] == "ERROR"]
-            good = got == want and info == want_info and not errors
+            good = got == want and info == want_info and enums == EXPECTED_ENUM[name] and not errors
             ok &= good
-            print(f"{'PASS' if good else 'FAIL'} selftest {name}: {len(got)} defect finding(s), empty-optional {sorted(info)}")
+            print(f"{'PASS' if good else 'FAIL'} selftest {name}: {len(got)} defect finding(s), empty-optional {sorted(info)}, "
+                  f"raw-enum {sorted(enums)}")
+            for x in sorted(EXPECTED_ENUM[name] ^ enums):
+                print(f"   raw-enum mismatch: {x}")
             for x in sorted(want - got):
                 print(f"   missed:     {x}")
             for x in sorted(got - want):

@@ -210,7 +210,7 @@ def sec_D():
               rm.status_code == 400 and "applies only to a job" in text_of(rm.text), status=rm.status_code)
     # allowed on a job: a Delete window deletes it
     if st("admin", "/job/r16/job/del-16/api/json") != 200:
-        api("admin", "/createItem?name=del-16&mode=hudson.model.FreeStyleProject", "POST",
+        api("admin", "/job/r16/createItem?name=del-16&mode=hudson.model.FreeStyleProject", "POST",
             headers={"Content-Type": "application/x-www-form-urlencoded"}, data=b"")
     gid = window(U, "r16/del-16", ["DELETE"], reason="e2e-16 delete the job del-16")
     r = api(U, "/job/r16/job/del-16/doDelete", "POST")
