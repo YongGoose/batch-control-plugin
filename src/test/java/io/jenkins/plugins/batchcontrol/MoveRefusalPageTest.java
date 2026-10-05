@@ -41,7 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * D-59 with D-48 (a browser form save shows the refusal "on a page with the standard layout"):
  * a move refused by change control, made from a browser, answers 403 with an HTML page in
  * Jenkins' standard layout, the message names the item as text (an item name with HTML-special
- * characters cannot inject markup), and nothing moves. Matrix row T-SEC-63 (note 192). The plain
+ * characters cannot inject markup), and nothing moves. Matrix rows T-SEC-63 (note 192), T-SEC-64,
+ * T-SEC-72 and T-08-128 (a move into the Jenkins root, D-71, note 261). The plain
  * answer for non-browser clients stays covered by T-SEC-53..56 (MoveChangeControlTest).
  *
  * <p>Fixture as T-SEC-53: u1 holds native Item/Move and an approved [CREATE, CONFIGURE] window on
@@ -238,6 +239,115 @@ public class MoveRefusalPageTest {
             }
         }
         assertTrue(prefilled, "the linked form must carry scopeFullName=" + expected);
+    }
+
+    /**
+     * T-08-128 (SPEC 8 D-59 move line and D-71, note 261): u1 holds native Move, a DELETE window
+     * on the job {@code prod/x} (Delete at the source is not missing) and no Create in the Jenkins
+     * root; moving {@code prod/x} into the root (folders plugin destination {@code /}) is refused
+     * with 403 from a browser and from a script. A window's CREATE applies only to a regular folder,
+     * so the refusal must not offer what cannot be granted: it says that an administrator must make
+     * the move, names the missing Create, does not suggest requesting a Create window, and neither
+     * page nor message links or names the grant request form {@code batch-control/grants/new}.
+     * Nothing moves and the refusal is recorded as GRANT_VIOLATION naming u1 and {@code prod/x}
+     * (how many records the immediate scripted repeat adds is not pinned). Guards: the same user moves
+     * the job into the regular folder {@code team}, where the setUp's CREATE window applies, and
+     * the administrator moves it into the root with the same destination value.
+     */
+    @Test
+    public void t_08_128_moveIntoTheJenkinsRootNeedsAnAdministratorAndOffersNoWindow() throws Exception {
+        Item x = prod.createProject(FreeStyleProject.class, "x");
+        String id = submitGrantOk(j, "u1", "prod/x", Arrays.asList("DELETE"), 30, "retire x", null, "a1");
+        assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval of the DELETE window by a1");
+        hudson.model.User u1 = hudson.model.User.getById("u1", true);
+        assertTrue(x.getACL().hasPermission2(u1.impersonate2(), Item.DELETE), "premise: u1 holds Delete on prod/x (window)");
+        assertTrue(x.getACL().hasPermission2(u1.impersonate2(), RelocationAction.RELOCATE), "premise: u1 holds native Move");
+        assertFalse(j.jenkins.getACL().hasPermission2(u1.impersonate2(), Item.CREATE), "premise: u1 has no Create in the Jenkins root");
+        int violationsBefore = records(ChangeType.GRANT_VIOLATION).size();
+
+        // browser
+        JenkinsRule.WebClient wc = ApproverFormFixtures.client(j, "u1");
+        wc.getOptions().setJavaScriptEnabled(false);
+        WebRequest browser = new WebRequest(wc.createCrumbedUrl(x.getUrl() + "move/move"), HttpMethod.POST);
+        browser.setAdditionalHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        browser.setRequestParameters(List.of(new NameValuePair("destination", "/")));
+        Page page = wc.getPage(browser);
+        String body = page.getWebResponse().getContentAsString();
+        assertEquals(403, page.getWebResponse().getStatusCode(), "a move into the root without Create there must answer 403: " + excerpt(body));
+        assertTrue(page instanceof HtmlPage, "a browser gets an HTML page: " + excerpt(body));
+        HtmlPage html = (HtmlPage) page;
+        org.htmlunit.html.DomNode main = html.querySelector("#main-panel");
+        String message = main != null ? main.asNormalizedText() : html.asNormalizedText();
+        assertRootRefusalMessage("browser", message);
+        List<String> links = new java.util.ArrayList<>();
+        for (org.htmlunit.html.DomNode n : html.querySelectorAll("a[href], form[action]")) {
+            DomElement e = (DomElement) n;
+            String target = e.hasAttribute("href") ? e.getAttribute("href") : e.getAttribute("action");
+            links.add(target);
+            assertFalse(target.contains("grants/new"), "the refusal page must not link the grant request form, found " + target);
+        }
+        assertFalse(html.asNormalizedText().contains("grants/new"), "the refusal page must not name the grant request form: "
+                + excerpt(html.asNormalizedText()) + " links: " + links);
+        assertNotMoved(x);
+        List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(violationsBefore + 1, violations.size(), "the refused move is recorded once as GRANT_VIOLATION, got " + violations);
+        ChangeRecord rec = violations.get(violations.size() - 1);
+        assertEquals("u1", rec.getUser(), "the GRANT_VIOLATION names u1");
+        assertTrue((rec.getTarget() + " " + rec.getDetail()).contains("prod/x"), "the GRANT_VIOLATION names prod/x: "
+                + rec.getTarget() + " / " + rec.getDetail());
+
+        // script (the same attempt repeated at once; how many records a repeat adds is not pinned, note 261)
+        JenkinsRule.WebClient script = ApproverFormFixtures.client(j, "u1");
+        WebRequest plain = new WebRequest(script.createCrumbedUrl(x.getUrl() + "move/move"), HttpMethod.POST);
+        plain.setAdditionalHeader("Accept", "*/*");
+        plain.setRequestParameters(List.of(new NameValuePair("destination", "/")));
+        org.htmlunit.WebResponse scripted = script.getPage(plain).getWebResponse();
+        String scriptedText = scripted.getContentAsString();
+        assertEquals(403, scripted.getStatusCode(), "a scripted move into the root must answer 403: " + excerpt(scriptedText));
+        String scriptedMessage = scriptedText.replaceAll("<[^>]+>", " ");
+        assertRootRefusalMessage("script", scriptedMessage);
+        assertFalse(scriptedText.contains("grants/new"), "the scripted refusal must not name the grant request form: " + excerpt(scriptedText));
+        assertNotMoved(x);
+        int violationsAfterRefusals = records(ChangeType.GRANT_VIOLATION).size();
+
+        // guard: into a regular folder under the CREATE window the same user's move goes through
+        assertSuccess(ApproverFormFixtures.post(j, "u1", x.getUrl() + "move/move", List.of(new NameValuePair("destination", "/team"))),
+                "guard: u1 moves prod/x into team (Create from the window, Delete from the window)");
+        assertNull(prod.getItem("x"), "guard: x left prod");
+        assertNotNull(team.getItem("x"), "guard: x is in team");
+        assertEquals(violationsAfterRefusals, records(ChangeType.GRANT_VIOLATION).size(), "guard: the permitted move adds no violation");
+
+        // guard: "/" is the root destination (an administrator's move into it goes through)
+        assertSuccess(ApproverFormFixtures.post(j, "admin", team.getItem("x").getUrl() + "move/move",
+                List.of(new NameValuePair("destination", "/"))), "guard: the administrator moves team/x into the root");
+        assertNotNull(j.jenkins.getItem("x"), "guard: x is in the root");
+        assertNull(team.getItem("x"), "guard: x left team");
+    }
+
+    /** Plain words for the root refusal: an administrator, the missing Create, no window to request. */
+    private static void assertRootRefusalMessage(String what, String message) {
+        assertTrue(ADMINISTRATOR.matcher(message).find(), what + ": the refusal must say that an administrator must make the move: "
+                + excerpt(message));
+        assertTrue(CREATE.matcher(message).find(), what + ": the refusal must name what is missing (Create): " + excerpt(message));
+        assertFalse(SUGGESTS_CREATE_WINDOW.matcher(message).find(), what + ": the refusal must not suggest requesting a Create"
+                + " window for the Jenkins root: " + excerpt(message));
+    }
+
+    private static final java.util.regex.Pattern ADMINISTRATOR = java.util.regex.Pattern.compile("(?i)\\badministrator");
+    private static final java.util.regex.Pattern CREATE = java.util.regex.Pattern.compile("(?i)\\bcreate\\b");
+    /**
+     * "request a Create window", "ask for Item/Create", "request a permission window for Create"
+     * and the like, unless negated ("cannot request ..."): a suggestion to apply for what no
+     * window can give in the Jenkins root.
+     */
+    private static final java.util.regex.Pattern SUGGESTS_CREATE_WINDOW = java.util.regex.Pattern.compile(
+            "(?i)(?<!\\b(?:not|cannot|can't|never)\\s{1,3})\\b(?:request|ask\\s+for|apply\\s+for)\\s+(?:a|an|the)?\\s*"
+            + "(?:new\\s+|temporary\\s+)?(?:(?:item/)?create\\b|(?:permission\\s+)?window\\b[^.]{0,40}\\bcreate\\b)");
+
+    private void assertNotMoved(Item x) {
+        assertNotNull(prod.getItem("x"), "the refused move must leave x in prod");
+        assertNull(j.jenkins.getItem("x"), "nothing may arrive in the root");
+        assertEquals("prod/x", x.getFullName(), "the item keeps its full name");
     }
 
     private static String queryValue(java.net.URL url, String name) {
