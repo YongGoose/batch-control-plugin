@@ -37,9 +37,6 @@ public final class ParameterDisplay {
     /** Base class of the file-parameters plugin's values (stashedFile, base64File); not linked. */
     static final String FILE_PARAMETERS_VALUE = "io.jenkins.plugins.file_parameters.AbstractFileParameterValue";
 
-    /** The file-parameters plugin's stashed file value, whose upload waits in a temporary directory. */
-    public static final String STASHED_FILE_VALUE = "io.jenkins.plugins.file_parameters.StashedFileParameterValue";
-
     private ParameterDisplay() {
     }
 
@@ -108,11 +105,6 @@ public final class ParameterDisplay {
         }
         Object raw = value.getValue();
         return raw instanceof org.apache.commons.fileupload2.core.FileItem || raw instanceof File;
-    }
-
-    /** Whether {@code value} is the file-parameters plugin's stashed file value (by class name). */
-    public static boolean isStashedFile(ParameterValue value) {
-        return isA(value, STASHED_FILE_VALUE);
     }
 
     /** Whether {@code object}'s class is, or extends, the class named {@code className}. */
