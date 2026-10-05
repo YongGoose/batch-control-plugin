@@ -66,6 +66,7 @@ import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.markReason;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.payload;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.renameTypedValue;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestDirListing;
+import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.requestXml;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.retypeTypedValue;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.tempFiles;
 import static io.jenkins.plugins.batchcontrol.TypedParameterFixtures.uploadFile;
@@ -86,7 +87,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * anything is stored; approval refuses a request whose stored values do not match the displayed
  * ones (repeated or differing names, a value that cannot be loaded) and a request stored before
  * D-72; every stored value obeys the display length limit and contains only characters XML can
- * store; a failed save leaves nothing behind. Matrix rows T-05-70 .. T-05-81 (note 265).
+ * store; a failed save leaves nothing behind. Matrix rows T-05-70 .. T-05-81 (note 265), and
+ * T-05-136/137 (XML-illegal characters in a decision comment and in a parameter name, LIMITATIONS
+ * 31; note 273).
  *
  * <p>Form rows post the Request Run endpoint the way the rendered form does (core's structured
  * {@code json} field; multipart when files are involved; raw fields for the plain channel). A field
@@ -101,9 +104,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * back). Each refusal is paired with an unedited twin request of the same job that is approved and
  * runs with its own value.
  *
- * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72, D-72b and D-74, and the
- * Given/When/Then of docs/reports/security-35.md and docs/reports/spec-review-S7.md only (no
- * src/main knowledge).
+ * <p>Written from docs/SPEC.md item 5, docs/DECISIONS.md D-72, D-72b and D-74, docs/LIMITATIONS.md
+ * item 31, and the Given/When/Then of docs/reports/security-35.md, docs/reports/spec-review-S7.md
+ * and docs/reports/spec-review-r6.md only (no src/main knowledge).
  */
 @WithJenkins
 public class TypedParameterIntegrityTest {
@@ -373,6 +376,109 @@ public class TypedParameterIntegrityTest {
                 "guard: a valid request adds exactly its own two files, the request and its values (D-74)");
     }
 
+    /**
+     * T-05-136 (SPEC 5 D-72b line: "Every stored value ... contains only characters XML can store;
+     * a failed save leaves nothing behind"; SPEC 6 usability line; LIMITATIONS 31: a character XML
+     * 1.0 cannot store is refused "in an approve or reject comment", and "a refused approval or
+     * rejection leaves the request pending"; spec-review-r6 m-11 (c); note 273): a1, the designated
+     * approver, posts the request screen's approve endpoint with a comment holding U+0001 (storable
+     * in XML 1.1, not in XML 1.0) and with one holding U+FFFE, and the reject endpoint with U+0000
+     * and with U+001F; then calls the service's approve and reject with such comments. Each attempt
+     * is refused without a server error: the answer is an HTML page that is not core's bare error
+     * page, shows no crash text, carries the decision form again and says something the plain
+     * request screen does not; the service call throws. The request stays PENDING with no decider
+     * and no comment, its file is byte-for-byte unchanged, nothing new appears under
+     * {@code requests/run/}, nothing runs. Guards: a second request of the same job is rejected with
+     * the comment {@code wrong date} (REJECTED, comment stored), and the first is approved with
+     * {@code looks fine} and runs once with its own value.
+     */
+    @Test
+    public void t_05_136_xmlIllegalCharacterInADecisionCommentIsRefusedAndLeavesTheRequestPending() throws Exception {
+        FreeStyleProject job = storedJob("xml-comment");
+        String id = createTyped(job, List.of(new StringParameterValue("TARGET", "staging"))).getId();
+        String other = createTyped(job, List.of(new StringParameterValue("TARGET", "second"))).getId();
+        String file = requestXml(j, id);
+        Set<String> listing = requestDirListing(j);
+
+        String[][] attempts = {
+            {"approve", "looks\u0001fine", "an approve comment with U+0001"},
+            {"approve", "looks\uFFFEfine", "an approve comment with U+FFFE"},
+            {"reject", "wrong\u0000date", "a reject comment with U+0000"},
+            {"reject", "wrong\u001Fdate", "a reject comment with U+001F"},
+        };
+        for (String[] attempt : attempts) {
+            assertDecisionRefused(attempt[2], id, attempt[0], attempt[1]);
+            assertUndecided(attempt[2], id, file, listing);
+        }
+        assertRefusedDecision("the service approve with a U+0001 comment", () -> {
+            try (ACLContext ignored = as("a1")) {
+                RunRequestService.get().approve(id, "looks\u0001fine");
+            }
+        });
+        assertUndecided("the service approve with a U+0001 comment", id, file, listing);
+        assertRefusedDecision("the service reject with a U+0000 comment", () -> {
+            try (ACLContext ignored = as("a1")) {
+                RunRequestService.get().reject(id, "wrong\u0000date");
+            }
+        });
+        assertUndecided("the service reject with a U+0000 comment", id, file, listing);
+        assertNothingRan(job);
+
+        WebResponse rejected = ApproverFormFixtures.decideRun(j, "a1", other, "reject", "wrong date");
+        assertTrue(rejected.getStatusCode() < 400, "guard: a plain reject comment is accepted, got HTTP " + rejected.getStatusCode() + ": "
+                + UsabilityFixtures.excerpt(rejected.getContentAsString()));
+        RunRequest otherNow = RunRequestService.get().load(other);
+        assertEquals(RequestStatus.REJECTED, otherNow.getStatus(), "guard: the second request is rejected");
+        assertEquals("wrong date", otherNow.getDecisionComment(), "guard: the plain reject comment is stored");
+
+        WebResponse approved = ApproverFormFixtures.decideRun(j, "a1", id, "approve", "looks fine");
+        assertTrue(approved.getStatusCode() < 400, "guard: a plain approve comment is accepted, got HTTP " + approved.getStatusCode() + ": "
+                + UsabilityFixtures.excerpt(approved.getContentAsString()));
+        j.waitUntilNoActivity();
+        assertNotNull(job.getBuildByNumber(1), "guard: the approved request runs");
+        assertEquals("staging", TypedParameterFixtures.CaptureEnv.seen(job.getFullName(), 1, "TARGET"), "guard: the run receives its own value");
+        assertEquals(1, job.getBuilds().size(), "guard: exactly one run");
+        assertEquals("looks fine", RunRequestService.get().load(id).getDecisionComment(), "guard: the plain approve comment is stored");
+    }
+
+    /**
+     * T-05-137 (SPEC 5 D-72b line: "each parameter name appears at most once ... Every stored value
+     * ... contains only characters XML can store; a failed save leaves nothing behind"; LIMITATIONS
+     * 31: such a character is refused "in a parameter name"; spec-review-r6 m-11 (c); note 273): the
+     * Freestyle job {@code xml-name} defines the string parameter {@code BAD<U+0001>NAME} (a name
+     * the job's own XML 1.1 configuration can hold, XML 1.0 cannot). u1 posts the Request Run form's
+     * {@code json} with that parameter: refused with 4xx (not 5xx), an HTML page that is not core's
+     * bare error page, no crash text, the form again and an explanation the plain form does not
+     * have; then the service's {@code create} with that name: IllegalArgumentException or Failure.
+     * No request, the {@code requests/run/} listing unchanged (no temporary file), nothing under the
+     * temporary directories, nothing queued. Guard: the job {@code xml-name-ok} with
+     * {@code BAD_NAME} accepts the same post (the value is stored) and the same service call.
+     */
+    @Test
+    public void t_05_137_xmlIllegalCharacterInAParameterNameIsRefusedBeforeAnythingIsStored() throws Exception {
+        String bad = "BAD\u0001NAME";
+        FreeStyleProject job = job("xml-name", new StringParameterDefinition(bad, "name-default"));
+        FreeStyleProject twin = job("xml-name-ok", new StringParameterDefinition("BAD_NAME", "name-default"));
+        Set<String> ids = ApproverFormFixtures.runRequestIds();
+        Set<String> listing = requestDirListing(j);
+        Set<Path> temp = tempFiles(j);
+
+        assertFormRefusal("a parameter name with U+0001", postJson("u1", job, form(REASON, value(bad, "fine"))), job);
+        assertEquals(ids, ApproverFormFixtures.runRequestIds(), "the refused form post must store no request");
+        assertEquals(listing, requestDirListing(j), "the refused form post must leave no file of any name under requests/run/");
+        assertRefusedAsInvalid("the service create with a parameter name holding U+0001 must be refused",
+                () -> createTyped(job, List.of(new StringParameterValue(bad, "fine"))));
+        assertEquals(ids, ApproverFormFixtures.runRequestIds(), "the refused service call must store no request");
+        assertEquals(listing, requestDirListing(j), "the refused service call must leave no file of any name under requests/run/");
+        assertEquals(temp, tempFiles(j), "nothing may be kept under the temporary directories");
+        assertNothingRan(job);
+
+        String id = acceptedOne("the name without U+0001", postJson("u1", twin, form(REASON, value("BAD_NAME", "fine"))), ids);
+        assertEquals("fine", RunRequestService.get().load(id).getParameters().get("BAD_NAME"), "guard: the plain name is accepted with its value");
+        RunRequest viaService = createTyped(twin, List.of(new StringParameterValue("BAD_NAME", "fine")));
+        assertEquals(RequestStatus.PENDING, viaService.getStatus(), "guard: the service accepts the plain name");
+    }
+
     // ================================================================ approval fails closed
 
     /**
@@ -636,6 +742,89 @@ public class TypedParameterIntegrityTest {
         }
         assertTrue(named || nextTo, what + ": the refusal must explain itself next to or naming the field " + field
                 + "; lines the plain form does not have: " + fresh);
+    }
+
+    /**
+     * A form refusal whose field is not pinned (T-05-137): 4xx, an HTML page that is not core's bare
+     * error page, no crash text, the form again, and a line the plain form does not have (re-entry
+     * notices excluded).
+     */
+    private void assertFormRefusal(String what, Page answer, Job<?, ?> job) throws Exception {
+        WebResponse response = answer.getWebResponse();
+        int code = response.getStatusCode();
+        assertTrue(code >= 400 && code < 500, what + " must be refused with 4xx (not a server error), got HTTP " + code + ": "
+                + UsabilityFixtures.excerpt(response.getContentAsString()));
+        assertTrue(answer instanceof HtmlPage, what + ": the refusal must be an HTML page, got " + response.getContentType());
+        HtmlPage page = (HtmlPage) answer;
+        UsabilityFixtures.assertNotBareErrorPage(what, page);
+        String text = page.asNormalizedText();
+        UsabilityFixtures.assertPlainRefusal(what, text, null);
+        assertFalse(UsabilityFixtures.formsEndingWith(page, job.getUrl() + "batch-control/submit").isEmpty(),
+                what + ": the refusal must show the form again: " + UsabilityFixtures.formActions(page));
+        Set<String> fresh = lines(text);
+        fresh.removeAll(lines(UsabilityFixtures.htmlPage(j, "u1", job.getUrl() + "batch-control/").asNormalizedText()));
+        for (Object notice : page.querySelectorAll("[data-batch-control-notice]")) {
+            fresh.removeAll(lines(((org.htmlunit.html.DomNode) notice).asNormalizedText()));
+        }
+        assertFalse(fresh.isEmpty(), what + ": the refusal must explain itself (no line differs from the plain form)");
+    }
+
+    /**
+     * a1 posts {@code batch-control/requests/<id>/<verb>} with {@code comment} as UTF-8 (redirects followed):
+     * no server error, an HTML page that is not core's bare error page, no crash text, the decision
+     * form again, and a line the plain request screen does not have.
+     */
+    private void assertDecisionRefused(String what, String id, String verb, String comment) throws Exception {
+        String detail = "batch-control/requests/" + id + "/";
+        Set<String> plain = lines(UsabilityFixtures.htmlPage(j, "a1", detail).asNormalizedText());
+        JenkinsRule.WebClient wc = UsabilityFixtures.clientNoJs(j, "a1");
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(detail + verb), HttpMethod.POST);
+        // the body is percent-encoded here: HtmlUnit's own parameter encoding sends U+FFFE as '?',
+        // so the character would never reach Jenkins (a browser sends its UTF-8 bytes)
+        request.setAdditionalHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        request.setRequestBody("comment=" + java.net.URLEncoder.encode(comment, StandardCharsets.UTF_8));
+        Page answer = wc.getPage(request);
+        int code = answer.getWebResponse().getStatusCode();
+        assertTrue(code < 500, what + ": the refusal must not be a server error, got HTTP " + code + ": "
+                + UsabilityFixtures.excerpt(answer.getWebResponse().getContentAsString()));
+        assertTrue(answer instanceof HtmlPage, what + ": the refusal must be an HTML page, got " + answer.getWebResponse().getContentType());
+        HtmlPage page = (HtmlPage) answer;
+        UsabilityFixtures.assertNotBareErrorPage(what, page);
+        String text = page.asNormalizedText();
+        UsabilityFixtures.assertPlainRefusal(what, text, null);
+        assertFalse(UsabilityFixtures.formsEndingWith(page, detail + verb).isEmpty(),
+                what + ": the refusal must show the " + verb + " form again; HTTP " + code + " at " + page.getUrl() + ", forms "
+                        + UsabilityFixtures.formActions(page) + ", status now " + RunRequestService.get().load(id).getStatus() + ": "
+                        + UsabilityFixtures.excerpt(text));
+        Set<String> fresh = lines(text);
+        fresh.removeAll(plain);
+        for (Object notice : page.querySelectorAll("[data-batch-control-notice]")) {
+            fresh.removeAll(lines(((org.htmlunit.html.DomNode) notice).asNormalizedText()));
+        }
+        assertFalse(fresh.isEmpty(), what + ": the refusal must explain itself (no line differs from the plain request screen)");
+    }
+
+    /** The request is still PENDING, undecided and without a comment; its file and the request directory are unchanged. */
+    private void assertUndecided(String what, String id, String file, Set<String> listing) throws Exception {
+        RunRequest now = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, now.getStatus(), what + ": the request must stay PENDING");
+        assertEquals(null, now.getDecidedBy(), what + ": no decider may be stored");
+        String comment = now.getDecisionComment();
+        assertTrue(comment == null || comment.isEmpty(), what + ": no comment may be stored, was '" + comment + "'");
+        assertEquals(file, requestXml(j, id), what + ": the request file must be unchanged (nothing stored)");
+        assertEquals(listing, requestDirListing(j), what + ": nothing may be added under requests/run/ (no temporary file)");
+    }
+
+    /** A refused decision throws; the type is not pinned (SPEC names none), the state after it is what counts. */
+    private static void assertRefusedDecision(String what, Executable action) {
+        try {
+            action.execute();
+        } catch (RuntimeException refused) {
+            return;
+        } catch (Throwable other) {
+            throw new AssertionError(what + " - expected a refusal (a runtime exception), got " + other, other);
+        }
+        throw new AssertionError(what + " must be refused");
     }
 
     private static Set<String> lines(String text) {
