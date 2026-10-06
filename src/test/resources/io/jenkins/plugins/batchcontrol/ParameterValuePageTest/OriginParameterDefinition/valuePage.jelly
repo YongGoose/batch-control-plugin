@@ -1,0 +1,15 @@
+<?jelly escape-by-default='true'?>
+<!--
+  Value page of ParameterValuePageTest.OriginParameterDefinition (matrix row T-05-138, issue #111).
+  It differs from the string parameter's index.jelly in three observable ways: the block's
+  data-r6-value-page attribute, the text box's starting value, and the hidden field "origin".
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:entry title="${it.name}" description="${it.formattedDescription}">
+    <div name="parameter" data-r6-value-page="${it.name}">
+      <input type="hidden" name="name" value="${it.name}" />
+      <input type="hidden" name="origin" value="value-page" />
+      <f:textbox name="value" value="value-page-default" />
+    </div>
+  </f:entry>
+</j:jelly>

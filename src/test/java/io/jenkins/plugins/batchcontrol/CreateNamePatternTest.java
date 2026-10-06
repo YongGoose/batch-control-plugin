@@ -50,7 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * SPEC item 8, D-40: a CREATE change request may restrict the name of the item to be created
  * (form field {@code createNamePattern}: an exact name, or a Java regular expression written as
- * {@code /regex/}). Matrix rows T-08-37 .. T-08-46.
+ * {@code /regex/}). Matrix rows T-08-37 .. T-08-46, and T-08-192/193 (D-74 (4), issue #107: the
+ * restriction is read only with Create; note 273).
  *
  * <p>Every row works in the folder {@code team} with a window on that folder (D-71: scope type
  * ITEM; CREATE creates directly inside it) held by u1, who has no Create/Configure/Delete of
@@ -59,8 +60,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The creation paths are the ones core offers: {@code createItem} with a config.xml body, the
  * New Item form ({@code mode}), a copy ({@code mode=copy}) and CLI {@code create-job}.
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-40 and docs/TEST-MATRIX.md only
- * (no src/main knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-40 and D-74, issue #107 and
+ * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class CreateNamePatternTest {
@@ -367,6 +368,89 @@ public class CreateNamePatternTest {
         int outside = createAtRoot("u1", "root-job");
         assertTrue(outside >= 400, "outside the scope creation stays refused, got " + outside);
         assertNull(j.jenkins.getItemByFullName("root-job"));
+    }
+
+    /**
+     * T-08-192 (SPEC 8 D-40 line: "A CREATE request may carry an optional name restriction (form
+     * field {@code createNamePattern})"; D-74 (4) and issue #107: the field belongs to the Create
+     * action and is shown only while Create is ticked; note 273). (a) u1 submits a [CONFIGURE]
+     * request on the folder {@code team} through the form contract with {@code createNamePattern} =
+     * {@code nightly.report}, as a browser does when the hidden field still holds text: it is
+     * accepted, one request is stored with no restriction, a1's request screen does not show the
+     * pattern, and once approved the window configures {@code team} (config.xml 200) and confers no
+     * Create; no GRANT_VIOLATION. (b) The same pattern on a [CREATE] request is stored as submitted,
+     * shown to a1, and enforced: {@code other-report} is refused with 4xx, leaves no item and adds one
+     * GRANT_VIOLATION naming u1; {@code nightly.report} is created.
+     */
+    @Test
+    public void t_08_192_nameRestrictionWithoutCreateIsIgnoredAndWithCreateIsStoredAndEnforced() throws Exception {
+        team.setDescription("folder-base");
+        Set<String> before = grantRequestIds();
+        String configure = submitGrantOk(j, "u1", "team", Arrays.asList("CONFIGURE"), 30,
+                "tidy the folder settings", "nightly.report", "a1");
+        assertEquals(before.size() + 1, grantRequestIds().size(), "exactly one request is stored for the submission without Create");
+        String ignored = GrantRequestService.get().load(configure).getCreateNamePattern();
+        assertTrue(ignored == null || ignored.isEmpty(), "#107: a name restriction submitted without Create must not be stored, was '"
+                + ignored + "'");
+        WebResponse configureScreen = get(j, "a1", "batch-control/grants/" + configure + "/");
+        assertEquals(200, configureScreen.getStatusCode(), "fixture: a1 opens the request screen");
+        assertFalse(configureScreen.getContentAsString().contains("nightly.report"),
+                "#107: the request screen of a request without Create must not show the ignored restriction");
+        assertSuccess(decideGrant(j, "a1", configure, "approve", "ok"), "approval of the CONFIGURE request by a1");
+
+        JenkinsRule.WebClient wc = client(j, "u1");
+        String folderXml = team.getConfigFile().asString()
+                .replace("<description>folder-base</description>", "<description>folder-changed</description>");
+        assertTrue(folderXml.contains("folder-changed"), "fixture: the folder's config.xml must carry its description");
+        WebRequest folderSave = new WebRequest(wc.createCrumbedUrl(team.getUrl() + "config.xml"), HttpMethod.POST);
+        folderSave.setAdditionalHeader("Content-Type", "application/xml; charset=UTF-8");
+        folderSave.setRequestBody(folderXml);
+        assertEquals(200, wc.getPage(folderSave).getWebResponse().getStatusCode(), "the CONFIGURE window configures team");
+        assertEquals("folder-changed", j.jenkins.getItemByFullName("team", Folder.class).getDescription());
+        assertFalse(team.getACL().hasPermission2(hudson.model.User.getById("u1", true).impersonate2(), Item.CREATE),
+                "the ignored restriction must not have turned the CONFIGURE request into a Create window");
+        assertTrue(records(ChangeType.GRANT_VIOLATION).isEmpty(), "nothing so far is a violation");
+
+        String create = submitGrantOk(j, "u1", "team", Arrays.asList("CREATE"), 30,
+                "create the nightly report job", "nightly.report", "a1");
+        assertEquals("nightly.report", GrantRequestService.get().load(create).getCreateNamePattern(),
+                "guard: with Create the restriction is stored as submitted");
+        assertTrue(get(j, "a1", "batch-control/grants/" + create + "/").getContentAsString().contains("nightly.report"),
+                "guard: with Create the approver sees the restriction");
+        assertSuccess(decideGrant(j, "a1", create, "approve", "ok"), "approval of the CREATE request by a1");
+
+        int refused = createByConfigXml("u1", "other-report");
+        assertTrue(refused >= 400 && refused < 500, "guard: with Create the restriction is enforced, 'other-report' must be refused with 4xx, got "
+                + refused);
+        assertNull(j.jenkins.getItemByFullName("team/other-report"), "no item 'other-report' may be left behind");
+        List<ChangeRecord> violations = records(ChangeType.GRANT_VIOLATION);
+        assertEquals(1, violations.size(), "the refused creation is one GRANT_VIOLATION, got " + violations.size());
+        assertTrue("u1".equals(violations.get(0).getUser()) && mentions(violations.get(0), "other-report"),
+                "the GRANT_VIOLATION names u1 and other-report");
+        assertTrue(createByConfigXml("u1", "nightly.report") < 400, "guard: the restricted name is created");
+        assertNotNull(j.jenkins.getItemByFullName("team/nightly.report"));
+    }
+
+    /**
+     * T-08-193 (SPEC 8 D-40 line, D-74 (4), issue #107; SPEC 6 usability line: invalid input is
+     * refused "with a message next to the field"; note 273): the restriction is read only with
+     * Create, so text the hidden field still holds cannot refuse a request without Create. u1's
+     * [CONFIGURE] request on {@code team} with the invalid regular expression {@code /(unclosed/} in
+     * {@code createNamePattern} is accepted and stores no restriction. Guard (T-08-40): the same text
+     * on a [CREATE] request is refused with 4xx and nothing is stored.
+     */
+    @Test
+    public void t_08_193_invalidRestrictionWithoutCreateDoesNotRefuseTheRequest() throws Exception {
+        String configure = submitGrantOk(j, "u1", "team", Arrays.asList("CONFIGURE"), 30,
+                "tidy the folder settings", "/(unclosed/", "a1");
+        String ignored = GrantRequestService.get().load(configure).getCreateNamePattern();
+        assertTrue(ignored == null || ignored.isEmpty(), "#107: the restriction is not read without Create, so nothing is stored, was '"
+                + ignored + "'");
+
+        Set<String> before = grantRequestIds();
+        assertClientError(submitGrant(j, "u1", "team", Arrays.asList("CREATE"), 30,
+                "new nightly job", "/(unclosed/", "a1"), "guard: the invalid regex on a CREATE request");
+        assertEquals(before, grantRequestIds(), "guard: the refused CREATE request is not stored");
     }
 
     // ---------------------------------------------------------------- helpers

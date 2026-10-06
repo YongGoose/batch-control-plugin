@@ -1,9 +1,11 @@
 package io.jenkins.plugins.batchcontrol;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
+import hudson.model.Failure;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
 import hudson.model.User;
+import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.assertSuccess;
@@ -38,7 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (paraphrased from the Korean): creations, changes, deletions, renames and moves are recorded
  * automatically whatever the path, with who changed what and when, and recording is active while
  * either switch is on; SPEC 3 data model: ChangeRecord {@code target, user, at}. Matrix rows
- * T-09-25 .. T-09-29 (note 272).
+ * T-09-25 .. T-09-29 (note 272) and T-09-30 (security-39 S-39-05: a SYSTEM deletion after an aborted
+ * user deletion on the same thread; note 274).
  *
  * <p>Why the children are the interesting case (DECISIONS D-71): core's
  * {@code AbstractItem.delete()} deletes every child of a folder as SYSTEM, without checking it. A
@@ -56,8 +60,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Users: admin (Overall/Administer), d2 (Overall/Read; Item/Read on {@code f2} and below;
  * Item/Delete on the folder {@code f2} only), a1 (the configured approver, never acts).
  *
- * <p>Written from docs/SPEC.md, docs/DECISIONS.md (D-71) and docs/TEST-MATRIX.md only (no src/main
- * knowledge).
+ * <p>Written from docs/SPEC.md, docs/DECISIONS.md (D-71), the Given/When/Then of
+ * docs/reports/security-39.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
 public class ChangeRecordFolderDeleteAttributionTest {
@@ -231,6 +235,64 @@ public class ChangeRecordFolderDeleteAttributionTest {
             assertOneDeleteRecordBy(SYSTEM, target, before,
                     "the SYSTEM deletion after admin's deletion on the same thread (no leak of admin)");
         }
+    }
+
+    /** Vetoes the deletion of the item named {@link #vetoed} (T-09-30); null vetoes nothing. */
+    @TestExtension("t_09_30_systemDeletionAfterAnAbortedUserDeletionStaysSystem")
+    public static class ChildDeletionVeto extends ItemListener {
+        static volatile String vetoed;
+
+        @Override
+        public void onCheckDelete(Item item) throws Failure {
+            if (item.getFullName().equals(vetoed)) {
+                throw new Failure("test veto: " + item.getFullName() + " may not be deleted now");
+            }
+        }
+    }
+
+    /**
+     * T-09-30 (security-39 S-39-05; SPEC 6 usability "recorded history names who did what", SPEC 9;
+     * note 274): the folder {@code gf} holds the jobs {@code gf/c1} and {@code gf/c2}; a test item
+     * listener vetoes the deletion of {@code gf/c2}. On the test thread the administrator deletes
+     * {@code gf} in code under {@code ACL.as2(admin)}: {@code gf/c1} is deleted (one DELETE record
+     * naming admin) and the deletion aborts ({@code gf} and {@code gf/c2} remain). The veto is lifted
+     * and, on the same thread, {@code gf} is deleted under {@code ACL.as2(ACL.SYSTEM2)}: the DELETE
+     * records of {@code gf/c2} and {@code gf} each name SYSTEM, not admin.
+     */
+    @Test
+    public void t_09_30_systemDeletionAfterAnAbortedUserDeletionStaysSystem() throws Exception {
+        Instant before = Instant.now(BatchClock.clock());
+        Folder gf;
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the items exist before the row
+            gf = j.jenkins.createProject(Folder.class, "gf");
+            gf.createProject(FreeStyleProject.class, "c1");
+            gf.createProject(FreeStyleProject.class, "c2");
+        }
+        ChildDeletionVeto.vetoed = "gf/c2";
+        try {
+            boolean aborted = false;
+            try (ACLContext ignored = as("admin")) {
+                gf.delete();
+            } catch (RuntimeException | java.io.IOException expected) {
+                aborted = true;
+            }
+            assertTrue(aborted, "premise: the administrator's deletion of gf aborts at the vetoed gf/c2");
+        } finally {
+            ChildDeletionVeto.vetoed = null;
+        }
+        assertGone("gf/c1");
+        assertTrue(j.jenkins.getItemByFullName("gf") != null && j.jenkins.getItemByFullName("gf/c2") != null,
+                "premise: gf and gf/c2 remain after the aborted deletion");
+        assertOneDeleteRecordBy("admin", "gf/c1", before, "premise: the administrator's aborted deletion of gf deleted gf/c1");
+
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            gf.delete();
+        }
+        assertGone("gf", "gf/c2");
+        assertOneDeleteRecordBy(SYSTEM, "gf/c2", before,
+                "S-39-05: the SYSTEM deletion of gf after the administrator's aborted deletion on the same thread");
+        assertOneDeleteRecordBy(SYSTEM, "gf", before,
+                "S-39-05: the SYSTEM deletion of gf after the administrator's aborted deletion on the same thread");
     }
 
     // ---------------------------------------------------------------- helpers
