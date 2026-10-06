@@ -5,17 +5,40 @@
      made through the form) shows the full name alone, without the attribute. Every value is
      escaped by default; the icon comes from the item's descriptor, recorded when the request was
      made, and is decorative (the display name follows it as text). No script. D-74: styled by
-     classes (the plugin stylesheet and core's utility classes), no inline style. -->
+     classes (the plugin stylesheet and core's utility classes), no inline style.
+     D-75 (1), security-39 S-39-04: given a ui.ScopeDisplay (scope), the name is the one that class
+     decided for the viewer: a window's followed name only to a viewer who may read the item,
+     otherwise the approved name followed by a fixed note (data-batch-control-scope-note="moved"),
+     or, for a window whose request is no longer stored, the note alone ("hidden"). The notes are
+     constant texts from scopeItem.properties, put through an escaped expression so a translation
+     cannot add markup; they carry nothing about the new location, and the kind shown is the one
+     recorded with the request, never resolved from the moved item. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <st:documentation>
     The item a grant request or permission window names, with its kind.
-    <st:attribute name="fullName" use="required">The item's full name.</st:attribute>
+    <st:attribute name="scope">The io.jenkins.plugins.batchcontrol.ui.ScopeDisplay to show (D-75); takes precedence over fullName.</st:attribute>
+    <st:attribute name="fullName">The item's full name, when no scope is given.</st:attribute>
     <st:attribute name="kind">The recorded io.jenkins.plugins.batchcontrol.model.ItemKind, or null.</st:attribute>
   </st:documentation>
   <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>
   <j:set var="bcItemKind" value="${attrs.kind}"/>
   <j:set var="bcItemIcon" value="${bcItemKind == null ? null : bcItemKind.iconClassName}"/>
+  <j:set var="bcScope" value="${attrs.scope}"/>
+  <j:set var="bcItemName" value="${bcScope == null ? attrs.fullName : bcScope.fullName}"/>
+  <j:set var="bcItemMoved" value="${bcScope != null and bcScope.moved}"/>
+  <j:set var="bcItemNameHidden" value="${bcScope != null and bcScope.nameHidden}"/>
   <!-- Written on one line so that the element's text is exactly "<kind> <full name>": the icon is
-       spaced by a margin, and the one separator is an expression. -->
-  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}" class="batch-control-nowrap"><j:if test="${bcItemKind != null}"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span class="jenkins-!-text-color-secondary${bcItemIcon != null ? ' jenkins-!-margin-left-1' : ''}">${bcItemKind.displayName}</span>${' '}</j:if><span>${attrs.fullName}</span></span>
+       spaced by a margin, and the one separator is an expression. The note, when there is one, is
+       a sibling after it, after one space, so that text stays the same. -->
+  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}" class="batch-control-nowrap"><j:if test="${bcItemKind != null}"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span class="jenkins-!-text-color-secondary${bcItemIcon != null ? ' jenkins-!-margin-left-1' : ''}">${bcItemKind.displayName}</span><j:if test="${!bcItemNameHidden}">${' '}</j:if></j:if><j:if test="${!bcItemNameHidden}"><span>${bcItemName}</span></j:if></span>
+  <j:choose>
+    <j:when test="${bcItemNameHidden}">
+      <j:set var="bcScopeNote" value="${%hiddenNote}"/>
+      ${' '}<span class="batch-control-scope-note jenkins-!-text-color-secondary" data-batch-control-scope-note="hidden">(${bcScopeNote})</span>
+    </j:when>
+    <j:when test="${bcItemMoved}">
+      <j:set var="bcScopeNote" value="${%movedNote}"/>
+      ${' '}<span class="batch-control-scope-note jenkins-!-text-color-secondary" data-batch-control-scope-note="moved">(${bcScopeNote})</span>
+    </j:when>
+  </j:choose>
 </j:jelly>

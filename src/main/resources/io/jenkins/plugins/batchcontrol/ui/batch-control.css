@@ -16,6 +16,14 @@
 }
 
 /*
+ * D-75 (1) (tags/scopeItem.jelly): the note after the approved name of a moved window. It may wrap
+ * inside a short (nowrap) table cell, so the list does not widen for it.
+ */
+.batch-control-scope-note {
+  white-space: normal;
+}
+
+/*
  * e2e-11 DEF-05 (tags/idLink.jelly): a request or window id (a UUID) shown cut to its first
  * characters with an ellipsis; the element still holds the whole id.
  */

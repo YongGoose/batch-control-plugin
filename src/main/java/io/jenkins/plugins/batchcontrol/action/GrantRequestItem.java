@@ -26,6 +26,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.ScopeDisplay;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
@@ -163,15 +164,29 @@ public class GrantRequestItem implements ModelObject {
     }
 
     /**
-     * D-74: the item this page names. Once the request was approved, its window's item
+     * D-74: the item this request concerns now. Once the request was approved, its window's item
      * ({@link Grant#getScope()}): an open window follows its item when an administrator (or a user
      * with their own permissions) renames or moves it, and an ended one keeps the name its item had
      * when it ended. Before that (or without a stored window), the item the request was made for.
+     *
+     * <p>Not a view getter: a followed name may name a place the viewer cannot read (D-75 (1)), so
+     * the page shows {@link #getShownScope()} instead.
      */
     @CheckForNull
-    public GrantScope getScope() {
+    private GrantScope currentScope() {
         Grant g = getGrant();
         return g != null && g.getScope() != null ? g.getScope() : request.getScope();
+    }
+
+    /**
+     * D-75 (1), security-39 S-39-04: the name the Scope row shows ({@code tags/scopeItem.jelly}).
+     * The window's followed name ({@link #currentScope()}) only to a viewer who may read the item
+     * now, or an administrator; anyone else (the requester and approvers included) sees the
+     * approved name with the fixed "moved" note. Unchanged when the name did not change.
+     */
+    public ScopeDisplay getShownScope() {
+        Grant g = getGrant();
+        return ScopeDisplay.of(request.getScope(), g == null ? null : g.getScope());
     }
 
     /**
@@ -267,7 +282,7 @@ public class GrantRequestItem implements ModelObject {
 
     /** The recorded kind, or else the current item as the viewer may see it, is an item group. */
     private boolean namesGroup() {
-        GrantScope scope = getScope();
+        GrantScope scope = currentScope();
         return recordedKindIsGroup()
                 || (scope != null && isGroup(Visibility.findVisibleItem(scope.getFullName())));
     }
