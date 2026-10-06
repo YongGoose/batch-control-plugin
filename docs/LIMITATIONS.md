@@ -127,7 +127,18 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
       folder, whose children are generated (item 6). The Configure that the
       holder keeps on items created that way (D-35c) is matched by the created
       item's parent being the window's folder, not by its name, and does not
-      extend to renaming them (item 33).
+      extend to renaming them (item 33). An item created through the window
+      keeps no authorization property from its creation payload (a submitted
+      `config.xml`, or the item it was copied from): the property is removed
+      and recorded as `GRANT_VIOLATION` (SPEC item 2). Copying a folder that
+      contains items stops part-way, because the window confers no
+      `Item/Create` inside the new folder: core leaves the new folder in place,
+      empty, with the source's configuration in its `config.xml`. When the
+      HTTP request that made the copy ends (for a copy made otherwise, at the
+      next periodic run after its thread has ended or ten minutes have
+      passed), Batch Control saves that folder as it is in memory, without
+      the copied authorization property, and records that as
+      `GRANT_VIOLATION` too. If such a removal cannot be saved, see item 35.
     - `DELETE` applies only to a job, including multi-configuration and Maven
       projects, whose sub-items are part of the job. Maven projects are
       covered by the same rule, because a Maven project is a job, but no test
@@ -169,29 +180,57 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     on everything inside it: each is revoked, by the account that deleted the
     item, with the reason "its item was deleted" and a `GRANT_REVOKE` record.
     Creating a new item at a window's name ends that window the same way,
-    since its own item must have disappeared without a deletion event (names
-    are compared as Jenkins looks them up, without regard to letter case), and
-    so does starting Jenkins after the item has vanished, as if it had been
-    deleted while Jenkins was down. A window approved while its item is being
-    deleted, after the approval checked the item and before the window was
-    registered, ends as soon as it is registered, with the same reason and a
-    `GRANT_REVOKE` record, revoked by the approving account (D-71c (3)). The
-    request itself stays `APPROVED`: the requester is sent the usual approval
-    notification, which does not say that the window has ended, and the
-    request's page shows the window's state as `Revoked (its item was deleted)
-    by <approver>`. A window therefore either applies to its item, under
-    whatever name the item has now, or has ended; renaming, moving, swapping
-    or re-creating items, or combining several windows, cannot make a window
-    reach an item nobody approved.
+    since its own item must have disappeared without a deletion event, and so
+    does starting Jenkins when no item has exactly the window's name any more,
+    as if the item had been deleted while Jenkins was down. For a new item,
+    and for an item renamed or moved onto a window's name (above), names are
+    compared as Jenkins usually looks them up, without regard to letter case,
+    so a window under another spelling of that name ends too. A folder loaded
+    from disk (after a restart or a reload) looks its children up by exact
+    name, though, and can then hold two items whose names differ only in
+    letter case. A window whose own item is still there under exactly the
+    window's name is therefore about that item and stays, whatever arrives
+    next to it under another spelling (DEF-E17-01). The same exception keeps
+    created-item records (D-35c) and the changed-under-grant state of item 35
+    on items that still exist.
 
-    When a window has followed its item, the grant pages, the Grants list and
-    the expiry notice show the item's current full name only to a viewer, or a
-    recipient, who holds `Item/Read` on it. Anyone else, including the holder
-    and the approvers when they cannot read the item where it is now, sees the
-    name that was approved, with a fixed note that the item was moved and its
-    new location is not visible to them; administrators see the current name
-    (SPEC item 8, D-75, security-39 S-39-04). The audit history is not
-    filtered this way: a `ViewHistory` holder sees the new name in the
+    A window approved while its item is being deleted, after the approval
+    checked the item and before the window was registered, ends as soon as it
+    is registered, with the same reason and a `GRANT_REVOKE` record, revoked
+    by the approving account (D-71c (3)). The request itself stays
+    `APPROVED`. The requester is sent the approval notification as usual,
+    with one more line before the window's kind, actions and duration:
+    `Window: ended at once — its item was deleted`. The request's page shows
+    the window's state as `Revoked (its item was deleted) by <approver>`. A
+    window therefore either applies to its item, under whatever name the item
+    has now, or has ended; renaming, moving, swapping or re-creating items, or
+    combining several windows, cannot make a window reach an item nobody
+    approved.
+
+    When a window has followed its item, the item's current full name is
+    shown only to a viewer who may read the item where it is now: an
+    administrator, or a user who holds `Item/Read` on it and on every folder
+    above it (`Item/Discover` is not enough). This applies to the grant
+    request's page, the Pending, Active and Ended lists of the Grants screen
+    and the **Request again** form. Anyone else, including the holder and the
+    approvers when they cannot read the item there, sees the name that was
+    approved followed by the fixed note "(moved; its new location is not
+    visible to you)", with the kind recorded when the request was made, and
+    the **Request again** form starts with an empty name field. A window
+    whose request is no longer stored has no approved name, so such a viewer
+    sees "(its name is not visible to you)" instead of a name. The expiry
+    notice (`GRANT_EXPIRING`) applies the same rule to its recipient, the
+    window's holder, checked as that user: when the holder may not read the
+    item, the notice names the approved name and adds the fixed sentence "The
+    window's item was moved; its new location is not visible to you." When
+    the window's change request is no longer stored, the approved name is
+    unknown: the notice names the current name if the holder may read the
+    item, and otherwise it is not sent, with a warning in the controller log.
+    When the change request's file is there but cannot be read, no expiry
+    notice is sent for that window. Every other notice names the item by the
+    name in the request, which is the approved name and never follows the
+    item (SPEC item 8, D-75 (1), security-39 S-39-04). The audit history is
+    not filtered this way: a `ViewHistory` holder sees the new name in the
     `RENAME` or `MOVE` record and in later records of the window, as for any
     other item (item 19).
 
@@ -200,7 +239,11 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     a `GRANT_REVOKE` record is appended under `batch-control/changes/` and the
     window's grant file under `batch-control/grants/` is rewritten. A grant
     file that cannot be written is retried before every later grant write, on
-    every item event and by the periodic work. At startup, a grant file that
+    every item event and by the periodic work. A grant file that cannot be
+    read at all (a permission or I/O error, or damaged content) is left out
+    with a warning naming it: its window confers nothing, everyone else's
+    permission checks keep working, and it stays left out until the file can
+    be read again and Jenkins restarts. At startup, a grant file that
     still says the window is open but has a `GRANT_REVOKE` record is ended
     again from that record. To find those records, the change log is read in
     full back to the time the oldest still-open window was granted, which is
@@ -212,9 +255,23 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     be ruled out, so every window still open ends: it is revoked by `SYSTEM`
     with the reason "its state could not be confirmed at startup" and a
     `GRANT_REVOKE` record, and its holder can request it again (D-75,
-    security-39 S-39-03). A record line that is damaged on disk is skipped
-    with a warning, as everywhere the change log is read, so it counts as a
-    record that was never written. Three gaps remain:
+    security-39 S-39-03). A line in that part of the change log that cannot
+    be read counts the same way: a line torn by a crash or a failed write, a
+    line damaged on disk, or one too long to read may be a window's end, so
+    the read is incomplete and every window still open ends (D-75 (2)). A
+    complete record of another type, including one this version does not
+    know, cannot be a window's end and does not count. Elsewhere, on the
+    screens and in the CSV exports, such a line is skipped with a warning.
+
+    Such a line is read back once. The `GRANT_REVOKE` records written by the
+    start that ended the windows mark the point before which no line can end
+    a window approved later, and every later start stops reading there, so
+    the same line does not end the windows approved after that start (unless
+    those records could not be written either). A record appended after a
+    torn line does not merge into it: every append to a change, run or
+    incident-index file first ends a last line that was left without a line
+    end, so the new record stays readable and the torn line stays a damaged
+    line of its own. Three gaps remain:
 
     - If both directories are unwritable, nothing durable records the
       window's end: the `GRANT_REVOKE` record could not be appended under
@@ -237,7 +294,14 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
       before the restart, and lies directly inside the window's folder, the
       holder has `Item/Read` and `Item/Configure` on it until the window ends.
       This is the same class of gap as the one above, but it needs only the
-      grants directory to be unwritable.
+      grants directory to be unwritable. The changed-under-grant state of
+      item 35 is kept in the same file and the same way (D-75 (2)): a rename,
+      move, deletion, new mark or review changes it in memory at once and its
+      write is retried, but a restart while `batch-control/grants/` still
+      refuses writes loses the change, and the file's older state applies
+      again: an item renamed or moved since loses the state, another item at
+      its old name has it instead, a mark made since is lost, and an item
+      marked as reviewed since has it again.
     - An item replaced on disk outside Jenkins, followed by a reload, fires no
       item event, so a window naming it applies to the replacement. The
       precondition is file-system access to `$JENKINS_HOME`, which is outside
@@ -289,6 +353,19 @@ from scripts.
     yet, and whoever may create items creates `X` with the calling pipeline in its
     exempt list; the pipeline's next run would then execute their job with no
     approval and no window.
+
+    **The lock holds even when it cannot be saved.** It replaces every Batch
+    Control job property the job carries (so a payload with two cannot leave
+    an unlocked one in effect) in one change, written by one save, and
+    Jenkins runs the job from its configuration in memory, so the lock is in
+    effect at once whatever happens to that write. A save that fails, on an
+    unwritable job directory for example, is logged as SEVERE and retried
+    every minute by the periodic work; the retry that succeeds is recorded as
+    a `CONFIGURE` by SYSTEM. The list of jobs waiting for that retry is kept
+    in memory only: if Jenkins restarts before a retry succeeds, the job is
+    loaded from its `config.xml` as it was created, without the lock. It is
+    still not activated (item 39). The same holds for the lock a job moved by
+    a non-administrator gets (item 44).
 
     **A refused timer, upstream or Replay submission is recorded and shown, not
     silent (#21).** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
@@ -485,9 +562,14 @@ from scripts.
     is counted in neither the approved nor the rejected column.
 29. **With change control off the Grants screen is closed**, its links are gone from
     the Batch Control landing page, and requesting or approving a window is refused
-    with a message that says why, plus a `GRANT_REQUEST_BLOCKED` record. The URL
+    with a message that says why. The refusal is recorded as `GRANT_REQUEST_BLOCKED`
+    while run control is on; with both controls off Batch Control writes no records
+    at all. An approval sent from a request's page that was opened before the switch
+    went off is refused on that page, which then offers none of its forms. The URL
     itself still answers, deliberately, so that an old bookmark reaches that
-    explanation rather than a dead link. Nothing about the audit trail is gated this
+    explanation rather than a dead link. Anything else sent below the closed screen,
+    rejecting or cancelling a pending request for example, gets the same
+    explanation and writes no record. Nothing about the audit trail is gated this
     way: the history, dashboard, incident and change-record screens show the same
     content whichever way the switch is set. The Role Strategy notice likewise
     appears with both switches off.
@@ -553,7 +635,11 @@ from scripts.
     change-record screens read a whole month bucket into memory on every page
     load, the incident list opens one file per incident, and the Run Requests
     and Grants screens read every run and grant request file on every page
-    load (the expiry job, every minute, loads only the open ones). Request
+    load (the expiry job, every minute, loads only the open ones). A run
+    request, grant request, activation request or grant file that cannot be
+    read (a permission or I/O error, or damaged content) is skipped with a
+    warning naming it, instead of breaking the whole listing; a skipped grant
+    confers nothing (item 11). Request
     files are kept until retention deletes the closed requests last active
     before the first kept month (`retentionMonths`, 24 by default), so up to
     that age every one of them is read. SPEC item 6's target of 5,000 runs a
@@ -723,8 +809,10 @@ code does on purpose.
     only for holders of `BatchControl/Request`, so a native Configure holder
     needs `BatchControl/Request` as well to use the button there; otherwise
     they ask an administrator, who uses the monitor. It writes a
-    `GUARD_REVIEWED` change record naming the reviewer. An ordinary save,
-    even an administrator's, is not a review.
+    `GUARD_REVIEWED` change record naming the reviewer. The review takes
+    effect at once; if the grant file that holds the state cannot be written
+    at that moment, the write is retried (item 11). An ordinary save, even an
+    administrator's, is not a review.
 
     Guarding follows renames and moves. On a guarded item, any change that
     widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
@@ -744,6 +832,18 @@ code does on purpose.
     build log naming the reverted entries. A save whose build cannot be
     identified gets no such line, only the `GRANT_VIOLATION` record: for
     example a seed job saving another job, or a Freestyle build.
+
+    Removing authorization entries from a new item, those of an item created
+    inside a guarded folder or the authorization property of an item created
+    through a `CREATE` window (item 11), can fail to be saved, on an
+    unwritable item directory for example. The failure is recorded as
+    `GRANT_VIOLATION`, saying that the removal failed and that an
+    administrator must check the item. When the entries are already gone from
+    the item in memory, they no longer apply and the save is retried every
+    minute; the list of items waiting for that retry is kept in memory only,
+    so a restart before a retry succeeds loads the item with the entries.
+    When they could not be removed in memory either, the record says that
+    they are still in effect.
 
     This changes how administrators manage authorization on those items, and
     only on those. Until the item is marked as reviewed, a Jenkinsfile, Job
@@ -876,8 +976,13 @@ code does on purpose.
     folders) carry activation for their children: one created while run control
     is on starts not activated, the `ACTIVATE`/`HOLD` request is made on the
     folder, and a child passes only if its nearest computed-folder ancestor is
-    activated. The state fails closed: a job re-created under a deleted job's
-    name starts not activated.
+    activated. The state fails closed. An activation state that cannot be read
+    counts as not activated. An activation is also tied to the directory the
+    job had on disk when it was recorded (if that directory could be read
+    then): a job re-created under a deleted job's name starts not activated,
+    and while the job's directory cannot be read, so that it cannot be
+    confirmed as the same one, the job counts as not activated and a warning
+    naming it is logged.
 40. **Other plugins' build buttons show their own generic failure message.**
     When Batch Control refuses a run started from another plugin's button
     (Rebuild or Rebuild Last where they are shown, naginator's Retry, a button
