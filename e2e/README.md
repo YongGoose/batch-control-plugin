@@ -92,26 +92,28 @@ re-enables the plugin's monitors.
 `ci/shard.py units` lists the units with their steps. A unit is a group of driver invocations that must run in order on
 one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account in between).
 Units are assigned with a deterministic longest-processing-time split over the measured minutes, so the same N always
-gives the same shards; `role` (replaces the authorization strategy) and `r16-durable` (restarts Jenkins) are `last`
-units: each runs last in its shard, and never two in one shard.
+gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins) and `r17-disk`
+(reloads and restarts Jenkins) are `last` units: each runs last in its shard, and never two in one shard.
 
-Measured 2026-10-06 (e2e-16: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards at a time on
-one machine; the image was cached, so no build time is included). Every shard: about 2.2 min until Jenkins is ready,
-3.5 min setup (now including `ci/preconditions.py`).
+Measured 2026-10-06 (e2e-17: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards and one
+supplementary run at a time on one machine; the image was cached, so no build time is included). Every shard: about
+2.1 min until Jenkins is ready, 3.5 min setup (including `ci/preconditions.py`). The unit weights in `ci/shard.py` are
+still the e2e-16 ones (pessimistic on this run; the r16/r17 drivers ran in well under their weights).
 
 | Shard of 5 | Units | Steps | Driver minutes (incl. setup) | Wall minutes |
 |---|---|---:|---:|---:|
-| 1/5 | `def07`, `crawl-approver-1`, `actions`, `jobui-new-requester`, `jobui-classic-reqonly`, `misc`, `r16-rerun` | 31 | 24.6 | 26.8 |
-| 2/5 | `crawl-admin`, `jobui-new-admin`, `jobui-classic-others`, `r16-d60`, `r16-names` | 27 | 31.7 | 34.0 |
-| 3/5 | `crawl-requester`, `crawl-reqonly`, `r16-items`, `r16-params`, `role` | 34 | 26.2 | 28.7 |
-| 4/5 | `crawl-manager`, `crawl-nobc`, `jobui-classic-requester`, `r16-rename`, `r16-follow`, `multibranch` | 38 | 28.5 | 30.9 |
-| 5/5 | `jobui-new-reqonly`, `jobui-new-others`, `jobui-classic-admin`, `targeted`, `round3`, `r16-durable` | 29 | 27.7 | 29.9 |
+| 1/5 | `def07`, `jobui-new-requester`, `jobui-classic-reqonly`, `misc`, `r16-follow`, `r16-rerun`, `r17-s39` | 30 | 22.1 | 24.3 |
+| 2/5 | `crawl-admin`, `jobui-new-admin`, `jobui-classic-others`, `round3`, `r16-items`, `r16-durable` | 28 | 30.8 | 33.0 |
+| 3/5 | `crawl-requester`, `crawl-reqonly`, `crawl-nobc`, `r16-rename`, `multibranch`, `role` | 47 | 29.0 | 31.2 |
+| 4/5 | `crawl-approver-1`, `crawl-manager`, `actions`, `jobui-classic-requester`, `jobui-classic-admin`, `targeted` | 34 | 28.6 | 30.7 |
+| 5/5 | `jobui-new-reqonly`, `jobui-new-others`, `r16-params`, `r16-d60`, `r16-names`, `r17-disk` | 26 | 22.6 | 24.7 |
 
-On the plugin built from aeaac42 every step passed except `r16-durable` in shard 5, a driver defect fixed in 0a68f5c
-and re-run alone (docs/reports/e2e-16.md). The merged execution data of the five shards and the two re-runs: **lines
-72.2% (7871/10908), instructions 72.2%, branches 57.3%, methods 82.4%** of `io.jenkins.plugins.batchcontrol`; changed
-lines against cb5ad5d 72.8%. The crawls reported no content defect. N is free (`run.sh 1/3` works,
-`shard.py plan-all <N>` shows the split); 5 keeps every shard at about half an hour.
+On the plugin built from bd449cd every step passed except two r17 steps that assert behaviour bd449cd does not have:
+`r17-visibility` (D-75 (1), not implemented yet) in shard 1 and `r17-case` (e2e-17 DEF-E17-01) in shard 5
+(docs/reports/e2e-17.md). The merged execution data of the five shards and two supplementary runs: **lines 72.4%
+(7961/10999), instructions 72.4%, branches 57.3%, methods 82.5%** of `io.jenkins.plugins.batchcontrol`; changed lines
+against cb5ad5d 73.8%. The crawls reported no content defect. N is free (`run.sh 1/3` works, `shard.py plan-all <N>`
+shows the split); 5 keeps every shard at about half an hour.
 
 ### Coverage
 
@@ -191,7 +193,8 @@ look-alikes that must stay silent (a path in `<pre>`, a URL path, empty optional
 probe rendered correctly (also shortened with an ellipsis). Both must give exactly the expected findings and raw-enum
 rows (2026-10-06: 9 defect findings and the raw-enum values `FOLDER_ONLY`, `GRANT_REVOKE`, `ITEM:`, `PENDING` on the
 first page; no defect and only `JOB_NAME` on the second, where `GRANT_REVOKE` and `ITEM:` inside `<code>` and title-case
-words must stay silent). Run it after editing the checks; CI can run it in the `coverage` job.
+words must stay silent; the same on 2026-10-06 for e2e-17). Run it after editing the checks; `.github/workflows/e2e.yml`
+runs it in the `coverage` job (22ed006).
 
 ### Fixture preconditions
 
@@ -230,7 +233,7 @@ requests work with the default read-only token.
   plugins of `e2e/plugins.txt` from the Jenkins update centre) and pulling `axllent/mailpit`. Network needed:
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
-- Durations: per shard 27-34 min measured locally (2026-10-06) ("Units and shards" above: 2 min start, 3.3 min setup, the units);
+- Durations: per shard 24-33 min measured locally (2026-10-06, e2e-17) ("Units and shards" above: 2 min start, 3.5 min setup, the units);
   on a runner add the image build (the base image and the plugins of `plugins.txt`, a few minutes without a cache),
   the Playwright install (about 1 min) and the artifact upload. Expect 35-45 min per shard, the five in parallel, and
   2-3 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT` (default 2700 s) bounds one step.
