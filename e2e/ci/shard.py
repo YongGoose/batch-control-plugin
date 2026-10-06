@@ -178,6 +178,11 @@ UNITS = [
          last=True, doc="e2e-17: items removed on disk + reload (a rename onto the stale name: 'it could not follow its item'), "
                         "startup end of a vanished item, fail-closed restart re-end with an unreadable change log (S-39-02/03); "
                         "letter case after a restart (own step); reloads and restarts Jenkins (last)"),
+    # e2e-18 (bd449cd..d696d5d). r18/arrange.py is idempotent and self-contained (account w18, items r18*).
+    Unit("r18-final", 4.0, [("r18-arrange", py("r18/arrange.py")), ("r18-final", py("r18/final.py", "KMDAS"))],
+         last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
+                        "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
+                        "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
