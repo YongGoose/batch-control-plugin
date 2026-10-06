@@ -4,11 +4,13 @@ import { execSync } from 'node:child_process';
 const L = 'section-b.log';
 const countLog = () => Number(execSync("docker logs batch-control-e2e 2>&1 | grep -c 'AccessDeniedException3: requester is missing the Job/Create permission' || true", { shell: '/bin/bash' }).toString().trim());
 const rq = await login('requester'); const p = rq.page;
-// grant: FOLDER team, CREATE, /app-[0-9]+/
+// grant: CREATE window on the folder team, name restriction /app-[0-9]+/ (D-71 one item)
 await p.goto(`${BASE}/batch-control/grants/`);
-await p.selectOption('select[name="scopeType"]', 'FOLDER');
+await p.waitForSelector('input[name="scopeFullName"]');
 await p.fill('input[name="scopeFullName"]', 'team');
-await p.locator('#grant-action-create + label').click();
+// #107: tick Create (id is replaced by core's optionalBlock script, so select by value) before the restriction field appears
+await p.locator('input[name="actions"][value="CREATE"]').locator('xpath=following-sibling::label[1]').click();
+await p.locator('input[name="createNamePattern"]').waitFor({ state: 'visible' }).catch(() => {});
 await p.fill('input[name="createNamePattern"]', '/app-[0-9]+/');
 await p.selectOption('select[name="durationMinutes"]', '15');
 await p.fill('textarea[name="reason"]', 'Name-restricted create, New Item validation check (B7-15 extra).');

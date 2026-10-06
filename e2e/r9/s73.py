@@ -16,9 +16,9 @@ def check(s, tag, open_link):
         href = open_link(s, f"{tag}{sid}")
         s.page.wait_for_load_state("load")
         url = s.page.url.replace("http://localhost:8080", "")
-        st = s.page.locator("select[name=scopeType]")
+        st = s.page.locator("[data-batch-control-item-kind]")
         res[f"{tag}{sid} {path}"] = {"href": href, "landed": url,
-            "scopeType": st.input_value() if st.count() else None,
+            "itemKind": st.first.get_attribute("data-batch-control-item-kind") if st.count() else None,
             "scopeFullName": s.page.locator("input[name=scopeFullName]").input_value() if st.count() else None}
         s.shot("form", f"73{tag}{sid}-02-grant-form")
 def classic(s, n):

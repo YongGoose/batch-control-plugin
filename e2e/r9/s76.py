@@ -4,7 +4,7 @@ from lib import api, log, Session, close
 res = {}
 # arrange two pending grant requests by requester: one to approver-1, one to approver-2
 for ap in ["approver-1", "approver-2"]:
-    r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeType", "JOB"), ("scopeFullName", "batch-daily"),
+    r = api("requester", "/batch-control/grants/create", "POST", data=[("scopeFullName", "batch-daily"),
         ("durationMinutes", "30"), ("reason", f"e2e-09 #76 to {ap}"), ("approvers", ap), ("actions", "CONFIGURE")])
     res[f"grant to {ap}"] = (r.status_code, r.headers.get("Location"))
 def badges(u):

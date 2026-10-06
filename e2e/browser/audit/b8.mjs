@@ -110,7 +110,7 @@ if (steps.includes('role')) {
   const r0 = await groovy(ROLES);
   // R4: a CONFIGURE window under the role variant
   const rq = await login('requester');
-  const g = await requestGrant(rq.page, { type: 'JOB', scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B8-R4 ${Date.now()}: window under the role variant` });
+  const g = await requestGrant(rq.page, { scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B8-R4 ${Date.now()}: window under the role variant` });
   const a1 = await login('approver-1'); await a1.page.goto(g.url); const f = await a1.page.locator('form[name="approve"]').count(); await a1.context.close();
   await decide(g.url, 'approve', 'ok');
   const c1 = await statusAs('requester', '/job/team/job/app-1/configure');

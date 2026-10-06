@@ -153,7 +153,7 @@ if (step === 'grant') {
   const since = new Date(Date.now() - 2000);
   const { page, context } = await login('lrequester');
   const before = (await page.goto(`${BASE}/job/fresh-daily/configure`)).status();
-  await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=fresh-daily`);
+  await page.goto(`${BASE}/batch-control/grants/?scopeFullName=fresh-daily`);
   const f = page.locator('form[action$="grants/create"]');
   await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
   await f.locator('select[name="durationMinutes"]').selectOption('15');

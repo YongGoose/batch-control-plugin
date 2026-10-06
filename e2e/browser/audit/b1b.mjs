@@ -57,7 +57,7 @@ if (on('B1-11') || on('B1-12')) {
   const rq = await login('requester'); await rq.page.goto(`${BASE}/batch-control/grants/`);
   const opts = await rq.page.locator('select[name="durationMinutes"] option').allInnerTexts();
   const s1 = await shot(rq.page, rq.page.locator('select[name="durationMinutes"]'), 'B1-11-1-options', { pad: 30 });
-  const g = await requestGrant(rq.page, { type: 'JOB', scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 5, reason: `Audit B1-11 ${Date.now()}: five-minute window` });
+  const g = await requestGrant(rq.page, { scope: 'batch-pipeline', actions: ['CONFIGURE'], minutes: 5, reason: `Audit B1-11 ${Date.now()}: five-minute window` });
   await decide(g.url, 'approve', 'ok');
   await rq.page.goto(`${BASE}/batch-control/grants/`);
   const r = rq.page.locator('table:has(th:has-text("Expires")) tbody tr', { hasText: 'batch-pipeline' }).first();

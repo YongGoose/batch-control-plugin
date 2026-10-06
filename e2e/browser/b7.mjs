@@ -7,15 +7,19 @@ const txt = async (p, sel = '#main-panel, body') => (await p.locator(sel).first(
 const errText = (t) => (t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').match(/(?:Error|Access Denied|Oops!?) (.{0,240}?) (?:REST API|Logging ID)/) || [null, t.replace(/\s+/g, ' ').slice(0, 160)])[1];
 
 /** requester submits a grant request in the form; returns the detail URL (and the page for inspection). */
-async function requestGrant(page, { type = 'JOB', scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
+async function requestGrant(page, { scope, actions, minutes = 15, pattern, reason, approver = 'approver-1' }) {
   await page.goto(`${BASE}/batch-control/grants/`);
-  await page.selectOption('select[name="scopeType"]', type);
-  await page.fill('input[name="scopeFullName"]', scope);
+  await page.waitForSelector('input[name="scopeFullName"]');
+  await page.fill('input[name="scopeFullName"]', scope); // D-71: one item, no scope type
   for (const a of actions) {
     const box = page.locator(`input[name="actions"][value="${a}"]`);
     if (!(await box.isChecked())) await box.locator('xpath=following-sibling::label[1]').click();
   }
-  if (pattern !== undefined) await page.fill('input[name="createNamePattern"]', pattern);
+  if (pattern !== undefined) { // #107: the field is revealed by ticking Create (done above)
+    const field = page.locator('input[name="createNamePattern"]');
+    await field.waitFor({ state: 'visible' }).catch(() => {});
+    await field.fill(pattern);
+  }
   await page.selectOption('select[name="durationMinutes"]', String(minutes));
   await page.fill('textarea[name="reason"]', reason);
   await page.locator(`input[name="approvers"][value="${approver}"] + label`).click();
@@ -117,12 +121,12 @@ steps.expiry = async () => {
 
 steps.folder = async () => {
   const rq = await login('requester'); const p = rq.page;
-  // B7-12 FOLDER CONFIGURE
-  let g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: 'Folder-wide configure (B7-12).' });
+  // B7-12 CONFIGURE window on the folder team
+  let g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: 'Folder-wide configure (B7-12).' });
   await decide(g.url);
-  log(L, `B7-12 FOLDER team CONFIGURE: team/app-1/configure -> ${await status('/job/team/job/app-1/configure', p)}; batch-cron/configure -> ${await status('/job/batch-cron/configure', p)}; team/configure -> ${await status('/job/team/configure', p)}`);
-  // B7-13/14 FOLDER CREATE without restriction
-  g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: 'Create any job in team/ (B7-13).' });
+  log(L, `B7-12 folder team CONFIGURE: team/app-1/configure -> ${await status('/job/team/job/app-1/configure', p)}; batch-cron/configure -> ${await status('/job/batch-cron/configure', p)}; team/configure -> ${await status('/job/team/configure', p)}`);
+  // B7-13/14 CREATE window on the folder team, no restriction
+  g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: 'Create any job in team/ (B7-13).' });
   await decide(g.url);
   const gid = g.url.split('/grants/')[1].replace('/', '');
   await p.goto(`${BASE}/job/team/newJob`);
@@ -144,11 +148,11 @@ steps.folder = async () => {
 steps.pattern = async () => {
   const rq = await login('requester'); const p = rq.page;
   // B7-17 invalid regex, B7-18 256-char name
-  const bad = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/app-[/', reason: 'Invalid regex (B7-17).' });
+  const bad = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: '/app-[/', reason: 'Invalid regex (B7-17).' });
   await shot(p, '#main-panel, body', 'B7-17', { pad: 8 });
   log(L, `B7-17 pattern "/app-[/" -> ${bad.status} "${bad.error}"`);
   // B7-16 regex
-  const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: '/app-[0-9]+/', minutes: 15, reason: 'Numbered apps only (B7-16).' });
+  const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: '/app-[0-9]+/', minutes: 15, reason: 'Numbered apps only (B7-16).' });
   await decide(g.url);
   const vi0 = (await changeRows(/GRANT_VIOLATION/)).length;
   const create = async (name) => {
@@ -183,7 +187,7 @@ steps.pattern = async () => {
   }
   log(L, `B7-19 rename team/app-7 -> evil: ${rr}; evil exists ${(await api('admin', '/job/team/job/evil/api/json')).status}; app-7 exists ${(await api('admin', '/job/team/job/app-7/api/json')).status}; GRANT_VIOLATION +${(await changeRows(/GRANT_VIOLATION/)).length - vr}`);
   // B7-20 CLI create-job with trailing space
-  const g2 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], pattern: 'app-8', minutes: 15, reason: 'Exact app-8 (B7-20).' });
+  const g2 = await requestGrant(p, { scope: 'team', actions: ['CREATE'], pattern: 'app-8', minutes: 15, reason: 'Exact app-8 (B7-20).' });
   await decide(g2.url);
   let cli;
   try { cli = execSync(`echo '<project><builders/></project>' | ../scripts/cli.sh requester create-job "team/app-8 " 2>&1; echo "EXIT=$?"`, { shell: '/bin/bash' }).toString(); } catch (e) { cli = e.stdout.toString(); }

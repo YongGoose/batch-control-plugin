@@ -5,7 +5,7 @@ const L = 'section-a.log';
 const phase = process.argv[2];
 const cfg = async (user) => { const { context, page } = await login(user); const r = await page.goto(BASE + '/job/batch-pipeline/configure'); const s = r.status(); await context.close(); return s; };
 if (phase === 'before') {
-  // The request was submitted from the job sidebar (prefilled JOB batch-pipeline + CONFIGURE);
+  // The request was submitted from the job sidebar (prefilled batch-pipeline + CONFIGURE);
   // an accidental duplicate is cancelled by the requester through the detail page.
   const [keep, dup] = process.argv.slice(3);
   const rq = await login('requester');

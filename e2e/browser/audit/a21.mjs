@@ -11,7 +11,7 @@ Jenkins.get().nodes.each { nd -> def p = nd.nodeProperties.get(org.jenkinsci.plu
 println "\${s.class.simpleName} global=\${n} perItem=\${props}"`;
 const cfg = async () => { const c = await login('requester'); const s = (await c.page.goto(`${BASE}/job/team/job/app-1/configure`)).status(); await c.context.close(); return s; };
 const rq = await login('requester');
-const g = await requestGrant(rq.page, { type: 'JOB', scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Audit A-21 ${Date.now()}: window across the strategy round trip`, approver: 'approver-1' });
+const g = await requestGrant(rq.page, { scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 15, reason: `Audit A-21 ${Date.now()}: window across the strategy round trip`, approver: 'approver-1' });
 await decide(g.url, 'approve', 'ok');
 const gid = g.url.match(/(\d{8}-\d{6}-\w+)/)[1];
 const k0 = await groovy(COUNT); const c0 = await cfg();

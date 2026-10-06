@@ -25,6 +25,9 @@ workflow-multibranch
 # git: the multibranch sample over a local file:// repository (team-mb).
 git
 job-dsl
+# file-parameters: the stashedFile and base64File parameter types that a run request must keep (D-72, e2e-16);
+# core's own `file` parameter needs no plugin.
+file-parameters
 # Section E - plugin precedence. Each one adds a build button, a trigger, a
 # queue restriction, a configuration history or a build authenticator next to
 # Batch Control's own gate.

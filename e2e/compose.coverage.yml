@@ -1,0 +1,38 @@
+# Overlay: JaCoCo agent in the Jenkins JVM, so an e2e run records which plugin code it executed
+# (ci/run.sh, ci/coverage-diff.py). Use on top of the others, last:
+#
+#   ci/fetch-jacoco.sh      # pinned agent + CLI, sha256-verified, into ci/.cache/jacoco/
+#   BC_CONTAINER=bc-cov BC_PORT=18080 BC_MAIL_PORT=18025 \
+#     docker compose -p bc-cov -f docker-compose.yml -f compose.prefix.yml -f compose.coverage.yml up -d --build
+#
+# * The agent is passed through JAVA_TOOL_OPTIONS, which the JVM reads itself, so this file does
+#   not have to repeat (and keep in sync with) the JAVA_OPTS of docker-compose.yml/compose.prefix.yml
+#   and works with any combination of the other overlays. The JVM logs one
+#   "Picked up JAVA_TOOL_OPTIONS" line at boot.
+# * Only the plugin's own classes are instrumented (includes=io.jenkins.plugins.batchcontrol.*). JaCoCo matches
+#   execution data to classes by a checksum of the class file, so the report must use the target/classes of the
+#   build that produced the mounted target/batch-control.hpi (ci/coverage-diff.py refuses to report on a mismatch).
+# * Groovy's call-site classes, which Groovy generates at runtime as <PluginClass>$<method> when a script calls
+#   plugin code (the e2e arrangement uses the script console), are not plugin code: their class loaders are
+#   excluded (exclclassloader, which replaces JaCoCo's default list, so the reflection loaders are repeated).
+# * output=file writes the execution data when the JVM exits normally (JaCoCo's shutdown hook):
+#   `docker compose stop` sends SIGTERM and stop_grace_period gives Jenkins time to shut down
+#   cleanly. A SIGKILL (grace period exceeded, `docker kill`) loses everything since the last dump,
+#   so ci/run.sh also triggers a dump through the script console before stopping (append=true keeps
+#   both sessions in the file; merging them is idempotent).
+# * container_name: docker-compose.yml fixes the names `batch-control-e2e` / `batch-control-e2e-mail`;
+#   overriding them lets a coverage stack run next to the regular e2e stack (use another -p project
+#   and other BC_PORT/BC_MAIL_PORT too). The JENKINS_HOME volume is per project (<project>_jenkins_home).
+services:
+  jenkins:
+    container_name: ${BC_CONTAINER:-bc-cov}-jenkins
+    stop_grace_period: 180s
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -javaagent:/opt/jacoco/jacocoagent.jar=includes=io.jenkins.plugins.batchcontrol.*,output=file,destfile=/var/jenkins_home/jacoco/jacoco-${BC_SHARD:-local}.exec,append=true,exclclassloader=sun.reflect.DelegatingClassLoader:jdk.internal.reflect.DelegatingClassLoader:org.codehaus.groovy.reflection.ClassLoaderForClassArtifacts:org.codehaus.groovy.runtime.callsite.CallSiteClassLoader,sessionid=${BC_CONTAINER:-bc-cov}-${BC_SHARD:-local}
+    volumes:
+      # BC_JACOCO_AGENT: absolute path of the agent jar when this overlay is used with another checkout's
+      # docker-compose.yml (relative paths resolve against the first compose file's directory).
+      - ${BC_JACOCO_AGENT:-./ci/.cache/jacoco/jacocoagent.jar}:/opt/jacoco/jacocoagent.jar:ro
+  mailpit:
+    container_name: ${BC_CONTAINER:-bc-cov}-mail

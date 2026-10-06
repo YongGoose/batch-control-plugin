@@ -19,7 +19,7 @@ if (step === 'setup') {
   for (const ap of ['approver-1', 'admin']) await page.locator(`input[name="approvers"][value="${ap}"]`).check({ force: true });
   await Promise.all([page.waitForLoadState('load'), page.click('button[name="Submit"]')]);
   const run = (page.url().match(/requests\/([^/]+)/) || [])[1];
-  await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=fresh-daily`);
+  await page.goto(`${BASE}/batch-control/grants/?scopeFullName=fresh-daily`);
   const f = page.locator('form[action$="grants/create"]');
   await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
   await f.locator('textarea[name="reason"]').fill('e2e-05 dark theme: pending grant for the screens');

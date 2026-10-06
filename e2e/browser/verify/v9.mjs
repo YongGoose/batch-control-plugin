@@ -41,14 +41,14 @@ ev(`V9 B9-02 ${pr.status} "${pr.text.slice(0, 300)}" entries ${e2.length} desc $
 row('B9-02', { roles: 'requester (script, CONFIGURE window)', V: 'n.a.', G: `${e2.length === 0 && d2 === `posted ${T}` ? '✓' : '✗'} entry removed, the description change kept`, R: `${pr.status === 403 && d48(pr.text, 'batch-pipeline') ? '✓' : '✗'} HTTP ${pr.status}: "${pr.text.replace(/\s+/g, ' ').slice(0, 200)}"`, C: `${nv2 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: '✓ text' });
 await uiRevoke(g1);
 // B9-03 folder window, team/app-1
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Verify B9-03 ${T}` }); await decide(g.url); const g3 = gidOf(g.url);
+g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Verify B9-03 ${T}` }); await decide(g.url); const g3 = gidOf(g.url);
 v0 = (await viol()).length; const nd3 = `folder window edit ${T}`;
 const r3 = await addSelf('/job/team/job/app-1/configure', nd3, 'B9-03-1-refusal-page');
 const e3 = await reqEntries('/job/team/job/app-1/'); const d3 = await desc('/job/team/job/app-1/'); const nv3 = (await viol()).length - v0;
-row('B9-03', { roles: 'requester (FOLDER team window)', V: 'n.a.', G: `${e3.length === 0 && d3 === nd3 ? '✓' : '✗'} entry removed on team/app-1, description kept`, R: `${r3.status === 403 && d48(r3.t, 'app-1') ? '✓' : '✗'} HTTP ${r3.status} "${r3.t.replace(/^.*?(The |Your )/, '$1').slice(0, 160)}"`, C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-refusal-page' : '✗' });
+row('B9-03', { roles: 'requester (window on the folder team)', V: 'n.a.', G: `${e3.length === 0 && d3 === nd3 ? '✓' : '✗'} entry removed on team/app-1, description kept`, R: `${r3.status === 403 && d48(r3.t, 'app-1') ? '✓' : '✗'} HTTP ${r3.status} "${r3.t.replace(/^.*?(The |Your )/, '$1').slice(0, 160)}"`, C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-refusal-page' : '✗' });
 await uiRevoke(g3);
 // B9-05 createItem payload, B9-06 copy
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify B9-05 ${T}` }); await decide(g.url);
+g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Verify B9-05 ${T}` }); await decide(g.url);
 const gs = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Verify B9-06 ${T}: copy source` }); await decide(gs.url);
 v0 = (await viol()).length;
 const payload = `<?xml version='1.1' encoding='UTF-8'?><project><description>payload ${T}</description><properties><hudson.security.AuthorizationMatrixProperty><inheritanceStrategy class="org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy"/><permission>USER:hudson.model.Item.Read:requester</permission><permission>USER:hudson.model.Item.Configure:requester</permission></hudson.security.AuthorizationMatrixProperty></properties><builders/></project>`;

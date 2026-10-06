@@ -47,7 +47,7 @@ async function newRunRequest(user, reason, approvers = ['approver-1', 'approver-
 }
 async function newGrant(reason, approvers = ['approver-1', 'approver-2']) {
   const { page, context } = await login('requester');
-  await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=${JOB}`);
+  await page.goto(`${BASE}/batch-control/grants/?scopeFullName=${JOB}`);
   const f = page.locator('form[action$="grants/create"]');
   await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
   await f.locator('textarea[name="reason"]').fill(reason);
@@ -189,7 +189,7 @@ if (step === 'back') {
   // B3: grant request submit, Back, resubmit; then approve, Back, approve again.
   const g = await login('requester'); const gp = g.page; const pg = watch(gp);
   const gb = await ids('grants');
-  await gp.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=${JOB}`);
+  await gp.goto(`${BASE}/batch-control/grants/?scopeFullName=${JOB}`);
   const f = gp.locator('form[action$="grants/create"]');
   await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
   await f.locator('textarea[name="reason"]').fill('e2e-05 B3 back button grant');
@@ -253,7 +253,7 @@ if (step === 'double') {
   // D3: double click on the grant request submit; D4: double click on the grant Approve.
   const g = await login('requester'); const gp = g.page; const pg = watch(gp);
   const gb = await ids('grants');
-  await gp.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=${JOB}`);
+  await gp.goto(`${BASE}/batch-control/grants/?scopeFullName=${JOB}`);
   const f = gp.locator('form[action$="grants/create"]');
   await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
   await f.locator('textarea[name="reason"]').fill('e2e-05 D3 double submit grant');

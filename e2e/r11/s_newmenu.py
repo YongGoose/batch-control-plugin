@@ -10,10 +10,10 @@ s.page.wait_for_timeout(1200)
 res["overflow_items"] = [t.strip() for t in s.page.locator(".tippy-box a, .tippy-box button").all_inner_texts() if t.strip()]
 s.shot(".tippy-box", "N-01-overflow-menu")
 s.page.locator(".tippy-box a, .tippy-box button", has_text="Request Change Permission").first.click()
-s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
 d = s.page.locator("dialog[open]").first
 res["url_while_open"] = s.page.url
-res["prefill"] = (d.locator("select[name=scopeType]").input_value(), d.locator("input[name=scopeFullName]").input_value(),
+res["prefill"] = ((d.locator("[data-batch-control-item-kind]").first.get_attribute("data-batch-control-item-kind") if d.locator("[data-batch-control-item-kind]").count() else None), d.locator("input[name=scopeFullName]").input_value(),
                   [x.get_attribute("value") for x in d.locator("input[name=actions]").all() if x.is_checked()])
 d.locator("textarea[name=reason]").fill("e2e-11 new job page menu grant")
 d.locator("input[name=approvers][value=approver-2]").locator("xpath=following-sibling::label").click()
