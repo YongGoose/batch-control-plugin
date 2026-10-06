@@ -629,8 +629,10 @@ covers the item and everything below it. A changed item stays guarded until
 someone marks it as reviewed with **Mark as reviewed**: administrators find it
 next to the item on the Manage Jenkins monitor, which lists the items waiting
 for review, and users with native Configure who also hold
-`BatchControl/Request` find it on the item's Batch Control page (without
-`Request` that page is not shown, so they ask an administrator). It writes a `GUARD_REVIEWED` record; an ordinary save is not a review. On
+`BatchControl/Request` find it on a job's Batch Control page (without
+`Request` that page is not shown, so they ask an administrator). Folders,
+multibranch projects and organization folders have no such page, so only an
+administrator can mark one as reviewed. A review writes a `GUARD_REVIEWED` record; an ordinary save is not a review. On
 a guarded item, any change that widens access is put back and recorded, whoever
 makes it, a non-administrator with native Configure included (an HTTP save gets
 a 403 message). The only exception is a save made through an HTTP request (the
