@@ -621,6 +621,10 @@ public final class FileStore implements Store {
     public String loadConfigSnapshot(String jobFullName) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        if (!Files.isRegularFile(file) && Files.exists(file)) {
+            // T-GAP-385: something other than a file in its place is not "no snapshot".
+            throw new UncheckedIOException(new IOException("The config snapshot " + file + " is not a regular file"));
+        }
         return readTextOrNull(file);
     }
 
