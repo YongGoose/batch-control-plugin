@@ -37,6 +37,13 @@ public final class Incident {
     private String resolvedByRunId;
     private Map<String, String> parameters = new LinkedHashMap<>();
     private final long createdAtMillis;
+    /**
+     * D-72b (6), security-35 S-35-06: the failed build's own timestamp ({@code Run#getTimeInMillis},
+     * persisted by Jenkins in the build), so a rerun reuses the values of exactly that build and
+     * not of a same-numbered build of a job re-created under the same name. {@code null} in
+     * incident files written before it was recorded.
+     */
+    private Long runTimestampMillis;
 
     public Incident(String id, String runId, String jobFullName, String result, Instant createdAt) {
         this.id = Objects.requireNonNull(id, "id");
@@ -124,5 +131,18 @@ public final class Incident {
 
     public Instant getCreatedAt() {
         return Instant.ofEpochMilli(createdAtMillis);
+    }
+
+    /**
+     * D-72b (6): the failed build's own timestamp in epoch milliseconds, or {@code null} when the
+     * incident was stored before it was recorded.
+     */
+    public Long getRunTimestampMillis() {
+        return runTimestampMillis;
+    }
+
+    /** Only {@code ops.IncidentService} records the failed build's timestamp, when it opens the incident. */
+    public void setRunTimestampMillis(Long runTimestampMillis) {
+        this.runTimestampMillis = runTimestampMillis;
     }
 }

@@ -41,7 +41,7 @@ if (on('B1-13')) {
 }
 if (on('B1-15')) {
   const rq = await login('requester');
-  const g = await requestGrant(rq.page, { type: 'JOB', scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 1, reason: `Audit B1-15 ${Date.now()}: one-minute window for the expiry notice` });
+  const g = await requestGrant(rq.page, { scope: 'team/app-1', actions: ['CONFIGURE'], minutes: 1, reason: `Audit B1-15 ${Date.now()}: one-minute window for the expiry notice` });
   await decide(g.url, 'approve', 'ok');
   const gid = g.url.match(/(\d{8}-\d{6}-\w+)/)[1]; const t0 = Date.now();
   const m = await findMail(`to:requester@e2e.local subject:"ends soon" ${gid}`, { timeout: 90000 });

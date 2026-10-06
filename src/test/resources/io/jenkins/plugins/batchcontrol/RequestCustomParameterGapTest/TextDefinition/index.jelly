@@ -1,0 +1,10 @@
+<?jelly escape-by-default='true'?>
+<!-- The form view of the L1-14 fixture parameter types: a plain text value, as core's string parameter. -->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+  <f:entry title="${it.name}" description="${it.formattedDescription}">
+    <div name="parameter">
+      <input type="hidden" name="name" value="${it.name}"/>
+      <f:textbox name="value" value=""/>
+    </div>
+  </f:entry>
+</j:jelly>

@@ -242,7 +242,7 @@ public class ActivationUnattendedPathTest {
         Folder folder = j.jenkins.createProject(Folder.class, "team");
         GrantRequest request;
         try (ACLContext ignored = ACL.as2(token("u1"))) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.FOLDER, "team"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "team"),
                     Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30, "new nightly job", "a1");
         }
         try (ACLContext ignored = ACL.as2(token("a1"))) {

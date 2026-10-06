@@ -71,6 +71,12 @@ public final class GrantRequest {
 
     private final String id;
     private final GrantScope scope;
+    /**
+     * D-71: the kind of the scope item when the request was created (descriptor id, display name,
+     * icon); approval is refused when the item's kind differs. {@code null} only for a request
+     * built without one (never by {@code policy.GrantRequestService}), which cannot be approved.
+     */
+    private ItemKind itemKind;
     private final List<GrantAction> actions;
     private final int durationMinutes;
     private final String reason;
@@ -107,17 +113,29 @@ public final class GrantRequest {
 
     /**
      * Creates a new PENDING grant request with a random UUID id (D-68) and its creation time
-     * from {@link BatchClock}.
+     * from {@link BatchClock}, recording the kind of the scope item (D-71).
      * Duplicate actions are collapsed while preserving order.
+     */
+    public static GrantRequest create(GrantScope scope, ItemKind itemKind, List<GrantAction> actions,
+                                      int durationMinutes, String reason, String requester,
+                                      List<String> approvers, String createNamePattern) {
+        Objects.requireNonNull(scope, "scope");
+        Objects.requireNonNull(actions, "actions");
+        List<GrantAction> distinct = new ArrayList<>(new LinkedHashSet<>(actions));
+        GrantRequest request = new GrantRequest(Ids.newRequestId(), scope, distinct, durationMinutes, reason,
+                requester, approvers, createNamePattern, RequestStatus.PENDING, BatchClock.now());
+        request.itemKind = itemKind;
+        return request;
+    }
+
+    /**
+     * As {@link #create(GrantScope, ItemKind, List, int, String, String, List, String)} without an
+     * item kind. Such a request cannot be approved (D-71); kept for store fixtures.
      */
     public static GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
                                       String reason, String requester, List<String> approvers,
                                       String createNamePattern) {
-        Objects.requireNonNull(scope, "scope");
-        Objects.requireNonNull(actions, "actions");
-        List<GrantAction> distinct = new ArrayList<>(new LinkedHashSet<>(actions));
-        return new GrantRequest(Ids.newRequestId(), scope, distinct, durationMinutes, reason,
-                requester, approvers, createNamePattern, RequestStatus.PENDING, BatchClock.now());
+        return create(scope, null, actions, durationMinutes, reason, requester, approvers, createNamePattern);
     }
 
     /** Single-approver form without a name restriction, kept for callers written before D-37. */
@@ -132,6 +150,11 @@ public final class GrantRequest {
 
     public GrantScope getScope() {
         return scope;
+    }
+
+    /** D-71: the kind of the scope item recorded at creation, or {@code null} when none was recorded. */
+    public ItemKind getItemKind() {
+        return itemKind;
     }
 
     /** A defensive copy; the requested actions never change after creation. */

@@ -98,7 +98,10 @@ def fill_dialog(d, role):
         d.locator("textarea[name=reason]").fill(f"e2e-12 {UI} entry test by {role}")
     acts = d.locator("input[name=actions]")
     if acts.count() and not any(a.is_checked() for a in acts.all()):
-        acts.first.locator("xpath=following-sibling::label").first.click()
+        # D-71: Create applies only to a folder and Delete only to a job; Configure applies to every item kind, so the
+        # full submit lands on the new request from a job page and from a folder page alike
+        conf = d.locator("input[name=actions][value=CONFIGURE]")
+        (conf if conf.count() else acts).first.locator("xpath=following-sibling::label").first.click()
     apps = d.locator("input[name=approvers]")
     if apps.count() and not any(a.is_checked() for a in apps.all()):
         apps.first.locator("xpath=following-sibling::label").first.click()

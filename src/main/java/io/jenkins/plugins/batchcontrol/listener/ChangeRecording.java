@@ -1,13 +1,11 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
-import hudson.model.AbstractItem;
 import hudson.model.Item;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
-import java.io.File;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -41,13 +39,35 @@ final class ChangeRecording {
     }
 
     /**
-     * The id of the current user's active grant matching the item and action, or {@code null}
-     * (SPEC item 9: link the grant when one covers the change, else {@code grantId=null}).
-     * A {@code null} action matches any granted action.
+     * The id of the current user's active grant naming {@code itemFullName} (with {@code item}
+     * present) and matching the action, or {@code null} (SPEC item 9: link the grant when one
+     * covers the change, else {@code grantId=null}). {@code itemFullName} may be the item's name
+     * before a rename or move. A {@code null} action matches any granted action.
      */
     @CheckForNull
-    static String activeGrantIdFor(String user, String itemFullName, @CheckForNull GrantAction action) {
-        Grant grant = GrantService.get().findActiveGrant(user, itemFullName, action);
+    static String activeGrantIdFor(String user, String itemFullName, Item item, @CheckForNull GrantAction action) {
+        Grant grant = GrantService.get().findActiveGrant(user, itemFullName, item, action);
+        return grant == null ? null : grant.getId();
+    }
+
+    /**
+     * The id of the active CREATE window through which {@code user} created {@code item}, or
+     * {@code null} (SPEC item 9). A CREATE window names the folder the item is created in (D-71),
+     * so the lookup takes the item's parent: preferably the window whose name restriction admits
+     * the item's name, else any CREATE window of the user on that folder.
+     */
+    @CheckForNull
+    static String createGrantIdFor(String user, Item item) {
+        if (!(item.getParent() instanceof Item)) {
+            return null; // no root-scope grant exists (S-13)
+        }
+        // The window must name the parent folder.
+        Item group = (Item) item.getParent();
+        Grant grant = GrantService.get().findActiveCreateGrant(user, item.getParent(), item.getName());
+        if (grant == null) {
+            java.util.List<Grant> windows = GrantService.get().findActiveGrants(user, group, GrantAction.CREATE);
+            grant = windows.isEmpty() ? null : windows.get(0);
+        }
         return grant == null ? null : grant.getId();
     }
 
@@ -59,8 +79,7 @@ final class ChangeRecording {
      */
     @CheckForNull
     static String configureGrantIdFor(String user, Item item) {
-        File rootDir = item instanceof AbstractItem ? ((AbstractItem) item).getRootDir() : null;
-        Grant grant = GrantService.get().findConfigureGrant(user, item.getFullName(), rootDir);
+        Grant grant = GrantService.get().findConfigureGrant(user, item);
         return grant == null ? null : grant.getId();
     }
 

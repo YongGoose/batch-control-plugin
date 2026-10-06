@@ -8,7 +8,6 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.time.Clock;
@@ -55,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * save of a native Item/Configure or Overall/Administer holder, is guarded; any widening of access on
  * it is reverted whoever makes it, except an administrator's HTTP save.
  *
- * <p>bob (StrategyFixtures) holds a JOB CONFIGURE grant on the Pipeline job {@code pipe} and
+ * <p>bob (StrategyFixtures) holds a CONFIGURE window on the Pipeline job {@code pipe} and
  * edits its script through {@code POST config.xml} to a {@code properties([authorizationMatrix(...)])}
  * step. Builds run as {@code batch} (a global default build authorization; batch holds Overall/Read,
  * Job/Read and Job/Build, no Configure), so D-50a/D-50b are satisfied and the exposure is the
@@ -270,7 +269,8 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-62 (D-58a, S-27-05): bob holds a FOLDER CONFIGURE grant on {@code team}, which makes the
+     * T-02-62 (D-58a, S-27-05): bob holds a CONFIGURE window on the folder {@code team} (D-71: it
+     * covers the folder itself; the guard, unchanged by D-71, covers what is below), which makes the
      * folder guarded. carol, who holds Job/Create natively (not an administrator), creates
      * {@code team/new} through {@code createItem} with a payload giving herself Job/Configure. The
      * new item's authorization entries are removed and the creation is recorded.
@@ -280,7 +280,7 @@ public class AuthorizationEntryGuardTest {
         BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
         strategy.add(Item.CREATE, PermissionEntry.user("carol"));
         j.jenkins.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "team");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CONFIGURE));
         int violations = violations().size();
 
         String payload = "<?xml version='1.1' encoding='UTF-8'?><project><properties>" + propertyXml("Inherit", "carol")
@@ -409,7 +409,7 @@ public class AuthorizationEntryGuardTest {
         WorkflowJob other = j.jenkins.createProject(WorkflowJob.class, "replay-me");
         other.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
         j.buildAndAssertSuccess(other);
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "replay-me", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "replay-me", Arrays.asList(GrantAction.CONFIGURE));
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("bob");
         List<org.htmlunit.util.NameValuePair> params = new java.util.ArrayList<>();
         String script = entryFor("user", "bob");
@@ -429,7 +429,8 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-72 (D-58b (1)): bob holds a FOLDER CONFIGURE grant on {@code outer}; {@code outer/inner/deep}
+     * T-02-72 (D-58b (1)): bob holds a CONFIGURE window on the folder {@code outer} (D-71 leaves the
+     * guard of descendants unchanged); {@code outer/inner/deep}
      * is a Pipeline job two levels below whose script gives alice Job/Configure; the build's entry
      * is reverted, because guarding covers descendants.
      */
@@ -439,7 +440,7 @@ public class AuthorizationEntryGuardTest {
         com.cloudbees.hudson.plugins.folder.Folder inner = outer.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "inner");
         WorkflowJob deep = inner.createProject(WorkflowJob.class, "deep");
         deep.setDefinition(new CpsFlowDefinition(entryFor("user", "alice"), true));
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "outer", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "outer", Arrays.asList(GrantAction.CONFIGURE));
         j.buildAndAssertSuccess(deep);
         assertFalse(entryOn(deep, "alice"), "a job two levels below the guarded folder is guarded");
     }
@@ -539,7 +540,7 @@ public class AuthorizationEntryGuardTest {
     }
 
     /**
-     * T-02-67 (D-58a (1)(5)): bob holds a FOLDER CONFIGURE grant on {@code team}; carol (native
+     * T-02-67 (D-58a (1)(5)): bob holds a CONFIGURE window on the folder {@code team}; carol (native
      * Job/Create, not an administrator) creates the Pipeline job {@code team/p2} whose script gives
      * her Job/Configure. The window ends; the item stays guarded, so the build's entry is reverted.
      */
@@ -548,7 +549,7 @@ public class AuthorizationEntryGuardTest {
         BatchControlMatrixAuthorizationStrategy strategy = (BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy();
         strategy.add(Item.CREATE, PermissionEntry.user("carol"));
         j.jenkins.createProject(com.cloudbees.hudson.plugins.folder.Folder.class, "team");
-        StrategyFixtures.grant("bob", GrantScope.Type.FOLDER, "team", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "team", Arrays.asList(GrantAction.CONFIGURE));
 
         String script = entryFor("user", "carol").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 .replace("'", "&apos;");
@@ -645,7 +646,7 @@ public class AuthorizationEntryGuardTest {
         String declarative = "pipeline { agent any; stages { stage('only') { steps { echo 'hello' } } } }";
         job.setDefinition(new CpsFlowDefinition(declarative, true));
         j.assertBuildStatusSuccess(job.scheduleBuild2(0).get(2, java.util.concurrent.TimeUnit.MINUTES));
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "restart-me", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "restart-me", Arrays.asList(GrantAction.CONFIGURE));
         replay("bob", job, 1, declarative.replace("hello", "planted"));
         j.waitUntilNoActivityUpTo(120_000);
         assertTrue(job.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
@@ -761,13 +762,13 @@ public class AuthorizationEntryGuardTest {
                 .add(io.jenkins.plugins.batchcontrol.security.BatchControlPermissions.REQUEST, PermissionEntry.user(user));
     }
 
-    /** replay-me with #1; bob's JOB CONFIGURE grant; bob replays #1 as #2 (a harmless script). c1 gets Job/Build. */
+    /** replay-me with #1; bob's CONFIGURE window on it; bob replays #1 as #2 (a harmless script). c1 gets Job/Build. */
     private WorkflowJob replayedUnderGrant() throws Exception {
         ((BatchControlMatrixAuthorizationStrategy) j.jenkins.getAuthorizationStrategy()).add(Item.BUILD, PermissionEntry.user("c1"));
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "replay-me");
         job.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
         j.buildAndAssertSuccess(job);
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "replay-me", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "replay-me", Arrays.asList(GrantAction.CONFIGURE));
         replay("bob", job, 1, "echo 'planted'");
         j.waitUntilNoActivity();
         assertTrue(job.getBuildByNumber(2) != null, "fixture: bob's replay must have run as #2");
@@ -843,7 +844,7 @@ public class AuthorizationEntryGuardTest {
     }
 
     private void grantBob() throws Exception {
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "pipe", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "pipe", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(pipe, "bob", Item.CONFIGURE), "premise: the grant confers Configure on the job");
     }
 

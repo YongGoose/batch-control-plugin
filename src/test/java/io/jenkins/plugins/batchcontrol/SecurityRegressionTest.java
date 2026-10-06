@@ -281,7 +281,11 @@ public class SecurityRegressionTest {
         assertEquals(nextBuildNumberBefore, job.getNextBuildNumber(), "the job's next build number must be unchanged");
     }
 
-    /** T-SEC-12 (S-03): an empty scope full name is rejected for both JOB and FOLDER types. */
+    /**
+     * T-SEC-12 (S-03): an empty scope full name is rejected for every scope type. Before D-71 the
+     * row named JOB and FOLDER; D-71 leaves ITEM as the only type, and the loop covers all of
+     * {@code GrantScope.Type.values()} so that no type can be added without this guard.
+     */
     @Test
     public void s_03_emptyScopeNameIsRejected() throws Exception {
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -292,8 +296,7 @@ public class SecurityRegressionTest {
         cfg.setChangeControlEnabled(true);
         cfg.save();
 
-        for (GrantScope.Type type : new GrantScope.Type[] {
-                GrantScope.Type.FOLDER, GrantScope.Type.JOB}) {
+        for (GrantScope.Type type : GrantScope.Type.values()) { // D-71: every scope type (only ITEM since D-71)
             assertRejectedAsInvalid("an empty " + type + " scope name must be rejected "
                     + "(S-03: root-scope grants are not supported)", () -> {
                         try (ACLContext ignored = as("g1")) {
@@ -396,8 +399,7 @@ public class SecurityRegressionTest {
         cfg.setChangeControlEnabled(true);
         cfg.save();
 
-        for (GrantScope.Type type : new GrantScope.Type[] {
-                GrantScope.Type.FOLDER, GrantScope.Type.JOB}) {
+        for (GrantScope.Type type : GrantScope.Type.values()) { // D-71: every scope type (only ITEM since D-71)
             // written straight to the store, bypassing the service-side creation guard
             GrantRequest stored = GrantRequest.create(new GrantScope(type, ""),
                     Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE, GrantAction.DELETE),
@@ -478,7 +480,7 @@ public class SecurityRegressionTest {
 
     private GrantRequest grantRequestAs(String userId) {
         try (ACLContext ignored = as(userId)) {
-            return GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            return GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance window", "a1");
         }
     }

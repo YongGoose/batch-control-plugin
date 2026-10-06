@@ -63,7 +63,7 @@ public class ActiveGrantsRealJenkinsTest {
 
         GrantRequest request;
         try (ACLContext ignored = ACL.as2(User.getById("g1", true).impersonate2())) {
-            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+            request = GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                     Arrays.asList(GrantAction.CONFIGURE), 30, "maintenance", "a1");
         }
         Grant grant;

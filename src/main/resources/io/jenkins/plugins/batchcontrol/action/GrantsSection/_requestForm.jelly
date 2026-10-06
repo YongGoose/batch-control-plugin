@@ -5,7 +5,17 @@
      submission (GrantsSection#doCreate, ui.FormErrors) comes back with each message next to its
      field and the input kept; the action is absolute because the refusal is rendered at
      .../grants/create. U-01: a prefill comes from the resolved model object, never from the raw
-     query string, and every value is escaped by the Jelly default. -->
+     query string, and every value is escaped by the Jelly default. D-75 (1): a renewed window's
+     followed name only to a requester who may read the item.
+     D-71: a window names exactly one job or folder, so there is no scope type. The name field is
+     checked as it is typed (POST GrantsSection#doCheckScopeFullName, with the crumb; the answer
+     is the item's kind with its icon, or "No such item" for a missing or invisible item); the
+     description says that a folder's own settings still reach its items (D-71a, S-34-02) and
+     that the window follows its item when it is renamed or moved and ends when it is deleted
+     (D-74); the actions say where each applies, and that no window includes renaming its item,
+     job or folder (D-71c). The service refuses
+     an action that cannot apply at submission, and the refusal is shown next to the field it
+     concerns. -->
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form" xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="errors" value="${it.formErrors}"/>
   <j:set var="renew" value="${it.renewSource}"/>
@@ -22,9 +32,18 @@
         </div>
       </j:when>
       <j:otherwise>
-        <j:if test="${it.prefilled and !errors.present}">
+        <!-- D-75 (1), S-39-04: a renewed window whose item was moved where the requester may not
+             read it is named by its approved name with the fixed note (GrantsSection#getRenewScope),
+             and the name field starts empty. -->
+        <j:set var="renewScope" value="${it.renewScope}"/>
+        <j:if test="${(it.prefilled or renewScope.moved) and !errors.present}">
           <p class="jenkins-description">
             <j:choose>
+              <j:when test="${renewScope.moved}">
+                Prefilled from ended grant ${renew.id}, which was for <bc:scopeItem scope="${renewScope}" kind="${renew.itemKind}"/>.
+                Enter the job or folder, check the actions and duration, say why you need it again,
+                and check one or more approvers.
+              </j:when>
               <j:when test="${renew != null}">
                 Prefilled from ended grant ${renew.id} for <strong>${it.prefillScopeFullName}</strong>.
                 Check the actions and duration, say why you need it again, and check one or more
@@ -38,33 +57,52 @@
           </p>
         </j:if>
         <bc:formError errors="${errors}"/>
-        <j:set var="scopeTypeValue" value="${errors.present ? errors.value('scopeType') : it.prefillScopeType}"/>
-        <f:entry title="Scope type" help="/plugin/batch-control/help/grant-scope-type.html">
-          <div class="jenkins-select">
-            <select name="scopeType" class="jenkins-select__input">
-              <option value="JOB" selected="${scopeTypeValue == 'JOB' ? 'true' : null}">Job (exact full name)</option>
-              <option value="FOLDER" selected="${scopeTypeValue == 'FOLDER' ? 'true' : null}">Folder and everything below</option>
-              <!-- D-65 (R4-15): the folder and the items directly in it, not nested folders. -->
-              <option value="FOLDER_ONLY" selected="${scopeTypeValue == 'FOLDER_ONLY' ? 'true' : null}">Folder only (not nested folders)</option>
-            </select>
-          </div>
-          <div class="jenkins-form-description">
-            Folder only covers the folder and the items directly in it: new items can be created
-            only directly in the folder, and a nested folder cannot be deleted.
-          </div>
-          <bc:fieldError errors="${errors}" field="scopeType"/>
-        </f:entry>
-        <f:entry title="Scope full name" help="/plugin/batch-control/help/grant-scope-full-name.html">
-          <input type="text" name="scopeFullName" class="jenkins-input" placeholder="team/folder/job"
-                 value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"/>
+        <f:entry title="Job or folder (full name)"
+                 description="The one item the window is for: it grants permissions on that item only. The window follows the item when an administrator (or a user with their own permissions) renames or moves it, and ends when the item is deleted. A folder's own settings still affect the items inside it."
+                 help="/plugin/batch-control/help/grant-scope-full-name.html">
+          <f:textbox name="scopeFullName" placeholder="team/folder/job"
+                     value="${errors.present ? errors.value('scopeFullName') : it.prefillScopeFullName}"
+                     checkUrl="${rootURL}/batch-control/grants/checkScopeFullName" checkDependsOn=""
+                     checkMethod="post"/>
           <bc:fieldError errors="${errors}" field="scopeFullName"/>
         </f:entry>
-        <f:entry title="Actions" help="/plugin/batch-control/help/grant-actions.html">
+        <f:entry title="Actions"
+                 description="Configure: the item's own configuration. Create: new items directly inside a folder (folders only). Delete: the job (jobs only). No window allows renaming the item."
+                 help="/plugin/batch-control/help/grant-actions.html">
           <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
                GrantsSection#doCreate reads with getParameterValues("actions"). -->
-          <div class="jenkins-!-margin-bottom-1">
-            <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"
-                        checked="${errors.present ? errors.checked('actions', 'CREATE') : it.isPrefillAction('CREATE')}"/>
+          <!-- #107: Create controls an optional block, f:optionalBlock's markup written out
+               because that tag cannot post Create as one of the repeated "actions" values: core's
+               optional-block behaviour shows the name restriction only while Create is ticked,
+               also on a refused submission and on a prefill (Request again) that ticks Create.
+               Without row-set markers (like f:optionalBlock inline="true"), so the fields stay at
+               the top level of the form. Core's script replaces the checkbox id with its own.
+               GrantsSection#doCreate reads the restriction only with CREATE. -->
+          <div class="optionalBlock-container jenkins-form-item jenkins-!-margin-bottom-1">
+            <div class="help-sibling tr optional-block-start row-group-start">
+              <div class="jenkins-checkbox-help-wrapper">
+                <f:checkbox name="actions" value="CREATE" id="grant-action-create" title="Create"
+                            class="optional-block-control block-control optional-block-event-item"
+                            checked="${errors.present ? errors.checked('actions', 'CREATE') : it.isPrefillAction('CREATE')}"/>
+              </div>
+            </div>
+            <div class="rowvg-start tr"></div>
+            <div class="form-container tr">
+              <!-- D-40: optional, CREATE only. Length-bounded here and in GrantsSection#doCreate;
+                   syntax is validated by the service at submission. No help link of its own:
+                   inside the Actions entry its help area would be the one the Actions help link
+                   opens, so the Actions help (grant-actions.html) explains the restriction. -->
+              <f:entry title="New job name restriction"
+                       description="Optional. An exact job name, or a regular expression between slashes that must match the whole name.">
+                <input type="text" name="createNamePattern" class="jenkins-input"
+                       placeholder="nightly-report or /report-[0-9]+/"
+                       maxlength="${it.createNamePatternMaxLength}"
+                       value="${errors.present ? errors.value('createNamePattern') : it.prefillCreateNamePattern}"/>
+                <bc:fieldError errors="${errors}" field="createNamePattern"/>
+              </f:entry>
+            </div>
+            <!-- end marker -->
+            <div class="tr rowvg-end optional-block-end row-group-end"></div>
           </div>
           <div class="jenkins-!-margin-bottom-1">
             <f:checkbox name="actions" value="CONFIGURE" id="grant-action-configure" title="Configure"
@@ -75,17 +113,6 @@
                         checked="${errors.present ? errors.checked('actions', 'DELETE') : it.isPrefillAction('DELETE')}"/>
           </div>
           <bc:fieldError errors="${errors}" field="actions"/>
-        </f:entry>
-        <!-- D-40: optional, CREATE only. Length-bounded here and in GrantsSection#doCreate;
-             syntax is validated by the service at submission. -->
-        <f:entry title="New job name restriction (Create only)"
-                 description="Optional. An exact job name, or a regular expression between slashes that must match the whole name."
-                 help="/plugin/batch-control/help/grant-create-name-pattern.html">
-          <input type="text" name="createNamePattern" class="jenkins-input"
-                 placeholder="nightly-report or /report-[0-9]+/"
-                 maxlength="${it.createNamePatternMaxLength}"
-                 value="${errors.present ? errors.value('createNamePattern') : it.prefillCreateNamePattern}"/>
-          <bc:fieldError errors="${errors}" field="createNamePattern"/>
         </f:entry>
         <f:entry title="Duration" help="/plugin/batch-control/help/grant-duration.html">
           <div class="jenkins-select">

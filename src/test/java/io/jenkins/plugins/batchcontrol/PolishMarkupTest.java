@@ -10,7 +10,6 @@ import hudson.security.ProjectMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
@@ -147,7 +146,7 @@ public class PolishMarkupTest {
         try (ACLContext ignored = ACL.as2(User.getById("bob", true).impersonate2())) {
             request = RunRequestService.get().create(job, new LinkedHashMap<>(), "month-end run", "a1");
         }
-        StrategyFixtures.grant("carol", GrantScope.Type.JOB, "batch-x", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("carol", "batch-x", Arrays.asList(GrantAction.CONFIGURE));
 
         assertDestructive(page("bob", "batch-control/requests/" + request.getId() + "/"), "/cancel", "Cancel on the request");
         assertDestructive(page("admin", "batch-control/grants/"), "/revoke", "Revoke on the active grant");

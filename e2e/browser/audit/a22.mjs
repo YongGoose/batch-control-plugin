@@ -10,7 +10,7 @@ if (phase === 'before') {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/job/batch-pipeline/`);
   await page.locator('#side-panel a:has-text("Request Change Permission")').click(); await page.waitForLoadState('load');
-  const pre = { type: await page.locator('select[name="scopeType"]').inputValue(), scope: await page.locator('input[name="scopeFullName"]').inputValue(), conf: await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked() };
+  const pre = { kind: (await page.locator('[data-batch-control-item-kind]').count()) ? await page.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null, scope: await page.locator('input[name="scopeFullName"]').inputValue(), conf: await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked() };
   await page.selectOption('select[name="durationMinutes"]', '15');
   const reason = `Audit A-22 ${Date.now()}: fix the pipeline script`;
   await page.fill('textarea[name="reason"]', reason);
@@ -47,6 +47,6 @@ if (phase === 'before') {
   const rq = await login('requester'); await rq.page.goto(`${BASE}/job/batch-pipeline/`); const sb = (await rq.page.locator('#side-panel a').allInnerTexts()).map((x) => x.trim());
   ev(`A-22 after restart: configure ${c2}; manager rows ${n} "${rt}"; dialog "${dialogText}"; left ${left}; configure after revoke ${c3}; revoke records for ${st.gid}: ${mine.join(' || ')}; requester sidebar ${sb}`);
   const rem1 = (st.rt.match(/(\d+) min/) || [])[1]; const rem2 = (rt.match(/(\d+) min/) || [])[1];
-  for (const id of ['A-22', 'B7-11']) row(id, { roles: 'requester, approver-1, manager', V: `✓ Request Change Permission prefills JOB batch-pipeline + Configure (${JSON.stringify(st.pre)}); Revoke offered to manager; the requester's sidebar loses Configure after the revoke (${sb.includes('Configure') ? 'still there' : 'gone'})`, G: `${st.c0 === 403 && st.c1 === 200 && c2 === 200 && n === 1 && left === 0 && c3 === 403 ? '✓' : '✗'} configure ${st.c0} -> approved ${st.c1} -> after docker restart ${c2}; one active row before (${rem1} min left) and after the restart (${rem2} min left); manager Revoke (confirmation "${dialogText.slice(0, 80)}") -> row gone, configure ${c3}`, R: 'n.a.', C: `${mine.length === 1 ? '✓' : '✗'} ${mine.length} GRANT_REVOKE for ${st.gid}: "${(mine[0] || '').slice(0, 120)}"`, E: st.s0 && st.s1 && s2 && s4 ? '✓ A-22-0..4' : '✗' });
+  for (const id of ['A-22', 'B7-11']) row(id, { roles: 'requester, approver-1, manager', V: `✓ Request Change Permission prefills batch-pipeline (one item, D-71) + Configure (${JSON.stringify(st.pre)}); Revoke offered to manager; the requester's sidebar loses Configure after the revoke (${sb.includes('Configure') ? 'still there' : 'gone'})`, G: `${st.c0 === 403 && st.c1 === 200 && c2 === 200 && n === 1 && left === 0 && c3 === 403 ? '✓' : '✗'} configure ${st.c0} -> approved ${st.c1} -> after docker restart ${c2}; one active row before (${rem1} min left) and after the restart (${rem2} min left); manager Revoke (confirmation "${dialogText.slice(0, 80)}") -> row gone, configure ${c3}`, R: 'n.a.', C: `${mine.length === 1 ? '✓' : '✗'} ${mine.length} GRANT_REVOKE for ${st.gid}: "${(mine[0] || '').slice(0, 120)}"`, E: st.s0 && st.s1 && s2 && s4 ? '✓ A-22-0..4' : '✗' });
   await close();
 }

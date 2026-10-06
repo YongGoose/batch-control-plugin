@@ -9,8 +9,9 @@
 
      Wording contract: an activated job's notice must not contain the phrases used for the other
      two states, so "Request a hold" rather than any phrase with "on hold" in it. -->
-<!-- #72: shared by jobMain.jelly (classic job page, noticeStyle = top margin) and
-     JobNoticesWidget/index.jelly (new job page card, no extra style). -->
+<!-- #72: shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
+     JobNoticesWidget/index.jelly (new job page card, no extra class). D-74: core's utility
+     classes instead of inline styles. -->
 <j:jelly xmlns:j="jelly:core">
   <j:if test="${it.shown}">
     <!-- e2e-03 DEF-01 (SPEC item 6): on an approval-required job the page always says that manual
@@ -18,7 +19,7 @@
          customised Build Now) only reports a refusal as its own generic failure. The request form
          link (not worded "Request Run": exactly one element, the sidebar entry, reads that, U-02) is rendered only for a Request holder (the form answers 404 to anyone else). -->
     <j:if test="${it.approvalRequired}">
-      <div class="jenkins-alert jenkins-alert-info" role="status" style="${noticeStyle}">
+      <div class="jenkins-alert jenkins-alert-info ${noticeClass}" role="status">
         <strong>Batch Control: manual runs of this job need an approved run request.</strong>
         A build started any other way (a build URL, the CLI, Rebuild, Retry or another plugin's
         build button) is refused without one, even where the button only reports a generic
@@ -40,7 +41,7 @@
     <j:choose>
       <j:when test="${carrier != null}">
         <j:set var="carrierUrl" value="${it.carrierUrl(carrier)}"/>
-        <div class="jenkins-alert jenkins-alert-info" role="status" style="${noticeStyle}">
+        <div class="jenkins-alert jenkins-alert-info ${noticeClass}" role="status">
           <!-- S-14-02: the carrier's name and state only for a viewer with Item/Read on it
                (carrierUrl is null otherwise); anyone else gets a neutral line. -->
           <j:choose>
@@ -58,7 +59,7 @@
         </div>
       </j:when>
       <j:when test="${it.activated}">
-        <div class="jenkins-alert jenkins-alert-success" role="status" style="${noticeStyle}">
+        <div class="jenkins-alert jenkins-alert-success ${noticeClass}" role="status">
           <strong>Batch Control: this job is activated.</strong>
           Timer and upstream triggers may start it, as far as its own trigger settings allow.
           <j:if test="${it.canRequest}">
@@ -68,7 +69,7 @@
         </div>
       </j:when>
       <j:otherwise>
-        <div class="jenkins-alert jenkins-alert-warning" role="status" style="${noticeStyle}">
+        <div class="jenkins-alert jenkins-alert-warning ${noticeClass}" role="status">
           <j:choose>
             <j:when test="${it.held}">
               <strong>Batch Control: this job is on hold.</strong>
@@ -87,7 +88,7 @@
     </j:choose>
     <j:set var="pending" value="${it.pendingRequests}"/>
     <j:if test="${carrier == null and !empty(pending)}">
-      <ul style="margin: 0.5rem 0;">
+      <ul class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-1">
         <j:forEach var="r" items="${pending}">
           <li>
             Pending ${it.actionLabel(r.action)} request

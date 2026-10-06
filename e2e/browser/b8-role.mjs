@@ -97,7 +97,7 @@ if (step === 'check') {
 if (step === 'r4') {
   // grant CONFIGURE on team/app-1 under whichever role strategy is installed
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=team/app-1`);
+  await rq.page.goto(`${BASE}/batch-control/grants/?scopeFullName=team/app-1`);
   await rq.page.selectOption('select[name="durationMinutes"]', '15');
   await rq.page.fill('textarea[name="reason"]', 'Configure app-1 under role strategy (B8-R4).');
   await rq.page.locator('#grant-approver-0 + label').click();

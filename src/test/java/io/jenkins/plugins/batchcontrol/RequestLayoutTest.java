@@ -312,7 +312,7 @@ public class RequestLayoutTest {
     }
 
     private GrantRequest grantRequest(String reason) throws Exception {
-        return as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "batch-x"),
+        return as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30, reason, "a1"));
     }
 

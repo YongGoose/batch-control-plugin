@@ -36,6 +36,8 @@ public final class PathCodec {
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
     /** Joins prefix and hash of a shortened name; never emitted raw by {@link #encode}. */
     private static final char SHORTENED_SEPARATOR = '~';
+    /** Longest store identifier accepted by {@link #isId} (a UUID has 36 characters). */
+    private static final int MAX_ID_LENGTH = 128;
 
     private PathCodec() {
     }
@@ -101,6 +103,43 @@ public final class PathCodec {
             }
         }
         return out.toString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Whether {@code id} has the shape of a store identifier: ASCII letters, digits and {@code -}
+     * only, at most {@value #MAX_ID_LENGTH} characters. New requests and windows get UUIDs (D-68) and
+     * history records {@code yyyyMMdd-HHmmss-<6 random>} ids ({@link Ids}), and both forms qualify.
+     *
+     * <p>S-39-01: an identifier is turned into a file name only after this check, so it can name only
+     * its own file: without {@code .} it can never reach another file of the same directory under
+     * another suffix (a run request's {@code <id>.values.xml}, also in another letter case on a
+     * case-insensitive file system), and without {@code ~} never a Windows 8.3 short name.
+     */
+    public static boolean isId(String id) {
+        if (id == null || id.isEmpty() || id.length() > MAX_ID_LENGTH) {
+            return false;
+        }
+        for (int i = 0; i < id.length(); i++) {
+            char c = id.charAt(i);
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The file {@code <id><suffix>} under {@code baseDir} of the entity {@code id} (S-39-01).
+     *
+     * @throws IllegalArgumentException if {@code id} is not a store identifier ({@link #isId}) or
+     *         the file name is unsafe ({@link #resolveUnder})
+     */
+    public static Path resolveId(Path baseDir, String id, String suffix) {
+        Objects.requireNonNull(suffix, "suffix");
+        if (!isId(id)) {
+            throw new IllegalArgumentException("Not a store identifier: " + id);
+        }
+        return resolveUnder(baseDir, id + suffix);
     }
 
     /**

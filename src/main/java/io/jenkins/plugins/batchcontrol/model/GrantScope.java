@@ -1,15 +1,30 @@
 package io.jenkins.plugins.batchcontrol.model;
 
+import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.Item;
+import hudson.model.Job;
+import hudson.model.ModifiableItemGroup;
 import java.util.Objects;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Target scope of a grant request / grant: a single job, a folder subtree, or a folder and its
- * direct items (D-65).
+ * Target of a grant request / grant: exactly one item, a job or a folder of any kind (D-71,
+ * replaces the JOB, FOLDER and FOLDER_ONLY scopes of D-65). A window confers nothing on any other
+ * item, including the items inside a folder.
  *
- * <p>Folder matching is done on path-segment boundaries: scope {@code team/batch} includes
- * {@code team/batch} itself and {@code team/batch/job1}, but never {@code team/batch-other}.
+ * <ul>
+ *   <li>CONFIGURE (and EXTENDED_READ through the {@code impliedBy} walk, P-11) is answered on the
+ *       item's own ACL: {@link #includes(String)}.</li>
+ *   <li>CREATE is checked by core on the ACL of the group the new item is created in, so a CREATE
+ *       window, which can only exist on a regular folder ({@link #createAppliesTo(Item)}), admits
+ *       creation directly inside that folder only: {@link #includes(String)} of the group.</li>
+ *   <li>DELETE can only exist on a job ({@link #deleteAppliesTo(Item)}): deleting an item group
+ *       that is not a job deletes its children as SYSTEM without checking them.</li>
+ *   <li>D-35c: the items its holder created through a CREATE window are matched by parent,
+ *       {@link #isParentOf(String)}, not by name prefix.</li>
+ * </ul>
  *
  * <p>An empty full name (the Jenkins root) is not a valid scope: it is rejected when a grant
  * request is created and again when it is approved, and {@link #includes(String)} matches
@@ -19,16 +34,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 public final class GrantScope {
 
     /**
-     * Scope kind. Stored by name in the existing {@code type} field, so files written before
-     * {@link #FOLDER_ONLY} existed load unchanged (D-65).
+     * Scope kind. Stored by name in the {@code type} field. Files written with the earlier values
+     * ({@code JOB}, {@code FOLDER}, {@code FOLDER_ONLY}) are not converted (D-69, D-71).
      */
     public enum Type {
-        /** The job with exactly this full name. */
-        JOB,
-        /** The folder and everything below it, nested folders included. */
-        FOLDER,
-        /** The folder itself and the items whose parent is that folder, not nested folders' contents (D-65). */
-        FOLDER_ONLY
+        /** The one item with exactly this full name (D-71). */
+        ITEM
     }
 
     private final Type type;
@@ -37,6 +48,11 @@ public final class GrantScope {
     public GrantScope(Type type, String fullName) {
         this.type = Objects.requireNonNull(type, "type");
         this.fullName = Objects.requireNonNull(fullName, "fullName");
+    }
+
+    /** The scope naming exactly the item {@code fullName} (D-71). */
+    public static GrantScope item(String fullName) {
+        return new GrantScope(Type.ITEM, fullName);
     }
 
     public Type getType() {
@@ -48,16 +64,8 @@ public final class GrantScope {
     }
 
     /**
-     * Whether the given item full name falls inside this scope.
-     *
-     * <ul>
-     *   <li>{@code JOB}: exact match only.</li>
-     *   <li>{@code FOLDER}: the folder itself (CREATE is checked on the folder ACL)
-     *       and any descendant, with a {@code /} segment-boundary check.</li>
-     *   <li>{@code FOLDER_ONLY} (D-65): the folder itself and its direct items ({@code f/x}, never
-     *       {@code f/sub/x}).</li>
-     *   <li>An empty scope name matches nothing at all, for any type — see below.</li>
-     * </ul>
+     * Whether the given item full name is the scope item: an exact full-name match (D-71). An
+     * empty scope name matches nothing at all — see below.
      */
     public boolean includes(String itemFullName) {
         if (itemFullName == null) {
@@ -67,54 +75,49 @@ public final class GrantScope {
         // grants are not a supported capability: GrantRequestService rejects an empty scope both
         // at creation and at approval, so this state cannot be produced through the plugin. The
         // guard stays because XStream rebuilds persisted Grant/GrantRequest objects without
-        // running the constructor, so a hand-edited or pre-S-03 store file could still carry
-        // GrantScope("") — and the safe answer for such a scope is "includes nothing", never the
-        // instance-wide "includes everything" this branch used to return.
-        if (fullName.isEmpty()) {
+        // running the constructor, so a hand-edited store file could still carry GrantScope("")
+        // — and the safe answer for such a scope is "includes nothing".
+        if (fullName == null || fullName.isEmpty() || type != Type.ITEM) {
             return false;
         }
-        if (type == Type.JOB) {
-            return fullName.equals(itemFullName);
-        }
-        if (itemFullName.equals(fullName)) {
-            return true;
-        }
-        String prefix = fullName + "/";
-        if (!itemFullName.startsWith(prefix)) {
-            return false;
-        }
-        return type == Type.FOLDER || itemFullName.indexOf('/', prefix.length()) < 0;
+        return fullName.equals(itemFullName);
     }
 
     /**
-     * Whether a DELETE action of this scope confers Item/Delete on {@code itemFullName}. For
-     * {@code FOLDER_ONLY} only a direct item that is not itself an item group: deleting the folder
-     * or a nested folder (any {@code ItemGroup}, a multibranch project included) would delete
-     * items outside the scope (D-65 owner ruling). For the other types it is
-     * {@link #includes(String)}.
-     *
-     * @param itemIsGroup whether the item is an item group; callers that cannot tell pass
-     *                    {@code true} (fail-safe)
+     * D-35c (as amended by D-71): whether the scope item is the parent of {@code itemFullName},
+     * i.e. the item lies directly inside the scope folder ({@code f/x}, never {@code f/sub/x} and
+     * never {@code f} itself).
      */
-    public boolean includesDeleteOf(String itemFullName, boolean itemIsGroup) {
-        if (type == Type.FOLDER_ONLY) {
-            return !itemIsGroup && itemFullName != null && !itemFullName.equals(fullName) && includes(itemFullName);
+    public boolean isParentOf(@CheckForNull String itemFullName) {
+        if (itemFullName == null || !includes(parentOf(itemFullName))) {
+            return false;
         }
-        return includes(itemFullName);
+        return itemFullName.length() > fullName.length() + 1;
+    }
+
+    /** The full name of the group {@code itemFullName} lies in ({@code ""} for a root item). */
+    public static String parentOf(String itemFullName) {
+        int slash = itemFullName.lastIndexOf('/');
+        return slash < 0 ? "" : itemFullName.substring(0, slash);
     }
 
     /**
-     * Whether a CREATE action of this scope confers Item/Create in the item group
-     * {@code groupFullName}, i.e. whether an item created directly in that group falls inside
-     * this scope. For {@code FOLDER_ONLY} that is the folder itself only: a nested folder is a
-     * direct item, but what is created in it lies outside the scope (D-65). For the other types it
-     * is {@link #includes(String)} of the group, as before.
+     * D-71: whether a window's CREATE can apply to {@code item}: a modifiable item group that is
+     * neither a job nor a computed folder (a regular folder; not a multibranch project or an
+     * organization folder, whose children are created by indexing).
      */
-    public boolean includesCreateIn(String groupFullName) {
-        if (type == Type.FOLDER_ONLY) {
-            return groupFullName != null && !fullName.isEmpty() && fullName.equals(groupFullName);
-        }
-        return includes(groupFullName);
+    public static boolean createAppliesTo(@CheckForNull Item item) {
+        return item instanceof ModifiableItemGroup && !(item instanceof Job) && !(item instanceof ComputedFolder);
+    }
+
+    /**
+     * D-71: whether a window's DELETE can apply to {@code item}: a {@link Job} only, including
+     * multi-configuration and Maven projects, whose sub-items are part of the job. Never an item
+     * group that is not a job (a folder, a multibranch project, an organization folder): core's
+     * {@code AbstractItem.delete()} deletes such a group's children as SYSTEM without checking them.
+     */
+    public static boolean deleteAppliesTo(@CheckForNull Item item) {
+        return item instanceof Job;
     }
 
     @Override

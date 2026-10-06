@@ -38,6 +38,7 @@ import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.TestExtension;
 import org.springframework.security.core.Authentication;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -129,11 +130,9 @@ public class ExpiryAndCancelTest {
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
 
         RunRequest request = createAs("u1");
-        // hold the executor so the approval is recorded but the build never starts,
-        // then drop the queue item to model "approved but never submitted"
-        j.jenkins.doQuietDown();
-        approveAs("a1", request.getId());
-        j.jenkins.getQueue().clear();
+        // the queue refuses the approved submission: "approved but never submitted" without
+        // cancelling a queue item (D-72b (7) treats a cancelled one differently; note 265)
+        QueueRefusalFixtures.refusedBeforeTheGate(job, () -> approveAs("a1", request.getId()));
         assertEquals(RequestStatus.APPROVED, RunRequestService.get().load(request.getId()).getStatus());
 
         BatchClock.setForTest(Clock.fixed(T0.plus(Duration.ofMinutes(61)), ZoneOffset.UTC));
@@ -142,7 +141,6 @@ public class ExpiryAndCancelTest {
         RunRequest reloaded = RunRequestService.get().load(request.getId());
         assertEquals(RequestStatus.EXPIRED, reloaded.getStatus(), "an APPROVED request not submitted within the timeout must become EXPIRED");
 
-        j.jenkins.doCancelQuietDown();
         j.waitUntilNoActivity();
         assertTrue(job.getBuilds().isEmpty(), "an expired approval must never run");
     }
@@ -252,6 +250,11 @@ public class ExpiryAndCancelTest {
         try (ACLContext ignored = as(userId)) {
             return RunRequestService.get().create(job, parameters, "scheduled batch run", "a1");
         }
+    }
+
+    /** Refuses armed jobs before Batch Control's queue gate (QueueRefusalFixtures, note 265). */
+    @TestExtension
+    public static final class RefuseBeforeGate extends QueueRefusalFixtures.RefusingHandler {
     }
 
     private void approveAs(String userId, String requestId) {

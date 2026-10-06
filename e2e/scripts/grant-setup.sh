@@ -13,7 +13,6 @@ bc_login requester
 bc_login approver-1
 
 status=$(bc_post requester "$OUT_DIR/setup-grant-create.html" "/batch-control/grants/create" \
-        --data-urlencode "scopeType=JOB" \
         --data-urlencode "scopeFullName=$JOB" \
         --data-urlencode "actions=CONFIGURE" \
         --data-urlencode "durationMinutes=$MINUTES" \

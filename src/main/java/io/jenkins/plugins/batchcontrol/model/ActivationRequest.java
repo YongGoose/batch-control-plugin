@@ -58,16 +58,6 @@ public final class ActivationRequest {
             return toApprovers == null ? new ArrayList<>() : new ArrayList<>(toApprovers);
         }
 
-        /** Compatibility view: the first member of the previous set, or {@code null}. */
-        public String getFrom() {
-            return fromApprovers == null || fromApprovers.isEmpty() ? null : fromApprovers.get(0);
-        }
-
-        /** Compatibility view: the first member of the new set, or {@code null}. */
-        public String getTo() {
-            return toApprovers == null || toApprovers.isEmpty() ? null : toApprovers.get(0);
-        }
-
         public String getBy() {
             return by;
         }
@@ -137,11 +127,6 @@ public final class ActivationRequest {
     /** The designated approver set (D-37), in designation order. */
     public List<String> getApprovers() {
         return approvers == null ? new ArrayList<>() : new ArrayList<>(approvers);
-    }
-
-    /** Compatibility view: the first designated approver, or {@code null}. */
-    public String getApprover() {
-        return approvers == null || approvers.isEmpty() ? null : approvers.get(0);
     }
 
     /** Whether {@code userId} is a member of the designated set. */

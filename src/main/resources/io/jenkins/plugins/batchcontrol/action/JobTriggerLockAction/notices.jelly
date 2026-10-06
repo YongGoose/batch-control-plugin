@@ -4,13 +4,14 @@
      control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches),
      whether or not the job requires approval for manual runs (DEF-15).
      Only constant text and switch names are rendered; no script. -->
-<!-- #72: shared by jobMain.jelly (classic job page, noticeStyle = top margin) and
-     JobNoticesWidget/index.jelly (new job page card, no extra style). -->
+<!-- #72: shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
+     JobNoticesWidget/index.jelly (new job page card, no extra class). D-74: core's utility
+     classes instead of inline styles. -->
 <j:jelly xmlns:j="jelly:core">
   <j:if test="${!empty(it.blockingSwitches)}">
-    <div class="jenkins-alert jenkins-alert-warning" role="status" style="${noticeStyle}">
+    <div class="jenkins-alert jenkins-alert-warning ${noticeClass}" role="status">
       <strong>Batch Control: unattended triggers of this job are blocked</strong>
-      <ul style="margin: 0.5rem 0;">
+      <ul class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-1">
         <j:if test="${it.timerBlocked}">
           <li>
             <b>Block cron (timer) triggers</b> (<code>blockTimer</code>) is on: scheduled cron
@@ -24,7 +25,7 @@
           </li>
         </j:if>
       </ul>
-      <p style="margin: 0;">
+      <p class="jenkins-!-margin-0">
         To clear it, turn the switch off in the Batch Control section of the
         <j:choose>
           <j:when test="${it.canConfigure}"><a href="${rootURL}/${it.job.url}configure">job configuration</a>.</j:when>
@@ -40,7 +41,7 @@
       </p>
       <!-- e2e-03 DEF-15 / DEF-21 (D-46): shown whatever "Require approval to run" says, and
            clearing a switch is not what puts a job into service; activation is. -->
-      <p style="margin: 0.5rem 0 0;">
+      <p class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-0">
         Clearing a switch only removes that block: an unattended run also needs the job to be
         activated, which is a separate, approved request (see the activation notice on this page).
       </p>

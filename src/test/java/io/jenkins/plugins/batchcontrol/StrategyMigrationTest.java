@@ -9,7 +9,6 @@ import hudson.security.GlobalMatrixAuthorizationStrategy;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlRoleBasedAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
@@ -104,7 +103,7 @@ public class StrategyMigrationTest {
         Set<String> before = StrategyFixtures.describeMatrix(plain.getGrantedPermissionEntries());
         FreeStyleProject p = jobWithAliceProperty();
         FreeStyleProject granted = j.createFreeStyleProject("granted");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "granted", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "granted", Arrays.asList(GrantAction.CONFIGURE));
         AdministrativeMonitor monitor = StrategyFixtures.strategyMonitor();
         assertFalse(has(granted, "bob", Item.CONFIGURE), "premise: a grant does not confer under the plain parent");
         assertTrue(monitor.isActivated(), "premise: the monitor shows for a plain matrix strategy with change control on");
@@ -149,7 +148,7 @@ public class StrategyMigrationTest {
         Set<String> before = StrategyFixtures.describeMatrix(sub.getGrantedPermissionEntries());
         FreeStyleProject p = jobWithAliceProperty();
         FreeStyleProject granted = j.createFreeStyleProject("granted");
-        StrategyFixtures.grant("bob", GrantScope.Type.JOB, "granted", Arrays.asList(GrantAction.CONFIGURE));
+        StrategyFixtures.grant("bob", "granted", Arrays.asList(GrantAction.CONFIGURE));
         assertTrue(has(granted, "bob", Item.CONFIGURE), "premise: the grant confers under the subclass");
 
         int status = post("admin", "revert", true);

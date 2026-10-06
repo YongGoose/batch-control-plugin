@@ -16,6 +16,7 @@ import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.store.BlockedAttemptAudit;
 import java.util.ArrayList;
 import java.util.List;
@@ -93,7 +94,7 @@ final class MoveGuard {
             return null;
         }
         String user = a.getName();
-        Grant restricting = create ? null : restrictingGrant(user, destName, item.getName());
+        Grant restricting = create ? null : restrictingGrant(user, destination, item.getName());
         List<String> missing = new ArrayList<>();
         if (!delete) {
             missing.add("Item/Delete on '" + item.getFullName() + "'");
@@ -113,10 +114,9 @@ final class MoveGuard {
         }
         // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
-        Grant deleteWindow = GrantService.get().findActiveGrant(user, item.getFullName(), GrantAction.DELETE,
-                item instanceof ItemGroup);
-        Grant createWindow = destName.isEmpty() ? null
-                : GrantService.get().findActiveCreateGrant(user, destName, item.getName());
+        // The windows naming the item and the destination folder respectively.
+        Grant deleteWindow = GrantService.get().findActiveDeleteGrant(user, item);
+        Grant createWindow = GrantService.get().findActiveCreateGrant(user, destination, item.getName());
         List<String> windows = new ArrayList<>();
         if (deleteWindow != null) {
             windows.add("Delete on '" + item.getFullName() + "' from grant " + deleteWindow.getId());
@@ -166,6 +166,28 @@ final class MoveGuard {
             if (!namingRefusal.endsWith(".")) {
                 message.append('.');
             }
+        }
+        // Missing parts no permission window can supply. Suggesting a window for one of them would
+        // lead to a request refused at submission (or to a window that still does not allow the
+        // move), so the message says an administrator must make the move and the refusal page
+        // offers no window at all.
+        List<String> noWindow = new ArrayList<>();
+        if (!delete && !GrantScope.deleteAppliesTo(item)) {
+            // D-71: a window's Delete applies only to a job, never to a folder, multibranch project
+            // or organization folder.
+            noWindow.add("Delete on '" + item.getFullName() + "', because a window's Delete applies only to a job");
+        }
+        if (!create && restricting == null && !createWindowPossible(destination)) {
+            // S-13: no window can name the Jenkins root; D-71: a window's Create applies only to a
+            // regular folder.
+            noWindow.add(destName.isEmpty()
+                    ? "Create in the Jenkins root, because a window names one job or folder and the Jenkins root is neither"
+                    : "Create in " + describe(destName) + ", because a window's Create applies only to a folder");
+        }
+        if (!noWindow.isEmpty()) {
+            message.append(" No permission window confers ").append(String.join(", nor ", noWindow))
+                    .append(", so an administrator must make this move.");
+            return new MoveRefusal(message.toString(), item.getFullName(), destName, false, false);
         }
         if (toRequest.isEmpty()) {
             message.append(" Ask an administrator");
@@ -312,16 +334,16 @@ final class MoveGuard {
     }
 
     /**
-     * The active CREATE grant of {@code user} on {@code groupFullName} whose name restriction alone
-     * refuses {@code name}, or {@code null} when no such grant exists (no grant at all, or one
-     * that admits the name).
+     * The active CREATE grant of {@code user} on {@code group} (named exactly) whose name
+     * restriction alone refuses {@code name}, or {@code null} when no such grant
+     * exists (no grant at all, or one that admits the name).
      */
     @CheckForNull
-    private static Grant restrictingGrant(String user, String groupFullName, String name) {
-        if (groupFullName.isEmpty()) {
+    private static Grant restrictingGrant(String user, ItemGroup<?> group, String name) {
+        if (!(group instanceof Item)) {
             return null; // no root-scope grant exists (S-13)
         }
-        List<Grant> grants = GrantService.get().findActiveGrants(user, groupFullName, GrantAction.CREATE);
+        List<Grant> grants = GrantService.get().findActiveGrants(user, (Item) group, GrantAction.CREATE);
         Grant first = null;
         for (Grant grant : grants) {
             if (grant.getCreateNamePattern() == null || grant.allowsCreateName(name)) {
@@ -332,6 +354,16 @@ final class MoveGuard {
             }
         }
         return first;
+    }
+
+    /**
+     * Whether a permission window can confer Item/Create in {@code destination}: never in the
+     * Jenkins root (no window names it, S-13), and elsewhere only in a group a window's CREATE
+     * applies to (a regular folder, D-71).
+     */
+    private static boolean createWindowPossible(ItemGroup<?> destination) {
+        return destination instanceof Item && !destination.getFullName().isEmpty()
+                && GrantScope.createAppliesTo((Item) destination);
     }
 
     private static String describe(String groupFullName) {

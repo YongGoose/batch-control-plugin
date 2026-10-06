@@ -188,7 +188,7 @@ public class EmailNotificationTest {
     public void t_13_16_grantRequestMailNamesTheScope() throws Exception {
         cfg.setEmailNotifications(true);
         cfg.save();
-        String id = submitGrantOk(j, "u1", "JOB", "batch-x", Arrays.asList("CONFIGURE"), 30,
+        String id = submitGrantOk(j, "u1", "batch-x", Arrays.asList("CONFIGURE"), 30,
                 "fix the cron expression", null, "a2");
 
         String body = plainTextBody(awaitSingleMail(A2_MAIL), A2_MAIL);

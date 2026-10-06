@@ -27,10 +27,10 @@ if (on('A-08')) {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/batch-control/grants/`);
   const rep = await page.locator('select').evaluateAll((ss) => ss.filter((s) => s.offsetParent !== null).map((s) => `${s.name}: wrapped=${!!s.closest('.jenkins-select')} h=${Math.round(s.getBoundingClientRect().height)}`));
-  const scope = page.locator('select[name="scopeType"]');
-  await scope.focus(); await page.keyboard.type('Fo'); const kb = await scope.inputValue();
+  // D-71: no scope type select; the Duration select is the styled select used for this widget/keyboard check
+  const scope = page.locator('select[name="durationMinutes"]');
+  await scope.focus(); await page.keyboard.type('3'); const kb = await scope.inputValue();
   await page.keyboard.press('ArrowUp'); const kb2 = await scope.inputValue();
-  await scope.selectOption('JOB');
   await page.locator('select[name="durationMinutes"]').selectOption({ index: 1 });
   const s = await shot(page, [scope, page.locator('select[name="durationMinutes"]')], 'A-08-light', { pad: 20 });
   const appr = await page.goto(`${BASE}/me/appearance/`);
@@ -43,20 +43,23 @@ if (on('A-08')) {
 if (on('A-09')) {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/batch-control/grants/`);
-  await page.selectOption('select[name="scopeType"]', 'FOLDER');
-  await page.fill('input[name="scopeFullName"]', 'team');
+  await page.waitForSelector('input[name="scopeFullName"]');
+  await page.fill('input[name="scopeFullName"]', 'team'); // D-71: one item (folder), no scope type
   const cb = (v) => page.locator(`input[name="actions"][value="${v}"]`);
+  const lbl = (v) => cb(v).locator('xpath=following-sibling::label[1]'); // #107 renames the Create id to cb<n>
   const st = async () => [await cb('CREATE').isChecked(), await cb('CONFIGURE').isChecked(), await cb('DELETE').isChecked()];
   const pre = await st();
-  for (const id of ['create', 'configure', 'delete']) { const l = page.locator(`#grant-action-${id} + label`); if (!(await page.locator(`#grant-action-${id}`).isChecked())) await l.click(); }
+  for (const v of ['CREATE', 'CONFIGURE', 'DELETE']) { if (!(await cb(v).isChecked())) await lbl(v).click(); }
   const allOn = await st();
   const item = page.locator('input[name="actions"]').first().locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]');
   const s1 = await shot(page, item, 'A-09-1-all-checked', { pad: 12 });
-  await page.locator('#grant-action-configure + label').click();
+  await lbl('DELETE').click(); // D-71: Delete does not apply to a folder; submit CREATE+CONFIGURE
   const cd = await st();
-  const s2 = await shot(page, item, 'A-09-2-create-delete', { pad: 12 });
+  const s2 = await shot(page, item, 'A-09-2-create-configure', { pad: 12 });
   const tops = await page.locator('input[name="actions"]').evaluateAll((es) => es.map((e) => Math.round(e.getBoundingClientRect().top)));
-  const tick = await page.locator('#grant-action-create + label').evaluate((l) => getComputedStyle(l, '::after').content + '|' + getComputedStyle(l, '::before').backgroundColor);
+  const tick = await lbl('CREATE').evaluate((l) => getComputedStyle(l, '::after').content + '|' + getComputedStyle(l, '::before').backgroundColor);
+  // #107: the name restriction field is revealed only after Create is ticked (done above)
+  await page.locator('input[name="createNamePattern"]').waitFor({ state: 'visible' }).catch(() => {});
   await page.fill('input[name="createNamePattern"]', 'app-31');
   await page.selectOption('select[name="durationMinutes"]', '15');
   const reason = `Audit A-09: create team/app-31 and delete a leftover (${Date.now()})`;
@@ -75,21 +78,22 @@ if (on('A-09')) {
   fs.writeFileSync('../out/audit-a09.url', url);
   ev(`A-09 pre ${pre} all ${allOn} after-uncheck ${cd} tops ${tops} tick ${tick}; landed ${landed}; row "${rowT}"; detail ${det.slice(0, 300)}`);
   const actions = (det.match(/Actions? ([A-Z, ]+?) (Duration|New job|Name|Status)/) || [])[1];
-  row('A-09', { roles: 'requester', V: 'n.a. (form visibility per role in B2/B7)', G: `${JSON.stringify(allOn) === '[true,true,true]' && JSON.stringify(cd) === '[true,false,true]' && /CREATE, DELETE/.test(det) && !/CONFIGURE/.test(actions || '') ? '✓' : '✗'} label clicks tick all (${allOn}), label click unticks Configure (${cd}), boxes ${tops[1] - tops[0]} px apart; submitted: list row "${rowT.slice(0, 120)}", detail actions "${actions}"`, R: 'n.a.', C: 'n.a.', E: [s1, s2, s3, s4].every(Boolean) ? '✓ A-09-1..4' : '✗', note: `after submit the user lands on ${landed.replace(BASE, '')} (the list, not the new request: U-03)` });
+  row('A-09', { roles: 'requester', V: 'n.a. (form visibility per role in B2/B7)', G: `${JSON.stringify(allOn) === '[true,true,true]' && JSON.stringify(cd) === '[true,true,false]' && /CREATE/.test(det) && /CONFIGURE/.test(det) && !/DELETE/.test(actions || '') ? '✓' : '✗'} label clicks tick all (${allOn}), label click unticks Configure (${cd}), boxes ${tops[1] - tops[0]} px apart; submitted: list row "${rowT.slice(0, 120)}", detail actions "${actions}"`, R: 'n.a.', C: 'n.a.', E: [s1, s2, s3, s4].every(Boolean) ? '✓ A-09-1..4' : '✗', note: `after submit the user lands on ${landed.replace(BASE, '')} (the list, not the new request: U-03)` });
   await context.close();
 }
 if (on('A-23')) {
   const { context, page } = await login('requester');
   await page.goto(`${BASE}/batch-control/grants/`);
-  const scope = page.locator('select[name="scopeType"]');
-  const opts = await scope.locator('option').allInnerTexts();
-  await scope.selectOption('FOLDER');
+  const noScopeType = await page.locator('select[name="scopeType"]').count(); // D-71: must be 0
+  const opts = [];
   await page.fill('input[name="scopeFullName"]', 'team-mb');
-  const help = scope.locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]').locator('.jenkins-help-button').first();
+  await page.locator('input[name="scopeFullName"]').blur(); await page.waitForTimeout(1000);
+  const kindBadge = (await page.locator('[data-batch-control-item-kind]').count()) ? await page.locator('[data-batch-control-item-kind]').first().getAttribute('data-batch-control-item-kind') : null;
+  const help = page.locator('input[name="scopeFullName"]').locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]').locator('.jenkins-help-button').first();
   await help.click().catch(() => {}); await page.waitForTimeout(1200);
   const ht = (await page.locator('.help-area .help').allInnerTexts()).join(' ').replace(/\s+/g, ' ');
-  const s1 = await shot(page, scope.locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-23-1-scope-folder-help', { pad: 10 });
-  if (!(await page.locator('#grant-action-configure').isChecked())) await page.locator('#grant-action-configure + label').click();
+  const s1 = await shot(page, page.locator('input[name="scopeFullName"]').locator('xpath=ancestor::*[contains(@class,"jenkins-form-item")][1]'), 'A-23-1-item-name-help', { pad: 10 });
+  if (!(await page.locator('input[name="actions"][value="CONFIGURE"]').isChecked())) await page.locator('input[name="actions"][value="CONFIGURE"]').locator('xpath=following-sibling::label[1]').click();
   const reason = `Audit A-23: adjust the multibranch source of team-mb (${Date.now()})`;
   await page.fill('textarea[name="reason"]', reason);
   await page.locator('input[name="approvers"][value="approver-2"] + label').click();
@@ -97,8 +101,8 @@ if (on('A-23')) {
   const rowEl = page.locator('#main-panel table tbody tr', { hasText: reason.slice(0, 30) }).first();
   const rowT = (await rowEl.innerText().catch(() => 'NOT LISTED')).replace(/\s+/g, ' ');
   const s2 = await shot(page, rowEl, 'A-23-2-folder-request-row', { pad: 10 });
-  ev(`A-23 options ${opts}; help "${ht.slice(0, 300)}"; submit ${r && r.status()} row "${rowT}"`);
-  row('A-23', { roles: 'requester', V: 'n.a.', G: `${/FOLDER|Folder/.test(opts.join()) && /team-mb/.test(rowT) && /PENDING/.test(rowT) ? '✓' : '✗'} Scope type offers ${opts.join('/')}; team-mb (multibranch) accepted as FOLDER scope: "${rowT.slice(0, 120)}"; help: "${ht.slice(0, 120)}"`, R: 'n.a.', C: 'n.a.', E: s1 && s2 ? '✓ A-23-1-scope-folder-help, A-23-2-folder-request-row' : '✗' });
+  ev(`A-23 no scope type selector=${noScopeType === 0}; team-mb kind=${kindBadge}; help "${ht.slice(0, 300)}"; submit ${r && r.status()} row "${rowT}"`);
+  row('A-23', { roles: 'requester', V: 'n.a.', G: `${noScopeType === 0 && /Multibranch|WorkflowMultiBranchProject/.test(kindBadge || '') && /team-mb/.test(rowT) && /PENDING/.test(rowT) ? '✓' : '✗'} D-71: no scope type selector; team-mb named directly, kind ${kindBadge}; CONFIGURE window on the multibranch accepted: "${rowT.slice(0, 120)}"; help: "${ht.slice(0, 120)}"`, R: 'n.a.', C: 'n.a.', E: s1 && s2 ? '✓ A-23-1-item-name-help, A-23-2-folder-request-row' : '✗' });
   // cancel it again as the requester (keeps the approver inbox clean); cancel UI is B7-24
   await context.close();
 }

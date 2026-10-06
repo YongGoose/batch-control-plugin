@@ -48,10 +48,15 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
    of this plugin.
 5. **Changes made outside Jenkins are not recorded.** Editing `config.xml` on
    disk and then using "Reload Configuration from Disk" produces no `CONFIGURE`
-   record, because Jenkins reports that as a load, not a change.
+   record, because Jenkins reports that as a load, not a change. The item's
+   configuration snapshot (item 17) is not updated either, so the next change
+   saved through Jenkins is compared with the configuration from before the
+   edit, and its diff, recorded under whoever saved, shows the edit as well.
 6. **Multibranch and organisation-folder children are not change-controlled.**
    Their configuration is generated, so only their runs and failures are
-   recorded.
+   recorded. A `CONFIGURE` window on the multibranch project or organization
+   folder itself can still create or delete them, through the indexing that
+   its save starts (item 11).
 7. **Blocking happens only at queue entry.** Nothing the plugin does interrupts
    a build that is already running: not flipping a global switch, not toggling a
    job property, not changing the job's configuration, and not a permission
@@ -95,9 +100,221 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     to intercept the job configuration "Save" itself, so if the applicable
     Batch Control strategy variant is not selected, change control has no
     effect at all, and only the monitor warning tells you.
-11. **Grants must name a concrete job or folder.** There is no instance-wide
-    grant, which means a grant can confer `Item/Create` only inside a named
-    folder, never at the Jenkins root.
+11. **A permission window covers exactly one job or folder.** A window names
+    one top-level item, of any kind, and grants no permission on any other item,
+    including the jobs and folders inside a folder it names (D-71). A part of a
+    job, such as a configuration of a multi-configuration project or a Maven
+    module, cannot be named; such a request is refused when it is submitted.
+    There is no instance-wide window and no window for a folder and everything
+    below it, so a change that spans several jobs needs a window for each of
+    them, each decided on its own. What each action reaches:
+
+    - `CONFIGURE`, with the permissions Jenkins implies from it (item 33),
+      covers the item's own configuration only; for a folder that is the
+      folder's settings. Those settings are not walled off from the items
+      inside the folder, though: what they define reaches every item below it,
+      such as a folder-level Pipeline library marked "Load implicitly", which
+      changes what every Pipeline in the folder runs, or folder properties and
+      environment that the jobs read. Reconfiguring a multibranch project or
+      an organization folder (its sources, filters or orphaned-item strategy)
+      makes the next indexing create its generated items, or delete them with
+      their build history, as SYSTEM (item 6). The page of a `CONFIGURE`
+      request on a folder, multibranch project or organization folder states
+      both points to the approver and the requester, together with the fact
+      that the window does not allow renaming it (item 33; security-34
+      S-34-02); the page of a `CONFIGURE` request on a job states that rename
+      rule alone (security-36 S-36-04).
+    - `CREATE` applies only to a regular folder and allows creating items
+      directly inside it: never at the Jenkins root, never inside a folder
+      nested in it, and never inside a multibranch project or organization
+      folder, whose children are generated (item 6). The Configure that the
+      holder keeps on items created that way (D-35c) is matched by the created
+      item's parent being the window's folder, not by its name, and does not
+      extend to renaming them (item 33). An item created through the window
+      keeps no authorization property from its creation payload (a submitted
+      `config.xml`, or the item it was copied from): the property is removed
+      and recorded as `GRANT_VIOLATION` (SPEC item 2). Copying a folder that
+      contains items stops part-way, because the window confers no
+      `Item/Create` inside the new folder: core leaves the new folder in place,
+      empty, with the source's configuration in its `config.xml`. When the
+      HTTP request that made the copy ends (for a copy made otherwise, at the
+      next periodic run after its thread has ended or ten minutes have
+      passed), Batch Control saves that folder as it is in memory, without
+      the copied authorization property, and records that as
+      `GRANT_VIOLATION` too. If such a removal cannot be saved, see item 35.
+    - `DELETE` applies only to a job, including multi-configuration and Maven
+      projects, whose sub-items are part of the job. Maven projects are
+      covered by the same rule, because a Maven project is a job, but no test
+      exercises them: the build has no `maven-plugin` test dependency (D-74).
+      No window confers
+      `Item/Delete` on a folder, a multibranch project or an organization
+      folder, because core deletes everything inside one as SYSTEM without
+      checking those items. While change control is on, the delete veto
+      therefore leaves deleting one of these to administrators, and moving one
+      (item 44) needs an administrator or standing `Item/Delete` on it.
+
+    A request for `CREATE` or `DELETE` on an item where it cannot apply is
+    refused when it is submitted. The request records the item's kind (for
+    example Pipeline, Freestyle project, Folder, Multibranch Pipeline or
+    Organization Folder), the request screens show that kind with its icon
+    (there is no scope type to choose), and approval is refused when no
+    item exists at that name any more or its kind has changed. The stored
+    scope is the item's canonical full name, whatever spelling was typed
+    (Jenkins resolves `team/` or `TEAM` to `team`, and the request records
+    `team`).
+
+    Once approved, a window applies to its item, not to a name (D-74). It
+    matches the item by its exact full name, and Jenkins' item events keep that
+    name current, as matrix-auth does for its item permissions. When an
+    administrator or a user with their own permissions renames or moves the
+    item, the window follows it to the new full name, and when a folder is
+    renamed or moved, the windows on the items inside it follow too. No window
+    can authorise the rename itself (item 33). A window that cannot follow its
+    item for certain ends instead of keeping a name its item no longer has:
+    when its grant file cannot be updated with the new name, when another item
+    already has the old name again by the time the rename or move is handled,
+    or when another item has just taken the name the window gives (renames
+    whose events interleave lead to the last two). It is revoked, by the
+    account whose rename or move was being handled, with the reason "it could
+    not follow its item" and a `GRANT_REVOKE` record, and its holder requests
+    it again (D-75, security-39 S-39-02).
+
+    Deleting the item ends its windows, and deleting a folder ends the windows
+    on everything inside it: each is revoked, by the account that deleted the
+    item, with the reason "its item was deleted" and a `GRANT_REVOKE` record.
+    Creating a new item at a window's name ends that window the same way,
+    since its own item must have disappeared without a deletion event, and so
+    does starting Jenkins when no item has exactly the window's name any more,
+    as if the item had been deleted while Jenkins was down. For a new item,
+    and for an item renamed or moved onto a window's name (above), names are
+    compared as Jenkins usually looks them up, without regard to letter case,
+    so a window under another spelling of that name ends too. A folder loaded
+    from disk (after a restart or a reload) looks its children up by exact
+    name, though, and can then hold two items whose names differ only in
+    letter case. A window whose own item is still there under exactly the
+    window's name is therefore about that item and stays, whatever arrives
+    next to it under another spelling (DEF-E17-01). The same exception keeps
+    created-item records (D-35c) and the changed-under-grant state of item 35
+    on items that still exist.
+
+    A window approved while its item is being deleted, after the approval
+    checked the item and before the window was registered, ends as soon as it
+    is registered, with the same reason and a `GRANT_REVOKE` record, revoked
+    by the approving account (D-71c (3)). The request itself stays
+    `APPROVED`. The requester is sent the approval notification as usual,
+    with one more line before the window's kind, actions and duration:
+    `Window: ended at once — its item was deleted`. The request's page shows
+    the window's state as `Revoked (its item was deleted) by <approver>`. A
+    window therefore either applies to its item, under whatever name the item
+    has now, or has ended; renaming, moving, swapping or re-creating items, or
+    combining several windows, cannot make a window reach an item nobody
+    approved.
+
+    When a window has followed its item, the item's current full name is
+    shown only to a viewer who may read the item where it is now: an
+    administrator, or a user who holds `Item/Read` on it and on every folder
+    above it (`Item/Discover` is not enough). This applies to the grant
+    request's page, the Pending, Active and Ended lists of the Grants screen
+    and the **Request again** form. Anyone else, including the holder and the
+    approvers when they cannot read the item there, sees the name that was
+    approved followed by the fixed note "(moved; its new location is not
+    visible to you)", with the kind recorded when the request was made, and
+    the **Request again** form starts with an empty name field. A window
+    whose request is no longer stored has no approved name, so such a viewer
+    sees "(its name is not visible to you)" instead of a name. The expiry
+    notice (`GRANT_EXPIRING`) applies the same rule to its recipient, the
+    window's holder, checked as that user: when the holder may not read the
+    item, the notice names the approved name and adds the fixed sentence "The
+    window's item was moved; its new location is not visible to you." When
+    the window's change request is no longer stored, the approved name is
+    unknown: the notice names the current name if the holder may read the
+    item, and otherwise it is not sent, with a warning in the controller log.
+    When the change request's file is there but cannot be read, no expiry
+    notice is sent for that window, and it is not tried again. Neither case
+    holds up the notices of the other windows, and neither does a window
+    whose grant file cannot be read or written when its notice falls due:
+    that window is tried again on the next run of the periodic work, a
+    minute later. Every other notice names the item by the
+    name in the request, which is the approved name and never follows the
+    item (SPEC item 8, D-75 (1), security-39 S-39-04). The audit history is
+    not filtered this way: a `ViewHistory` holder sees the new name in the
+    `RENAME` or `MOVE` record and in later records of the window, as for any
+    other item (item 19).
+
+    Ending a window is built to survive a failed write and a restart. The
+    window is marked ended in memory first, so it stops applying at once; then
+    a `GRANT_REVOKE` record is appended under `batch-control/changes/` and the
+    window's grant file under `batch-control/grants/` is rewritten. A grant
+    file that cannot be written is retried before every later grant write, on
+    every item event and by the periodic work. A grant file that cannot be
+    read at all (a permission or I/O error, or damaged content) is left out
+    with a warning naming it: its window confers nothing, everyone else's
+    permission checks keep working, and it stays left out until the file can
+    be read again and Jenkins restarts. At startup, a grant file that
+    still says the window is open but has a `GRANT_REVOKE` record is ended
+    again from that record. To find those records, the change log is read in
+    full back to the time the oldest still-open window was granted, which is
+    never longer ago than the `maxGrantMinutes` in force when that window was
+    requested (default 240): the read is bounded by that time, never by a
+    number of records, so no amount of activity after a window's end can push
+    its record out of reach. If the change log cannot be read back that far
+    (a read error, or a read that has to stop early), no open window's end can
+    be ruled out, so every window still open ends: it is revoked by `SYSTEM`
+    with the reason "its state could not be confirmed at startup" and a
+    `GRANT_REVOKE` record, and its holder can request it again (D-75,
+    security-39 S-39-03). A line in that part of the change log that cannot
+    be read counts the same way: a line torn by a crash or a failed write, a
+    line damaged on disk, or one too long to read may be a window's end, so
+    the read is incomplete and every window still open ends (D-75 (2)). A
+    complete record of another type, including one this version does not
+    know, cannot be a window's end and does not count. Elsewhere, on the
+    screens and in the CSV exports, such a line is skipped with a warning.
+
+    Such a line is read back once. The `GRANT_REVOKE` records written by the
+    start that ended the windows mark the point before which no line can end
+    a window approved later, and every later start stops reading there, so
+    the same line does not end the windows approved after that start (unless
+    those records could not be written either). A record appended after a
+    torn line does not merge into it: every append to a change, run or
+    incident-index file first ends a last line that was left without a line
+    end, so the new record stays readable and the torn line stays a damaged
+    line of its own. Three gaps remain:
+
+    - If both directories are unwritable, nothing durable records the
+      window's end: the `GRANT_REVOKE` record could not be appended under
+      `batch-control/changes/` when the window ended (that failure is logged,
+      not retried), and the grant file under `batch-control/grants/` stays
+      unwritable until Jenkins restarts. If, in addition, an item is created
+      at the window's name, or renamed or moved there, before that restart,
+      the window applies to that item after the restart. Either write
+      succeeding is enough for the end to survive the restart.
+    - A created-item record (D-35c: the `Item/Read` and `Item/Configure` that
+      a `CREATE` window's holder keeps on an item they created through it)
+      follows its item in memory at once when the item is renamed or moved,
+      and is dropped when the item is deleted or another item takes its name;
+      a failed write of that change is retried like an end. Unlike an end, the
+      change leaves no record under `batch-control/changes/`, so a restart
+      while `batch-control/grants/` still refuses writes loses it, and the
+      record names the item's old name again (the item it followed loses those
+      permissions). At startup a record whose name no item has is dropped; if
+      an item does have that name by then, created, renamed or moved there
+      before the restart, and lies directly inside the window's folder, the
+      holder has `Item/Read` and `Item/Configure` on it until the window ends.
+      This is the same class of gap as the one above, but it needs only the
+      grants directory to be unwritable. The changed-under-grant state of
+      item 35 is kept in the same file and the same way (D-75 (2)): a rename,
+      move, deletion, new mark or review changes it in memory at once and its
+      write is retried, but a restart while `batch-control/grants/` still
+      refuses writes loses the change, and the file's older state applies
+      again: an item renamed or moved since loses the state, another item at
+      its old name has it instead, a mark made since is lost, and an item
+      marked as reviewed since has it again.
+    - An item replaced on disk outside Jenkins, followed by a reload, fires no
+      item event, so a window naming it applies to the replacement. The
+      precondition is file-system access to `$JENKINS_HOME`, which is outside
+      the plugin's reach anyway (item 5); the reload itself does not need
+      `Overall/Administer`, because reloading a single item from disk needs
+      only `Item/Configure` on it.
 12. **The "standing change permissions" monitor is best-effort.** Its verdict is
     cached for up to five minutes and it deliberately ignores administrators, so
     it is a warning, never an enforcement point.
@@ -143,6 +360,19 @@ from scripts.
     yet, and whoever may create items creates `X` with the calling pipeline in its
     exempt list; the pipeline's next run would then execute their job with no
     approval and no window.
+
+    **The lock holds even when it cannot be saved.** It replaces every Batch
+    Control job property the job carries (so a payload with two cannot leave
+    an unlocked one in effect) in one change, written by one save, and
+    Jenkins runs the job from its configuration in memory, so the lock is in
+    effect at once whatever happens to that write. A save that fails, on an
+    unwritable job directory for example, is logged as SEVERE and retried
+    every minute by the periodic work; the retry that succeeds is recorded as
+    a `CONFIGURE` by SYSTEM. The list of jobs waiting for that retry is kept
+    in memory only: if Jenkins restarts before a retry succeeds, the job is
+    loaded from its `config.xml` as it was created, without the lock. It is
+    still not activated (item 39). The same holds for the lock a job moved by
+    a non-administrator gets (item 44).
 
     **A refused timer, upstream or Replay submission is recorded and shown, not
     silent (#21).** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
@@ -209,16 +439,67 @@ from scripts.
     is stored and displayed verbatim** to anyone holding `ViewHistory`. Generic
     secret-pattern detection was deliberately rejected: it gives false confidence
     and still misses things.
-16. **A job with secret parameters cannot be rerun faithfully.** Request
-    parameters are masked before they are stored, so no plaintext secret is ever
-    written, but an approved run, and a rerun prefilled from an incident,
-    therefore submit the mask rather than the original value. Approval-based
-    execution of jobs with password parameters is not usable today.
+16. **An incident rerun can reuse only the parameter values its build still
+    holds.** A run request keeps the submitted parameter values with their
+    types (D-72), so the approved run receives exactly what was submitted: the
+    original value of a password or other sensitive parameter, and file
+    parameters, both core `file` and the file-parameters plugin's `stashedFile`
+    and `base64File`. Secrets are stored only in Jenkins' encrypted form, the
+    protection core gives them in a build's `build.xml`, and every screen, CSV,
+    history record, run record and incident shows them as `********`. A file
+    shows only as `[file] <original file name>`, never its content, its Base64
+    or a server path. The typed values are kept in a values file of their own,
+    `requests/run/<id>.values.xml`, only until the approved run starts, the
+    request ends, or the queue item of the approved run is cancelled; then
+    that file is deleted and the masked values remain as the record (D-72b,
+    D-74, item 32). An incident rerun reuses the failed
+    run's own values the same way, original secrets included: a core file is
+    recreated from the copy the build keeps, and a `base64File` value carries
+    its content. It takes values only from the incident's own build: the
+    incident records the failed build's timestamp, and a build counts as that
+    run only while it still has that timestamp. A build that is not that run,
+    such as the build with the same number in a job that was deleted and
+    re-created under the same name, is treated like a deleted build, and its
+    values are not used. An incident recorded before the timestamp was kept
+    cannot confirm its build, so its rerun always opens the Request Run form
+    described below (D-72b). A failed run that holds the same parameter name
+    more than once is not rerun at all: its values are never carried, and the
+    message points to the job's Request Run form. Some values cannot be
+    recovered from the build: a `stashedFile`, whose stash the build clears
+    when it completes, and a core file whose copy is gone. A rerun that cannot
+    recover all of its values creates no request. Instead it opens the job's
+    Request Run form with the build's recoverable non-sensitive values filled
+    in. Nothing can be recovered from a deleted build, so for it the form is
+    filled in with the non-sensitive values recorded on the incident instead;
+    secrets and files are recorded only masked, so they are never filled in.
+    These values travel in the URL as described in item 48, and the files and
+    secrets have to be provided again. A request submitted from that form is
+    linked to the incident only after the server has validated the incident
+    reference again (the incident exists, belongs to that job, and the
+    submitter holds `ViewHistory`), so a successful run still records
+    `resolvedByRunId` (D-72a).
 17. **Stored configuration snapshots are not masked.** The diff shown in a change
     record is masked, but `batch-control/snapshots/<job>.xml` keeps the raw
     `config.xml`. Secrets inside it are Jenkins-encrypted exactly as they are in
     `$JENKINS_HOME/jobs/*/config.xml`: the same protection, on the same disk, and
-    no more.
+    no more. While recording is active (either switch on), Batch Control keeps
+    such a snapshot of every item, the baseline that the item's next
+    `CONFIGURE` diff is compared with. It is written when the item is
+    created, renamed or moved and on every recorded save; at startup the
+    items that have none are seeded in the background, and when recording is
+    turned on every item's snapshot is refreshed to its current configuration
+    (item 53). Nothing keeps the snapshots current while both switches are
+    off. The snapshot of an item deleted, renamed or moved while recording
+    was off therefore stays on disk until an item has that name again, as
+    does one that could not be removed at the time. A newly created item is
+    not compared with it: a creation while recording is active writes the
+    new item's own snapshot, and an item created while recording was off
+    gets a refreshed one when recording is turned on (except as item 54
+    describes). An item that reappears under that name without a creation
+    event, though, such as an item directory put back on disk and loaded by
+    "Reload Configuration from Disk" or a restart, is compared with the old
+    snapshot, so its first diff is taken against the configuration of the
+    item that had the name before.
 18. **A change that touched only secret values carries an explanatory note
     instead of a diff**, because both sides are masked identically and a real
     diff would be empty.
@@ -280,6 +561,105 @@ from scripts.
     `RENAME` for the folder itself. This is accurate, since every child's full
     name did change, but it means one rename can generate a large number of
     records.
+
+<!-- Items 52 to 55 were added after 27-51 and sit here by topic. The comment ends the list so that they render as 52 to 55, not 27 to 30. -->
+
+52. **A `DELETE` record of an item deleted together with its folder names the
+    user who deleted the folder** only when core deletes the item on the same
+    thread inside `AbstractItem.delete()`; an item removed in any other way, on
+    another thread or outside `AbstractItem.delete()`, is recorded under the
+    authentication current at that moment, which is often SYSTEM.
+53. **Some `CONFIGURE` records have no diff.** The diff compares the saved
+    `config.xml` with the item's snapshot under `batch-control/snapshots/`
+    (item 17). In three situations there is no usable snapshot to compare
+    with. The change is still recorded, with the window it was made under if
+    any, but without a diff: the record's detail carries a note instead
+    (compare item 18), and the same save writes the new configuration as the
+    item's snapshot, so once that succeeds the next change has a diff again.
+
+    - **No snapshot of the item exists.** The note is "No diff: no earlier
+      configuration of this item was recorded." This is the case for an
+      item saved before the seeding at startup, or the refresh when
+      recording is turned on, has reached it, and for an item whose snapshot
+      could not be written (when it was created, renamed or moved, or by
+      that seeding). With nothing to compare with, such a save is recorded
+      even if it changed nothing, and while the snapshots directory refuses
+      writes every save of the item is recorded this way.
+    - **Recording has just been turned on and the refresh has not reached the
+      item yet.** The note is "No diff: change recording had just been turned
+      on, and the configuration of this item before this change was not
+      recorded yet." When a switch turns recording on (no switch was on
+      before), every item's snapshot is refreshed to its current
+      configuration, so that changes made while recording was off are never
+      shown as the change of whoever saves the item first. Up to 1,000 items
+      are refreshed before the switch change returns, and the rest in the
+      background. Until the refresh has reached an item, a save whose
+      configuration differs from its old snapshot is recorded with this
+      note, even if that save itself changed nothing, and a save whose
+      configuration matches the old snapshot writes no record, as a save that
+      changes nothing does: a save that only undoes a change made while
+      recording was off is not recorded. An item whose refreshed
+      snapshot could not be written stays in this state until one of its
+      saves writes one. A restart before the refresh has finished leaves the
+      items it had not reached with their old snapshots (item 54).
+    - **The snapshot exists but cannot be read** (a permission or I/O error),
+      or something other than a file is in its place. The note is "No diff:
+      the previous configuration of this item could not be read from its
+      snapshot.", and a warning is logged. While the snapshot stays unusable
+      (something other than a file stays in its place, or the snapshots
+      directory refuses writes), every save of the item is recorded this way,
+      including saves that change nothing, which otherwise write no record.
+
+    In the first two situations, two kinds of save write only the snapshot
+    and no record: a save that is part of creating the item (item 55), and a
+    multibranch project or organization folder saving itself during its own
+    indexing. A snapshot that cannot be replaced after a change does not stop
+    the record either: it is written all the same, and the item's next change
+    is compared with the older snapshot, so its diff also shows the change
+    before it. One narrow race remains: when the seeding or the refresh
+    reaches an item in the instant after core has written a save of it to
+    disk and before Batch Control's listeners are told of that save, the
+    saved configuration becomes the snapshot, the save then compares equal
+    to it, and no record is written for it.
+54. **Recording turned on by editing the saved configuration while Jenkins
+    is stopped is not detected.** Every item's snapshot is refreshed (item
+    53) when a switch turns recording on while Jenkins runs, from either
+    configuration page, the script console or a JCasC reload, and when JCasC
+    turns recording on as Jenkins starts, that is, when the saved
+    configuration had both switches off. When the saved configuration itself
+    (`$JENKINS_HOME/io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.xml`)
+    already has a switch on as Jenkins starts, because it was edited or
+    restored from a backup while Jenkins was stopped, Batch Control cannot
+    tell that from recording that stayed on, and only the missing snapshots
+    are seeded. The snapshots left from the last time recording was on are
+    kept, so the first diff of an item changed while recording was off
+    includes those changes, under whoever saves the item first, and an item
+    created while recording was off at the name of an item deleted while
+    recording was off is compared with the deleted item's configuration
+    (item 17). The same holds for the items that the background part of a
+    switch-on refresh had not reached when Jenkins stopped: the refresh is
+    held in memory only, and the next start seeds only the missing
+    snapshots.
+55. **A save made while core builds a new item counts as part of the
+    creation, whichever item it saves.** Creating an item writes one
+    `CREATE` record and no `CONFIGURE` record for the saves that make up the
+    creation (D-76 (2)): the saves of the new item before core has added it
+    to its parent, and every save made inside core's item-building methods
+    (`createProject`, `createProjectFromXML` and `copy`), which also run the
+    new item's own creation code, such as `onCreatedFromScratch`, where an
+    organization folder created from a `config.xml` saves itself several
+    times. Batch Control recognises these saves by those methods being on
+    the saving thread's call stack, not by the item saved, so a plugin that
+    changes another, existing item from code running there leaves that
+    change unrecorded: it writes no `CONFIGURE` record, and the item's
+    snapshot is updated to it, so it does not appear in that item's next
+    diff either. The creation announcement is treated differently: the item
+    listeners told of a new or copied item may save it, and the items inside
+    it, as part of the creation, but a change they make to any other item is
+    recorded as usual.
+
+<!-- The comment ends the list so that 27 to 32 render with their own numbers. -->
+
 27. **The expired-window denial page is Jenkins' own.** Saving a configuration
     after a `CONFIGURE` window has expired gives the stock Jenkins 403 page. The
     plugin deliberately does not intercept it: Jenkins does not offer that as an
@@ -300,9 +680,14 @@ from scripts.
     is counted in neither the approved nor the rejected column.
 29. **With change control off the Grants screen is closed**, its links are gone from
     the Batch Control landing page, and requesting or approving a window is refused
-    with a message that says why, plus a `GRANT_REQUEST_BLOCKED` record. The URL
+    with a message that says why. The refusal is recorded as `GRANT_REQUEST_BLOCKED`
+    while run control is on; with both controls off Batch Control writes no records
+    at all. An approval sent from a request's page that was opened before the switch
+    went off is refused on that page, which then offers none of its forms. The URL
     itself still answers, deliberately, so that an old bookmark reaches that
-    explanation rather than a dead link. Nothing about the audit trail is gated this
+    explanation rather than a dead link. Anything else sent below the closed screen,
+    rejecting or cancelling a pending request for example, gets the same
+    explanation and writes no record. Nothing about the audit trail is gated this
     way: the history, dashboard, incident and change-record screens show the same
     content whichever way the switch is set. The Role Strategy notice likewise
     appears with both switches off.
@@ -310,20 +695,172 @@ from scripts.
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
     means a rename during a busy approval queue silently costs the requesters
-    their pending requests, and they have to file them again.
-31. **No rate limiting.** There is a size cap on a reason (4,000 characters) and
-    on each string parameter value (10,000 characters), but no per-user request
-    rate limit and no cap on concurrent pending requests; bulk-created requests
-    accumulate until the pending timeout clears them. Likewise nothing limits the
-    rate of configuration changes, so a burst of saves inside a window produces a
-    burst of diff and snapshot writes against a single store lock.
+    their pending requests, and they have to file them again. A request whose
+    file cannot be read at that moment is handled as item 32 describes.
+31. **No rate limiting, and the instance-wide upload limit is Jenkins' own.**
+    There is a size cap on a reason (4,000 characters) and on every textual
+    value a run request stores (10,000 characters per parameter), the plaintext
+    of a password or other secret included, although it is displayed as
+    `********` (D-72b). The content of a file, the Base64 of a `base64File`
+    value included, is bounded only by the body cap below. A run request names
+    each parameter at most once: a submission that repeats a name is refused
+    with HTTP 400 and an error below that parameter on the re-displayed form,
+    before anything is stored. A character that XML 1.0 cannot store, such as
+    a control character other than tab, line feed and carriage return, is
+    refused the same way in a parameter name or value, in the reason, and in
+    an approve or reject comment. A save that fails anyway stores nothing,
+    leaves no temporary file behind and is reported as an error above the form,
+    not as an error page; a refused approval or rejection leaves the request
+    pending (D-72b). The body of a run
+    request submission is capped at 100 MB, configurable in bytes with the
+    system property `io.jenkins.plugins.batchcontrol.maxRequestBodyBytes`,
+    because requesting a run does not require `Item/Build` (D-38a). The cap is
+    checked in two stages (D-74). The first is only an early filter: the
+    declared `Content-Length`, judged from the headers alone before Batch
+    Control reads the form; a body that declares no length (a chunked one, for
+    example) passes it. The second, the one that counts, is judged on what the
+    request would keep, before anything is stored: each value, with its name,
+    counts as the larger of its own size and the size of the uploaded parts it
+    was created from. A core `file` value therefore counts as its file
+    content, a `base64File` value as its stored Base64 text, a `stashedFile`
+    value as the uploaded part it came from, and every other value as its
+    stored text. A value or uploaded part whose size cannot be determined is
+    refused (fail closed). The reason has its own length limit above and is
+    not counted. A submission over the cap at either stage is answered with
+    HTTP 413, and Batch
+    Control creates nothing and keeps nothing in JENKINS_HOME. It does not
+    prevent the upload itself: Jenkins parses a multipart body posted under a
+    job URL while it dispatches the URL, before any plugin code runs (D-72a),
+    into a new `jenkins-stapler-uploads*` directory under `java.io.tmpdir`.
+    Jenkins only marks that directory for deletion when the JVM exits, and
+    Java does not delete a directory that still holds files, so the uploaded
+    parts written there stay, after Jenkins has stopped as well, until the
+    operating system or an administrator removes them. A core `file`
+    parameter leaves its upload there for every accepted submission too, on
+    Jenkins' own build form as on Batch Control's, because core copies the
+    upload and does not delete Stapler's part (the file-parameters plugin's
+    values delete theirs). If `java.io.tmpdir` lies inside JENKINS_HOME, these
+    leftovers are in JENKINS_HOME as well. The instance-wide limit on such
+    uploads is Stapler's
+    `org.kohsuke.stapler.RequestImpl.FILEUPLOAD_MAX_SIZE` system property, the
+    total size in bytes of one `multipart/form-data` request, which is
+    unlimited (`-1`) by default. It applies to every multipart form Stapler
+    parses, not only Batch Control's, so leave room for the largest file
+    parameter your jobs legitimately take. Beyond these caps there is no
+    per-user request rate limit, no cap on concurrent pending requests and no
+    limit on the rate of configuration changes; bulk-created requests
+    accumulate until the pending timeout clears them.
 32. **Performance at volume is unmeasured.** The history, dashboard and
     change-record screens read a whole month bucket into memory on every page
-    load, the incident list opens one file per incident, and run and grant
-    request files are never pruned and are all scanned every minute by the
-    expiry job. SPEC item 6's target of 5,000 runs a day has therefore not been
-    measured, and it is not expected to hold at that scale until the store gains
-    an index.
+    load, the incident list opens one file per incident, and the Run Requests
+    and Grants screens read every run and grant request file on every page
+    load (the expiry job, every minute, loads only the open ones). A run
+    request, grant request, activation request or grant file that cannot be
+    read (a permission or I/O error, or damaged content) is skipped with a
+    warning naming it, instead of breaking the whole listing; a skipped grant
+    confers nothing (item 11). The expiry job, the pending counts on the
+    tabs, the activation approval inbox, startup recovery and the
+    invalidation of open requests work instead from a list of the open run,
+    change and activation requests built when Jenkins starts. An open
+    request whose file stops being readable while Jenkins runs is skipped
+    there too, with a warning naming it, repeated at most once an hour while
+    it stays unreadable: it is not counted, expired, approved or submitted,
+    and the other open requests are handled as usual. It is picked up again
+    as soon as its file can be read; a pending request past its timeout
+    still cannot be approved then, and an approved run past its timeout is
+    not submitted, because each decision and each submission compares the
+    clock itself. An invalidation that such a request missed (its job
+    renamed or moved, D-21; for an activation request also its job deleted,
+    or another request on the job approved, SPEC item 6a), or whose end
+    could not be written, is kept in memory: the request cannot be approved,
+    its approved run waiting in the queue on a job that is renamed or moved
+    is cancelled at once, and within a minute of its file becoming readable
+    and writable it ends `INVALIDATED` if the invalidation concerns its job.
+    A restart forgets a missed invalidation: a request that can be read at
+    the next start is an ordinary open request again, under its job's old
+    full name, so it can be approved, and an approved run recovered, against
+    whatever item has that name by then (item 30). A request file that
+    cannot be read when Jenkins starts never enters the list in that
+    session, even once it can be read again: until the next restart it is
+    not counted, expired, recovered or invalidated, so if its job is renamed
+    or moved meanwhile, an approval of it acts on whatever item then has the
+    old name. The request screens, which read every file, show it once it
+    can be read, and a decision made on its page puts it back on the list. A
+    request whose file can be read but not written when it falls due for
+    expiry or for its `EXPIRING` notice is logged, tried again on the next
+    run and does not hold up the others. Request
+    files are kept until retention deletes the closed requests last active
+    before the first kept month (`retentionMonths`, 24 by default), so up to
+    that age every one of them is read. SPEC item 6's target of 5,000 runs a
+    day has therefore not been measured, and it is not expected to hold at
+    that scale until the store gains an index. File parameters add to this.
+    The file-parameters plugin's `base64File` keeps the file's content,
+    Base64-encoded, inside the parameter value, so a run request with such a
+    parameter carries the whole file in its values file,
+    `requests/run/<id>.values.xml`, about a third larger than the file. A
+    request's typed values live only in that file, next to the request file
+    `requests/run/<id>.xml` (D-74). Batch Control does not copy the content
+    elsewhere, and it keeps a request's typed values only as long as they are
+    needed: the values file is deleted when the approved run starts, when the
+    request ends (rejected, cancelled, expired or invalidated), or when the
+    queue item of the approved run is cancelled, and the masked display values
+    in `<id>.xml` stay as the record (D-72b). The screens, badges, listings and
+    periodic jobs read only `<id>.xml` and never the values file; only
+    approving, submitting, recovering after a restart and disposing of a
+    request read it. Batch Control's
+    storage therefore grows with every open request that carries such a file,
+    not with every such upload ever made. Core `file` and `stashedFile`
+    content stays in its own directory under JENKINS_HOME
+    (`fileParameterValueFiles/`, `stashedFileParameterValueFiles/`) until a
+    build takes it over. Jenkins core cleans up such a file only for a value
+    that reached the queue (when its queue item is cancelled, for example)
+    and never sweeps `$JENKINS_HOME/fileParameterValueFiles/` itself, so the
+    file of a value that never reaches the queue stays there unless someone
+    disposes of it. Batch Control disposes of the files of a run request that
+    ends without a run (rejected, cancelled, expired, invalidated, or approved
+    but impossible to queue) and of a person's own direct build that run
+    control refuses, through any of core's channels: the build form, the
+    parameters dialog, `build` and `buildWithParameters` over HTTP, the CLI,
+    and a build token. That disposal covers exactly two parameter types: core
+    `file` parameters, including another plugin's type built on core's file
+    parameter value (a subclass), and the file-parameters plugin's
+    `stashedFile`. Another plugin's parameter type that keeps its own
+    temporary file is not covered: when a request carrying such a value ends
+    without a run, Batch Control leaves that file alone, and it stays until an
+    administrator removes it. A `base64File` value keeps no separate file; its
+    content is in the request's values file, which is deleted as described
+    above (D-74). The file-parameters plugin is an optional dependency: Batch
+    Control works without it, and then core `file` is the only file parameter
+    type there is. When the queue item of an approved run is cancelled (by
+    a user, by clearing the queue, or because its job was deleted), the
+    cancelled item's own parameter values delete their files, as for any
+    cancelled queue item, and Batch Control deletes the request's values file
+    and never submits that run again, not when Jenkins restarts
+    either. If the store refuses to write the cancellation to the request
+    file at that moment, the cancellation is kept in memory, so the run is
+    still not submitted again in that session, and it is written, together
+    with the deletion of the values file, as soon as the store accepts writes
+    again: the periodic work tries every minute. If Jenkins restarts before
+    that write succeeds, the cancellation is lost, and startup recovery
+    submits the run again, as for an approved run whose queue item was never
+    cancelled. This is the storage-failure class of gap described under
+    item 11. The request stays `APPROVED` until the approved-run timeout ends
+    it as `EXPIRED`, with the reason `Expired: approved but not started within
+    <N> minutes; its queued run was cancelled.` When another plugin's queue
+    handler refuses an approved run after Batch Control's gate has accepted
+    it, nothing is queued: Batch Control releases the run's claim, so the
+    request stays `APPROVED` and is submitted again when Jenkins restarts, and
+    if it never runs, its files are disposed of when the approved-run timeout
+    expires it or it is invalidated (D-72b). Batch
+    Control leaves two kinds of refused submission alone: a refused re-run that
+    uploads a new file (for example from the rebuild plugin's parameters
+    page), and a refused unattended submission that creates file values (for
+    example one from parameterized-trigger). Batch Control cannot tell the
+    file values of such a submission apart from values it shares with another
+    build, whose files must not be deleted, so it does not touch them, and
+    their files stay in `fileParameterValueFiles/` or
+    `stashedFileParameterValueFiles/` until an administrator removes them
+    (D-72).
 
 ## Before you switch either control on
 
@@ -347,15 +884,45 @@ code does on purpose.
     a run-gate bypass there, but on a job without run control a window holder can
     replay a build with a modified Pipeline script.
 
-    A `CONFIGURE` window also lets its holder **rename** the job, to any free
-    name in its folder, because Jenkins allows a rename to anyone who may
-    configure the job. The rename is recorded as `RENAME` with the window it was
-    made under, and like any rename it ends the job's pending requests (item 30).
-    An approver who wants to rule out renames has no narrower window to grant.
-    A `CREATE` window with a name restriction is different: renaming a job its
-    holder created through that window, or a rename that relies on the window's
-    Create permission on the folder, is allowed only to a name that matches the
-    restriction, and any other name is refused and recorded as a violation.
+    No window allows **renaming** an item (D-71c, security-36 S-36-01,
+    S-36-02; this replaces the folder-only refusal of D-71a). While change
+    control is on, renaming a job or a folder of any kind (including a
+    multibranch project or an organization folder) is refused whenever a
+    window would be what allows it: neither a `CONFIGURE` window on the item,
+    nor a `DELETE` window on it combined with a `CREATE` window on its parent
+    (core's other rename path), nor the Configure a `CREATE` window's holder
+    keeps on the items created through it (D-35c) is enough. Renaming needs
+    an administrator, or the user's own (standing) permissions under core's
+    rule: `Item/Configure` on the item, or `Item/Delete` on it plus
+    `Item/Create` in its parent. The reason is that permissions matched by
+    full name are re-pointed by a rename. Windows follow their item to its new
+    name (item 11), but under role-strategy the holder's own item roles match
+    full names by pattern, so renaming a job into one of their patterns, or a
+    folder (which renames everything inside it), would give the holder that
+    role on it long after the window ended. Refusing the rename closes that
+    escalation, and it also means a window holder cannot re-point windows by
+    swapping names. The cost: a user who renamed jobs through a
+    `CONFIGURE` window now needs an administrator to do it, or their own
+    standing permissions.
+
+    Jenkins' sidebar still shows **Rename** to a window holder, because the
+    window does confer `Item/Configure` for everything else; the refusal
+    appears on the rename page itself, as a message under the new-name field
+    while typing and as a plain refusal page when the rename is submitted, and
+    nothing is renamed. Every core rename endpoint (`confirmRename`,
+    `doRename`, `checkNewName`) is checked on the decoded request path, so an
+    encoded URL form does not get past the refusal. A refused rename, by any
+    URL form, is recorded as `GRANT_VIOLATION`; the same refused rename by the
+    same user (same item and new name) is recorded once per minute, and repeats
+    within that minute go only to the Jenkins log (D-73). Renaming an item is
+    therefore, like deleting or moving a folder (items 11 and 44), not
+    something a permission window can authorise. When a rename does happen, it
+    is recorded as `RENAME`, ends the item's pending requests (item 30), and
+    the windows on the item follow it to the new name, or end where they
+    cannot follow it for certain (item 11). A folder rename also changes the
+    full name of everything inside the folder, ends the pending run requests
+    of the jobs inside, produces one `MOVE` record per descendant job (item
+    26), and the windows on anything inside it follow to the new full names.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming
@@ -380,7 +947,7 @@ code does on purpose.
     *items*, not accounts. While change control is on, these items are
     guarded:
 
-    - every item in the scope of an active grant;
+    - every item an active grant names;
     - every item whose configuration was changed under a grant (saved or
       created by a user whose permission came only from a grant), every item
       a non-administrator created inside a guarded folder, and every
@@ -395,12 +962,18 @@ code does on purpose.
     The guard on a changed item ends only through **Mark as reviewed**, a
     deliberate action offered to administrators next to each item on the
     Manage Jenkins monitor, and to users who hold `Item/Configure` natively
-    (not from a grant) on the item's Batch Control page. That page exists
-    only for holders of `BatchControl/Request`, so a native Configure holder
-    needs `BatchControl/Request` as well to use the button there; otherwise
-    they ask an administrator, who uses the monitor. It writes a
-    `GUARD_REVIEWED` change record naming the reviewer. An ordinary save,
-    even an administrator's, is not a review.
+    (not from a grant) on a job's Batch Control page. That page exists only
+    for jobs and only for holders of `BatchControl/Request`, so a native
+    Configure holder needs `BatchControl/Request` as well to use the button
+    there; otherwise they ask an administrator, who uses the monitor. A
+    folder, a multibranch project or an organization folder has no Batch
+    Control page, so a changed one can be marked as reviewed only by an
+    administrator on the monitor: a user who holds `Item/Configure` on it
+    natively cannot review it (T-GAP-325). A review writes a
+    `GUARD_REVIEWED` change record naming the reviewer. The review takes
+    effect at once; if the grant file that holds the state cannot be written
+    at that moment, the write is retried (item 11). An ordinary save, even an
+    administrator's, is not a review.
 
     Guarding follows renames and moves. On a guarded item, any change that
     widens access is put back and recorded as `GRANT_VIOLATION`, whoever makes
@@ -420,6 +993,18 @@ code does on purpose.
     build log naming the reverted entries. A save whose build cannot be
     identified gets no such line, only the `GRANT_VIOLATION` record: for
     example a seed job saving another job, or a Freestyle build.
+
+    Removing authorization entries from a new item, those of an item created
+    inside a guarded folder or the authorization property of an item created
+    through a `CREATE` window (item 11), can fail to be saved, on an
+    unwritable item directory for example. The failure is recorded as
+    `GRANT_VIOLATION`, saying that the removal failed and that an
+    administrator must check the item. When the entries are already gone from
+    the item in memory, they no longer apply and the save is retried every
+    minute; the list of items waiting for that retry is kept in memory only,
+    so a restart before a retry succeeds loads the item with the entries.
+    When they could not be removed in memory either, the record says that
+    they are still in effect.
 
     This changes how administrators manage authorization on those items, and
     only on those. Until the item is marked as reviewed, a Jenkinsfile, Job
@@ -552,8 +1137,13 @@ code does on purpose.
     folders) carry activation for their children: one created while run control
     is on starts not activated, the `ACTIVATE`/`HOLD` request is made on the
     folder, and a child passes only if its nearest computed-folder ancestor is
-    activated. The state fails closed: a job re-created under a deleted job's
-    name starts not activated.
+    activated. The state fails closed. An activation state that cannot be read
+    counts as not activated. An activation is also tied to the directory the
+    job had on disk when it was recorded (if that directory could be read
+    then): a job re-created under a deleted job's name starts not activated,
+    and while the job's directory cannot be read, so that it cannot be
+    confirmed as the same one, the job counts as not activated and a warning
+    naming it is logged.
 40. **Other plugins' build buttons show their own generic failure message.**
     When Batch Control refuses a run started from another plugin's button
     (Rebuild or Rebuild Last where they are shown, naginator's Retry, a button
@@ -615,6 +1205,28 @@ code does on purpose.
     directly on **Manage Jenkins → Security** writes no Batch Control record,
     so that change is not in the Batch Control history.
 
+<!-- Item 51 was added after 44-50 and sits here by topic. The comment ends the list so that it renders as 51, not 44. -->
+
+51. **A run request whose stored values do not match what the approver sees
+    cannot be approved.** A run request keeps the submitted parameter values
+    with their types (D-72, item 16), and the approved build must never
+    receive values other than the ones the approver saw. Approval, and the
+    submission of an approved run, are therefore refused for a request whose
+    stored values repeat a parameter name, name different parameters than the
+    request shows, or include a value Jenkins can no longer load, for example
+    because the plugin that provides that parameter type was removed or
+    downgraded while the request was open, or whose values file
+    (`requests/run/<id>.values.xml`, item 32) is missing or cannot be read
+    at all (D-72b, D-74). A request file written before typed values were
+    introduced holds only the masked display values. It is not converted, as
+    earlier grant files are not (D-69), and if it has parameters it cannot be
+    approved; a request without parameters is unaffected. A refused approval
+    leaves the request `PENDING` with the reason shown above the form, and the
+    approver can still reject it. An approved request whose values fail this
+    check when it is submitted, for example on recovery after a restart, is
+    not submitted; it stays `APPROVED` until the approved-run timeout ends it.
+    In each case the requester has to submit the run again.
+
 ## Moving items
 
 44. **While change control is on, moving an item needs `Item/Delete` on it.**
@@ -624,18 +1236,31 @@ code does on purpose.
     active window (D-59). The cost: a non-administrator who holds `Item/Move`
     and `Item/Create` standing but not `Item/Delete` can no longer move items
     while change control is on, although plain Jenkins would let them. A
-    `DELETE` window on the item lets such a user move it, but the move then
+    `DELETE` window on a job lets such a user move it, but the move then
     costs what a delete and recreate would: while run control is also on, a
     job moved by a non-administrator is no longer activated, gets the same
     lock as a newly created job and is recorded as `HELD` naming the move, so
     it does not run unattended until a new activation request is approved
-    (D-59a). Administrators' moves keep the job's state. The refused move
-    changes nothing and is recorded as a `GRANT_VIOLATION`. A user who holds
-    `Item/Delete` on two jobs can still swap them by moving them in and out
-    of a job-scoped window's name; such a user could already delete and
-    recreate them, and with run control on the swapped jobs arrive locked
-    and not activated, as recreated ones would. With change control off,
-    moves behave exactly as in Jenkins.
+    (D-59a). Administrators' moves keep the job's state. No window can make a
+    folder, a multibranch project or an organization folder movable, because
+    a window's `DELETE` applies only to a job (item 11, D-71): moving one of
+    those needs an administrator or standing `Item/Delete` on it. Likewise no
+    window confers `Item/Create` in the Jenkins root or inside a multibranch
+    project or organization folder, so a move to one of those destinations
+    needs standing `Item/Create` there or an administrator. In both cases the
+    refusal says an administrator must make the move instead of suggesting a
+    window. The refused move
+    changes nothing and is recorded as a `GRANT_VIOLATION`; the same refused
+    move by the same user (same item and destination) is recorded once per
+    minute, and repeats within that minute go only to the Jenkins log (D-73).
+    A user who holds `Item/Delete` on two jobs can still swap them by moving them; such a user
+    could already delete and recreate them, and with run control on the
+    swapped jobs arrive locked and not activated, as recreated ones would. A
+    swap does not carry a window from one job to the other: each window
+    follows its own job through every move, so a job moved into another
+    job's former name does not pick up that job's windows (item 11, D-74).
+    With change control off, moves
+    behave exactly as in Jenkins.
 
     The rule governs the folders plugin's Move action, in the UI and over
     REST, which use the same endpoint. Jenkins core offers no way to veto a
@@ -669,7 +1294,13 @@ code does on purpose.
 48. **Pre-filled parameter values travel in the URL.** When a refused build
     submission leads to the Request Run form with the submitted values filled
     in (D-60), the values of non-sensitive parameters are carried in the
-    redirect URL's query string. From there they can reach the browser
+    redirect URL's query string. The values carried are those of string,
+    text, boolean, choice and run parameters (a run as its `job#build` id),
+    and of any other simple parameter whose definition rebuilds the same value
+    from its text; a value the job's definition no longer accepts, such as a
+    choice that is no longer offered or a run that no longer exists or that
+    the requester cannot see, is dropped and the field starts at its default.
+    From the URL the carried values can reach the browser
     history, reverse-proxy and servlet container access logs, and the
     `Referer` header of the next request. Password and other sensitive
     parameters are never carried. Anything typed into a plain string or text
@@ -681,7 +1312,14 @@ code does on purpose.
     are defined, and one that would push the query over the cap is left out,
     while a later, shorter one may still fit. The form always opens; a field
     whose value was not carried starts at its default and has to be entered
-    again.
+    again. Files are not carried either: a file submitted with the refused
+    build does not reach the Request Run form (issue #115), and the form names
+    each file parameter and says to select the file again. The same URL
+    mechanism and caps apply when an incident rerun continues on the Request
+    Run form (item 16).
+
+<!-- Item 50 was added after 49 and sits here by topic. The comment ends the list so that it renders as 50, not 49. -->
+
 50. **The request dialogs on the new job page use a beta core API.** On the
     new job page an action can open a dialog only through
     `Action#getEvent()` returning `DialogEvent`, which core 2.568.x marks

@@ -279,7 +279,7 @@ public class SectionTabsTest {
             for (int i = 0; i < 5; i++) {
                 io.jenkins.plugins.batchcontrol.policy.GrantRequestService.get().create(
                         new io.jenkins.plugins.batchcontrol.model.GrantScope(
-                                io.jenkins.plugins.batchcontrol.model.GrantScope.Type.JOB, "batch-x"),
+                                io.jenkins.plugins.batchcontrol.model.GrantScope.Type.ITEM, "batch-x"),
                         Arrays.asList(io.jenkins.plugins.batchcontrol.model.GrantAction.CONFIGURE), 30, "fix " + i, "a1");
             }
         }

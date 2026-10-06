@@ -47,14 +47,14 @@ const pr = await api('requester', '/job/batch-pipeline/config.xml', { method: 'P
 await sleep(1500);
 log(L, `B9-02 POST config.xml with a requester Configure entry -> ${pr.status}; requester entries now ${JSON.stringify(await entriesOf('/job/batch-pipeline/'))}; GRANT_VIOLATION +${(await viol()).length - v0}`);
 // B9-03 inherited folder window editing team/app-1
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], reason: 'Self-grant guard via a folder window (B9-03).' });
+g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], reason: 'Self-grant guard via a folder window (B9-03).' });
 await decide(g.url);
 v0 = (await viol()).length;
 const s3 = await addSelfInMatrix('/job/team/job/app-1/configure');
 await sleep(1000);
 log(L, `B9-03 folder window, requester adds himself on team/app-1 -> ${s3}; requester entries now ${JSON.stringify(await entriesOf('/job/team/job/app-1/'))}; GRANT_VIOLATION +${(await viol()).length - v0}`);
 // B9-04 / B9-05 / B9-06 under a CREATE window on team/
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 1, reason: 'Create under the guard (B9-04..06).' });
+g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 1, reason: 'Create under the guard (B9-04..06).' });
 await decide(g.url);
 await p.goto(`${BASE}/job/team/newJob`);
 await p.fill('#name', 'app-guard');

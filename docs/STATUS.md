@@ -13,6 +13,17 @@
 
 ---
 
+## 2026-10-07 — hosting review round 6 (mawinter69, #5338, comment 5986189363): PR #116
+- Blockers fixed: ITEM scope (one-item windows, item kind shown; D-71..D-71c, D-74) and typed run parameters incl. file parameters (D-72..D-72b, D-74).
+- Decisions: D-71, D-71a/b (replaced by D-74), D-71c, D-72, D-72a, D-72b, D-73, D-74, D-75 (followed names for readers only; D-71c (3) stands; SPEC 171/206 approved), D-76 (snapshot refresh at switch-on, creation-time saves, accepted storage residuals).
+- Reviews: security-34..40 (security-40: 0 BLOCKER/HIGH/MEDIUM, 2 LOW documented in LIMITATIONS 32/55), spec-review-r6 (PASS WITH NOTES, resolved).
+- Gates: mvn clean verify on 01a3a96 (src/main final): 1289 tests, 0 failures, SpotBugs 0, JDK 21 and 25; later test-only commits verified in PR CI (JDK 21/25 green).
+- e2e: e2e-16, e2e-17, e2e-18 (final, 166/167 + rerun, supp 17/17, cifs 14/14, 0 plugin defects). CI e2e shard 5: one layout check (no h-scroll at 1280) fails in CI only.
+- Coverage (JaCoCo unit+integration+e2e): 93.0% lines overall, 90.3% of the round's changed lines.
+- Issues: #107 and #111 done; #108-#110, #112-#115 open. Replies posted on #5338 (6018970812, 6018971375).
+- Follow-ups (LOW): S-40-01, S-40-02, lock retry vs deletion race (TEST-MATRIX note 284 (c)), orphan snapshots, switch-on by editing saved config, CI h-scroll check, README.ko lag.
+- Waiting: mawinter69's re-review.
+
 ## 2026-10-04 — hosting review rounds 3 and 4 (mawinter69, #5338, 2026-10-03): all merged
 - Decisions: D-35g (role-strategy 927 minimum, forward to its descriptor), D-63, D-64, D-65 (FOLDER_ONLY scope), D-66 (lists and dialogs), D-67 (badges only, dashboard 50), D-68 (UUID ids), D-69 (no pre-release migration code), D-70 (beta DialogEvent).
 - PRs merged: #98 Java 25 build, caffeine cache, CI per JDK 21/25, UUID ids, migration code removed; #99 FOLDER_ONLY scope; #100 badges, core tab look, model-link, dashboard 50; #101 Pending/Active/Ended lists, revoke on detail, request dialogs, DEF-07 crumb fix; #102 role-strategy 927 forwarding; #103 UX-1 empty id cells (regression of the DEF-05 fix); #104 e2e-14 report; #105 DEF-08 activation page layout on the new job page. #97 (Dependabot 918) closed as superseded.

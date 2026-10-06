@@ -46,20 +46,51 @@ an SCM trigger or a webhook until an approver has activated it
 
 **Change control** governs changing a job. A user who does *not* hold the standing
 permission to create, configure or delete one asks for a permission window
-instead: a scope (one job, or a folder), some combination of `CREATE`,
-`CONFIGURE` and `DELETE`, a duration and a reason. A window **adds** those
+instead: one item (a job, or a folder of any kind), some combination of `CREATE`,
+`CONFIGURE` and `DELETE`, a duration and a reason. A window names exactly that
+one item and grants no permission on any other item, not even on the jobs and
+folders inside a folder it names; to change a job in a folder, request a window
+for that job. `CONFIGURE` covers the item's own configuration only. For a folder
+that is the folder's settings, and those settings still affect the items inside
+it: implicitly loaded Pipeline libraries, for example, and the items a
+multibranch project or organization folder generates, which reconfiguring it can
+create or delete. `CREATE` applies only to a regular folder, not to a job, a
+multibranch project or an organization folder, and allows creating items
+directly inside that folder, never inside a folder nested in it. `DELETE`
+applies only to a job. A request for `CREATE` or `DELETE` on an item where it
+cannot apply is refused when it is submitted. Every request shows the item's
+kind (Pipeline, Freestyle project, Folder, Multibranch Pipeline, Organization
+Folder, ...) next to its name, so the approver sees what kind of item they are
+deciding on, and approval is refused if the item is gone or its kind has
+changed since the request was made. An approved window applies to that item,
+not to its name: when an administrator or a user with their own permissions
+renames or moves the item, the window follows it (so do the windows on the
+items inside a renamed or moved folder), and deleting the item ends the window,
+as do creating a new item at the window's name and starting Jenkins after the
+item has vanished. Renaming, moving, swapping or re-creating items therefore
+never makes a window reach an item nobody approved. A window **adds** those
 permissions to whatever the user already has, for as long as it lasts; it never
 takes anything away and it imposes nothing on someone who holds the permission
 standing, which is what the "standing change permissions" monitor is for. Deleting
 is the one exception: while change control is on, deleting a job needs an active
 `DELETE` window even from a user whose standing permissions would allow it, and
-only administrators are not vetoed. Moving an item between folders (the folders
+only administrators are not vetoed. Since no window confers `Item/Delete` on a
+folder, a multibranch project or an organization folder (deleting one deletes
+everything inside it), only an administrator can delete one of those while
+change control is on. Moving an item between folders (the folders
 plugin's `Item/Move`) is treated as deleting it here and creating it there: while
 change control is on, a user without `Overall/Administer` can move an item only
 if they hold `Item/Delete` on the item and `Item/Create` at the destination, each
 either standing or from an active window, and a `CREATE` window's name
-restriction is matched against the moved item's name. A refused move changes
-nothing, tells the user why and is recorded as a `GRANT_VIOLATION`. While run
+restriction is matched against the moved item's name. For the same reason no
+window can authorise moving a folder of any kind: that needs an administrator, or
+a user who already holds `Item/Delete` on it standing. Nor can any window authorise
+renaming a job or folder of any kind, because permissions matched by full name
+follow a rename: renaming needs an administrator, or the user's own
+`Item/Configure` on the item, or their own `Item/Delete` on it plus
+`Item/Create` in its parent. A refused move or rename changes
+nothing, tells the user why and is recorded as a `GRANT_VIOLATION` (once per
+minute for the same attempt). While run
 control is also on, a job moved by a non-administrator arrives the way a newly
 created job does: not activated and locked, recorded as `HELD`, so it needs a
 new activation before it runs unattended again. The rule covers the folders
@@ -190,6 +221,7 @@ Batch Control is compiled against, which Jenkins enforces when loading plugins:
 | `configuration-as-code` | 2121.v86fe99d4b_b_a_b_ |
 | `mailer` | 534.v1b_36f5864073 |
 | `rebuild` | 338.va_0a_b_50e29397 |
+| `file-parameters` | 433.va_0b_80359d54d |
 
 If an older version of any of these is installed, Batch Control fails to load
 until that plugin is upgraded. Installing Batch Control from **Manage Jenkins →
@@ -305,7 +337,8 @@ jobs, folders and agents effective from that moment; review them first
 in the Batch Control section of **Manage Jenkins → System**, shown while a
 variant is installed. While an approved window is open, the selected variant
 *adds* that window's actions, `Item/Create`, `Item/Configure` or `Item/Delete`,
-on that window's scope, and passes every other decision through unchanged, so
+on the one item that window names (`Item/Create` directly inside it), and passes
+every other decision through unchanged, so
 with no active window it behaves exactly like the plain strategy. It resolves a
 permission the way Jenkins itself does, by walking the `impliedBy` chain, so a
 window also answers the permissions Jenkins treats as implied by the granted
@@ -404,7 +437,16 @@ the job's parameters, while Jenkins' own build entry is relabelled **Direct Buil
 core entry reaches the queue with no approval and is refused. **Request Change
 Permission** sits alongside them while change control is on, for a user who does
 not already hold `Item/Configure` on the job, and opens the window request form
-with that job filled in. **Grants** shows pending window requests, the time left on
+with that job filled in. A folder's page carries the same entry for the folder
+itself, for a user who lacks a permission a window could add there. The form
+takes the full name of one job or folder and shows the item's kind once the name
+is recognised; there is no scope type to choose, and each action says where it
+applies. The page of a `CONFIGURE` request on a folder, multibranch project or
+organization folder warns that the folder's settings apply to the items inside
+it, that reconfiguring a multibranch project or organization folder can create
+or delete its generated items, and that the window does not allow renaming it;
+the page of a `CONFIGURE` request on a job states that rename rule alone.
+**Grants** shows pending window requests, the time left on
 an active window, the history of expired ones and a link to request another.
 **Activations** lists activation and hold requests, with the ones awaiting your
 decision at the top, and is where the approver decides them; the request itself
@@ -416,9 +458,17 @@ parameters, result and duration, linking approved runs back to the request that
 authorised them. **Incidents** collects the failures that opened automatically,
 each with the last 100 console lines, and offers acknowledge, resolve, comment and
 a rerun request. The rerun request carries the failed build's original parameters
-as they were; they are fixed, not offered for editing. The rerun form has only
+as they were, password and file values included; they are fixed, not offered for
+editing. The rerun form has only
 the approver checkboxes: the reason is generated from the incident and cannot be
-typed in. Submitting it needs `BatchControl/Request` plus
+typed in. When a value can no longer be recovered from the build (a stashed
+file, which the build removes when it completes, or a deleted build, which
+includes a same-numbered build of a re-created job), no request
+is created there: the job's Request Run form opens with the other values filled
+in, the requester provides files and passwords again, and the request submitted
+from it is linked to the incident only after the server has validated the incident
+reference again: the incident exists, belongs to that job, and the submitter holds
+`BatchControl/ViewHistory`. Submitting a rerun needs `BatchControl/Request` plus
 `Item/Read` on the job, like any run request (`Item/Build` is not required), and
 the Incidents screen itself needs `BatchControl/ViewHistory`, so the user needs
 all three; the typical roles in step 3 give that combination only to administrators unless you
@@ -431,7 +481,10 @@ spreadsheet does not evaluate it, and gives a monthly summary.
 **Change Records** is the create / configure / delete / rename / move trail,
 recorded whatever path the change came through (UI, REST, CLI, Job DSL), with a
 unified diff and the window the change was made under, or an explicit note where
-there was none.
+there was none. A configuration change is recorded without a diff, with a note
+saying why, when Batch Control holds no usable earlier configuration of the item
+to compare it with
+([Limitations](docs/LIMITATIONS.md#records-and-screens) item 53).
 
 Records live in `$JENKINS_HOME/batch-control/`, separately from builds, so they
 outlive build rotation. They are append-only: no edit or delete API exists, only
@@ -464,8 +517,8 @@ may change the set at any time before a decision is made.
 **Restricting the name a CREATE window may create.** A `CREATE` permission
 window request may optionally carry an exact job name or a regular expression.
 When one is given, the window confers `Item/Create` only for a new item whose
-name matches it; left empty, the window behaves as before, any name in the
-scope folder. The pattern is validated at submission and shown to the approver
+name matches it; left empty, the window allows any name directly inside the
+window's folder. The pattern is validated at submission and shown to the approver
 before they decide. It does not reach a child that a computed folder (a
 multibranch project or an organization folder) creates while indexing, since
 that child is created by the system rather than through the window
@@ -504,6 +557,41 @@ rather than after it, and keep the remaining time, the expiry history and the
 re-request link on the Grants screen. Deleting is the exception: the plugin's own
 veto message names the grant to request.
 
+**A permission window covers one item.** A window names one job or one folder
+and grants no permission on any other item, so a change that spans several jobs
+needs a window for each of them. A `CONFIGURE` window on a folder grants
+permission on the folder's own settings, not on the jobs inside it, but those
+settings still affect the jobs (implicitly loaded Pipeline libraries, for
+example), and reconfiguring a multibranch project or organization folder can
+create or delete the items it generates; the approval page says so. `CREATE`
+works only directly inside a regular folder, never at the Jenkins root, inside a
+nested folder or inside a multibranch project or organization folder. `DELETE`
+works only on a job. No window can delete or move a folder, a multibranch
+project or an organization folder, because core deletes everything inside one
+without checking it: while change control is on, deleting one needs an
+administrator, and moving one needs an administrator or standing `Item/Delete`
+on it. A window applies to the item it was approved for, not to its name: it
+follows the item through a rename or move made by someone entitled to it
+(windows on the items inside a renamed or moved folder follow too), and it ends
+when the item is deleted (so do the windows on anything inside a deleted
+folder), when a new item is created at its name, or when Jenkins starts and the
+item is gone. A window that cannot follow its item for certain (its file cannot
+be updated with the new name, or another item has taken one of the names
+involved) ends instead, recorded with the reason "it could not follow its
+item", and its holder requests it again. A window's new name is shown only to
+users who may read the item where it is now; anyone else, the holder and the
+approvers included, sees the approved name marked "moved; its new location is
+not visible to you", and the expiry e-mail does the same. If, at startup, the
+change records written since the oldest open window was granted cannot all be
+read back (one damaged line among them is enough), every open window ends,
+recorded with the reason "its state could not be confirmed at startup". Apart
+from Batch Control's storage directories refusing writes until a restart, one
+gap remains: an item replaced on disk outside Jenkins and then reloaded fires
+no item event, so a window naming it applies to the replacement. That takes
+file-system access (reloading a single item needs only `Item/Configure` on it,
+not `Overall/Administer`)
+([item 11](docs/LIMITATIONS.md#the-authorization-strategy)).
+
 **A `CONFIGURE` window confers whatever Jenkins implies from `Item/Configure`.**
 On the plugin set this project is built against that means `Item/ExtendedRead`
 (which reads `config.xml`), `Credentials/UseItem` and `Run/Replay`, and another
@@ -514,10 +602,24 @@ that a non-administrator approved while being shown only the word `CONFIGURE`.
 `Run/Replay` is the one to know about: run control still refuses a replay of a job
 that requires approval, so it is not a way around the run gate there, but on a job
 without run control a window holder can replay a build with a modified Pipeline
-script. A `CONFIGURE` window also lets its holder rename the job to any free name
-in its folder, since Jenkins allows a rename to anyone who may configure the job;
-the rename is recorded with the window. Under a `CREATE` window with a name
-restriction, renames of what that window created are limited to matching names.
+script.
+
+**No window allows renaming a job or folder.** While change control is on,
+neither a `CONFIGURE` window nor `DELETE` and `CREATE` windows combined (core's
+other rename path) let their holder rename any item, and neither does the
+Configure a `CREATE` window's holder keeps on what they created through it. A
+rename needs an administrator, or the user's own `Item/Configure` on the item,
+or their own `Item/Delete` on it plus `Item/Create` in its parent. This closes
+an escalation: under role-strategy, item roles match full names by pattern, so
+a window holder who renamed a job, or a folder and everything inside it, into
+one of their own patterns would keep that role after the window ended. The
+cost: a user who renamed jobs with a `CONFIGURE` window now needs an
+administrator or their own permissions. Jenkins still shows **Rename** in the
+sidebar to a window holder; the refusal appears on the rename page, whatever
+URL form is used (including encoded ones and core's `doRename`), and is
+recorded as a `GRANT_VIOLATION` (once per minute for the same attempt). When
+someone entitled to it renames an item, the item's windows follow it to the new
+name, as above.
 
 **On an item a grant has touched, only an administrator can widen
 authorization.** A Pipeline `properties` step saves its job's authorization
@@ -530,8 +632,10 @@ covers the item and everything below it. A changed item stays guarded until
 someone marks it as reviewed with **Mark as reviewed**: administrators find it
 next to the item on the Manage Jenkins monitor, which lists the items waiting
 for review, and users with native Configure who also hold
-`BatchControl/Request` find it on the item's Batch Control page (without
-`Request` that page is not shown, so they ask an administrator). It writes a `GUARD_REVIEWED` record; an ordinary save is not a review. On
+`BatchControl/Request` find it on a job's Batch Control page (without
+`Request` that page is not shown, so they ask an administrator). Folders,
+multibranch projects and organization folders have no such page, so only an
+administrator can mark one as reviewed. A review writes a `GUARD_REVIEWED` record; an ordinary save is not a review. On
 a guarded item, any change that widens access is put back and recorded, whoever
 makes it, a non-administrator with native Configure included (an HTTP save gets
 a 403 message). The only exception is a save made through an HTTP request (the
@@ -637,10 +741,18 @@ retry among them) are allowed, with a **Request activation** link.
 **Secrets survive only as far as detection reaches.** A stored incident log tail
 masks the build's own sensitive parameter values and Jenkins `Secret` plaintexts
 and nothing else, so a token echoed by a script, a stack trace or a third-party
-tool is kept and displayed verbatim. Request parameters, on the other hand, are
-masked before they are stored, which means no plaintext secret is ever written
-but an approved run submits the mask rather than the original value: jobs with
-password parameters cannot be run through approval today.
+tool is kept and displayed verbatim. Run request parameters are a different
+matter. A request keeps the submitted values with their types, so the approved
+run receives the original secret and the original file. That covers every
+parameter type, including core `file` and the file-parameters plugin's
+`stashedFile` and `base64File`. Secrets are stored only in Jenkins' encrypted
+form and shown everywhere as `********`; a file shows only as
+`[file] <original file name>`. An incident rerun can reuse only what the failed
+build still holds. When a file or another value is gone, it opens the Request Run
+form with the remaining values filled in, and files and secrets have to be
+provided again. A run request submission is capped at 100 MB, but the
+instance-wide upload limit is Jenkins' own; see
+[Limitations](docs/LIMITATIONS.md#records-and-screens) items 31 and 32.
 
 **`BatchControl/ViewHistory` is an instance-wide audit read.** The history
 screens, the dashboard and the CSV exports show every request and run, job names

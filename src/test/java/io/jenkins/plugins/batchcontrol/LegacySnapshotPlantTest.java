@@ -7,7 +7,6 @@ import hudson.security.AuthorizationMatrixProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.nio.charset.StandardCharsets;
@@ -110,7 +109,7 @@ public class LegacySnapshotPlantTest {
             assertTrue(plantContent.contains(BOB_ENTRY) && plantContent.contains(PLANT_MARKER), "fixture: the plant differs");
             Files.writeString(legacyFile(j), plantContent, StandardCharsets.UTF_8);
 
-            StrategyFixtures.grant("bob", GrantScope.Type.JOB, VICTIM, Arrays.asList(GrantAction.CONFIGURE));
+            StrategyFixtures.grant("bob", VICTIM, Arrays.asList(GrantAction.CONFIGURE));
             assertTrue(has(n, "bob", Item.CONFIGURE), "premise: the grant confers Configure on N");
             assertTrue(StrategyFixtures.records(ChangeType.GRANT_VIOLATION).isEmpty(), "premise: no violation yet");
 

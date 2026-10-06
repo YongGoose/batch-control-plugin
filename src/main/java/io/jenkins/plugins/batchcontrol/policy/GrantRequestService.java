@@ -1,8 +1,9 @@
 package io.jenkins.plugins.batchcontrol.policy;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
-import hudson.model.ItemGroup;
-import hudson.model.Job;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
@@ -12,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.PendingCount;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.ops.NotificationDispatcher;
@@ -102,7 +104,8 @@ public final class GrantRequestService {
      * <p>Rules: at least one action; duration in {@code (0, maxGrantMinutes]}; non-empty reason
      * of at most {@value #MAX_REASON_LENGTH} characters; the approver must be on the global
      * list and must not be the requester (admin exception per the self-approval policy); the
-     * scope target must exist (a job for JOB scope, a folder for FOLDER and FOLDER_ONLY scope).
+     * scope item must exist and be visible to the requester, and each action must apply to its
+     * kind (D-71: CREATE only on a regular folder, DELETE only on a job).
      */
     public GrantRequest create(GrantScope scope, List<GrantAction> actions, int durationMinutes,
                                String reason, String approver) {
@@ -164,9 +167,14 @@ public final class GrantRequestService {
             }
             CreateNamePattern.parse(pattern); // D-40: validated at submission
         }
-        checkScopeExists(scope);
+        Item item = checkScopeAtCreation(scope, actions);
+        ItemKind kind = ItemKind.of(item);
+        // D-71a (security-34 S-34-04): the stored scope is the canonical full name of the item the
+        // typed name resolved to (Jenkins resolves "ops/" or "OPS" to the item "ops"), so the window
+        // the approver sees is the one that confers, and it is matched by that exact name.
+        GrantScope canonical = GrantScope.item(item.getFullName());
 
-        GrantRequest request = GrantRequest.create(scope, actions, durationMinutes, reason,
+        GrantRequest request = GrantRequest.create(canonical, kind, actions, durationMinutes, reason,
                 requester, designated, pattern);
         lock.lock();
         try {
@@ -179,32 +187,172 @@ public final class GrantRequestService {
     }
 
     /**
-     * The scope target must exist so approvers never approve a window on a phantom path.
+     * The scope item of a new request (D-71): it must exist and be visible to the requester, be a
+     * top-level item, and each requested action must apply to its kind. Returns the item, whose
+     * kind and canonical full name the request records (D-71a, S-34-04).
      *
-     * <p>S-03: an empty full name is rejected for every scope type. A root scope would be
-     * instance-wide, which SPEC item 8 never defines; root-scope grants stay impossible until a
-     * deliberate DECISIONS entry introduces them.
+     * <p>S-03: an empty full name is rejected. A root scope would be instance-wide, which SPEC
+     * item 8 never defines; root-scope grants stay impossible until a deliberate DECISIONS entry
+     * introduces them.
      *
-     * <p>S-13: this runs both at creation and again at approval, so a request whose target was
-     * deleted or renamed in between — or one persisted by a build that predates this rule —
-     * cannot turn into a live grant. {@code GrantScope.includes} additionally matches nothing
-     * for an empty scope name, so even a hand-edited store file cannot confer anything.
+     * <p>The lookup is the requester's own: an item they cannot see is refused exactly like a
+     * missing one ("No such item"), so the refusal discloses nothing.
      */
-    private static void checkScopeExists(GrantScope scope) {
+    private static Item checkScopeAtCreation(GrantScope scope, List<GrantAction> actions) {
+        checkScopeName(scope);
+        String fullName = scope.getFullName();
+        Item item = findScopeItem(fullName);
+        if (item == null || item.getFullName() == null || item.getFullName().isEmpty()) {
+            throw new IllegalArgumentException("No such item: '" + fullName + "'.");
+        }
+        ItemKind kind = ItemKind.of(item);
+        if (kind == null) {
+            throw new IllegalArgumentException("'" + fullName + "' is part of another job and cannot be "
+                    + "named by a permission window; name the job it belongs to.");
+        }
+        checkActionsApply(item, kind, actions);
+        return item;
+    }
+
+    /** S-03 / S-13: the scope must name an item; there is no root-scope grant. */
+    private static void checkScopeName(GrantScope scope) {
         String fullName = scope.getFullName();
         if (fullName == null || fullName.isEmpty()) {
             throw new IllegalArgumentException("root-scope grants are not supported");
         }
-        if (scope.getType() == GrantScope.Type.JOB) {
-            Item item = Jenkins.get().getItemByFullName(fullName);
-            if (!(item instanceof Job)) {
-                throw new IllegalArgumentException("No such job: '" + fullName + "'.");
+    }
+
+    /**
+     * D-71: CREATE applies only to a regular folder, DELETE only to a job.
+     *
+     * @throws IllegalArgumentException naming the action and the item's kind
+     */
+    private static void checkActionsApply(Item item, ItemKind kind, List<GrantAction> actions) {
+        String fullName = item.getFullName();
+        if (actions.contains(GrantAction.CREATE) && !GrantScope.createAppliesTo(item)) {
+            throw new IllegalArgumentException("The Create action applies only to a folder, not to "
+                    + kind.getDisplayName() + " '" + fullName + "'. To create an item, request Create on the "
+                    + "folder that should contain it.");
+        }
+        if (actions.contains(GrantAction.DELETE) && !GrantScope.deleteAppliesTo(item)) {
+            throw new IllegalArgumentException("The Delete action applies only to a job, not to "
+                    + kind.getDisplayName() + " '" + fullName + "': deleting it would also delete every item "
+                    + "inside it. Ask an administrator to delete it.");
+        }
+    }
+
+    /**
+     * D-71: the item a window would name, as the current user sees it, or {@code null} when no
+     * item exists at {@code fullName} or the user may not read it (an item visible only through
+     * Item/Discover counts as not visible). The single lookup used for requests and approvals.
+     */
+    @CheckForNull
+    public static Item findScopeItem(@CheckForNull String fullName) {
+        if (fullName == null || fullName.isEmpty()) {
+            return null;
+        }
+        try {
+            return Jenkins.get().getItemByFullName(fullName);
+        } catch (AccessDeniedException e) {
+            // Item/Discover without Item/Read somewhere on the path: the same answer as a missing
+            // item, so the refusal does not tell the two apart.
+            return null;
+        }
+    }
+
+    /**
+     * S-13, D-71: re-validates a request's scope right before it becomes a live grant. Creation-time
+     * validation does not bind a request that was persisted earlier, or whose item has since been
+     * deleted, renamed or replaced.
+     *
+     * <ul>
+     *   <li>The item exists but the approver cannot see it (T-SEC-18, P-10: the decision may not be
+     *       made blind): {@link IllegalArgumentException}.</li>
+     *   <li>No item exists at that name any more, or its kind (descriptor id) differs from the one
+     *       recorded at creation (D-71): {@link IllegalStateException}.</li>
+     * </ul>
+     *
+     * <p>The first two cases share one message, so a page that shows the message does not tell an
+     * approver who cannot see the item whether it still exists. The kind is only compared, and
+     * named, for an item the approver can see.
+     *
+     * <p>D-69, D-71: a request whose stored scope type is not {@code ITEM} (an earlier type, which
+     * loads without a type and is not converted) is refused with {@link IllegalStateException}.
+     *
+     * <p>D-71a: the scope must be the item's canonical full name (requests are stored with it,
+     * S-34-04); a request that does not name it so is refused with {@link IllegalStateException}
+     * (only reached for an item the approver can see).
+     *
+     * @return the item the window will be on
+     * @throws IllegalArgumentException for an empty (root) scope, as at creation, or an item the
+     *                                  approver cannot see
+     * @throws IllegalStateException when the item is gone or its kind changed
+     */
+    private static Item checkScopeAtApproval(GrantRequest request) {
+        GrantScope scope = request.getScope();
+        String id = request.getId();
+        if (scope == null || scope.getType() != GrantScope.Type.ITEM) {
+            // D-69, D-71 (T-08-145): a request stored with an earlier scope type (JOB, FOLDER,
+            // FOLDER_ONLY) loads without a type and is not converted; approving it would create a
+            // window that confers nothing (or, converted silently, one the approver never saw).
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: it was stored with an"
+                    + " earlier scope type, which is not converted. Ask the requester to request a window on the"
+                    + " item again.");
+        }
+        checkScopeName(scope);
+        String fullName = scope.getFullName();
+        Item item = findScopeItem(fullName);
+        if (item == null) {
+            String unavailable = "Grant request " + id + " cannot be approved: no item named '" + fullName
+                    + "' exists any more, or you cannot see it.";
+            if (itemExists(fullName)) {
+                throw new IllegalArgumentException(unavailable);
             }
-        } else {
-            Item item = Jenkins.get().getItemByFullName(fullName);
-            if (!(item instanceof ItemGroup)) {
-                throw new IllegalArgumentException("No such folder: '" + fullName + "'.");
-            }
+            throw new IllegalStateException(unavailable);
+        }
+        ItemKind recorded = request.getItemKind();
+        ItemKind current = ItemKind.of(item);
+        if (recorded == null) {
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: the kind of '"
+                    + fullName + "' was not recorded when the window was requested. Ask the requester to "
+                    + "request it again.");
+        }
+        if (current == null || !recorded.getDescriptorId().equals(current.getDescriptorId())) {
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: the item '" + fullName
+                    + "' is now of kind " + (current == null ? "unknown" : current.getDisplayName()) + ", not "
+                    + recorded.getDisplayName() + " as when the window was requested.");
+        }
+        try {
+            checkActionsApply(item, current, request.getActions());
+        } catch (IllegalArgumentException e) {
+            // Only reachable for a request stored without the creation-time check.
+            throw new IllegalStateException("Grant request " + id + " cannot be approved. " + e.getMessage(), e);
+        }
+        if (!fullName.equals(item.getFullName())) {
+            // Only reachable for a request stored before D-71a (S-34-04): the window would be matched
+            // by a name no item has.
+            throw new IllegalStateException("Grant request " + id + " cannot be approved: it names '" + fullName
+                    + "', but the item's name is '" + item.getFullName() + "'. Ask the requester to request it again.");
+        }
+        return item;
+    }
+
+    /**
+     * D-71: whether any item exists at {@code fullName}, whoever may see it. Used only by
+     * {@link #checkScopeAtApproval} once the approver's own lookup came back empty, to tell an item
+     * that is gone (the world changed: {@link IllegalStateException}) from one the approver cannot
+     * see (the approver may not decide: {@link IllegalArgumentException}).
+     *
+     * <p>ACL.SYSTEM2 switch, with its reason: a caller-scoped lookup cannot tell a missing item from
+     * an invisible one, and that distinction is the whole question. The approver's permission checks
+     * are complete before this is reached ({@link ApprovalPolicy#checkDecision} in {@link #approve}:
+     * the caller is a designated approver holding BatchControl/Approve), the switch covers the one
+     * lookup only, and the item found is never returned or acted on: only its existence is used.
+     */
+    private static boolean itemExists(String fullName) {
+        // ACL.SYSTEM2 switch: the approver's permission checks are complete (see javadoc).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return Jenkins.get().getItemByFullName(fullName) != null;
         }
     }
 
@@ -216,16 +364,22 @@ public final class GrantRequestService {
      * window is {@code [now, now + durationMinutes)} on the {@link BatchClock}; SPEC item 8:
      * the requester holds the permissions immediately.
      *
-     * <p>The stored scope is re-validated here (S-13), so approval fails with
-     * {@link IllegalArgumentException} if the target no longer exists or the scope is a root
-     * scope. The lookup is caller-scoped like every other item lookup in this service: the
-     * approver must be able to see the scope target to approve a window on it.
+     * <p>The stored scope is re-validated here (S-13, D-71): approval fails with
+     * {@link IllegalStateException} if no item exists at the scope name any more or its kind
+     * (descriptor id) differs from the one recorded at creation, and with
+     * {@link IllegalArgumentException} for a root scope or an item the approver cannot see
+     * (T-SEC-18): the approver must be able to see the scope item to approve a window on it.
      *
-     * @return the created, immediately effective {@link Grant}
+     * <p>D-71c (3): if the item is deleted after it was checked and before the window is registered,
+     * the window ends at once; the request stays APPROVED and its APPROVED notice says that the
+     * window ended at once and why (owner decision 2026-10-06).
+     *
+     * @return the created, immediately effective {@link Grant}, or the window that ended at once
      */
     public Grant approve(String id, String comment) {
         Grant created;
         GrantRequest approved;
+        boolean endedAtOnce;
         lock.lock();
         try {
             GrantRequest request = require(id);
@@ -234,7 +388,7 @@ public final class GrantRequestService {
             // cannot confer anything should not turn on whether the request is still PENDING or the
             // caller happens to be its designated approver. Existence was already disclosed to any
             // caller by require(id) before this change, so nothing new leaks.
-            checkChangeControlEnabled("approved", request.getScope().getFullName());
+            checkChangeControlEnabled("approved", request.getScope() == null ? null : request.getScope().getFullName());
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
@@ -245,7 +399,7 @@ public final class GrantRequestService {
             // since been deleted or renamed), and approval is the last point where a bad scope
             // can still be stopped. Deliberately after checkDecision, so a non-approver learns
             // nothing about the scope's validity.
-            checkScopeExists(request.getScope());
+            Item item = checkScopeAtApproval(request);
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
                 String reason = EndReasons.pendingExpired();
@@ -263,16 +417,23 @@ public final class GrantRequestService {
             store.saveGrantRequest(request);
             Grant grant = Grant.createFor(request, now);
             // Registration persists the grant and makes it effective in the same critical
-            // section, so approval and effectiveness are atomic.
-            GrantService.get().register(grant);
-            LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
-                    + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
+            // section, so approval and effectiveness are atomic. D-74: on the item checked above,
+            // under its name at registration (it follows a rename that happened meanwhile).
+            // D-71c (3), S-39-02: registration re-verifies that this item is still at its name;
+            // if it was deleted meanwhile, the window ends at once ("its item was deleted").
+            endedAtOnce = !GrantService.get().register(grant, item);
+            if (!endedAtOnce) {
+                LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
+                        + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
+            }
             created = grant;
             approved = request;
         } finally {
             lock.unlock();
         }
-        NotificationDispatcher.grant(NotificationEvent.APPROVED, approved);
+        // Owner decision 2026-10-06: a window that ended at registration is still announced as
+        // APPROVED (no new notice type), with one details line saying it ended at once and why.
+        NotificationDispatcher.grantApproved(approved, endedAtOnce ? Grant.REVOKED_ITEM_DELETED : null);
         return created;
     }
 
@@ -300,11 +461,6 @@ public final class GrantRequestService {
         }
         NotificationDispatcher.grant(NotificationEvent.REJECTED, request);
         return request;
-    }
-
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public GrantRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
     }
 
     /**
@@ -391,6 +547,11 @@ public final class GrantRequestService {
                     LOGGER.info(() -> "Grant request " + request.getId()
                             + " expired (pending timeout)");
                 }
+            } catch (RuntimeException e) {
+                // One request that cannot be read or written never ends the expiry of the others; it
+                // is tried again on the next run (an approval compares the clock meanwhile).
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not expire change request " + snapshot.getId()
+                        + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
@@ -402,11 +563,27 @@ public final class GrantRequestService {
      * pending timeout falls within {@code notifyBeforeExpiryMinutes}, and
      * {@link NotificationEvent#GRANT_EXPIRING} once for every active window ending within it. The
      * "notified" flags are persisted before dispatch, so a restart never resends.
+     *
+     * <p>One request or window that cannot be read or written never keeps the others from their
+     * notice: the pending requests and the windows are handled apart, each request and each window
+     * on its own, and a failure is logged.
      */
     public void notifyExpiring() {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
                 BatchControlGlobalConfiguration.get().getNotifyBeforeExpiryMinutes());
+        try {
+            notifyPendingExpiring(now, lead);
+        } catch (RuntimeException e) {
+            // Listing the pending requests failed; the windows below are told all the same.
+            LOGGER.log(java.util.logging.Level.WARNING,
+                    "Could not send the EXPIRING notifications of pending change requests", e);
+        }
+        notifyWindowsExpiring(lead);
+    }
+
+    /** EXPIRING for the PENDING requests close to their timeout; a request that fails is tried next run. */
+    private void notifyPendingExpiring(Instant now, Duration lead) {
         for (GrantRequest snapshot : store.listOpenGrantRequests()) {
             if (snapshot.getStatus() != RequestStatus.PENDING || snapshot.isExpiringNotified()) {
                 continue;
@@ -424,6 +601,10 @@ public final class GrantRequestService {
                         notified = request;
                     }
                 }
+            } catch (RuntimeException e) {
+                // Not marked (the flag is only ever stored before the dispatch), so the next run tries again.
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not send the EXPIRING notification of change request "
+                        + snapshot.getId() + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
@@ -431,9 +612,25 @@ public final class GrantRequestService {
                 NotificationDispatcher.grant(NotificationEvent.EXPIRING, notified);
             }
         }
+    }
+
+    /** GRANT_EXPIRING for the active windows close to their end, each window on its own. */
+    private void notifyWindowsExpiring(Duration lead) {
         for (Grant grant : GrantService.get().claimExpiringNotifications(lead)) {
-            GrantRequest request = store.loadGrantRequest(grant.getGrantRequestId());
-            NotificationDispatcher.grantExpiring(grant, request == null ? null : request.getReason());
+            GrantRequest request;
+            try {
+                request = store.loadGrantRequest(grant.getGrantRequestId());
+            } catch (RuntimeException e) {
+                // LIMITATIONS 11: the change request's file is there but cannot be read, so no expiry
+                // notice is sent for this window (its approved name is unknown); its claim stands, so
+                // it is not retried. The windows after it are still told.
+                LOGGER.log(java.util.logging.Level.WARNING, "The change request of grant " + grant.getId()
+                        + " cannot be read; the GRANT_EXPIRING notification of its window is not sent", e);
+                continue;
+            }
+            // D-75 (1): the request gives the reason and the approved name, which the notice names
+            // instead of a followed name its holder cannot read.
+            NotificationDispatcher.grantExpiring(grant, request);
         }
     }
 

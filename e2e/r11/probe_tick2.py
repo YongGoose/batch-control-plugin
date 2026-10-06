@@ -5,7 +5,7 @@ for page, link in (("/job/batch-pipeline/", "#tasks a"), ("/job/ops/", "#tasks a
         s = Session("classic")
         s.go(page)
         s.page.locator(link, has_text="Request Change Permission").first.click()
-        s.page.wait_for_selector("dialog[open] select[name=scopeType]")
+        s.page.wait_for_selector("dialog[open] input[name=scopeFullName]")
         s.page.wait_for_timeout(500)
         d = s.page.locator("dialog[open]").first
         info = d.evaluate("""d => [...d.querySelectorAll('input[name=actions]')].map(i => i.value + ' id=' + i.id + ' for=' + (i.nextElementSibling && i.nextElementSibling.getAttribute('for')) + ' dupIds=' + document.querySelectorAll('[id=\"' + i.id + '\"]').length)""")

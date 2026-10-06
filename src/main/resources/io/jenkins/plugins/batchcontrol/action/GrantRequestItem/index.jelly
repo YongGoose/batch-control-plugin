@@ -1,7 +1,13 @@
 <?jelly escape-by-default='true'?>
 <!-- e2e-03 DEF-09: a refused approve, reject, cancel or approver change comes back to this page
      (ui.FormErrors) with the message next to the field or above the form it concerns and the
-     input kept. Form targets are absolute because the refusal is rendered at the POST URL. -->
+     input kept. Form targets are absolute because the refusal is rendered at the POST URL.
+     D-71: the Scope row shows the one item the request names, with its kind
+     (tags/scopeItem.jelly); D-74: once approved, its window's item, which follows the item when
+     it is renamed or moved. D-75 (1), S-39-04: the followed name only to a viewer who may read the
+     item, otherwise the approved name with a fixed note (GrantRequestItem#getShownScope).
+     LIMITATIONS 29: with change control off this page is shown only as the refusal of an
+     approval (GrantsSection#getTarget), with the message above the details and no forms. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Grant Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">
@@ -26,7 +32,7 @@
         <tbody>
           <tr>
             <th style="text-align: left; width: 12rem;">Scope</th>
-            <td>${it.request.scope.type}: ${it.request.scope.fullName}</td>
+            <td><bc:scopeItem scope="${it.shownScope}" kind="${it.request.itemKind}"/></td>
           </tr>
           <tr><th style="text-align: left;">Actions</th><td>${it.join(it.request.actions)}</td></tr>
           <j:if test="${it.request.createNamePattern != null}">
@@ -66,9 +72,26 @@
         </tbody>
       </table>
 
+      <!-- D-71a (5), security-34 S-34-02: a CONFIGURE request on a folder, multibranch project or
+           organization folder confers nothing on the items inside it, but the group's own settings
+           still reach them; and its window does not allow renaming the group (D-71c). Stated
+           to the designated approvers and the requester
+           (GrantRequestItem#isShowGroupConfigureNotice); not shown for a job. Fixed, item-neutral
+           text, on one line so that the element's text is exactly the three sentences.
+           D-71c (security-36 S-36-04): for a CONFIGURE request on any other item (a job), the same
+           audience is told the rename rule alone (GrantRequestItem#isShowNoRenameNotice). -->
+      <j:if test="${it.showGroupConfigureNotice}">
+        <div class="jenkins-alert jenkins-alert-warning" data-batch-control-notice="group-configure">The settings of this folder, multibranch project or organization folder apply to the items inside it (for example implicitly loaded Pipeline libraries). Reconfiguring a multibranch project or organization folder can create or delete its generated items. A Configure window does not allow renaming it: that needs an administrator, or the user's own Configure permission on it, or own Delete on it plus Create in its parent.</div>
+      </j:if>
+      <j:if test="${it.showNoRenameNotice}">
+        <div class="jenkins-alert jenkins-alert-info" data-batch-control-notice="no-rename">A Configure window does not allow renaming the item: that needs an administrator, or the user's own Configure permission on it, or own Delete on it plus Create in its parent.</div>
+      </j:if>
+
       <!-- R4-12: the window of an approved request, with Revoke for a holder of Batch
            Control/Manage (the rule of the Grants list's Revoke; GrantRequestItem#doRevoke and the
-           service re-check). A refused revoke is shown above the window. -->
+           service re-check). A refused revoke is shown above the window. D-74: an open window
+           applies to its item (renamed or moved, it follows; deleted, it ends), so its State is
+           the time left. -->
       <j:set var="window" value="${it.grant}"/>
       <j:if test="${window != null}">
         <h2>Permission Window</h2>
@@ -80,12 +103,14 @@
             <tr><th style="text-align: left;">Expires</th><td>${it.format(window.expiresAt)}</td></tr>
             <tr>
               <th style="text-align: left;">State</th>
-              <td>
-                <j:choose>
-                  <j:when test="${it.windowOpen}">Open, ${it.remaining(window.expiresAt)} left</j:when>
-                  <j:otherwise>${it.endedLabelOf(window)}</j:otherwise>
-                </j:choose>
-              </td>
+              <j:choose>
+                <j:when test="${it.windowOpen}">
+                  <td>Open, ${it.remaining(window.expiresAt)} left</td>
+                </j:when>
+                <j:otherwise>
+                  <td>${it.endedLabelOf(window)}</td>
+                </j:otherwise>
+              </j:choose>
             </tr>
           </tbody>
         </table>
@@ -143,8 +168,10 @@
       <j:if test="${it.canDecide}">
         <h2>Decision</h2>
         <p class="jenkins-description">
-          Approving immediately grants the requester the selected permissions in the requested
-          scope for the requested duration.
+          Approving immediately grants the requester the selected permissions on the requested
+          item for the requested duration. The window applies to this item only: it follows the
+          item when an administrator (or a user with their own permissions) renames or moves it,
+          and ends when the item is deleted.
         </p>
         <j:set var="approveErrors" value="${it.formErrors('approve')}"/>
         <j:set var="rejectErrors" value="${it.formErrors('reject')}"/>

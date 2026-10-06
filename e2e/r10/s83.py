@@ -24,9 +24,9 @@ for i, (txt, href) in enumerate(res["window links"]):
         s.page.locator("#main-panel a", has_text=txt).first.click(); s.page.wait_for_load_state("load")
     else:
         s.go(href.replace("/jenkins", "", 1))
-    f = s.page.locator("select[name=scopeType]")
+    f = s.page.locator("[data-batch-control-item-kind]")
     res[f"link {txt}"] = {"landed": s.page.url.replace("http://localhost:8080", ""),
-        "scopeType": f.input_value() if f.count() else None,
+        "itemKind": f.first.get_attribute("data-batch-control-item-kind") if f.count() else None,
         "scopeFullName": s.page.locator("input[name=scopeFullName]").input_value() if f.count() else None,
         "checked actions": s.page.locator("input[name=actions]:checked").evaluate_all("els => els.map(e => e.value)")}
     s.shot("form", f"83-03-{i}-grant-form")
@@ -42,8 +42,8 @@ res["team window links"] = s.page.locator("#main-panel a", has_text=re.compile("
 s.shot("#main-panel", "83-04-refusal-both")
 for i, (txt, href) in enumerate(res["team window links"]):
     s.go(href.replace("/jenkins", "", 1))
-    f = s.page.locator("select[name=scopeType]")
-    res[f"team link {txt}"] = {"scopeType": f.input_value() if f.count() else None,
+    f = s.page.locator("[data-batch-control-item-kind]")
+    res[f"team link {txt}"] = {"itemKind": f.first.get_attribute("data-batch-control-item-kind") if f.count() else None,
         "scopeFullName": s.page.locator("input[name=scopeFullName]").input_value() if f.count() else None,
         "checked actions": s.page.locator("input[name=actions]:checked").evaluate_all("els => els.map(e => e.value)")}
     s.shot("form", f"83-05-{i}-grant-form")

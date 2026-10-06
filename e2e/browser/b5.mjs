@@ -61,7 +61,7 @@ steps.replay = async () => {
   log(L, `B5-05 admin Replay #${last} -> ${r && r.status()} ${ad.page.url().replace(BASE, '')}; page "${after.slice(0, 160)}"; next ${n0}->${(await job('batch-pipeline')).nextBuildNumber}; TRIGGER_BLOCKED ${tb0.length}->${tb1.length} ${tb1[0] || ''}`);
   // grant holder: a CONFIGURE window on batch-pipeline confers Run/Replay (LIMITATIONS 33)
   const rq = await login('requester');
-  await rq.page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=batch-pipeline`);
+  await rq.page.goto(`${BASE}/batch-control/grants/?scopeFullName=batch-pipeline`);
   await rq.page.selectOption('select[name="durationMinutes"]', '15');
   await rq.page.fill('textarea[name="reason"]', 'Replay check under a CONFIGURE window (B5-05).');
   await rq.page.locator('#grant-approver-0 + label').click();

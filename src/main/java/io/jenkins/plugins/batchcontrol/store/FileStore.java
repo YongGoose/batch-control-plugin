@@ -1,5 +1,9 @@
 package io.jenkins.plugins.batchcontrol.store;
 
+import com.thoughtworks.xstream.core.util.HierarchicalStreams;
+import com.thoughtworks.xstream.io.HierarchicalStreamReader;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.model.ParameterValue;
 import hudson.util.XStream2;
 import io.jenkins.plugins.batchcontrol.model.CauseType;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
@@ -13,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.model.RunRequestValues;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,17 +26,20 @@ import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -47,7 +55,9 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
@@ -128,6 +138,12 @@ public final class FileStore implements Store {
 
     /** Month file to its incremental summary; guarded by itself. */
     private final Map<Path, StatsEntry> statsCache = new HashMap<>();
+
+    /** How often an open request that stays unreadable is warned about again ({@link #skipUnreadableOpen}). */
+    private static final Duration UNREADABLE_WARNING_INTERVAL = Duration.ofHours(1);
+
+    /** Open requests left out of a listing as unreadable ("kind id") to when that was last warned about. */
+    private final Map<String, Instant> unreadableOpenWarnedAt = new ConcurrentHashMap<>();
 
     private FileStore() {
         for (int i = 0; i < LOCK_STRIPES; i++) {
@@ -212,27 +228,168 @@ public final class FileStore implements Store {
 
     // ---------------------------------------------------------------- run requests
 
+    /** Suffix of a run request's typed values file, {@code <id>.values.xml} (D-74). */
+    private static final String VALUES_SUFFIX = ".values.xml";
+
+    /** The id suffix that would name a values file instead of a request file. */
+    private static final String VALUES_ID_SUFFIX = ".values";
+
+    /**
+     * The request file of {@code id}, or {@code null} when {@code id} is not a store identifier
+     * (S-39-01, {@link PathCodec#isId}): such an id names no request. The identifier shape already
+     * excludes {@code .}; the values suffix is refused in any letter case as well (defence in depth,
+     * case-insensitive file systems), so no id can name the values file.
+     */
+    @CheckForNull
+    private Path runRequestFile(String id) {
+        Objects.requireNonNull(id, "id");
+        if (!PathCodec.isId(id) || endsWithIgnoreCase(id, VALUES_ID_SUFFIX)) {
+            return null;
+        }
+        return PathCodec.resolveId(runRequestDir(), id, ".xml");
+    }
+
+    /** The values file of {@code id}, or {@code null} when {@code id} is not a store identifier (S-39-01). */
+    @CheckForNull
+    private Path runRequestValuesFile(String id) {
+        Objects.requireNonNull(id, "id");
+        return runRequestFile(id) == null ? null : PathCodec.resolveId(runRequestDir(), id, VALUES_SUFFIX);
+    }
+
+    private static boolean endsWithIgnoreCase(String text, String suffix) {
+        return text.length() >= suffix.length()
+                && text.regionMatches(true, text.length() - suffix.length(), suffix, 0, suffix.length());
+    }
+
     @Override
     public void saveRunRequest(RunRequest request) {
         Objects.requireNonNull(request, "request");
+        if (runRequestFile(request.getId()) == null) {
+            throw new IllegalArgumentException("Invalid run request id: " + request.getId());
+        }
         saveXmlEntity(runRequestDir(), request.getId(), request, "run request");
+        index().put(request);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The request file is written first: should the process stop between the two writes, what
+     * remains is a request whose values are missing, which cannot be approved (fail closed), and
+     * never a values file without its request.
+     */
+    @Override
+    public void saveNewRunRequest(RunRequest request, List<ParameterValue> values) {
+        Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(values, "values");
+        String id = request.getId();
+        Path requestFile = runRequestFile(id);
+        if (requestFile == null) {
+            throw new IllegalArgumentException("Invalid run request id: " + id);
+        }
+        saveXmlEntity(runRequestDir(), id, request, "run request");
+        if (!values.isEmpty()) {
+            try {
+                saveXmlFile(runRequestDir(), id + VALUES_SUFFIX, id, new RunRequestValues(id, values),
+                        "parameter values of run request " + id);
+            } catch (StoreWriteException e) {
+                try {
+                    deleteFile(requestFile, "run request " + id);
+                } catch (UncheckedIOException deletion) {
+                    e.addSuppressed(deletion);
+                }
+                throw e;
+            }
+        }
         index().put(request);
     }
 
     @Override
     public RunRequest loadRunRequest(String id) {
-        return loadXmlEntity(runRequestDir(), id, RunRequest.class, "run request");
+        Path file = runRequestFile(id);
+        if (file == null || !Files.isRegularFile(file)) {
+            return null;
+        }
+        try {
+            RunRequest request = readRunRequest(file);
+            // The file found must be this request's own: on a case-insensitive file system another
+            // spelling of the id reaches the same file, and that spelling names no request.
+            return request != null && id.equals(request.getId()) ? request : null;
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load run request " + id, e);
+        }
+    }
+
+    @Override
+    @CheckForNull
+    public List<ParameterValue> loadRunRequestValues(String id) {
+        Path file = runRequestValuesFile(id);
+        if (file == null || !Files.isRegularFile(file)) {
+            return null;
+        }
+        RunRequestValues read;
+        try {
+            read = readXml(file, RunRequestValues.class, "parameter values file");
+        } catch (NoSuchFileException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to load the parameter values of run request " + id, e);
+        }
+        if (read == null || !id.equals(read.requestId())) {
+            throw new UncheckedIOException(new IOException("The parameter values file of run request " + id
+                    + " does not hold the values of that request"));
+        }
+        return read.values();
+    }
+
+    @Override
+    public void deleteRunRequestValues(String id) {
+        Path file = runRequestValuesFile(id);
+        if (file != null) {
+            deleteFile(file, "parameter values of run request " + id);
+        }
     }
 
     @Override
     public List<RunRequest> listRunRequests() {
-        List<RunRequest> all = listXmlEntities(runRequestDir(), RunRequest.class, "run request");
+        List<RunRequest> all = new ArrayList<>();
+        for (Path file : listXmlFiles(runRequestDir(), "run request")) {
+            Path name = file.getFileName();
+            if (name == null || endsWithIgnoreCase(name.toString(), VALUES_SUFFIX)) {
+                continue; // typed values, read only through loadRunRequestValues (D-74)
+            }
+            try {
+                RunRequest request = readRunRequest(file);
+                if (request != null) {
+                    all.add(request);
+                }
+            } catch (NoSuchFileException e) {
+                // Deleted between listing and reading; skip.
+            } catch (IOException | RuntimeException e) {
+                // As listXmlEntities: one file that cannot be read must not break every listing,
+                // badge and the request index.
+                warnSkipped("run request", file, e);
+            }
+        }
         all.sort(OLDEST_FIRST_RUNREQUEST);
         return all;
     }
 
+    /**
+     * The run request in {@code file}, or {@code null} (logged) when the file holds something else
+     * (S-39-01): its root element is checked before anything else of it is read, so no other
+     * object, a values file in particular, is ever materialised here.
+     */
+    @CheckForNull
+    private RunRequest readRunRequest(Path file) throws IOException {
+        return readXml(file, RunRequest.class, "run request");
+    }
+
     @Override
-    public List<RunRequest> listOpenRunRequests() {
+    public List<RunRequest> listOpenRunRequests(Consumer<String> unreadable) {
+        Objects.requireNonNull(unreadable, "unreadable");
         EntityIndex idx = index();
         List<String> ids = new ArrayList<>();
         for (EntityIndex.RunEntry entry : idx.runRequests.values()) {
@@ -242,7 +399,16 @@ public final class FileStore implements Store {
         }
         List<RunRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            RunRequest request = loadRunRequest(id);
+            RunRequest request;
+            try {
+                request = loadRunRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("run request", id, e);
+                unreadable.accept(id);
+                continue;
+            }
+            readableAgain("run request", id, request != null);
             if (request == null) {
                 idx.runRequests.remove(id);
                 continue;
@@ -293,7 +459,7 @@ public final class FileStore implements Store {
 
     @Override
     public GrantRequest loadGrantRequest(String id) {
-        return loadXmlEntity(grantRequestDir(), id, GrantRequest.class, "grant request");
+        return loadXmlEntity(grantRequestDir(), id, GrantRequest.class, GrantRequest::getId, "grant request");
     }
 
     @Override
@@ -314,7 +480,15 @@ public final class FileStore implements Store {
         }
         List<GrantRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            GrantRequest request = loadGrantRequest(id);
+            GrantRequest request;
+            try {
+                request = loadGrantRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("grant request", id, e);
+                continue;
+            }
+            readableAgain("grant request", id, request != null);
             if (request == null) {
                 idx.grantRequests.remove(id);
                 continue;
@@ -338,7 +512,7 @@ public final class FileStore implements Store {
 
     @Override
     public Grant loadGrant(String id) {
-        return loadXmlEntity(grantDir(), id, Grant.class, "grant");
+        return loadXmlEntity(grantDir(), id, Grant.class, Grant::getId, "grant");
     }
 
     @Override
@@ -357,7 +531,8 @@ public final class FileStore implements Store {
 
     @Override
     public ActivationRequest loadActivationRequest(String id) {
-        return loadXmlEntity(activationRequestDir(), id, ActivationRequest.class, "activation request");
+        return loadXmlEntity(activationRequestDir(), id, ActivationRequest.class, ActivationRequest::getId,
+                "activation request");
     }
 
     @Override
@@ -381,7 +556,8 @@ public final class FileStore implements Store {
     }
 
     @Override
-    public List<ActivationRequest> listOpenActivationRequests() {
+    public List<ActivationRequest> listOpenActivationRequests(Consumer<String> unreadable) {
+        Objects.requireNonNull(unreadable, "unreadable");
         EntityIndex idx = index();
         List<String> ids = new ArrayList<>();
         for (EntityIndex.GrantRequestEntry entry : idx.activationRequests.values()) {
@@ -391,7 +567,16 @@ public final class FileStore implements Store {
         }
         List<ActivationRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            ActivationRequest request = loadActivationRequest(id);
+            ActivationRequest request;
+            try {
+                request = loadActivationRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("activation request", id, e);
+                unreadable.accept(id);
+                continue;
+            }
+            readableAgain("activation request", id, request != null);
             if (request == null) {
                 idx.activationRequests.remove(id);
                 continue;
@@ -474,7 +659,18 @@ public final class FileStore implements Store {
     public String loadConfigSnapshot(String jobFullName) {
         Objects.requireNonNull(jobFullName, "jobFullName");
         Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        if (!Files.isRegularFile(file) && Files.exists(file)) {
+            // T-GAP-385: something other than a file in its place is not "no snapshot".
+            throw new UncheckedIOException(new IOException("The config snapshot " + file + " is not a regular file"));
+        }
         return readTextOrNull(file);
+    }
+
+    @Override
+    public boolean hasConfigSnapshot(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        return Files.exists(file, LinkOption.NOFOLLOW_LINKS);
     }
 
     @Override
@@ -495,13 +691,6 @@ public final class FileStore implements Store {
     @Override
     public List<RunRecord> listRunRecords(YearMonth month) {
         return parseLines(runsDir(), month, FileStore::runRecordFromJson);
-    }
-
-    @Override
-    public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months,
-                                                Predicate<? super RunRecord> filter,
-                                                int offset, int limit, int maxScanned) {
-        return pageRunRecords(months, Period.ALL, filter, offset, limit, maxScanned);
     }
 
     @Override
@@ -659,6 +848,79 @@ public final class FileStore implements Store {
         return page;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The bounded page query with no record cap and no page limit: only the period bounds it, so
+     * it reads every line since {@code since} (and the lines inside the append-order slack before
+     * it), keeping only the matching records, which are few. It is truncated only when the bytes of
+     * skipped out-of-period lines exceed the page query's byte budget. No diff is attached.
+     *
+     * <p>D-75 (2): it is truncated too when a line it read could not be parsed (a torn or damaged
+     * line) or was too long to read: such a line may be a {@code GRANT_REVOKE} record of one of the
+     * windows, so their ends cannot be ruled out, and the caller ends them (fail-closed). Its position
+     * tells that it was appended within the part of the log read back. Logged once per read. A
+     * complete line of another record type, also one this version does not know, is not such a
+     * record and does not count.
+     *
+     * <p>T-SEC-109: reading also stops at the first record before {@code since} that
+     * {@code boundary} accepts, inside the append-order slack too, so damage behind such a record
+     * is not read again.
+     */
+    @Override
+    public RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds,
+                                                            Predicate<? super ChangeRecord> boundary) {
+        Objects.requireNonNull(since, "since");
+        Objects.requireNonNull(boundary, "boundary");
+        Set<String> ids = Set.copyOf(grantIds);
+        Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
+                .thenComparing(ChangeRecord::getId).reversed();
+        RecordPage<ChangeRecord> page = page(changesDir(), listMonthsSince(changesDir(), monthOf(since).minusMonths(1)),
+                new Period(since, null), K_AT, line -> line.optLong(K_AT), FileStore::changeRecordFromScanner,
+                FileStore::changeRecordOrOtherType, ChangeRecord::getAt,
+                r -> r.getType() == ChangeType.GRANT_REVOKE && r.getGrantId() != null && ids.contains(r.getGrantId()),
+                newestFirst, 0, Integer.MAX_VALUE, Integer.MAX_VALUE, boundary);
+        int unread = page.getUnreadable() + page.getOversized();
+        if (unread == 0 || page.isTruncated()) {
+            return page;
+        }
+        LOGGER.warning(() -> unread + " change record line(s) appended since " + since + " could not be read (torn,"
+                + " damaged or too long); any of them may end a permission window, so the read of the window ends"
+                + " is incomplete");
+        return page.asTruncated();
+    }
+
+    /**
+     * {@link #changeRecordFromJson}, except that a complete line whose {@code type} names another
+     * record type than {@code GRANT_REVOKE} (also one this version does not know) gives {@code null}
+     * instead of failing: it cannot be a window's end ({@link #grantRevokeRecordsSince}).
+     */
+    @CheckForNull
+    private static ChangeRecord changeRecordOrOtherType(JSONObject json) {
+        try {
+            return changeRecordFromJson(json);
+        } catch (RuntimeException e) {
+            Object type = json.opt("type");
+            if (type instanceof String name && !ChangeType.GRANT_REVOKE.name().equals(name)) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    /** The months of the bucket files in {@code dir} from {@code first} on. */
+    private static List<YearMonth> listMonthsSince(Path dir, YearMonth first) {
+        List<YearMonth> months = new ArrayList<>();
+        for (Path file : listMonthFiles(dir)) {
+            Path name = file.getFileName();
+            YearMonth month = name == null ? null : parseMonthFileName(name.toString());
+            if (month != null && !month.isBefore(first)) {
+                months.add(month);
+            }
+        }
+        return months;
+    }
+
     private void attachDiff(ChangeRecord record) {
         record.setDiff(readTextOrNull(PathCodec.resolveUnder(diffDir(), record.getId() + ".patch")));
     }
@@ -681,7 +943,7 @@ public final class FileStore implements Store {
 
     @Override
     public Incident loadIncident(String id) {
-        return loadXmlEntity(incidentDir(), id, Incident.class, "incident");
+        return loadXmlEntity(incidentDir(), id, Incident.class, Incident::getId, "incident");
     }
 
     @Override
@@ -694,13 +956,6 @@ public final class FileStore implements Store {
             }
         }
         return incidents;
-    }
-
-    @Override
-    public RecordPage<Incident> pageIncidents(Collection<YearMonth> months,
-                                              Predicate<? super Incident> filter,
-                                              int offset, int limit, int maxScanned) {
-        return pageIncidents(months, Period.ALL, summary -> true, filter, offset, limit, maxScanned);
     }
 
     @Override
@@ -834,7 +1089,7 @@ public final class FileStore implements Store {
 
     private boolean deleteIncidentXml(String id) {
         try {
-            return deleteFile(PathCodec.resolveUnder(incidentDir(), id + ".xml"), "incident " + id);
+            return deleteFile(PathCodec.resolveId(incidentDir(), id, ".xml"), "incident " + id);
         } catch (IllegalArgumentException e) {
             return false; // not a valid id; nothing of ours to delete
         }
@@ -858,7 +1113,9 @@ public final class FileStore implements Store {
                 if (fresh == null || fresh.summary().isOpen() || !fresh.lastActivity().isBefore(cutoff)) {
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(runRequestDir(), id + ".xml"), "run request " + id)) {
+                deleteRunRequestValues(id); // normally gone already, when the request ended (D-74)
+                // The id is a store identifier: the request was just loaded under it (S-39-01).
+                if (deleteFile(PathCodec.resolveId(runRequestDir(), id, ".xml"), "run request " + id)) {
                     runRequests++;
                 }
             }
@@ -882,7 +1139,7 @@ public final class FileStore implements Store {
                     // the grant file is kept until every item on it has been reviewed or deleted.
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(grantDir(), id + ".xml"), "grant " + id)) {
+                if (deleteFile(PathCodec.resolveId(grantDir(), id, ".xml"), "grant " + id)) {
                     grantIds.add(id);
                 }
             }
@@ -906,7 +1163,7 @@ public final class FileStore implements Store {
                 if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(grantRequestDir(), id + ".xml"), "grant request " + id)) {
+                if (deleteFile(PathCodec.resolveId(grantRequestDir(), id, ".xml"), "grant request " + id)) {
                     grantRequests++;
                 }
             }
@@ -925,7 +1182,7 @@ public final class FileStore implements Store {
                 if (fresh == null || EntityIndex.isOpen(fresh) || !fresh.lastActivity().isBefore(cutoff)) {
                     continue;
                 }
-                if (deleteFile(PathCodec.resolveUnder(activationRequestDir(), id + ".xml"),
+                if (deleteFile(PathCodec.resolveId(activationRequestDir(), id, ".xml"),
                         "activation request " + id)) {
                     activationRequests++;
                 }
@@ -999,8 +1256,16 @@ public final class FileStore implements Store {
 
     // ---------------------------------------------------------------- I/O helpers
 
-    /** Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}). */
+    /**
+     * Writes one XStream XML entity atomically (temp file, then {@code ATOMIC_MOVE}).
+     *
+     * @throws IllegalArgumentException if {@code id} is not a store identifier (S-39-01): an entity
+     *         is only ever written under a name it can also be loaded by
+     */
     private void saveXmlEntity(Path dir, String id, Object entity, String what) {
+        if (!PathCodec.isId(id)) {
+            throw new IllegalArgumentException("Invalid " + what + " id: " + id);
+        }
         saveXmlFile(dir, id + ".xml", id, entity, what + " " + id);
     }
 
@@ -1015,25 +1280,56 @@ public final class FileStore implements Store {
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, tmpPrefix, ".tmp");
-            try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                xstream.toXML(entity, writer);
+            boolean moved = false;
+            try {
+                try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                    xstream.toXML(entity, writer);
+                }
+                moveAtomically(tmp, target);
+                moved = true;
+            } finally {
+                if (!moved) {
+                    // S-35-03: the partly written temporary file of a failed save is removed.
+                    deleteQuietly(tmp);
+                }
             }
-            moveAtomically(tmp, target);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to save " + what, e);
+        } catch (IOException | RuntimeException e) {
+            // S-35-03: XStream refuses some content with a RuntimeException (U+0000, for one), so
+            // every failure ends here, as one exception type the web layer shows as a refusal.
+            throw new StoreWriteException("The " + what + " could not be saved; nothing was stored.", e);
         } finally {
             lock.unlock();
         }
     }
 
-    private <T> T loadXmlEntity(Path dir, String id, Class<T> type, String what) {
+    /** Deletes a temporary file of a failed write; a failure to do so is only logged. */
+    private static void deleteQuietly(Path tmp) {
+        try {
+            Files.deleteIfExists(tmp);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Could not delete the temporary file " + tmp, e);
+        }
+    }
+
+    /**
+     * The entity {@code id} of {@code type} stored in {@code dir}, or {@code null}: also when
+     * {@code id} is not a store identifier (S-39-01, {@link PathCodec#isId}), when the file holds
+     * something else, and when the entity in it has another id (another spelling of the id reaching
+     * the same file on a case-insensitive file system).
+     */
+    @CheckForNull
+    private <T> T loadXmlEntity(Path dir, String id, Class<T> type, Function<T, String> idOf, String what) {
         Objects.requireNonNull(id, "id");
-        Path file = PathCodec.resolveUnder(dir, id + ".xml");
+        if (!PathCodec.isId(id)) {
+            return null;
+        }
+        Path file = PathCodec.resolveId(dir, id, ".xml");
         if (!Files.isRegularFile(file)) {
             return null;
         }
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            return type.cast(xstream.fromXML(reader));
+        try {
+            T entity = readXml(file, type, what);
+            return entity != null && id.equals(idOf.apply(entity)) ? entity : null;
         } catch (NoSuchFileException e) {
             return null;
         } catch (IOException e) {
@@ -1041,37 +1337,120 @@ public final class FileStore implements Store {
         }
     }
 
-    private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
-        List<T> entities = new ArrayList<>();
-        if (!Files.isDirectory(dir)) {
-            return entities;
+    /**
+     * Reads the XStream XML file {@code file} as a {@code type}, or returns {@code null} (logged) when
+     * its root element names another class (S-39-01). The root element is checked before anything
+     * else in the file is read, so a file holding another object is never materialised, whatever
+     * its size: XStream names the root after the object's class (no store class has an alias, and
+     * all of them are final), so anything else is not a {@code type}. The reader is the one
+     * {@link XStream2} itself creates for {@code fromXML}.
+     */
+    @CheckForNull
+    private <T> T readXml(Path file, Class<T> type, String what) throws IOException {
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            HierarchicalStreamReader xml = XStream2.getDefaultDriver().createReader(reader);
+            try {
+                String classAttribute = HierarchicalStreams.readClassAttribute(xml, xstream.getMapper());
+                String declared = classAttribute != null ? classAttribute : xml.getNodeName();
+                if (!xstream.getMapper().serializedClass(type).equals(declared)) {
+                    LOGGER.warning(() -> "Not reading " + file + ": it holds a " + declared + ", not a " + what);
+                    return null;
+                }
+                Object read = xstream.unmarshal(xml);
+                if (!type.isInstance(read)) {
+                    LOGGER.warning(() -> "Not using " + file + ": it does not hold a " + what);
+                    return null;
+                }
+                return type.cast(read);
+            } finally {
+                xml.close();
+            }
         }
+    }
+
+    /** The {@code *.xml} files of {@code dir}, sorted by name; empty when it does not exist. */
+    private static List<Path> listXmlFiles(Path dir, String what) {
         List<Path> files = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return files;
+        }
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, "*.xml")) {
             for (Path file : stream) {
                 files.add(file);
             }
         } catch (NoSuchFileException e) {
-            return entities;
+            return new ArrayList<>();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list " + what + " files in " + dir, e);
         }
         // Same directory for every entry, so the full path sorts identically to the file name.
         files.sort(Comparator.comparing(Path::toString));
-        for (Path file : files) {
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                entities.add(type.cast(xstream.fromXML(reader)));
+        return files;
+    }
+
+    /**
+     * Every {@code type} stored in {@code dir}. A file that cannot be read is skipped with a warning
+     * naming it, whether it is corrupt (an XStream conversion error) or cannot be read at all
+     * (permission denied, an I/O error): one such file must not break every reader of the
+     * directory, which for grants would be every permission check of every user. A skipped grant
+     * confers nothing. Only a directory that cannot be listed fails the whole listing.
+     */
+    private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
+        List<T> entities = new ArrayList<>();
+        for (Path file : listXmlFiles(dir, what)) {
+            try {
+                T entity = readXml(file, type, what);
+                if (entity != null) {
+                    entities.add(entity);
+                }
             } catch (NoSuchFileException e) {
                 // Deleted between listing and reading; skip.
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to load " + what + " file " + file, e);
-            } catch (RuntimeException e) {
-                // One corrupt file (XStream conversion error, wrong type) must not break every
-                // reader of the directory -- for grants that would be every permission check.
-                LOGGER.log(Level.WARNING, "Skipping unreadable " + what + " file " + file, e);
+            } catch (IOException | RuntimeException e) {
+                warnSkipped(what, file, e);
             }
         }
         return entities;
+    }
+
+    /** Logs that the {@code what} file {@code file} is left out of a listing because it cannot be read. */
+    private static void warnSkipped(String what, Path file, Exception e) {
+        Path name = file.getFileName();
+        String stem = name == null ? "" : name.toString();
+        if (endsWithIgnoreCase(stem, ".xml")) {
+            stem = stem.substring(0, stem.length() - ".xml".length());
+        }
+        LOGGER.log(Level.WARNING, "Skipping the " + what + " '" + stem + "' (" + file
+                + "): its file cannot be read; it is left out until it can be read and Jenkins is restarted", e);
+    }
+
+    /**
+     * Logs that the open {@code what} {@code id} is left out of an open-request listing because its file
+     * cannot be read. The listings run every minute and on every page that shows a pending count, so
+     * one request that stays unreadable is warned about when it is first seen and then once an hour,
+     * and logged at FINE in between.
+     */
+    private void skipUnreadableOpen(String what, String id, RuntimeException e) {
+        String key = what + ' ' + id;
+        Instant now = BatchClock.now();
+        Instant warned = unreadableOpenWarnedAt.get(key);
+        if (warned == null || now.isBefore(warned) || !now.isBefore(warned.plus(UNREADABLE_WARNING_INTERVAL))) {
+            unreadableOpenWarnedAt.put(key, now);
+            LOGGER.log(Level.WARNING, "Skipping the open " + what + " '" + id + "': its file cannot be read. While it"
+                    + " cannot be read it is not counted, expired, approved, run or recovered; it is picked up again"
+                    + " as soon as it can be read", e);
+        } else {
+            LOGGER.log(Level.FINE, "Still skipping the open " + what + " '" + id + "': its file cannot be read", e);
+        }
+    }
+
+    /**
+     * Notes that the open {@code what} {@code id}, once skipped as unreadable, was read again
+     * ({@code found}) or is gone.
+     */
+    private void readableAgain(String what, String id, boolean found) {
+        if (!unreadableOpenWarnedAt.isEmpty() && unreadableOpenWarnedAt.remove(what + ' ' + id) != null) {
+            LOGGER.info(() -> "The open " + what + " '" + id + "' " + (found ? "can be read again" : "is gone"));
+        }
     }
 
     /** Writes a plain-text file atomically (temp file, then {@code ATOMIC_MOVE}). */
@@ -1082,8 +1461,16 @@ public final class FileStore implements Store {
         try {
             Files.createDirectories(dir);
             Path tmp = Files.createTempFile(dir, "write", ".tmp");
-            Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
-            moveAtomically(tmp, target);
+            boolean moved = false;
+            try {
+                Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+                moveAtomically(tmp, target);
+                moved = true;
+            } finally {
+                if (!moved) {
+                    deleteQuietly(tmp);
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write " + what, e);
         } finally {
@@ -1125,6 +1512,19 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * Appends one record line to a month file (every append-only JSONL file goes through here:
+     * changes, runs, the incident index). Under the file's lock, the file's last byte is checked
+     * first: a file that does not end with a line end (a line torn by a crash or a failed write) is
+     * terminated before the record is written, so the record never merges into the torn line and
+     * stays readable (T-SEC-108); the torn line stays an unreadable line of its own.
+     *
+     * <p>The append itself needs only write access (T-GAP-387): the file is opened for writing alone
+     * and its last byte is read through a channel of its own. When that byte cannot be read (a file
+     * that can be written but not read), the record is written after a line end of its own, as for a
+     * torn line, instead of failing: at worst that leaves a blank line, which every reader of these
+     * files skips ({@link #parseLines}, the paged reads, the month counters, retention).
+     */
     private void appendLine(Path dir, YearMonth month, JSONObject json) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
         String line = json.toString() + System.lineSeparator();
@@ -1132,13 +1532,48 @@ public final class FileStore implements Store {
         lock.lock();
         try {
             Files.createDirectories(dir);
-            // Files.write opens, writes, flushes and closes in one call.
-            Files.write(file, line.getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+                long end = channel.size();
+                if (end > 0 && !lastLineEnded(file, end)) {
+                    line = System.lineSeparator() + line;
+                }
+                ByteBuffer bytes = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
+                while (bytes.hasRemaining()) {
+                    end += channel.write(bytes, end);
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to append record to " + file, e);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * Whether the byte before {@code end} in {@code file} is a line feed, read through a read-only
+     * channel of its own. {@code false}, with a warning, when it is not (a torn last line) or when it
+     * cannot be read: the caller then writes a line end before the record.
+     */
+    private static boolean lastLineEnded(Path file, long end) {
+        try (SeekableByteChannel in = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            in.position(end - 1);
+            ByteBuffer last = ByteBuffer.allocate(1);
+            while (last.hasRemaining()) {
+                if (in.read(last) < 0) {
+                    break;
+                }
+            }
+            if (!last.hasRemaining() && last.get(0) == '\n') {
+                return true;
+            }
+            LOGGER.warning(() -> "The last line of " + file + " was not terminated (torn); it is ended before"
+                    + " the next record is appended and stays an unreadable line of its own");
+            return false;
+        } catch (IOException e) {
+            LOGGER.warning(() -> "The last byte of " + file + " could not be read (" + e.getClass().getName()
+                    + "); the record is appended after a line end of its own, which leaves at worst a blank line"
+                    + " that readers skip");
+            return false;
         }
     }
 
@@ -1260,6 +1695,22 @@ public final class FileStore implements Store {
                                    Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
                                    Function<T, Instant> timeOf, Predicate<? super T> filter,
                                    Comparator<T> newestFirst, int offset, int limit, int maxScanned) {
+        return page(dir, months, period, timeKey, appendedAt, fastParser, fullParser, timeOf, filter, newestFirst,
+                offset, limit, maxScanned, null);
+    }
+
+    /**
+     * As {@link #page(Path, Collection, Period, byte[], ToLongFunction, Function, Function, Function,
+     * Predicate, Comparator, int, int, int)}; in addition, reading stops at the first record before
+     * the period that {@code boundary} accepts (a record that tells that no earlier line can matter
+     * to the caller), even inside the append-order slack.
+     */
+    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Period period, byte[] timeKey,
+                                   ToLongFunction<JsonLineScanner> appendedAt,
+                                   Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
+                                   Function<T, Instant> timeOf, Predicate<? super T> filter,
+                                   Comparator<T> newestFirst, int offset, int limit, int maxScanned,
+                                   @CheckForNull Predicate<? super T> boundary) {
         int from = Math.max(0, offset);
         int size = Math.max(0, limit);
         int cap = Math.max(0, maxScanned);
@@ -1296,6 +1747,10 @@ public final class FileStore implements Store {
                                 if (period.isBefore(at) && appendedAt.applyAsLong(scanner) < stopBefore) {
                                     break scan; // every earlier line, in this and older months, is older
                                 }
+                                if (boundary != null && period.isBefore(at)
+                                        && isBoundary(scanner, reader, fastParser, fullParser, boundary)) {
+                                    break scan; // no earlier line can matter to the caller
+                                }
                                 skippedBytes += reader.length();
                                 if (skippedBytes > MAX_SKIPPED_BYTES) {
                                     truncated = true;
@@ -1324,6 +1779,9 @@ public final class FileStore implements Store {
                             }
                             Instant at = value == null ? null : timeOf.apply(value);
                             if (at != null && (period.isAfter(at.toEpochMilli()) || period.isBefore(at.toEpochMilli()))) {
+                                if (boundary != null && period.isBefore(at.toEpochMilli()) && boundary.test(value)) {
+                                    break scan; // no earlier line can matter to the caller
+                                }
                                 continue;
                             }
                         }
@@ -1364,7 +1822,25 @@ public final class FileStore implements Store {
         List<T> items = from >= sorted.size()
                 ? new ArrayList<>()
                 : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
-        return new RecordPage<>(items, from, matched, truncated, oversized);
+        return new RecordPage<>(items, from, matched, truncated, oversized, unreadable);
+    }
+
+    /** Whether the line just scanned is a record {@code boundary} accepts; a line that cannot be parsed is not. */
+    private static <T> boolean isBoundary(JsonLineScanner scanner, ReverseLineReader reader,
+                                          Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
+                                          Predicate<? super T> boundary) {
+        T value;
+        try {
+            value = fastParser.apply(scanner);
+        } catch (RuntimeException e) {
+            try {
+                value = fullParser.apply(JSONObject.fromObject(
+                        new String(reader.buffer(), reader.offset(), reader.length(), StandardCharsets.UTF_8)));
+            } catch (RuntimeException again) {
+                return false;
+            }
+        }
+        return value != null && boundary.test(value);
     }
 
     // ---------------------------------------------------------------- JSON codecs

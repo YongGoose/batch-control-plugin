@@ -9,8 +9,9 @@
       <l:app-bar title="Request Change Permission"/>
       <bc:tabs active="grants"/>
       <p class="jenkins-description">
-        A temporary (just-in-time) permission window to create, configure or delete jobs. It
-        opens when one of the approvers you check approves it.
+        A temporary (just-in-time) permission window for one job or folder: to configure it,
+        to create items directly inside a folder, or to delete a job. It opens when one of the
+        approvers you check approves it.
       </p>
       <j:set var="bcDialog" value="false"/>
       <st:include page="_requestForm.jelly"/>

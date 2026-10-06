@@ -35,9 +35,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *       field {@code approvers} (one user id per value);</li>
  *   <li>{@code POST batch-control/requests/<id>/approve|reject} with {@code comment};</li>
  *   <li>{@code POST batch-control/requests/<id>/changeApprover} with repeated {@code approvers};</li>
- *   <li>{@code POST batch-control/grants/create} with {@code scopeType}, {@code scopeFullName},
- *       repeated {@code actions}, {@code durationMinutes}, {@code reason}, repeated
- *       {@code approvers} and the optional {@code createNamePattern};</li>
+ *   <li>{@code POST batch-control/grants/create} with {@code scopeFullName}, repeated
+ *       {@code actions}, {@code durationMinutes}, {@code reason}, repeated {@code approvers} and
+ *       the optional {@code createNamePattern}. Since D-71 a window names exactly one item and
+ *       the form has no {@code scopeType} field;</li>
  *   <li>{@code POST batch-control/grants/<id>/approve|reject} with {@code comment};</li>
  *   <li>{@code POST batch-control/grants/<id>/changeApprover} with repeated {@code approvers}
  *       (requester-only, PENDING-only; symmetric with the run-request endpoint above).</li>
@@ -125,11 +126,10 @@ final class ApproverFormFixtures {
 
     // ------------------------------------------------------------------ grant requests
 
-    static WebResponse submitGrant(JenkinsRule j, String userId, String scopeType, String scopeFullName,
+    static WebResponse submitGrant(JenkinsRule j, String userId, String scopeFullName,
                                    List<String> actions, int minutes, String reason,
                                    String createNamePattern, String... approvers) throws Exception {
         List<NameValuePair> params = new ArrayList<>();
-        params.add(new NameValuePair("scopeType", scopeType));
         params.add(new NameValuePair("scopeFullName", scopeFullName));
         for (String action : actions) {
             params.add(new NameValuePair("actions", action));
@@ -148,11 +148,11 @@ final class ApproverFormFixtures {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    static String submitGrantOk(JenkinsRule j, String userId, String scopeType, String scopeFullName,
+    static String submitGrantOk(JenkinsRule j, String userId, String scopeFullName,
                                 List<String> actions, int minutes, String reason,
                                 String createNamePattern, String... approvers) throws Exception {
         Set<String> before = grantRequestIds();
-        WebResponse response = submitGrant(j, userId, scopeType, scopeFullName, actions, minutes, reason,
+        WebResponse response = submitGrant(j, userId, scopeFullName, actions, minutes, reason,
                 createNamePattern, approvers);
         assertSuccess(response, "fixture: the grant request submission by " + userId);
         Set<String> after = grantRequestIds();

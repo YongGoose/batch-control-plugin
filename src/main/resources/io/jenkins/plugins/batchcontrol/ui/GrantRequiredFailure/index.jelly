@@ -5,28 +5,60 @@
      page that answers 403. Only the item name and constant text are rendered; no script.
      e2e re-audit DEF-28: no "Back to" link; the breadcrumb bar leads back (hosting review).
      Hosting review 2026-10-02: the alert's first block is not wrapped in a p (a p adds padding on
-     top); later blocks are divs spaced with the core margin utility. -->
+     top); later blocks are divs spaced with the core margin utility.
+     D-71: when no window can allow the change (Delete of a folder, multibranch project or
+     organization folder; Create in a group that is not a regular folder;
+     GrantRequiredFailure#isWindowApplies false) nobody is sent to the form: the page says an
+     administrator has to make the change. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Permission window required" type="one-column">
     <l:main-panel>
       <l:app-bar title="Permission window required"/>
       <div class="jenkins-alert jenkins-alert-warning" role="alert">
         <strong>Nothing was changed.</strong>
-        Change control is on: this change to <strong>${it.itemFullName}</strong> needs an
-        approved <strong>${it.actionLabel}</strong> permission window, and you do not hold one.
         <j:choose>
-          <j:when test="${it.canRequest}">
+          <j:when test="${it.partOfJob}">
+            Change control is on, and no permission window can allow this change to
+            <strong>${it.itemFullName}</strong>: it is part of another job and cannot be named by
+            a permission window.
             <div class="jenkins-!-margin-top-2">
-              Request a ${it.actionLabel} window for it on the
-              <a href="${rootURL}/${it.requestUrl}">Grants</a> screen (the form is prefilled), and
-              try again once the request is approved.
+              Ask a Jenkins administrator to make this change for you.
+            </div>
+          </j:when>
+          <j:when test="${!it.windowApplies}">
+            Change control is on, and no permission window can allow this change to
+            <strong>${it.itemFullName}</strong> (${it.itemKindName}): a window's
+            ${it.actionLabel} applies only to ${it.delete ? 'a job' : 'a folder'}.
+            <div class="jenkins-!-margin-top-2">
+              <j:choose>
+                <j:when test="${it.delete}">
+                  <j:if test="${it.group}">Deleting it would also delete every item inside it.</j:if>
+                  Ask a Jenkins administrator to delete (or move) it.
+                </j:when>
+                <j:otherwise>
+                  Ask a Jenkins administrator to make this change for you.
+                </j:otherwise>
+              </j:choose>
             </div>
           </j:when>
           <j:otherwise>
-            <div class="jenkins-!-margin-top-2">
-              You may not request permission windows yourself. Ask a Jenkins administrator to give
-              you the Batch Control/RequestGrant permission, or to make this change for you.
-            </div>
+            Change control is on: this change to <strong>${it.itemFullName}</strong> needs an
+            approved <strong>${it.actionLabel}</strong> permission window, and you do not hold one.
+            <j:choose>
+              <j:when test="${it.canRequest}">
+                <div class="jenkins-!-margin-top-2">
+                  Request a ${it.actionLabel} window for it on the
+                  <a href="${rootURL}/${it.requestUrl}">Grants</a> screen (the form is prefilled),
+                  and try again once the request is approved.
+                </div>
+              </j:when>
+              <j:otherwise>
+                <div class="jenkins-!-margin-top-2">
+                  You may not request permission windows yourself. Ask a Jenkins administrator to
+                  give you the Batch Control/RequestGrant permission, or to make this change for you.
+                </div>
+              </j:otherwise>
+            </j:choose>
           </j:otherwise>
         </j:choose>
       </div>

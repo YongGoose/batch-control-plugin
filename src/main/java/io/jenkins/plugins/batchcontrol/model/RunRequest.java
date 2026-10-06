@@ -15,6 +15,13 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * A request to run a specific job with a fixed set of parameters (SPEC section 3).
  * Persisted as XStream XML at {@code requests/run/<id>.xml}.
  *
+ * <p>D-72, D-74: {@code parameters} is the masked display map derived from the submitted
+ * {@link hudson.model.ParameterValue}s once at submission, the only form in which a request's
+ * parameters are shown or written anywhere else. The typed values themselves are not part of this
+ * object: the store keeps them in their own file ({@code requests/run/<id>.values.xml}), read only
+ * to approve, submit, recover or dispose of the request, and deleted when the approved run starts
+ * or the request ends.
+ *
  * <p>Timestamps are persisted as epoch milliseconds ({@code long}) because the Jenkins XStream
  * class filter does not allow {@code java.time.Instant}; the accessors expose {@link Instant}.
  *
@@ -71,6 +78,7 @@ public final class RunRequest {
 
     private final String id;
     private final String jobFullName;
+    /** D-72: the masked display map derived from the submitted typed values. */
     private final Map<String, String> parameters;
     private final String reason;
     private final String requester;
@@ -104,7 +112,12 @@ public final class RunRequest {
     private Long expiryBaseMillis;
     /** Human-readable history note for an INVALIDATED request (D-21: target renamed/moved). */
     private String invalidationReason;
-
+    /**
+     * D-72b (7), security-35 S-35-07: when the queue item of the approved run was cancelled, or
+     * {@code null}. Such a run is never submitted again (startup recovery skips it), and its
+     * files are disposed of when the request ends.
+     */
+    private Long queueCancelledAtMillis;
     private RunRequest(String id, String jobFullName, Map<String, String> parameters, String reason,
                        String requester, List<String> approvers, RequestStatus status, Instant createdAt) {
         this.id = id;
@@ -118,8 +131,9 @@ public final class RunRequest {
     }
 
     /**
-     * Creates a new PENDING request with a random UUID id (D-68) and its creation time
-     * from {@link BatchClock}.
+     * Creates a new PENDING request with a random UUID id (D-68) and its creation time from
+     * {@link BatchClock}, holding the masked display map {@code parameters} (D-72). The typed values
+     * the map was derived from are stored next to it by the store (D-74).
      */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, List<String> approvers) {
@@ -129,7 +143,7 @@ public final class RunRequest {
                 RequestStatus.PENDING, BatchClock.now());
     }
 
-    /** Single-approver form, kept for callers written before D-37. */
+    /** Single-approver form of {@link #create(String, Map, String, String, List)}. */
     public static RunRequest create(String jobFullName, Map<String, String> parameters, String reason,
                                     String requester, String approver) {
         return create(jobFullName, parameters, reason, requester, Approvers.of(approver));
@@ -151,7 +165,10 @@ public final class RunRequest {
         return jobFullName;
     }
 
-    /** A defensive copy; the stored parameters never change after creation. */
+    /**
+     * The masked display map (D-72): a sensitive value is {@code ********}, a file value
+     * {@code [file] <original file name>}. A defensive copy; it never changes after creation.
+     */
     public Map<String, String> getParameters() {
         return parameters == null ? new LinkedHashMap<>() : new LinkedHashMap<>(parameters);
     }
@@ -307,6 +324,19 @@ public final class RunRequest {
 
     public String getInvalidationReason() {
         return invalidationReason;
+    }
+
+    /**
+     * D-72b (7): when the queue item of the approved run was cancelled, or {@code null}. The
+     * request stays APPROVED until the approved-run timeout ends it; it is never submitted again.
+     */
+    public Instant getQueueCancelledAt() {
+        return queueCancelledAtMillis == null ? null : Instant.ofEpochMilli(queueCancelledAtMillis);
+    }
+
+    /** Only the policy service records the cancellation of the approved run's queue item. */
+    public void setQueueCancelledAt(Instant queueCancelledAt) {
+        this.queueCancelledAtMillis = queueCancelledAt == null ? null : queueCancelledAt.toEpochMilli();
     }
 
     public void setInvalidationReason(String invalidationReason) {

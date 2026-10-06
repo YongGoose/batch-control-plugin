@@ -2,7 +2,7 @@ import { login, close, shot, api, BASE, log, changeRows, requestGrant, decide, s
 const L = 'section-b.log';
 const rq = await login('requester'); const p = rq.page;
 const cfg = async (path) => (await p.goto(`${BASE}${path}configure`)).status();
-const g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: 'Only a CREATE window (B9-04/06/07 rerun).' });
+const g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: 'Only a CREATE window (B9-04/06/07 rerun).' });
 await decide(g.url);
 await p.goto(`${BASE}/job/team/newJob`); await p.fill('#name', 'app-g3');
 await p.locator('label:has-text("Freestyle project")').first().click();

@@ -3,11 +3,8 @@ package io.jenkins.plugins.batchcontrol.model;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.function.Supplier;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -30,10 +27,33 @@ public final class Grant {
     /** #85 (P-15): the revocation reason of the windows closed by turning change control off. */
     public static final String REVOKED_CHANGE_CONTROL_OFF = "change control turned off";
 
+    /** D-74: the revocation reason of a window whose item was deleted (or no longer exists). */
+    public static final String REVOKED_ITEM_DELETED = "its item was deleted";
+
+    /**
+     * S-39-02: the revocation reason of a window that could not follow its renamed or moved item for
+     * certain (its file could not be updated, another item had already taken the old name again, or
+     * another item has just taken the name the window gives).
+     */
+    public static final String REVOKED_ITEM_NOT_FOLLOWED = "it could not follow its item";
+
+    /**
+     * S-39-03: the revocation reason of a window ended at startup because the change records could
+     * not all be read, so it could not be shown not to have ended before.
+     */
+    public static final String REVOKED_UNCONFIRMED = "its state could not be confirmed at startup";
+
     private final String id;
     private final String grantRequestId;
     private final String user;
-    private final GrantScope scope;
+    /**
+     * The item the window is on. D-74: it follows the item when an administrator or a user with
+     * their own permissions renames or moves it ({@link #followItem(String)}), as matrix-auth's item
+     * permissions do.
+     */
+    private GrantScope scope;
+    /** D-71: the kind of the scope item, copied from the request at approval ({@code null} if it had none). */
+    private ItemKind itemKind;
     private final List<GrantAction> actions;
     private final long grantedAtMillis;
     private final long expiresAtMillis;
@@ -48,17 +68,11 @@ public final class Grant {
     /**
      * D-35c: full names of the items this grant's holder created inside the scope during the
      * window, using the grant's Create. While the grant is active the holder also holds Item/Read
-     * and Item/Configure on them, so matrix-auth's creator listener adds no permanent entry.
-     * {@code null} in grant files written before D-35c (XStream skips the initializer).
+     * and Item/Configure on them, so matrix-auth's creator listener adds no permanent entry. Item
+     * events keep the names in step (D-74): a rename or move updates them, a deletion drops them.
+     * {@code null} when empty.
      */
     private List<String> createdItems;
-    /**
-     * S-09: the identity of each created item (full name to an opaque marker of its directory on
-     * disk, see {@code security.ItemIdentity}), so an item deleted and recreated under the same
-     * name by someone else is not taken for the created one. An item without an entry (grant files
-     * written before S-09, or no marker could be read) is matched by name alone.
-     */
-    private Map<String, String> createdItemIdentities;
     /**
      * D-40: the CREATE name restriction copied from the request ({@code null}: any name). Copied so
      * the permission-check hot path never has to load the request.
@@ -99,6 +113,7 @@ public final class Grant {
                 request.getScope(), request.getActions(), grantedAt,
                 grantedAt.plus(Duration.ofMinutes(request.getDurationMinutes())));
         grant.createNamePattern = request.getCreateNamePattern();
+        grant.itemKind = request.getItemKind();
         return grant;
     }
 
@@ -150,6 +165,19 @@ public final class Grant {
         return scope;
     }
 
+    /** D-71: the kind of the scope item, copied from the request ({@code null} if it recorded none). */
+    public ItemKind getItemKind() {
+        return itemKind;
+    }
+
+    /**
+     * D-74: the window follows its item, renamed or moved to {@code newFullName}. Only
+     * {@code security.GrantService} calls this.
+     */
+    public void followItem(String newFullName) {
+        this.scope = GrantScope.item(Objects.requireNonNull(newFullName, "newFullName"));
+    }
+
     /** A defensive copy; the granted actions never change after creation. */
     public List<GrantAction> getActions() {
         return actions == null ? new ArrayList<>() : new ArrayList<>(actions);
@@ -199,51 +227,11 @@ public final class Grant {
     }
 
     /**
-     * Whether {@code itemFullName} was created through this grant's Create and is still the same
-     * item (S-09): when an identity was recorded for it, {@code currentIdentity} (evaluated only
-     * then) must return that identity.
-     */
-    public boolean hasCreated(String itemFullName, Supplier<String> currentIdentity) {
-        if (!hasCreated(itemFullName)) {
-            return false;
-        }
-        String recorded = createdItemIdentities == null ? null : createdItemIdentities.get(itemFullName);
-        return recorded == null || recorded.equals(currentIdentity.get());
-    }
-
-    /** S-09: the recorded identities of the created items (a copy; never {@code null}). */
-    public Map<String, String> getCreatedItemIdentities() {
-        return createdItemIdentities == null ? new HashMap<>() : new HashMap<>(createdItemIdentities);
-    }
-
-    /**
      * Replaces the created-items list (D-35c). Only {@code security.GrantService} calls this, when
-     * an item is created, relocated or deleted. Identities of items no longer listed are dropped.
+     * an item is created, relocated or deleted.
      */
     public void setCreatedItems(List<String> items) {
         this.createdItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
-        if (createdItemIdentities != null) {
-            createdItemIdentities.keySet().removeIf(name -> createdItems == null || !createdItems.contains(name));
-            if (createdItemIdentities.isEmpty()) {
-                createdItemIdentities = null;
-            }
-        }
-    }
-
-    /**
-     * Replaces the created-item identities (S-09); keys not in the created-items list are
-     * ignored. Only {@code security.GrantService} calls this.
-     */
-    public void setCreatedItemIdentities(Map<String, String> identities) {
-        Map<String, String> kept = new HashMap<>();
-        if (identities != null && createdItems != null) {
-            identities.forEach((name, identity) -> {
-                if (identity != null && createdItems.contains(name)) {
-                    kept.put(name, identity);
-                }
-            });
-        }
-        this.createdItemIdentities = kept.isEmpty() ? null : kept;
     }
 
     /** D-58a: the items changed under this grant and not reviewed since (a copy; never {@code null}). */
@@ -261,12 +249,11 @@ public final class Grant {
         this.changedItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
     }
 
-    /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */
-    public void markRevoked(Instant revokedAt, String revokedBy) {
-        markRevoked(revokedAt, revokedBy, null);
-    }
-
-    /** As {@link #markRevoked(Instant, String)}, recording why (#85); only {@code security.GrantService} calls this. */
+    /**
+     * Marks the grant revoked by {@code revokedBy}, recording why ({@code null}: an individual
+     * revocation, #85). Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC
+     * item 8).
+     */
     public void markRevoked(Instant revokedAt, String revokedBy, String reason) {
         this.revokedAtMillis = Objects.requireNonNull(revokedAt, "revokedAt").toEpochMilli();
         this.revokedBy = revokedBy;

@@ -473,7 +473,14 @@ def sec_M():
         d = s.page.locator("dialog[open]").first
         row["dialog"] = d.count()
         if d.count():
-            row["prefill"] = {"scopeType": d.locator("select[name=scopeType]").input_value(), "scope": d.locator("input[name=scopeFullName]").input_value(),
+            kind = d.locator("[data-batch-control-item-kind]")
+            try:
+                kind.first.wait_for(timeout=5000)
+            except Exception:
+                pass
+            row["prefill"] = {"scope_type_selector": d.locator("select[name=scopeType]").count(),  # D-71: must be 0
+                              "item_kind": kind.first.get_attribute("data-batch-control-item-kind") if kind.count() else None,
+                              "scope": d.locator("input[name=scopeFullName]").input_value(),
                               "actions": [a.get_attribute("value") for a in d.locator("input[name=actions]").all() if a.is_checked()],
                               "reason": d.locator("textarea[name=reason]").input_value()[:60],
                               "approvers": [a.get_attribute("value") for a in d.locator("input[name=approvers]").all() if a.is_checked()]}

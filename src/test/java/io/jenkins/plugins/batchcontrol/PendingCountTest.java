@@ -119,9 +119,9 @@ public class PendingCountTest {
     @Test
     public void t_ui_74_grantRequestCountsAndBadge() throws Exception {
         Function<Authentication, PendingCount> count = a -> GrantRequestService.get().countPendingFor(a);
-        GrantRequest first = as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "count-x"),
+        GrantRequest first = as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "count-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30, "fix 1", "a1"));
-        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "count-x"),
+        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "count-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30, "fix 2", "a1"));
 
         assertCounts(count, 2);
@@ -169,7 +169,7 @@ public class PendingCountTest {
     @Test
     public void t_ui_76_designatedApproverWithoutApproveHasNothingAwaiting() throws Exception {
         as("u1", () -> RunRequestService.get().create(job, new LinkedHashMap<>(), "run", "d1"));
-        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "count-x"),
+        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "count-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30, "fix", "d1"));
         as("u1", () -> ActivationService.get().create(job, ActivationRequest.Action.ACTIVATE, "go live", List.of("d1")));
         assertEquals(1, RunRequestService.get().countPendingFor(auth("d1")).getAwaitingDecision(), "guard: d1 with Approve awaits the run request");
@@ -189,7 +189,7 @@ public class PendingCountTest {
     public void t_ui_77_anonymousGetsNone() throws Exception {
         as("u1", () -> RunRequestService.get().create(job, new LinkedHashMap<>(), "run", "a1"));
         as("u1", () -> ActivationService.get().create(job, ActivationRequest.Action.ACTIVATE, "go live", List.of("a1")));
-        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, "count-x"),
+        as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, "count-x"),
                 Arrays.asList(GrantAction.CONFIGURE), 30, "fix", "a1"));
         Authentication anon = Jenkins.ANONYMOUS2;
         assertEquals(PendingCount.NONE, RunRequestService.get().countPendingFor(anon), "anonymous: run requests");

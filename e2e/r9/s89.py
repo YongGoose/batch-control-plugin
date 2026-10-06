@@ -20,7 +20,7 @@ a.done()
 r = Session("requester")
 r.go("/batch-control/grants/")
 f = r.page.locator("form#new-grant-request, form[action$='grants/create'], form[action$='create']").first
-f.locator("select[name=scopeType]").select_option("JOB")
+# D-71: scope type selector removed (no select_option)
 f.locator("input[name=scopeFullName]").fill("batch-pipeline")
 f.locator("input[name=actions][value=CONFIGURE] + label").click()
 f.locator("textarea[name=reason]").fill("e2e-09 #89 browser submit")

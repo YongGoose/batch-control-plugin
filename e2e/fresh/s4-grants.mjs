@@ -1,6 +1,7 @@
 // Scenario 4: change permission windows. node s4-grants.mjs <step> ...
 //  invalid                       - invalid submissions on the grant form
-//  request <type> <scope> <actions,> <minutes> [pattern]  - requester files a window request
+//  request <job|grants> <scope> <actions,> <minutes> [pattern]  - requester files a window request from the job page
+//                                or the Grants page (D-71: the form names one item, there is no scope type)
 //  approve <id> [user]           - approver approves it
 //  configure <job> <tag>         - requester edits the job description through the config form
 //  escalate <job>                - requester adds itself to the job's authorization matrix (self-grant)
@@ -15,9 +16,8 @@ const S = 'S4';
 const [step, ...a] = process.argv.slice(2);
 const form = (page) => page.locator('form[action$="grants/create"]');
 
-async function fill(page, { type = 'JOB', scope, actions = [], minutes, custom, pattern, reason, approvers = ['approver-1'] }) {
+async function fill(page, { scope, actions = [], minutes, custom, pattern, reason, approvers = ['approver-1'] }) {
   const f = form(page);
-  await f.locator('select[name="scopeType"]').selectOption(type);
   await f.locator('input[name="scopeFullName"]').fill(scope ?? '');
   for (const act of ['CREATE', 'CONFIGURE', 'DELETE']) await f.locator(`input[name="actions"][value="${act}"]`).setChecked(actions.includes(act), { force: true });
   if (pattern !== undefined) await f.locator('input[name="createNamePattern"]').fill(pattern);
@@ -38,7 +38,7 @@ if (step === 'invalid') {
     ['no-reason', { scope: 'fresh-daily', actions: ['CONFIGURE'], reason: '' }],
     ['too-long', { scope: 'fresh-daily', actions: ['CONFIGURE'], custom: 999, reason: 'too long' }],
     ['no-such-job', { scope: 'fresh-nope', actions: ['CONFIGURE'], reason: 'missing job' }],
-    ['bad-regex', { type: 'FOLDER', scope: 'fresh-folder', actions: ['CREATE'], pattern: '/fresh-(/', reason: 'bad regex' }],
+    ['bad-regex', { scope: 'fresh-folder', actions: ['CREATE'], pattern: '/fresh-(/', reason: 'bad regex' }],
     ['pattern-without-create', { scope: 'fresh-daily', actions: ['CONFIGURE'], pattern: 'fresh-x', reason: 'pattern w/o create' }],
     ['no-approver', { scope: 'fresh-daily', actions: ['CONFIGURE'], reason: 'nobody', approvers: [] }],
   ];
@@ -58,14 +58,14 @@ if (step === 'invalid') {
 }
 
 if (step === 'request') {
-  const [type, scope, acts, minutes, pattern] = a;
+  const [entry, scope, acts, minutes, pattern] = a;
   const { page } = await login('requester');
-  if (type === 'JOB') {
+  if (entry === 'job') {
     await page.goto(`${BASE}/job/${scope}/`);
     await page.locator('#tasks a, #side-panel a', { hasText: 'Request Change Permission' }).first().click();
     await page.waitForLoadState('load');
   } else await page.goto(`${BASE}/batch-control/grants/`);
-  await fill(page, { type, scope, actions: acts.split(','), minutes, pattern, reason: `fresh e2e-04: ${acts} on ${scope}${pattern ? ' named ' + pattern : ''}` });
+  await fill(page, { scope, actions: acts.split(','), minutes, pattern, reason: `fresh e2e-04: ${acts} on ${scope}${pattern ? ' named ' + pattern : ''}` });
   await shot(page, form(page), `${S}-${scope.replace(/\W/g, '_')}-${acts.replace(/,/g, '+')}-01-form`);
   await submit(page);
   const id = (page.url().match(/grants\/([0-9]{8}-[0-9]{6}-\w+)/) || [])[1] || (flat(await text(page)).match(/Status (\d{8}-\d{6}-\w+) /) || [])[1];

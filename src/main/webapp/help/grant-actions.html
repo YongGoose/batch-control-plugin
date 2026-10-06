@@ -1,3 +1,34 @@
 <div>
-  The Jenkins permissions to grant temporarily: Create, Configure and/or Delete items within the scope.
+  The Jenkins permissions to grant temporarily on the one job or folder named above, and on no
+  other item.
+  <ul>
+    <li><b>Configure</b>: change the item's own configuration. For a folder, that is the folder's
+      settings: the window gives no permission on the items inside the folder, but the folder's
+      settings still affect them (for example implicitly loaded Pipeline libraries), and
+      reconfiguring a Multibranch Pipeline or organization folder can create or delete the items
+      it generates.</li>
+    <li><b>Create</b>: create new items directly inside the folder. Applies only to a regular
+      folder. While Create is ticked, the optional <b>New job name restriction</b> limits which
+      new job the window lets you create:
+      <ul>
+        <li>An exact item name, for example <code>nightly-report</code>: only a job with exactly
+          that name can be created.</li>
+        <li>A Java regular expression between slashes, for example <code>/report-[0-9]+/</code>:
+          the expression must match the <em>whole</em> item name (the name of the new job itself,
+          not its folder path).</li>
+      </ul>
+      Leave it empty to allow any name in the folder. The restriction is checked when you submit
+      (an invalid expression is refused) and shown to the approver. It does not affect Configure
+      or Delete. An attempt to create a job with another name is refused and recorded as a grant
+      violation.</li>
+    <li><b>Delete</b>: delete the job. Applies only to a job.</li>
+  </ul>
+  A request for Create or Delete on an item where it does not apply is refused when you submit it.
+  No window allows renaming a job or folder of any kind: neither a Configure window nor Delete and
+  Create windows together. A rename needs an administrator, or your own standing permissions:
+  Configure on the item, or Delete on it plus Create in its parent (the folder that contains it,
+  or Jenkins itself for a top-level item).
+  A window applies only to the item it was approved for. It follows that item when an
+  administrator (or a user with their own permissions) renames or moves it, and ends when the item
+  is deleted.
 </div>

@@ -148,8 +148,34 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         JSONObject form = normalizeListFields(json);
         validate(form);
         validateApprovers(form);
+        boolean recordingTurnedOn;
         synchronized (this) {
-            return bindWriteApply(req, form);
+            boolean wasRecording = isRecording();
+            bindWriteApply(req, form);
+            recordingTurnedOn = !wasRecording && isRecording();
+        }
+        if (recordingTurnedOn) {
+            seedSnapshots();
+        }
+        return true;
+    }
+
+    /** Whether change recording is active: either switch on (SPEC item 9, D-13). */
+    private boolean isRecording() {
+        return runControlEnabled || changeControlEnabled;
+    }
+
+    /**
+     * SPEC item 9: recording has just become active, so the snapshot of every item that exists now
+     * is brought up to date (nothing kept them current while recording was off) and becomes the
+     * diff baseline its next change is compared with. Called once the new state is applied and
+     * outside this instance's monitor, so a long refresh never holds up the switches. Never throws.
+     */
+    private static void seedSnapshots() {
+        try {
+            io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding.recordingTurnedOn();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not seed the configuration snapshots after change recording was turned on", e);
         }
     }
 
@@ -202,14 +228,20 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             this.runControlEnabled = enabled;
             return;
         }
+        boolean recordingTurnedOn;
         synchronized (this) {
             boolean previousRun = this.runControlEnabled;
             if (previousRun == enabled) {
                 return;
             }
+            boolean wasRecording = isRecording();
             this.runControlEnabled = enabled;
             afterSwitchesChanged(previousRun, this.changeControlEnabled);
             persistBestEffort();
+            recordingTurnedOn = !wasRecording && isRecording();
+        }
+        if (recordingTurnedOn) {
+            seedSnapshots();
         }
     }
 
@@ -240,14 +272,20 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             this.changeControlEnabled = enabled;
             return;
         }
+        boolean recordingTurnedOn;
         synchronized (this) {
             boolean previousChange = this.changeControlEnabled;
             if (previousChange == enabled) {
                 return;
             }
+            boolean wasRecording = isRecording();
             this.changeControlEnabled = enabled;
             afterSwitchesChanged(this.runControlEnabled, previousChange);
             persistBestEffort();
+            recordingTurnedOn = !wasRecording && isRecording();
+        }
+        if (recordingTurnedOn) {
+            seedSnapshots();
         }
     }
 

@@ -57,7 +57,12 @@ public class MoveRefusal extends Failure {
         return destinationFullName;
     }
 
-    /** Whether the refusal lacks Item/Delete on the item (a Delete window on the item would supply it). */
+    /**
+     * Whether the refusal lacks Item/Delete on the item and a Delete window on the item would supply
+     * it. {@code false} when a missing part cannot come from any window: Delete on an item group
+     * that is not a job (D-71), or Create in the Jenkins root (no window names it) or in a group that
+     * is not a regular folder. Such a move needs an administrator, so no window is suggested.
+     */
     public boolean isDeleteMissing() {
         return deleteMissing;
     }
@@ -65,7 +70,8 @@ public class MoveRefusal extends Failure {
     /**
      * Whether the refusal lacks Item/Create on the destination, either entirely or because the
      * active Create window's name restriction does not admit the item's name; a Create window on
-     * {@link #getDestinationFullName()} that admits the name would supply it.
+     * {@link #getDestinationFullName()} that admits the name would supply it. {@code false} when
+     * the move cannot be authorised through windows at all (see {@link #isDeleteMissing()}).
      */
     public boolean isCreateMissing() {
         return createMissing;

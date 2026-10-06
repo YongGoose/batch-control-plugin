@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests (no Jenkins). Matrix rows T-SEC-04 (path codec hardening, RT-12 extension),
- * T-SEC-03 (FOLDER scope boundary, prefix misjudgment prevention) and T-SEC-16
+ * T-SEC-03 (ITEM scope boundary: exact match, prefix misjudgment prevention; D-71) and T-SEC-16
  * (empty scope full name matches nothing — DECISIONS P-10 / security-02 S-13a).
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
@@ -72,31 +72,34 @@ public class PathCodecTest {
     }
 
     /**
-     * T-SEC-03: FOLDER scope "team/batch" must not include "team/batch-other" —
-     * prefix matching happens on path-segment boundaries only.
+     * T-SEC-03, rewritten for D-71: an ITEM scope "team/batch" includes exactly "team/batch" — not
+     * "team/batch-other" or "team/batchx" (the prefix misjudgment the row was written for), and,
+     * since D-71, not the items inside the folder either ("team/batch/job1",
+     * "team/batch/sub/job2"), which the former FOLDER scope included. The window on a folder is
+     * about the folder itself; Item/Create inside it is checked on the folder's own ACL.
      */
     @Test
     public void t_sec_03_folderScopeBoundaryIsSegmentExact() {
-        GrantScope folder = new GrantScope(GrantScope.Type.FOLDER, "team/batch");
-        assertTrue(folder.includes("team/batch/job1"));
-        assertTrue(folder.includes("team/batch/sub/job2"));
-        assertTrue(folder.includes("team/batch"), "the folder itself is in scope (CREATE is checked on the folder ACL)");
-        assertFalse(folder.includes("team/batch-other"), "prefix must match on segment boundary only");
+        GrantScope folder = new GrantScope(GrantScope.Type.ITEM, "team/batch");
+        assertTrue(folder.includes("team/batch"), "the named item itself is in scope (CREATE is checked on the folder ACL)");
+        assertFalse(folder.includes("team/batch/job1"), "D-71: a window on a folder does not include the items inside it");
+        assertFalse(folder.includes("team/batch/sub/job2"), "D-71: nor anything inside a nested folder");
+        assertFalse(folder.includes("team/batch-other"), "prefix must never match");
         assertFalse(folder.includes("team/batch-other/job1"));
         assertFalse(folder.includes("team/batchx"));
-        assertFalse(folder.includes("team"));
+        assertFalse(folder.includes("team"), "a window on a folder does not include its parent");
         assertFalse(folder.includes("other/batch/job1"));
 
-        GrantScope job = new GrantScope(GrantScope.Type.JOB, "team/batch/job1");
+        GrantScope job = new GrantScope(GrantScope.Type.ITEM, "team/batch/job1");
         assertTrue(job.includes("team/batch/job1"));
-        assertFalse(job.includes("team/batch/job10"), "JOB scope is exact match only");
+        assertFalse(job.includes("team/batch/job10"), "an ITEM scope is exact match only");
         assertFalse(job.includes("team/batch"));
         assertFalse(job.includes("team/batch/job1/sub"));
     }
 
     /**
      * T-SEC-16 (SPEC item 8 / DECISIONS P-10, security-02 S-13a): a scope whose full name is
-     * empty is not "the Jenkins root", it is nothing. For BOTH scope types
+     * empty is not "the Jenkins root", it is nothing. For every scope type (only ITEM since D-71)
      * {@code includes(anything)} must be false — including the empty full name itself — so that
      * a scope rebuilt by XStream from a store file written before the rule existed (or edited by
      * hand) can never confer instance-wide CREATE/CONFIGURE/DELETE.

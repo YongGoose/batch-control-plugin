@@ -211,7 +211,7 @@ public class UnlinkedIdTextTest {
     }
 
     private GrantRequest grantRequest(String jobName) throws Exception {
-        return as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.JOB, jobName),
+        return as("u1", () -> GrantRequestService.get().create(new GrantScope(GrantScope.Type.ITEM, jobName),
                 Arrays.asList(GrantAction.CONFIGURE), 30, "id text window", List.of("a1")));
     }
 

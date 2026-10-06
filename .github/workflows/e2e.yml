@@ -1,0 +1,199 @@
+# Scripted e2e pass on a real Jenkins, in five shards, with JaCoCo coverage of the changed lines.
+# Contract: e2e/README.md, "CI contract (for .github/workflows)".
+#
+# Non-blocking: no job of this workflow is a required status check. The job names
+# ("e2e build", "e2e (shard k)", "e2e coverage") are kept distinct from the jobs of build.yml,
+# because a required check is matched by name and "build" is the required status there.
+#
+# Runs with the default read-only token and no secrets, so fork pull requests work too: the
+# coverage report goes to the job summary, annotations and an artifact, never to a PR comment
+# or a third-party service.
+---
+name: E2E
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: e2e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build the plugin (tests skipped)
+        run: mvn -ntp -B clean package -DskipTests
+      # One build for every job: the classes the coverage job reads must be the ones in the hpi.
+      - name: Upload the hpi and its classes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-build
+          path: |
+            target/batch-control.hpi
+            target/classes/
+          if-no-files-found: error
+          retention-days: 7
+
+  e2e:
+    name: e2e (shard ${{ matrix.shard }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-build
+          path: target/
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: e2e/ci/requirements.txt
+      - name: Install the Python packages and Chromium
+        run: |
+          pip install -r e2e/ci/requirements.txt
+          python -m playwright install --with-deps chromium
+      # Exit 1: a scenario failed; exit 2: the stack did not start (e2e/ci/run.sh).
+      - name: Run shard ${{ matrix.shard }} of 5
+        env:
+          BC_BUILD: never
+          PY: python
+          SHARD: ${{ matrix.shard }}
+        run: e2e/ci/run.sh "$SHARD/5"
+      - name: Shard summary
+        if: always()
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          f="e2e/ci/out/$SHARD/summary.md"
+          if [ -f "$f" ]; then
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No summary for shard $SHARD (the stack may not have started; see the shard artifact)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      # Execution data, summaries, step logs, jenkins.log and screenshots.
+      - name: Upload the shard output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-shard-${{ matrix.shard }}
+          path: e2e/ci/out/${{ matrix.shard }}/
+          if-no-files-found: warn
+          retention-days: 14
+
+  coverage:
+    name: e2e coverage
+    needs: [build, e2e]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # The full history, so that the merge base with the base commit is present.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Java only runs the JaCoCo CLI here.
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: e2e/ci/requirements.txt
+      - name: Download the build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-build
+          path: target/
+      # Without merge-multiple: one directory per shard, e2e/ci/out/e2e-shard-<k>/jacoco-<k>.exec.
+      - name: Download the shard outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: e2e-shard-*
+          path: e2e/ci/out/
+      - name: Install the Python packages
+        id: pip
+        run: pip install -r e2e/ci/requirements.txt
+      - name: Fetch the JaCoCo CLI
+        run: e2e/ci/fetch-jacoco.sh
+      # Pull request: its base commit. Push to main: the previous tip (all zeros for a new
+      # branch, then there is nothing to compare with). workflow_dispatch: no base.
+      - name: Choose the base commit
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=""
+          if [ "$EVENT" = pull_request ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]]; then
+            base="$BEFORE"
+          fi
+          echo "base=${base:-none}"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      # Exit 0 whatever the coverage (no --fail-under until the owner sets a threshold);
+      # 3 = execution data and classes do not match, 2 = tool error.
+      - name: Coverage of the changed lines
+        if: steps.base.outputs.sha != ''
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base "$BASE" --annotations on
+      - name: Upload the coverage report
+        if: always() && steps.base.outputs.sha != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-coverage
+          path: e2e/ci/out/coverage/
+          if-no-files-found: warn
+          retention-days: 14
+      # Self-test of the crawl's content checks (e2e/README.md, "Content checks in the crawl"):
+      # the real CONTENT_JS and content_checks() of e2e/r14/crawl.py on two synthetic pages in
+      # headless Chromium, no Jenkins, about 10 s. Last, so that a failure here does not cost the
+      # coverage report; and it runs whatever the JaCoCo and coverage steps did (also when there
+      # is no base commit), needing only the Python packages. Exit 1 = a page did not give exactly
+      # the expected findings; its PASS/FAIL lines go to the job summary.
+      - name: Self-test of the content checks
+        if: ${{ !cancelled() && steps.pip.outcome == 'success' }}
+        shell: bash
+        env:
+          BC_BROWSER_CHANNEL: chromium
+        run: |
+          python -m playwright install --with-deps chromium
+          {
+            echo '### Self-test of the content checks'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          python e2e/ci/selftest_content.py 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

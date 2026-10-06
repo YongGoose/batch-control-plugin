@@ -1,0 +1,37 @@
+/*
+ * D-74: the plugin's own styles, only for what the design library has no utility class for
+ * (spacing and colours use core's jenkins-!-* classes). Served as an adjunct, so the browser
+ * caches it: <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>.
+ */
+
+/* Backlog #89: a short table cell (or a header row) that does not wrap at 1280 px. */
+.batch-control-nowrap {
+  white-space: nowrap;
+}
+
+/* One part of a date ("2026-10-05", "14:03"), kept whole; a cell wraps only between parts. */
+.batch-control-date-part {
+  white-space: nowrap;
+  margin-right: 0.3em;
+}
+
+/*
+ * D-75 (1) (tags/scopeItem.jelly): the note after the approved name of a moved window. It may wrap
+ * inside a short (nowrap) table cell, so the list does not widen for it.
+ */
+.batch-control-scope-note {
+  white-space: normal;
+}
+
+/*
+ * e2e-11 DEF-05 (tags/idLink.jelly): a request or window id (a UUID) shown cut to its first
+ * characters with an ellipsis; the element still holds the whole id.
+ */
+.batch-control-short-id {
+  display: inline-block;
+  max-width: 9ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}

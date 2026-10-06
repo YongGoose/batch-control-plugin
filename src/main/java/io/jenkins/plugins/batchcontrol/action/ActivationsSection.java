@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.ui.ActivationView;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
+import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.time.Instant;
@@ -72,23 +73,15 @@ public class ActivationsSection implements ModelObject, StaplerProxy {
 
     /**
      * Stapler: serves {@code /batch-control/activations/<id>/}; {@code null} renders a 404. A
-     * request the caller may not see renders exactly like a nonexistent one (P-09).
+     * request the caller may not see renders exactly like a nonexistent one (P-09), and so does
+     * every failed lookup (S-39-01, {@link RecordLookup}).
      */
     @CheckForNull
     public ActivationItem getDynamic(String id) {
-        if (id == null || id.isEmpty()) {
-            return null;
-        }
-        ActivationRequest request;
-        try {
-            request = ActivationService.get().load(id);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-        if (request == null || !Visibility.canSeeActivationRequest(request)) {
-            return null;
-        }
-        return new ActivationItem(request);
+        ActivationRequest request = RecordLookup.find(id, "activation request",
+                i -> ActivationService.get().load(i), ActivationRequest::getId,
+                Visibility::canSeeActivationRequest);
+        return request == null ? null : new ActivationItem(request);
     }
 
     // ---------------------------------------------------------------- view model (Jelly)

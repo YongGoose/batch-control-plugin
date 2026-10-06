@@ -52,7 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * SPEC item 6, D-60 (P-03): a refused build submission with parameters on an approval-required
+ * SPEC item 6, D-60 (sensitive values are never carried, as SPEC line 112 now states; D-72
+ * superseded P-03, note 265): a refused build submission with parameters on an approval-required
  * job leads a user who may request to the job's Request Run form with the submitted values filled
  * in, sensitive values excepted; nothing is queued or stored until the requester submits the
  * form; the refusal does not fall back to the classic build form. Matrix rows T-06-89 .. T-06-97
@@ -70,7 +71,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Users: {@code u1} requester (Item/Read, Item/Build, BatchControl/Request), {@code nobc}
  * (Item/Read, Item/Build, no Batch Control permission), {@code a1} approver.
  *
- * Written from docs/SPEC.md item 6, docs/DECISIONS.md D-60 and P-03, and docs/TEST-MATRIX.md only
+ * Written from docs/SPEC.md item 6, docs/DECISIONS.md D-60 and D-72, and docs/TEST-MATRIX.md only
  * (no src/main knowledge).
  */
 @WithJenkins

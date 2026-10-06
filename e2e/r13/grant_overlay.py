@@ -25,7 +25,7 @@ state("0 before")
 r = Session("requester")
 r.go("/batch-control/grants/")
 f = r.page.locator("form[action$='create']").first
-f.locator("select[name=scopeType]").select_option("JOB")
+# D-71: scope type selector removed (no select_option)
 f.locator("input[name=scopeFullName]").fill("team/app-1")
 f.locator("input[name=actions][value=CONFIGURE] + label").click()
 dur = f.locator("select[name=durationMinutes]")

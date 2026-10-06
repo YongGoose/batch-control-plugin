@@ -3,7 +3,12 @@
      windows, one row per request, each linking to its detail page. The request form opens in
      core's dialog from the app bar; the old prefill links of this page (?scopeFullName=, ?from=)
      are redirected to the form page (GrantsSection#getLegacyFormQuery). Backlog #89: short cells
-     do not wrap at 1280 px, only free text does. -->
+     do not wrap at 1280 px, only free text does. D-71: the Scope column shows the one item a
+     request or window names, with its kind (tags/scopeItem.jelly). D-74: a row with a window names
+     the window's item, which follows the item when it is renamed or moved; deleting the item ends
+     the window, so an active window simply shows its remaining time. D-75 (1), S-39-04: a followed
+     name only to a viewer who may read the item, otherwise the approved name with a fixed note
+     (GrantsSection.Row#getShownScope); the rows carry no other trace of the new location. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="legacyQuery" value="${it.legacyFormQuery}"/>
@@ -15,6 +20,8 @@
   <l:layout title="Grants" type="one-column" permissions="${it.viewPermissions}">
     <l:main-panel>
       <j:set var="base" value="${rootURL}/batch-control/grants/"/>
+      <!-- D-74: short cells and date parts are styled by the plugin stylesheet's classes. -->
+      <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>
       <l:app-bar title="Grants">
         <j:if test="${it.canRequest}">
           <button type="button" class="jenkins-button jenkins-button--primary" data-type="dialog-opener"
@@ -26,8 +33,8 @@
       </l:app-bar>
       <bc:tabs active="grants"/>
       <p class="jenkins-description">
-        Temporary (just-in-time) permission windows for creating, configuring or deleting jobs:
-        the requests awaiting a decision, the windows open now and the ones that have ended.
+        Temporary (just-in-time) permission windows, each for one job or folder: the requests
+        awaiting a decision, the windows open now and the ones that have ended.
       </p>
 
       <h2>Pending Requests</h2>
@@ -38,7 +45,7 @@
         <j:otherwise>
           <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="pending">
             <thead>
-              <tr style="white-space: nowrap;">
+              <tr class="batch-control-nowrap">
                 <th>ID</th>
                 <th>Scope</th>
                 <th>Actions</th>
@@ -52,14 +59,14 @@
             <tbody>
               <j:forEach var="r" items="${it.pendingItems}">
                 <tr>
-                  <td style="white-space: nowrap;"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></td>
-                  <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
-                  <td style="white-space: nowrap;">${it.join(r.actions)}</td>
-                  <td style="white-space: nowrap;">${r.request.durationMinutes} min</td>
+                  <td class="batch-control-nowrap"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap">${it.join(r.actions)}</td>
+                  <td class="batch-control-nowrap">${r.request.durationMinutes} min</td>
                   <td>${r.request.reason}</td>
-                  <td style="white-space: nowrap;">${r.user}</td>
-                  <td style="white-space: nowrap;">${it.join(r.request.approvers)}</td>
-                  <td><j:forEach var="part" items="${it.formatParts(r.request.createdAt)}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
+                  <td class="batch-control-nowrap">${r.user}</td>
+                  <td class="batch-control-nowrap">${it.join(r.request.approvers)}</td>
+                  <td><j:forEach var="part" items="${it.formatParts(r.request.createdAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
                 </tr>
               </j:forEach>
             </tbody>
@@ -80,7 +87,7 @@
         <j:otherwise>
           <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="active">
             <thead>
-              <tr style="white-space: nowrap;">
+              <tr class="batch-control-nowrap">
                 <th>ID</th>
                 <th>User</th>
                 <th>Scope</th>
@@ -98,21 +105,21 @@
               <j:forEach var="r" items="${it.activeItems}">
                 <j:set var="g" value="${r.grant}"/>
                 <tr>
-                  <td style="white-space: nowrap;">
+                  <td class="batch-control-nowrap">
                     <j:choose>
                       <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
                       <j:otherwise><bc:idLink value="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
-                  <td style="white-space: nowrap;">${g.user}</td>
-                  <td style="white-space: nowrap;">${g.scope.type}: ${g.scope.fullName}</td>
-                  <td style="white-space: nowrap;">${it.join(g.actions)}</td>
-                  <td style="white-space: nowrap;"><code>${it.createNameLabel(r)}</code></td>
-                  <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
-                  <td><j:forEach var="part" items="${it.formatParts(g.expiresAt)}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
-                  <td style="white-space: nowrap;">${it.remaining(g.expiresAt)}</td>
+                  <td class="batch-control-nowrap">${g.user}</td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap">${it.join(g.actions)}</td>
+                  <td class="batch-control-nowrap"><code>${it.createNameLabel(r)}</code></td>
+                  <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
+                  <td><j:forEach var="part" items="${it.formatParts(g.expiresAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
+                  <td class="batch-control-nowrap">${it.remaining(g.expiresAt)}</td>
                   <j:if test="${it.canRevoke}">
-                    <td style="white-space: nowrap;">
+                    <td class="batch-control-nowrap">
                       <l:confirmationLink class="jenkins-button jenkins-button--tertiary jenkins-!-destructive-color" destructive="true" href="${base}active/${g.id}/revoke" post="true"
                                           title="Revoke this grant?" okText="Revoke"
                                           message="The user immediately loses the granted permissions. This cannot be undone.">
@@ -141,7 +148,7 @@
         <j:otherwise>
           <table class="jenkins-table jenkins-table--small jenkins-!-margin-bottom-0" data-batch-control-list="ended">
             <thead>
-              <tr style="white-space: nowrap;">
+              <tr class="batch-control-nowrap">
                 <th>ID</th>
                 <th>User</th>
                 <th>Scope</th>
@@ -155,19 +162,19 @@
             <tbody>
               <j:forEach var="r" items="${it.endedItems}">
                 <tr>
-                  <td style="white-space: nowrap;">
+                  <td class="batch-control-nowrap">
                     <j:choose>
                       <j:when test="${r.linked}"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></j:when>
                       <j:otherwise><bc:idLink value="${r.id}"/></j:otherwise>
                     </j:choose>
                   </td>
-                  <td style="white-space: nowrap;">${r.user}</td>
-                  <td style="white-space: nowrap;">${r.scope.type}: ${r.scope.fullName}</td>
-                  <td style="white-space: nowrap;">${it.join(r.actions)}</td>
-                  <td style="white-space: nowrap;"><code>${it.createNameLabel(r)}</code></td>
-                  <td><j:forEach var="part" items="${it.formatParts(it.endedAt(r))}"><span style="white-space: nowrap; margin-right: 0.3em;">${part}</span><wbr/></j:forEach></td>
+                  <td class="batch-control-nowrap">${r.user}</td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap">${it.join(r.actions)}</td>
+                  <td class="batch-control-nowrap"><code>${it.createNameLabel(r)}</code></td>
+                  <td><j:forEach var="part" items="${it.formatParts(it.endedAt(r))}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
                   <td data-batch-control-status="${r.status}">${it.howEnded(r)}</td>
-                  <td style="white-space: nowrap;">
+                  <td class="batch-control-nowrap">
                     <j:if test="${it.isCanRenew(r)}">
                       <button type="button" class="jenkins-button jenkins-button--tertiary" data-type="dialog-opener"
                               data-dialog-url="${base}dialog?from=${r.id}">Request again</button>

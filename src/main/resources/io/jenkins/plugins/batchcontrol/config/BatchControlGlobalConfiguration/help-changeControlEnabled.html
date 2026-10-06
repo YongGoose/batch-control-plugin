@@ -6,16 +6,28 @@
       also enabled by <b>Enable run control</b>);</li>
     <li>a user who does not hold the standing permission to create or configure a job can ask for
       a temporary permission window instead. A window <b>adds</b> <code>Item/Create</code>,
-      <code>Item/Configure</code> or <code>Item/Delete</code> on its scope to whatever the user
-      already has, for as long as it lasts; it never takes anything away, and it imposes nothing
-      on someone who already holds the permission standing;</li>
-    <li>deleting a job is the one exception to that: while this switch is on, deletion needs an
+      <code>Item/Configure</code> or <code>Item/Delete</code> on the one job or folder it names to
+      whatever the user already has, for as long as it lasts; it never takes anything away, and it
+      imposes nothing on someone who already holds the permission standing;</li>
+    <li>deleting is the one exception to that: while this switch is on, deleting a job needs an
       active <code>DELETE</code> window even for a user whose standing permissions would allow it
-      (administrators are not vetoed);</li>
+      (administrators are not vetoed). No window confers <code>Item/Delete</code> on a folder, a
+      multibranch project or an organization folder, because deleting one deletes everything
+      inside it, so only an administrator can delete one of those;</li>
+    <li>a folder, a multibranch project or an organization folder can be <b>moved</b> only by an
+      administrator or a user with standing <code>Item/Delete</code> on it (and
+      <code>Item/Create</code> at the destination), since no window confers Delete on it;</li>
+    <li>no window allows <b>renaming</b> a job or folder of any kind: neither a Configure window
+      nor Delete and Create windows together. A rename needs an administrator, or the user's own
+      standing permissions: <code>Item/Configure</code> on the item, or <code>Item/Delete</code> on
+      it plus <code>Item/Create</code> in its parent. A rename that only a window would have allowed
+      is refused and recorded. A window follows its item when an administrator (or a user with
+      their own permissions) renames or moves it, and ends when the item is deleted;</li>
     <li>an administrative monitor reports accounts that hold standing Create, Configure or Delete
       permissions outside the permission-window flow;</li>
-    <li>the <b>Grants</b> screen is open, and each job's sidebar offers <b>Request Change
-      Permission</b>, which opens the window request form with that job filled in.</li>
+    <li>the <b>Grants</b> screen is open, and the sidebar of each job and folder offers
+      <b>Request Change Permission</b>, which opens the window request form with that item filled
+      in.</li>
   </ul>
   <p>
     A window confers its permissions only when <b>both</b> this switch is on <b>and</b> a Batch

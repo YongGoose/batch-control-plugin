@@ -6,8 +6,10 @@
      Backlog #83: for a viewer who may request permission windows (BatchControlRootAction#isCanRequestGrants),
      each missing window links to the new grant request form prefilled for it. The links are
      built by GrantRequestLinks (through BatchControlRootAction#grantRequestUrl), which resolves each name as the viewer (no link for an item the
-     viewer cannot see, nor for the Jenkins root, which has no window). The missing parts come
-     from MoveRefusal#isDeleteMissing / #isCreateMissing / #getDestinationFullName.
+     viewer cannot see, nor for the Jenkins root, which has no window; D-71: nor for an action
+     that cannot apply to the item, Delete of a non-job or Create in a group that is not a regular
+     folder). The missing parts come from MoveRefusal#isDeleteMissing / #isCreateMissing /
+     #getDestinationFullName.
      No script and no Back link, the breadcrumb bar leads back. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
   <l:layout title="Move not allowed" type="one-column">

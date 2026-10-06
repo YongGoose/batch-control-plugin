@@ -181,10 +181,18 @@
         <!-- e2e-04 DD-06: the rerun's parameters are fixed and its reason is generated, as the
              README says; UX-19: the ordinary run request form is linked for this viewer, who may
              use it (isCanRerun is the same Request + Item/Read test, D-38a). -->
+        <!-- D-72 (SPEC item 11): the rerun carries the failed run's own values, passwords and
+             recoverable files included; when one cannot be recovered, IncidentItem#doRerun
+             continues on the job's run request form instead of creating the request, and the
+             request submitted there is linked to this incident after validation (D-72a). -->
         <p class="jenkins-description">
           Creates a run request for this job, linked to this incident. It uses the original
-          parameters, which cannot be changed here, and a reason generated from the incident; you
-          only choose the approvers.
+          parameters, password and file values included, which cannot be changed here, and a
+          reason generated from the incident; you only choose the approvers. When a value of the
+          failed run can no longer be recovered (a file the build has already removed, for
+          example), no request is created here: you continue on the job's run request form with
+          the other values filled in and provide the files and passwords again; the request you
+          submit there is linked to this incident as well.
           <j:if test="${it.jobUrl != null}">
             To run with other parameters, submit an ordinary run request on the job's
             <a href="${rootURL}/${it.jobUrl}batch-control/">run request form</a> instead; that

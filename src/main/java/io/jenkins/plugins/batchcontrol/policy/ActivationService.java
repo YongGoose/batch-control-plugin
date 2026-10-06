@@ -8,7 +8,6 @@ import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
-import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.PendingCount;
@@ -71,6 +70,14 @@ public final class ActivationService {
     private final Store store = Store.get();
 
     /**
+     * Invalidations (rename, move, deletion, a superseding approval) of PENDING requests whose file
+     * could not be read, or whose end could not be written, when they happened. Such a request cannot
+     * be approved, and it is ended INVALIDATED as soon as it can be read and written
+     * ({@link #applyMissedInvalidations}). Memory only.
+     */
+    private final MissedInvalidations missedInvalidations = new MissedInvalidations();
+
+    /**
      * A cached state: whether it is activated, the directory marker it is bound to, and when the
      * activation last ended (S-25-03: read by the queue gate from memory, never from disk).
      */
@@ -108,8 +115,9 @@ public final class ActivationService {
      * truthful: a computed child, which nobody activates, reports not activated; whether it may run
      * is {@link #mayRunUnattended(Job)}, which asks its computed-folder ancestor (D-46c).
      *
-     * <p>Fails closed: a state that cannot be read, or one bound to another directory than the
-     * item's current one (a re-created item under an old name, S-13-09), counts as not activated.
+     * <p>Fails closed: a state that cannot be read, one bound to another directory than the
+     * item's current one (a re-created item under an old name, S-13-09), or one bound to a directory
+     * whose marker cannot be read now, counts as not activated.
      */
     public boolean isActivated(Item item) {
         Objects.requireNonNull(item, "item");
@@ -136,7 +144,14 @@ public final class ActivationService {
         }
         if (cached.identity() != null) {
             String current = ItemIdentity.of(item.getRootDir());
-            if (current != null && !current.equals(cached.identity())) {
+            if (current == null) {
+                // SPEC 6a "fails closed": without the directory's marker the state cannot be shown to
+                // be this item's own, so it does not count.
+                LOGGER.warning(() -> "The directory of '" + fullName + "' cannot be read, so its activation cannot "
+                        + "be confirmed as its own; treating the item as not activated");
+                return false;
+            }
+            if (!current.equals(cached.identity())) {
                 LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
                         + "treating the item as not activated");
                 return false;
@@ -410,6 +425,13 @@ public final class ActivationService {
             }
             boolean selfApproval = ApprovalPolicy.checkJobDecision(request.getId(), request.getRequester(),
                     request.getApprovers(), request.getJobFullName());
+            // Its job was renamed, moved or deleted, or another request of it was approved, while its
+            // file could not be read: it ends now instead.
+            String missed = missedInvalidations.reasonFor(id, request.getJobFullName());
+            if (missed != null) {
+                invalidate(request, missed);
+                throw new IllegalStateException("Activation request " + id + " is now INVALIDATED: " + missed);
+            }
             Instant now = BatchClock.now();
             if (pendingExpired(request, now)) {
                 String reason = EndReasons.pendingExpired();
@@ -442,7 +464,7 @@ public final class ActivationService {
             applyApproved(request, decider, now, selfApproval, ItemIdentity.of(subject.getRootDir()));
             // S-13-07: the other pending requests of the item were asked against the state before
             // this decision; a stale ACTIVATE must not be able to undo this HOLD (or the reverse).
-            invalidatePending(request.getJobFullName(), "Superseded by the approval of activation request "
+            invalidatePending(request.getJobFullName(), false, "Superseded by the approval of activation request "
                     + request.getId());
         } finally {
             lock.unlock();
@@ -529,11 +551,6 @@ public final class ActivationService {
         }
     }
 
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public ActivationRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
-    }
-
     /**
      * Replaces the designated approver set of a PENDING request; requester only (D-26, D-37).
      * Recorded as (previous set, new set, changed by, time).
@@ -591,13 +608,22 @@ public final class ActivationService {
                     NotificationDispatcher.activationEnded(NotificationEvent.EXPIRED, request, true, reason);
                     LOGGER.info(() -> "Activation request " + request.getId() + " expired (pending timeout)");
                 }
+            } catch (RuntimeException e) {
+                // One request that cannot be read or written never ends the expiry of the others; it
+                // is tried again on the next run (an approval compares the clock meanwhile).
+                LOGGER.log(Level.WARNING, e, () -> "Could not expire activation request " + snapshot.getId()
+                        + "; it is tried again on the next run");
             } finally {
                 lock.unlock();
             }
         }
     }
 
-    /** D-36: sends {@link NotificationEvent#EXPIRING} once per PENDING request close to its timeout. */
+    /**
+     * D-36: sends {@link NotificationEvent#EXPIRING} once per PENDING request close to its timeout.
+     * Each request is handled on its own: one that cannot be read or written is logged and tried
+     * again on the next run, and never keeps the others from their notice.
+     */
     public void notifyExpiring() {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
@@ -619,6 +645,10 @@ public final class ActivationService {
                         notified = request;
                     }
                 }
+            } catch (RuntimeException e) {
+                // Not marked (the flag is only ever stored before the dispatch), so the next run tries again.
+                LOGGER.log(Level.WARNING, "Could not send the EXPIRING notification of activation request "
+                        + snapshot.getId() + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
@@ -646,7 +676,7 @@ public final class ActivationService {
                 // A state left behind under the new name by an earlier job must not be inherited.
                 deleteState(newFullName);
             }
-            invalidatePending(oldFullName, "Target job renamed or moved: '" + oldFullName
+            invalidatePending(oldFullName, false, "Target job renamed or moved: '" + oldFullName
                     + "' -> '" + newFullName + "'");
         } finally {
             lock.unlock();
@@ -708,7 +738,7 @@ public final class ActivationService {
         lock.lock();
         try {
             deleteState(fullName);
-            invalidatePending(fullName, "Target job deleted: '" + fullName + "'");
+            invalidatePending(fullName, false, "Target job deleted: '" + fullName + "'");
             if (withDescendants) {
                 String prefix = fullName + "/";
                 for (ActivationState state : store.listActivationStates()) {
@@ -716,12 +746,9 @@ public final class ActivationService {
                         deleteState(state.getJobFullName());
                     }
                 }
-                for (ActivationRequest request : store.listOpenActivationRequests()) {
-                    if (request.getJobFullName().startsWith(prefix)) {
-                        invalidatePending(request.getJobFullName(),
-                                "Target job deleted with its folder: '" + fullName + "'");
-                    }
-                }
+                // Everything below the folder, in one pass over the open requests (the folder's own
+                // requests were ended just above).
+                invalidatePending(fullName, true, "Target job deleted with its folder: '" + fullName + "'");
             }
         } finally {
             lock.unlock();
@@ -876,16 +903,75 @@ public final class ActivationService {
         }
     }
 
-    /** Ends the PENDING requests of one job as INVALIDATED; under {@link #lock}. */
-    private void invalidatePending(String jobFullName, String reason) {
-        for (ActivationRequest request : store.listOpenActivationRequests()) {
-            if (request.getStatus() == RequestStatus.PENDING && request.getJobFullName().equals(jobFullName)) {
-                request.setStatus(RequestStatus.INVALIDATED);
-                request.setDecisionComment(reason);
-                request.setDecidedAt(BatchClock.now());
-                store.saveActivationRequest(request);
-                NotificationDispatcher.activationEnded(NotificationEvent.INVALIDATED, request, true, reason);
-                LOGGER.info(() -> "Activation request " + request.getId() + " invalidated: " + reason);
+    /**
+     * Ends the PENDING requests of one job (with {@code withDescendants}, also of the items below it)
+     * as INVALIDATED; under {@link #lock}. Fail safe: a request whose file cannot be read (which job it
+     * names is unknown) or whose end cannot be written is not ended here; the invalidation is
+     * remembered ({@link MissedInvalidations}), so it cannot be approved, and it is ended once it can be
+     * read and written if the invalidation applies to it ({@link #applyMissedInvalidations}). One such
+     * request never keeps the others from being invalidated.
+     */
+    private void invalidatePending(String jobFullName, boolean withDescendants, String reason) {
+        String prefix = jobFullName + "/";
+        List<String> unreadable = new ArrayList<>();
+        for (ActivationRequest request : store.listOpenActivationRequests(unreadable::add)) {
+            String job = request.getJobFullName();
+            if (request.getStatus() != RequestStatus.PENDING
+                    || !(job.equals(jobFullName) || withDescendants && job.startsWith(prefix))) {
+                continue;
+            }
+            try {
+                invalidate(request, reason);
+            } catch (RuntimeException e) {
+                missedInvalidations.add(request.getId(), jobFullName, withDescendants, reason);
+                LOGGER.log(Level.WARNING, e, () -> "Could not invalidate activation request " + request.getId() + " ("
+                        + reason + "); it cannot be approved, and it is invalidated as soon as it can be written");
+            }
+        }
+        for (String id : unreadable) {
+            missedInvalidations.add(id, jobFullName, withDescendants, reason);
+        }
+    }
+
+    /** Ends one PENDING request as INVALIDATED for {@code reason}; under {@link #lock}. */
+    private void invalidate(ActivationRequest request, String reason) {
+        request.setStatus(RequestStatus.INVALIDATED);
+        request.setDecisionComment(reason);
+        request.setDecidedAt(BatchClock.now());
+        store.saveActivationRequest(request);
+        missedInvalidations.forget(request.getId());
+        NotificationDispatcher.activationEnded(NotificationEvent.INVALIDATED, request, true, reason);
+        LOGGER.info(() -> "Activation request " + request.getId() + " invalidated: " + reason);
+    }
+
+    /**
+     * Ends, as INVALIDATED, every PENDING request that missed an invalidation while its file could not
+     * be read or written ({@link #invalidatePending}) and can now be, when the invalidation applies to
+     * the job it names; forgets the others. Run by the periodic work every minute; a request that still
+     * cannot be read stays for the next run.
+     */
+    public void applyMissedInvalidations() {
+        if (missedInvalidations.isEmpty()) {
+            return;
+        }
+        for (String id : missedInvalidations.ids()) {
+            lock.lock();
+            try {
+                ActivationRequest request = store.loadActivationRequest(id);
+                String reason = null;
+                if (request != null && request.getStatus() == RequestStatus.PENDING) {
+                    reason = missedInvalidations.reasonFor(id, request.getJobFullName());
+                }
+                if (request != null && reason != null) {
+                    invalidate(request, reason);
+                } else {
+                    missedInvalidations.forget(id); // gone, no longer open, or not about its job
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.FINE, e, () -> "Activation request " + id + " still cannot be read or written; its"
+                        + " missed invalidation is applied on a later run");
+            } finally {
+                lock.unlock();
             }
         }
     }

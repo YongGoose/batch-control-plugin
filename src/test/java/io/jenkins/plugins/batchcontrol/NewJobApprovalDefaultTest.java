@@ -234,7 +234,7 @@ public class NewJobApprovalDefaultTest {
         JenkinsRule.WebClient admin = webClient().login("admin");
         assertTrue(createFromXml(admin, "job/team/job/batch/", "admin-made", MINIMAL_FREESTYLE_XML) < 400, "the administrator must be able to create inside the folder");
 
-        grantTo("u1", new GrantScope(GrantScope.Type.FOLDER, "team/batch"),
+        grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "team/batch"),
                 Arrays.asList(GrantAction.CREATE, GrantAction.CONFIGURE), 30);
         JenkinsRule.WebClient u1 = webClient().login("u1");
         assertTrue(createFromXml(u1, "job/team/job/batch/", "user-made", MINIMAL_FREESTYLE_XML) < 400, "u1 must be able to create inside the granted folder");

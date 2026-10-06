@@ -3,13 +3,16 @@ package io.jenkins.plugins.batchcontrol.ops;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
 import hudson.init.Terminator;
+import hudson.model.User;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
-import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import java.util.ArrayList;
@@ -25,6 +28,8 @@ import jenkins.model.Jenkins;
 import jenkins.model.JenkinsLocationConfiguration;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 
 /**
  * Hands request events to every {@link BatchControlNotifier} on a background thread (D-36).
@@ -36,6 +41,13 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 public final class NotificationDispatcher {
 
     private static final Logger LOGGER = Logger.getLogger(NotificationDispatcher.class.getName());
+
+    /**
+     * D-75 (1), S-39-04: the fixed sentence of a notice whose window followed its item to a name the
+     * recipient may not read; the notice then names the approved name instead. A fixed sentence from
+     * the plugin, never user input (it is shown with the other notices, D-38a).
+     */
+    public static final String MOVED_NOTICE = "The window's item was moved; its new location is not visible to you.";
 
     /** Pending notifications beyond this are dropped and logged (security-08 S-09). */
     static final int QUEUE_CAPACITY = 1000;
@@ -112,13 +124,41 @@ public final class NotificationDispatcher {
 
     /** Event for a change (grant) request. Recipients follow the D-36 rule for the event. */
     public static void grant(NotificationEvent event, GrantRequest request) {
+        grant(event, request, null);
+    }
+
+    /**
+     * {@link NotificationEvent#APPROVED} for a change request, sent to its requester.
+     *
+     * <p>Owner decision 2026-10-06 (D-71c (3), D-75 (2)): when the window ended at once because its
+     * item was deleted after the approval checked it and before the window was registered, the
+     * notice is still APPROVED (no other notice type) and carries one more details line, first,
+     * saying so: {@code Window: ended at once — <reason>}.
+     *
+     * @param endedAtOnceBecause why the window ended at registration (for example
+     *                           {@link Grant#REVOKED_ITEM_DELETED}), or {@code null} when it is in effect
+     */
+    public static void grantApproved(GrantRequest request, @CheckForNull String endedAtOnceBecause) {
+        grant(NotificationEvent.APPROVED, request,
+                endedAtOnceBecause == null ? null : windowEndedAtOnce(endedAtOnceBecause));
+    }
+
+    /** The details line of an APPROVED notice whose window ended at registration (owner decision 2026-10-06). */
+    static String windowEndedAtOnce(String reason) {
+        return "Window: ended at once \u2014 " + reason;
+    }
+
+    private static void grant(NotificationEvent event, GrantRequest request, @CheckForNull String firstDetail) {
         try {
             List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
+            List<String> details = grantDetails(request.getItemKind(), request.getActions(),
+                    request.getDurationMinutes(), request.getCreateNamePattern());
+            if (firstDetail != null) {
+                details.add(0, firstDetail);
+            }
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
                     request.getScope().getFullName(), request.getRequester(), request.getReason(),
-                    recipients, url("batch-control/grants/" + request.getId() + "/"), null,
-                    grantDetails(request.getScope(), request.getActions(), request.getDurationMinutes(),
-                            request.getCreateNamePattern())));
+                    recipients, url("batch-control/grants/" + request.getId() + "/"), null, details));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
                     + request.getId(), e);
@@ -165,7 +205,7 @@ public final class NotificationDispatcher {
     public static void grantEnded(NotificationEvent event, GrantRequest request, boolean wasPending,
                                   @CheckForNull String reason) {
         try {
-            List<String> details = grantDetails(request.getScope(), request.getActions(),
+            List<String> details = grantDetails(request.getItemKind(), request.getActions(),
                     request.getDurationMinutes(), request.getCreateNamePattern());
             details.addAll(0, endDetails(reason));
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
@@ -223,15 +263,47 @@ public final class NotificationDispatcher {
         return details;
     }
 
-    /** {@link NotificationEvent#GRANT_EXPIRING} for an active window, sent to its holder. */
-    public static void grantExpiring(Grant grant, String reason) {
+    /**
+     * {@link NotificationEvent#GRANT_EXPIRING} for an active window, sent to its holder.
+     *
+     * <p>D-75 (1), security-39 S-39-04: the window follows its item when an administrator renames
+     * or moves it (D-74 (3)), possibly into a folder its holder cannot read. The notice therefore
+     * names the item's current full name only when the holder may read the item now
+     * ({@link #recipientMayRead}, checked as the holder); otherwise it names the approved name (the
+     * request's scope) with the fixed {@link #MOVED_NOTICE}. A window whose name did not change is
+     * named as before, without any check. This is the only notice that names a window's current
+     * scope: every other change request notice names the request's own scope, which is the
+     * approved name and never follows the item.
+     *
+     * @param request the change request the window came from, or {@code null} when it cannot be
+     *                read; then the approved name is unknown, and a window whose current item the
+     *                holder cannot read is not named at all: the notice is not sent (logged)
+     */
+    public static void grantExpiring(Grant grant, @CheckForNull GrantRequest request) {
         try {
             String requestId = grant.getGrantRequestId();
+            String holder = grant.getUser();
+            String current = grant.getScope() == null ? null : grant.getScope().getFullName();
+            String approved = request == null || request.getScope() == null ? null
+                    : request.getScope().getFullName();
+            String named = current;
+            List<String> notices = null;
+            if (current != null && !current.equals(approved) && !recipientMayRead(holder, current)) {
+                if (approved == null) {
+                    LOGGER.warning(() -> "The change request of grant " + grant.getId() + " could not be read, so"
+                            + " the name its window was approved on is unknown, and its holder cannot read the"
+                            + " item now; the GRANT_EXPIRING notification is not sent");
+                    return;
+                }
+                named = approved;
+                notices = List.of(MOVED_NOTICE);
+            }
             dispatch(NotificationEvent.GRANT_EXPIRING, new Notification(Notification.KIND_GRANT, requestId,
-                    grant.getScope().getFullName(), grant.getUser(), reason,
-                    grant.getUser() == null ? Collections.emptyList() : List.of(grant.getUser()),
+                    named, holder, request == null ? null : request.getReason(),
+                    holder == null ? Collections.emptyList() : List.of(holder),
                     url("batch-control/grants/" + requestId + "/"), null,
-                    grantDetails(grant.getScope(), grant.getActions(), 0, grant.getCreateNamePattern())));
+                    grantDetails(grant.getItemKind(), grant.getActions(), 0, grant.getCreateNamePattern()),
+                    notices));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the GRANT_EXPIRING notification of grant "
                     + grant.getId(), e);
@@ -239,14 +311,55 @@ public final class NotificationDispatcher {
     }
 
     /**
-     * e2e-03 DEF-24: what the approver decides on, so the mail can be judged without opening the
-     * request: scope type, actions, duration (when known) and the Create name restriction.
+     * D-75 (1), S-39-04: whether the user {@code userId} may read the item at {@code fullName} now,
+     * judged as that user: Jenkins resolves the full name with the user's authentication, which
+     * requires Item/Read on the item and on every folder above it, as for that user's own page
+     * views ({@code ui.Visibility#findVisibleItem}). Fails closed: an unknown user, a user the
+     * security realm cannot impersonate (deleted account, realm failure), an item that is not
+     * there, and Item/Discover without Item/Read all answer {@code false}.
      */
-    static List<String> grantDetails(GrantScope scope, List<GrantAction> actions, int durationMinutes,
+    static boolean recipientMayRead(@CheckForNull String userId, String fullName) {
+        if (userId == null || Jenkins.getInstanceOrNull() == null) {
+            return false;
+        }
+        User user = User.getById(userId, false);
+        if (user == null) {
+            return false; // the account no longer resolves
+        }
+        Authentication recipient;
+        try {
+            recipient = user.impersonate2();
+        } catch (RuntimeException e) {
+            // UsernameNotFoundException and realm failures: Read cannot be confirmed.
+            LOGGER.log(Level.FINE, e, () -> "Cannot impersonate '" + userId + "' to check Item/Read on '"
+                    + fullName + "'; the notification does not name the item");
+            return false;
+        }
+        // Impersonation switch, with its reason: the question is what the recipient may read, not
+        // what the thread sending the notification may read (the expiry work runs as SYSTEM). The
+        // switch narrows the authentication to the recipient's own for this one lookup; nothing is
+        // changed under it, and the item found is used only to answer yes or no.
+        try (ACLContext ignored = ACL.as2(recipient)) {
+            return Jenkins.get().getItemByFullName(fullName) != null;
+        } catch (AccessDeniedException e) {
+            return false; // Item/Discover without Item/Read somewhere along the path
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, e, () -> "Cannot check Item/Read on '" + fullName + "' for '" + userId
+                    + "'; the notification does not name the item");
+            return false;
+        }
+    }
+
+    /**
+     * e2e-03 DEF-24: what the approver decides on, so the mail can be judged without opening the
+     * request: the kind of the item the window names (D-71), actions, duration (when known) and
+     * the Create name restriction.
+     */
+    static List<String> grantDetails(@CheckForNull ItemKind itemKind, List<GrantAction> actions, int durationMinutes,
                                      String createNamePattern) {
         List<String> details = new ArrayList<>();
-        if (scope != null && scope.getType() != null) {
-            details.add("Scope type: " + scope.getType());
+        if (itemKind != null) {
+            details.add("Item kind: " + itemKind.getDisplayName());
         }
         if (actions != null && !actions.isEmpty()) {
             List<String> names = new ArrayList<>();

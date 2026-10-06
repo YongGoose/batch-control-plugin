@@ -128,7 +128,7 @@ public class ChangeRecordTest {
     public void t_09_03_changeInsideGrantWindowLinksGrantId() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("grant-job");
         job.setDescription("grant-before");
-        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.JOB, "grant-job"),
+        Grant grant = grantTo("u1", new GrantScope(GrantScope.Type.ITEM, "grant-job"),
                 Arrays.asList(GrantAction.CONFIGURE), 30);
 
         assertEquals(200, postConfigXml("u1", job,

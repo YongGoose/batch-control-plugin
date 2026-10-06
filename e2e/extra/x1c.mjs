@@ -6,7 +6,7 @@ for (const kind of ['grants', 'activations']) {
   const { page } = await login('requester');
   const before = await ids(kind);
   if (kind === 'grants') {
-    await page.goto(`${BASE}/batch-control/grants/?scopeType=JOB&scopeFullName=fresh-daily`);
+    await page.goto(`${BASE}/batch-control/grants/?scopeFullName=fresh-daily`);
     const f = page.locator('form[action$="grants/create"]');
     await f.locator('input[name="actions"][value="CONFIGURE"]').check({ force: true });
     await f.locator('textarea[name="reason"]').fill('e2e-05 X1c stale change approvers (grant)');

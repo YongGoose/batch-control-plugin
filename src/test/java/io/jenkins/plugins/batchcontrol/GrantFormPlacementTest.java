@@ -73,7 +73,7 @@ public class GrantFormPlacementTest {
         j.createFreeStyleProject("fd8-job");
         for (int i = 0; i < 3; i++) {
             j.createFreeStyleProject("fd8-other-" + i);
-            submitGrantOk(j, "u1", "JOB", "fd8-other-" + i, Arrays.asList("CONFIGURE"), 30, "maintenance " + i, null, "a1");
+            submitGrantOk(j, "u1", "fd8-other-" + i, Arrays.asList("CONFIGURE"), 30, "maintenance " + i, null, "a1");
         }
 
         // D-66 (note 248): the grants page carries no request form; its request entry
@@ -84,12 +84,11 @@ public class GrantFormPlacementTest {
         assertFalse(list.querySelectorAll("[data-batch-control-request=grant]").isEmpty(),
                 "D-66: the grants page must offer the grant request entry [data-batch-control-request=grant]");
 
-        HtmlPage prefilled = UsabilityFixtures.htmlPage(j, "u1", "batch-control/grants/new?scopeType=JOB&scopeFullName=fd8-job");
+        HtmlPage prefilled = UsabilityFixtures.htmlPage(j, "u1", "batch-control/grants/new?scopeFullName=fd8-job");
         assertFormBeforeLists("the prefilled form", prefilled);
 
         JenkinsRule.WebClient wc = UsabilityFixtures.clientNoJs(j, "u1");
         List<NameValuePair> params = new ArrayList<>();
-        params.add(new NameValuePair("scopeType", "JOB"));
         params.add(new NameValuePair("scopeFullName", "fd8-job"));
         params.add(new NameValuePair("actions", "CONFIGURE"));
         params.add(new NameValuePair("durationMinutes", "9999"));

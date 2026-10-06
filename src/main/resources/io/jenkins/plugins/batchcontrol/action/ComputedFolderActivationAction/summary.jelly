@@ -10,7 +10,7 @@
     <j:choose>
       <j:when test="${carrier != null}">
         <j:set var="carrierUrl" value="${it.carrierUrl(carrier)}"/>
-        <div class="jenkins-alert jenkins-alert-info" role="status" style="margin-top: 1rem;">
+        <div class="jenkins-alert jenkins-alert-info jenkins-!-margin-top-3" role="status">
           <!-- S-14-02: the carrier's name and state only for a viewer with Item/Read on it
                (carrierUrl is null otherwise); anyone else gets a neutral line. -->
           <j:choose>
@@ -26,7 +26,7 @@
         </div>
       </j:when>
       <j:when test="${it.activated}">
-        <div class="jenkins-alert jenkins-alert-success" role="status" style="margin-top: 1rem;">
+        <div class="jenkins-alert jenkins-alert-success jenkins-!-margin-top-3" role="status">
           <strong>Batch Control: this folder is activated.</strong>
           Unattended triggers may start the jobs it generates, as far as their own trigger
           settings allow.
@@ -37,7 +37,7 @@
         </div>
       </j:when>
       <j:otherwise>
-        <div class="jenkins-alert jenkins-alert-warning" role="status" style="margin-top: 1rem;">
+        <div class="jenkins-alert jenkins-alert-warning jenkins-!-margin-top-3" role="status">
           <j:choose>
             <j:when test="${it.held}">
               <strong>Batch Control: this folder is on hold.</strong>
@@ -56,7 +56,7 @@
     </j:choose>
     <j:set var="pending" value="${it.pendingRequests}"/>
     <j:if test="${carrier == null and !empty(pending)}">
-      <ul style="margin: 0.5rem 0;">
+      <ul class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-1">
         <j:forEach var="r" items="${pending}">
           <li>
             Pending ${it.actionLabel(r.action)} request

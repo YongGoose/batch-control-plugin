@@ -2,25 +2,34 @@ package io.jenkins.plugins.batchcontrol.action;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Util;
+import hudson.model.Descriptor;
 import hudson.model.Failure;
+import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.Job;
 import hudson.model.ModelObject;
+import hudson.model.TopLevelItemDescriptor;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.ItemKind;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.security.SystemBuildCheck;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
-import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.ScopeDisplay;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
+import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.time.Instant;
@@ -108,14 +117,24 @@ public class GrantRequestItem implements ModelObject {
      * (D-29, D-37). The endpoints and the service re-check for real.
      */
     public boolean isCanDecide() {
-        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
+        return isPending() && isChangeControlOn()
+                && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
                 && request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
     }
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
-        return isPending() && isOwnedByCurrentUser()
+        return isPending() && isChangeControlOn() && isOwnedByCurrentUser()
                 && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST_GRANT);
+    }
+
+    /**
+     * LIMITATIONS 29: while change control is off this page is shown only as the refusal of an
+     * approval ({@link GrantsSection#getTarget()} closes everything else below the Grants screen),
+     * so it offers none of its forms: each would lead to a refusal (SPEC item 6).
+     */
+    private static boolean isChangeControlOn() {
+        return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
     }
 
     /** Approver candidates for the change-approver form (global list, self excluded). */
@@ -130,7 +149,7 @@ public class GrantRequestItem implements ModelObject {
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
     public boolean isCanCancel() {
-        return isPending()
+        return isPending() && isChangeControlOn()
                 && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
     }
 
@@ -143,7 +162,7 @@ public class GrantRequestItem implements ModelObject {
     @CheckForNull
     public Grant getGrant() {
         if (!grantLoaded) {
-            grant = request.getStatus() == RequestStatus.APPROVED ? Store.get().loadGrant(request.getId()) : null;
+            grant = request.getStatus() == RequestStatus.APPROVED ? GrantService.get().find(request.getId()) : null;
             grantLoaded = true;
         }
         return grant;
@@ -153,6 +172,32 @@ public class GrantRequestItem implements ModelObject {
     public boolean isWindowOpen() {
         Grant g = getGrant();
         return g != null && g.isActiveAt(BatchClock.now());
+    }
+
+    /**
+     * D-74: the item this request concerns now. Once the request was approved, its window's item
+     * ({@link Grant#getScope()}): an open window follows its item when an administrator (or a user
+     * with their own permissions) renames or moves it, and an ended one keeps the name its item had
+     * when it ended. Before that (or without a stored window), the item the request was made for.
+     *
+     * <p>Not a view getter: a followed name may name a place the viewer cannot read (D-75 (1)), so
+     * the page shows {@link #getShownScope()} instead.
+     */
+    @CheckForNull
+    private GrantScope currentScope() {
+        Grant g = getGrant();
+        return g != null && g.getScope() != null ? g.getScope() : request.getScope();
+    }
+
+    /**
+     * D-75 (1), security-39 S-39-04: the name the Scope row shows ({@code tags/scopeItem.jelly}).
+     * The window's followed name ({@link #currentScope()}) only to a viewer who may read the item
+     * now, or an administrator; anyone else (the requester and approvers included) sees the
+     * approved name with the fixed "moved" note. Unchanged when the name did not change.
+     */
+    public ScopeDisplay getShownScope() {
+        Grant g = getGrant();
+        return ScopeDisplay.of(request.getScope(), g == null ? null : g.getScope());
     }
 
     /**
@@ -207,17 +252,76 @@ public class GrantRequestItem implements ModelObject {
         return SystemBuildCheck.buildsMayRunAsSystem();
     }
 
+    // ---------------------------------------------------------------- item groups (D-71a)
+
+    /**
+     * D-71a (5), security-34 S-34-02: whether this page states that the settings of the item group
+     * the request names reach the items inside it. For a request that includes CONFIGURE on an
+     * item group that is not a job (a folder, a multibranch project, an organization folder; a
+     * multi-configuration project is a job, its configurations are part of it), shown to a
+     * designated approver and to the requester, whatever the request's status: a window on the
+     * group confers nothing on its children (D-71), but the group's own configuration (for example
+     * an implicitly loaded Pipeline library, or a computed folder's sources) still affects them,
+     * and the decision and the request should be made knowing it.
+     *
+     * <p>Decided from the kind recorded with the request (its descriptor's item class), or else
+     * from the current item as the viewer may see it ({@link Visibility#findVisibleItem}); either
+     * saying "group" is enough. The page already shows that kind next to the name, so the notice
+     * discloses nothing more about the item.
+     */
+    public boolean isShowGroupConfigureNotice() {
+        return isConfigureNoticeAudience() && namesGroup();
+    }
+
+    /**
+     * D-71c (security-36 S-36-02, S-36-04): whether this page states that a Configure window does
+     * not allow renaming the item, for a CONFIGURE request whose item is not an item group (a job,
+     * or an item whose kind is no longer known), to the same audience as
+     * {@link #isShowGroupConfigureNotice()}, whose notice already says it for an item group.
+     */
+    public boolean isShowNoRenameNotice() {
+        return isConfigureNoticeAudience() && !namesGroup();
+    }
+
+    /** The request includes CONFIGURE and the viewer is its requester or a designated approver. */
+    private boolean isConfigureNoticeAudience() {
+        if (request.getActions() == null || !request.getActions().contains(GrantAction.CONFIGURE)) {
+            return false;
+        }
+        return isOwnedByCurrentUser() || request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
+    }
+
+    /** The recorded kind, or else the current item as the viewer may see it, is an item group. */
+    private boolean namesGroup() {
+        GrantScope scope = currentScope();
+        return recordedKindIsGroup()
+                || (scope != null && isGroup(Visibility.findVisibleItem(scope.getFullName())));
+    }
+
+    /** Whether the kind recorded with the request is an item group that is not a job. */
+    private boolean recordedKindIsGroup() {
+        ItemKind kind = request.getItemKind();
+        if (kind == null) {
+            return false;
+        }
+        Descriptor<?> descriptor = Jenkins.get().getDescriptor(kind.getDescriptorId());
+        if (!(descriptor instanceof TopLevelItemDescriptor)) {
+            return false; // the plugin of that kind is not installed now; the current item decides
+        }
+        Class<?> type = descriptor.clazz;
+        return ItemGroup.class.isAssignableFrom(type) && !Job.class.isAssignableFrom(type);
+    }
+
+    private static boolean isGroup(@CheckForNull Item item) {
+        return item instanceof ItemGroup && !(item instanceof Job);
+    }
+
     // ---------------------------------------------------------------- screen access (Jelly)
 
 
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
         return SectionAccess.grants();
-    }
-
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- state-changing endpoints

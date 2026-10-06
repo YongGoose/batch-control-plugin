@@ -1,19 +1,21 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
+import hudson.BulkChange;
 import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
-import hudson.model.ItemGroup;
 import hudson.model.Job;
+import hudson.model.JobProperty;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
-import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.security.DeletionAttribution;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
@@ -60,7 +62,7 @@ public class ItemChangeListener extends ItemListener {
         String fullName = item.getFullName();
         seedSnapshot(item);
         ChangeRecord record = ChangeRecord.create(ChangeType.CREATE, fullName, user, null);
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, GrantAction.CREATE));
+        record.setGrantId(ChangeRecording.createGrantIdFor(user, item));
         Store.get().appendChangeRecord(record);
     }
 
@@ -69,14 +71,15 @@ public class ItemChangeListener extends ItemListener {
         if (!ChangeRecording.isActive()) {
             return;
         }
-        String user = ChangeRecording.currentUser();
+        // SPEC 6: core deletes the items below a folder as SYSTEM; their DELETE records name the user
+        // who deleted the folder (SYSTEM only when SYSTEM started the deletion).
+        String user = DeletionAttribution.deletingUser(item);
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.DELETE, fullName, user, null);
-        Grant deleteGrant = GrantService.get().findActiveGrant(user, fullName, GrantAction.DELETE,
-                item instanceof ItemGroup);
+        Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item);
         record.setGrantId(deleteGrant == null ? null : deleteGrant.getId());
         Store.get().appendChangeRecord(record);
-        Store.get().deleteConfigSnapshot(fullName);
+        deleteSnapshot(fullName);
     }
 
     @Override
@@ -88,7 +91,18 @@ public class ItemChangeListener extends ItemListener {
         String fullName = item.getFullName();
         ChangeRecord record = ChangeRecord.create(ChangeType.RENAME, fullName, user,
                 "Renamed from '" + oldName + "' to '" + newName + "'");
-        record.setGrantId(ChangeRecording.activeGrantIdFor(user, fullName, null));
+        // D-71: a window names one item by its full name, so the window in use names the item's old
+        // name (all onRenamed calls precede onLocationChanged, where grant records follow the item):
+        // a CONFIGURE or DELETE window on it, or the CREATE window it was created through (D-35c).
+        String parent = GrantScope.parentOf(fullName);
+        String oldFullName = parent.isEmpty() ? oldName : parent + "/" + oldName;
+        // Windows follow the item only in onLocationChanged (D-74), so they still name the old name here.
+        String grantId = ChangeRecording.activeGrantIdFor(user, oldFullName, item, null);
+        if (grantId == null) {
+            Grant creating = GrantService.get().findCreatingGrant(user, oldFullName, item);
+            grantId = creating != null ? creating.getId() : ChangeRecording.activeGrantIdFor(user, fullName, item, null);
+        }
+        record.setGrantId(grantId);
         Store.get().appendChangeRecord(record);
     }
 
@@ -98,7 +112,7 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         // The diff baseline follows the item to its new full name.
-        Store.get().deleteConfigSnapshot(oldFullName);
+        deleteSnapshot(oldFullName);
         seedSnapshot(item);
         // onLocationChanged fires for renames too (which onRenamed already recorded); a MOVE
         // is a location change whose parent path changed.
@@ -111,10 +125,11 @@ public class ItemChangeListener extends ItemListener {
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).
         String destination = parentOf(newFullName);
-        Grant deleteGrant = GrantService.get().findActiveGrant(user, oldFullName, GrantAction.DELETE,
-                item instanceof ItemGroup);
+        // The Delete window still names the old name (windows follow the item after this listener,
+        // D-74); the Create window names the destination folder, which is now the item's parent.
+        Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item, oldFullName);
         Grant createGrant = destination.isEmpty() ? null
-                : GrantService.get().findActiveCreateGrant(user, destination, item.getName());
+                : GrantService.get().findActiveCreateGrant(user, item.getParent(), item.getName());
         StringBuilder detail = new StringBuilder("Moved from '").append(oldFullName)
                 .append("' to '").append(newFullName).append('\'');
         List<String> windows = new ArrayList<>();
@@ -130,7 +145,7 @@ public class ItemChangeListener extends ItemListener {
         ChangeRecord record = ChangeRecord.create(ChangeType.MOVE, newFullName, user, detail.toString());
         Grant primary = createGrant != null ? createGrant : deleteGrant;
         record.setGrantId(primary != null ? primary.getId()
-                : ChangeRecording.activeGrantIdFor(user, newFullName, null));
+                : ChangeRecording.activeGrantIdFor(user, newFullName, item, null));
         Store.get().appendChangeRecord(record);
     }
 
@@ -186,6 +201,12 @@ public class ItemChangeListener extends ItemListener {
      * creation and for a job moved under change control (D-59a). The caller decides whether the
      * switches call for it. A failure is logged, never thrown.
      *
+     * <p>Fail closed (S-20): the property is replaced in memory as one change and written by one
+     * save, so the job is locked in memory whatever happens to the write (every batch-control
+     * property it carried goes, not only the first, so a payload with two cannot leave an unlocked
+     * one in effect). If the save fails, the lock is in effect but its {@code config.xml} is stale,
+     * and the save is retried by the periodic work ({@link UnsavedItemWrites}) until it succeeds.
+     *
      * @param what    how the log line names the job, for example {@code "New job"}
      * @param outcome the end of the log line, saying what the lock means here
      */
@@ -198,72 +219,59 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
-        if (existing != null && existing.isActivationLocked()) {
+        List<BatchControlJobProperty> all = batchControlProperties(job);
+        if (existing != null && existing.isActivationLocked() && all.size() == 1) {
             return;
         }
+        BatchControlJobProperty applied = existing == null
+                ? BatchControlJobProperty.activationLocked()
+                : existing.withActivationLock();
         boolean previouslySuppressed = ChangeRecording.beginSuppression();
         try {
-            BatchControlJobProperty applied = existing == null
-                    ? BatchControlJobProperty.activationLocked()
-                    : existing.withActivationLock();
-            if (existing != null) {
-                job.removeProperty(BatchControlJobProperty.class);
-            }
-            try {
-                addProperty(job, applied);
-            } catch (IOException e) {
-                // S-20, fail closed. Core's removeProperty and addProperty each call save()
-                // (hudson/model/Job#removeProperty, #addProperty), so the rebuild is two
-                // persisted steps with a window between them. If the second fails the job is left
-                // with NO BatchControlJobProperty at all — losing not just approvalRequired but
-                // blockTimer, blockUpstream, allowedUpstreamJobs and jobApprovers, i.e. every
-                // control over the unattended trigger paths — and the failure is only a WARNING,
-                // so the job would go on running uncontrolled and unnoticed. Put the property the
-                // job already had back before reporting, so the worst outcome of a failed rebuild
-                // is the controls the creator supplied rather than none.
-                if (existing != null) {
-                    restoreAfterFailedRebuild(job, existing, fullName, e);
+            try (BulkChange bc = new BulkChange(job)) {
+                for (BatchControlJobProperty property : all) {
+                    removeProperty(job, property);
                 }
-                throw e;
+                addProperty(job, applied);
+                bc.commit();
             }
             LOGGER.info(() -> what + " '" + fullName + "' starts locked while run control is on: "
                     + "approvalRequired, blockTimer and blockUpstream are all on, so " + outcome);
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to apply the activation lock to the job '" + fullName + "'", e);
+        } catch (IOException | RuntimeException e) {
+            if (job.getProperty(BatchControlJobProperty.class) == applied) {
+                UnsavedItemWrites.add(job, "the activation lock");
+                LOGGER.log(Level.SEVERE, "The activation lock of the job '" + fullName + "' (approvalRequired,"
+                        + " blockTimer and blockUpstream on) is in effect but could not be saved; the save is retried"
+                        + " every minute. Until it succeeds, a restart would load the job from its config.xml without"
+                        + " the lock", e);
+            } else {
+                LOGGER.log(Level.SEVERE, "Could not apply the activation lock to the job '" + fullName + "'; an"
+                        + " administrator must check its Batch Control settings", e);
+            }
         } finally {
             ChangeRecording.endSuppression(previouslySuppressed);
         }
     }
 
-    /**
-     * Puts {@code existing} back after the D-31/D-34 rebuild removed it and failed to add the
-     * replacement (S-20). Still inside the suppressed window, so the restore is not recorded as a
-     * user CONFIGURE change.
-     *
-     * <p>If the restore itself fails there is nothing further to try — both writes go through the
-     * same {@code save()} — so it is attached to the original failure as a suppressed exception
-     * rather than replacing it: the operator needs to read "the default could not be applied"
-     * first and "and the job now has no property" second.
-     */
-    private static void restoreAfterFailedRebuild(Job<?, ?> job, BatchControlJobProperty existing,
-                                                  String fullName, IOException failure) {
-        try {
-            addProperty(job, existing);
-            LOGGER.log(Level.WARNING, () -> "Applying the new-job activation lock to '"
-                    + fullName + "' failed; the job's previous batch-control property was restored,"
-                    + " so its existing controls stay in force");
-        } catch (IOException restoreFailure) {
-            failure.addSuppressed(restoreFailure);
-            LOGGER.log(Level.SEVERE, () -> "Job '" + fullName + "' was left with no batch-control"
-                    + " property: applying the new-job activation lock failed and restoring"
-                    + " the previous property failed as well. The job is not run-controlled until"
-                    + " its configuration is saved again");
+    /** Every {@link BatchControlJobProperty} of {@code job}, in order. */
+    private static List<BatchControlJobProperty> batchControlProperties(Job<?, ?> job) {
+        List<BatchControlJobProperty> found = new ArrayList<>();
+        for (Object property : job.getAllProperties()) {
+            if (property instanceof BatchControlJobProperty) {
+                found.add((BatchControlJobProperty) property);
+            }
         }
+        return found;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void addProperty(Job job, BatchControlJobProperty property) throws IOException {
         job.addProperty(property);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void removeProperty(Job job, BatchControlJobProperty property) throws IOException {
+        job.removeProperty((JobProperty) property);
     }
 
     /**
@@ -310,7 +318,11 @@ public class ItemChangeListener extends ItemListener {
 
     // ---------------------------------------------------------------- snapshots
 
-    /** Stores the item's current config.xml as the diff baseline. */
+    /**
+     * Stores the item's current config.xml as the diff baseline (current, so no longer waiting for the
+     * refresh after recording was turned on). A failure (also a store failure, T-GAP-385) is logged
+     * and never stops the record of the event (SPEC item 9).
+     */
     private static void seedSnapshot(Item item) {
         if (!(item instanceof AbstractItem)) {
             return;
@@ -319,9 +331,20 @@ public class ItemChangeListener extends ItemListener {
             XmlFile config = ((AbstractItem) item).getConfigFile();
             if (config.exists()) {
                 Store.get().saveConfigSnapshot(item.getFullName(), config.asString());
+                ConfigSnapshotListener.upToDate(item.getFullName());
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Failed to snapshot config of '" + item.getFullName() + "'", e);
+        }
+    }
+
+    /** Removes the diff baseline of {@code fullName}; a store failure is logged (T-GAP-385). */
+    private static void deleteSnapshot(String fullName) {
+        try {
+            Store.get().deleteConfigSnapshot(fullName);
+            ConfigSnapshotListener.upToDate(fullName);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Failed to remove the config snapshot of '" + fullName + "'", e);
         }
     }
 

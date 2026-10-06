@@ -43,7 +43,6 @@ echo "--- GET /job/$SCOPE/configure as requester BEFORE any grant -> HTTP $statu
 
 # --- 1. create the grant request
 status=$(bc_post requester "$OUT_DIR/grant-create.html" "/batch-control/grants/create" \
-        --data-urlencode "scopeType=JOB" \
         --data-urlencode "scopeFullName=$SCOPE" \
         --data-urlencode "actions=CONFIGURE" \
         --data-urlencode "durationMinutes=1" \

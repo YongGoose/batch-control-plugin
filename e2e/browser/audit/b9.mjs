@@ -46,16 +46,16 @@ const e2 = await reqEntries('/job/batch-pipeline/'); const nv2 = (await viol()).
 row('B9-02', { roles: 'requester (script, CONFIGURE window)', V: 'n.a.', G: `${e2.length === 0 ? '✓' : '✗'} POST config.xml with a requester Configure entry: entry removed (${e2.length} left)`, R: `✗ the script gets HTTP ${pr.status} "${pr.text.slice(0, 40)}" as for a clean save: nothing says the entry was dropped (DEF-35)`, C: `${nv2 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: '✓ text', defect: 'DEF-35 (new)' });
 await uiRevoke(g1);
 // B9-03 inherited folder window on team/app-1
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B9-03 ${T}: folder window` });
+g = await requestGrant(p, { scope: 'team', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B9-03 ${T}: folder window` });
 await decide(g.url); const g3 = gidOf(g.url);
 v0 = (await viol()).length;
 const r3 = await addSelf('/job/team/job/app-1/configure', 'B9-03-1-adding-self');
 await sleep(1000); const e3 = await reqEntries('/job/team/job/app-1/'); const nv3 = (await viol()).length - v0;
-row('B9-03', { roles: 'requester (FOLDER team window)', V: 'n.a.', G: `${e3.length === 0 ? '✓' : '✗'} requester added himself on team/app-1 and saved (${r3.status}); entry removed`, R: '✗ silent, as B9-01 (DEF-35)', C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-adding-self' : '✗', defect: 'DEF-35 (new)' });
+row('B9-03', { roles: 'requester (window on the folder team)', V: 'n.a.', G: `${e3.length === 0 ? '✓' : '✗'} requester added himself on team/app-1 and saved (${r3.status}); entry removed`, R: '✗ silent, as B9-01 (DEF-35)', C: `${nv3 === 1 ? '✓' : '✗'} one GRANT_VIOLATION`, E: r3.s ? '✓ B9-03-1-adding-self' : '✗', defect: 'DEF-35 (new)' });
 await uiRevoke(g3);
 }
 // B9-04..06 under a CREATE window on team/ (plus a CONFIGURE window on the copy source for B9-06)
-g = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 1, reason: `Audit B9-04 ${T}: create under the guard` });
+g = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 1, reason: `Audit B9-04 ${T}: create under the guard` });
 await decide(g.url); const g4 = gidOf(g.url);
 const gs = await requestGrant(p, { scope: 'batch-daily', actions: ['CONFIGURE'], minutes: 15, reason: `Audit B9-06 ${T}: copy source` });
 await decide(gs.url);
@@ -89,7 +89,7 @@ await ad.page.goto(`${BASE}/job/team/job/${nm}/`);
 ad.page.once('dialog', (d) => d.accept());
 await ad.page.locator('#side-panel a:has-text("Delete Project")').click(); await ad.page.waitForTimeout(700);
 { const ok = ad.page.locator('dialog[open] button[data-id="ok"]').first(); if (await ok.count()) await Promise.all([ad.page.waitForNavigation().catch(() => null), ok.click()]); }
-const g7 = await requestGrant(p, { type: 'FOLDER', scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B9-07 ${T}: window open during delete+recreate` });
+const g7 = await requestGrant(p, { scope: 'team', actions: ['CREATE'], minutes: 15, reason: `Audit B9-07 ${T}: window open during delete+recreate` });
 await decide(g7.url);
 await ad.page.goto(`${BASE}/job/team/newJob`); await ad.page.fill('#name', nm); await ad.page.locator('label:has-text("Freestyle project")').first().click();
 await Promise.all([ad.page.waitForNavigation(), ad.page.locator('#ok-button').click()]); await Promise.all([ad.page.waitForNavigation(), ad.page.locator('button[name="Submit"]').click()]);

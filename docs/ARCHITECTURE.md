@@ -13,10 +13,12 @@
 |---|---|---|
 | 잡별 승인 설정 | `hudson.model.JobProperty` + `JobPropertyDescriptor` | `approvalRequired`, `blockTimer`, `blockUpstream`, `allowedUpstreamJobs` |
 | 실행 차단 | `hudson.model.Queue.QueueDecisionHandler#shouldSchedule(Task, List<Action>)` | `CauseAction`으로 원인 분류. 승인 투입은 `ApprovedRunAction`(마커)으로 통과. 차단 시 사용자 유래 Cause(UserIdCause·CLI·REST)는 `Failure` throw로 안내, Timer·SCM 등 무인 Cause는 `return false` + 로그 |
-| 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | 요청 저장 파라미터 그대로 |
+| 승인 투입 | `ParameterizedJobMixIn.scheduleBuild2(0, ParametersAction, CauseAction(ApprovedCause), ApprovedRunAction)` | The `ParametersAction` holds the request's stored `ParameterValue` objects unchanged, original secrets and files included (D-72) |
+| Approved run in the queue (D-72b (7)) | `hudson.model.queue.QueueListener#onLeft(Queue.LeftItem)` (`ApprovedRunQueueListener`) | An approved run's queue item that was cancelled marks the request `queueCancelledAtMillis`, deletes its values file and is never resubmitted by startup recovery |
+| Temporary parameter files (D-72, D-74 (2)) | core `FileParameterValue.CancelledQueueListener` and file-parameters `StashedFileParameterValue.CancelledQueueListener`, called with a synthetic cancelled `Queue.LeftItem` (`ParameterFiles`) | For values that will never reach the queue (a request that ended without a run, a submission refused before a request was stored, a person's own build refused by the queue gate, rerun values that could not be completed), the files are disposed of the way each parameter type disposes of them for a cancelled queue item. Neither type exposes its temporary file or a method that deletes it; its public listener for cancelled queue items is the only supported cleanup, so Batch Control calls exactly those two listeners (nothing enters the queue, no private field is read) |
 | 삭제 차단 | `ItemListener#onCheckDelete(Item)` → `throw new Failure(...)` | 변경 통제 on + 활성 Grant(DELETE) 없으면 거부 |
 | 변경 기록 | `ItemListener#onCreated/onDeleted/onRenamed/onLocationChanged` | 사후 훅. 현재 인증 `Jenkins.getAuthentication2()` 기록 |
-| 설정 diff | `SaveableListener#onChange(Saveable, XmlFile)` + 직전 스냅숏 보관 | 스냅숏은 `snapshots/<jobFullName>.xml`에 최신 1개만 |
+| 설정 diff | `SaveableListener#onChange(Saveable, XmlFile)` + 직전 스냅숏 보관 | 스냅숏은 `snapshots/<jobFullName>.xml`에 최신 1개만. `SnapshotSeeding` (D-76): at startup (`@Initializer`, background) missing snapshots are seeded; when recording turns on every snapshot is refreshed. A save with no usable snapshot is recorded without a diff; saves made while an item is being created belong to its CREATE |
 | 임시 권한 | `hudson.security.AuthorizationStrategy`(위임형) + `hudson.security.ACL` | 4절 참고 |
 | 권한 정의 | `hudson.security.PermissionGroup`, `hudson.security.Permission` | `PermissionScope.JENKINS` 스코프(전역 권한). `Manage`는 `Jenkins.ADMINISTER` implied |
 | 요청/결재/대시보드 화면 | `hudson.model.RootAction`(전역), `hudson.model.Action` + `TransientActionFactory<Job>`(잡별) | Jelly 뷰 |
@@ -64,20 +66,22 @@ GrantAwareACL extends ACL            (unchanged logic)
       if item != null and auth is not anonymous and changeControlEnabled:
           for p = perm; p != null; p = p.impliedBy:
               if p.enabled and GrantAction.fromPermission(p) != null
-                 and GrantService.hasActiveGrant(auth.getName(), item.getFullName(), p):
+                 and GrantService.hasActiveGrant(auth.getName(), item, p):   # exact full name of the window's item (D-71, D-74)
                   return true
       return parentACL.hasPermission2(auth, perm)
 ```
 
 - Every `getACL` overload the parent overrides is wrapped, so the parent's own per-item logic runs first underneath the grant layer. The root ACL carries no grant scope, so a subclass may leave `getRootACL` unwrapped, and matrix-auth's `getACL(ItemGroup)` resolves to an already wrapped item or root ACL (security-05 S-08).
+- Following the item (D-74, replaces the D-71a/D-71b identity binding): a grant matches its item by exact full name. Item events keep it correct: when an item is renamed or moved (by an administrator or a user with their own permissions — no window allows a rename, D-71c), the windows naming it and the items below a renamed folder are updated to the new full names, and so are D-35c created-item records; deleting an item ends (revokes, reason "its item was deleted") the windows naming it or anything below it; creating an item at a window's name ends that window; at startup, windows whose item no longer exists end. Ending a window marks it ended in memory first, then appends the GRANT_REVOKE record, then rewrites the grant file; a failed write is retried (every later grant write, item events, the periodic work), and at startup a window whose file still says it is open but which has a GRANT_REVOKE record is ended again from that record. Registration re-checks, under the service's lock and after the approver's checks, that the approved item object is still at its name; otherwise the window ends at once (D-71c (3), D-75). A window that cannot follow its item for certain (its grant file cannot be written with the new name, another item is at the old name again when the event is handled, or another item has just taken the name it gives) ends with a GRANT_REVOKE record instead of keeping a stale name; D-35c records are updated in memory first and their write is retried. The startup re-end reads the GRANT_REVOKE records since the oldest open window was granted, bounded by time and not by a record count; if they cannot all be read — including a line inside that range that is torn, damaged or too long — every open window ends ("its state could not be confirmed at startup"); a complete record of another type does not count, and a later start stops reading at the GRANT_REVOKE records of a start that failed closed, so a damaged line is read back once. The screens read grants through the same service as the permission checks; a followed name is shown only to a viewer who may read the item (D-75). Remaining gap: an item replaced on disk outside Jenkins followed by a reload.
 - Expiry: `hasActiveGrant` checks `expiresAt > now && revokedAt == null`. No timer, nothing written into the other plugin's data.
-- Scope: FOLDER scope matches the folder path prefix (the folder and everything below it), FOLDER_ONLY the folder itself and its direct items (D-65), JOB scope the exact full name. CREATE is checked on the folder's ACL, so only FOLDER-scope grants confer it. A Create grant also confers Configure on items its holder created inside the scope during the window (D-35c).
+- Scope (D-71, replaces D-65): a grant names exactly one item (scope type `ITEM`, a job or a folder of any kind) and matches only that item's exact full name, so it confers nothing on any other item, including the items inside a folder. CONFIGURE, and EXTENDED_READ through the `impliedBy` walk, is answered on the item's own ACL. Core checks CREATE on the parent's ACL, so a CREATE grant, which can exist only on a modifiable item group (a regular folder, not a job or a computed folder), admits creation directly inside that folder only, never in a nested folder. A DELETE grant can exist only on a job (an item that is a `Job`, including multi-configuration and Maven projects), never on an item group that is not a job (folder, multibranch project, organization folder). Both restrictions are enforced when the request is submitted, from the item's kind, and again in every permission check (a window answers CREATE only on a regular folder and DELETE only on a job).
 - Self-grant guard (D-35b): a `SaveableListener` restores an item's authorization property changed by a user whose Configure comes only from a grant, and records `GRANT_VIOLATION`.
 - Upgrade: none. The withdrawn generic wrapper `BatchControlAuthorizationStrategy` is removed without a load-time conversion; the plugin was never released (D-35e).
 - Migration: a security-page action copies a plain matrix-auth or role-strategy configuration into the subclass and back.
 - Monitors: "change control is on but the installed strategy is not a Batch Control strategy" (for example a plain strategy installed on the security page or by JCasC; role-strategy 927+ keeps the subclass on its own saves, D-35f, D-35g).
 - With no active grant the subclass behaves exactly like its parent.
 - matrix-auth and role-strategy are optional dependencies; each subclass is an `@Extension(optional = true)` in its own class so a missing plugin never breaks class loading.
+- file-parameters is an optional dependency too (D-74 (2)): every reference to its classes is isolated in `store/FileParametersSupport`, which checks that the plugin is installed before touching them, so `stashedFile`/`base64File` support is absent, not broken, without it.
 
 ## 5. 저장소 (FileStore)
 
@@ -85,6 +89,7 @@ GrantAwareACL extends ACL            (unchanged logic)
 $JENKINS_HOME/batch-control/
 ├── config.xml                    전역 설정 (GlobalConfiguration 표준 위치는 $JENKINS_HOME/io.jenkins...xml, 이 파일은 사용 안 함)
 ├── requests/run/<id>.xml         RunRequest (XStream). 상태 변경 시 파일 전체 재작성 (원자적: tmp → rename)
+├── requests/run/<id>.values.xml  RunRequestValues: the typed ParameterValues, written once at submission (D-74)
 ├── requests/grant/<id>.xml       GrantRequest
 ├── grants/<id>.xml               Grant
 ├── runs/YYYY-MM.jsonl            RunRecord, 월별 append-only
@@ -95,13 +100,18 @@ $JENKINS_HOME/batch-control/
 ```
 
 - ID: `yyyyMMdd-HHmmss-<6자리 랜덤>` (파일명 안전, 시간순 정렬 가능).
-- 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush.
+- 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush. An append first ends a torn last line (a file that does not end with a line end, or whose last byte cannot be read, gets one; at worst a blank line, which readers skip), so a damaged line never swallows the next record.
+- Unreadable entity files (an XML file that cannot be read or parsed) are skipped with a warning in listings and in the grant cache; a skipped grant confers nothing. Open-request listings skip a request that became unreadable after startup (it keeps its index entry and is picked up once readable); a D-21 invalidation missed because of it is remembered in memory and applied once readable.
 - Reads (#13): list screens page newest-first by streaming month files from the end and stop after the page window or at most 50,000 scanned records (`RecordPage.truncated`, and the screen asks the user to narrow the filter). Diffs are read only for the rows shown. Month counters for summaries are kept in memory and updated from what was appended since the last read. An in-memory index of requests and grants is built once per session at startup; the expiry, recovery and invalidation scans load only open requests. All of this is derived state, never persisted, and rebuilt on restart.
 - Locks (#18): one lock per file stripe (64 stripes by path hash) instead of a single store lock. Retention deletes one file at a time under that file's lock, so the queue gate and build completion wait behind at most one write.
 - Names (#17, #25): month bucket names and ids use `Locale.ROOT` ASCII digits and the plugin clock's zone. A shortened item file name is `prefix~sha256`; `encode` writes `~` as `%7E`, so a shortened name never equals a plain encoding. Pre-release file names (the old shortened form, non-ASCII month digits) are neither read nor migrated (D-43).
 - Retention also deletes closed requests and ended grants older than the first kept month.
-- Grant file fields (D-35c, D-58a): besides its window, a grant keeps two optional lists of item full names, `createdItems` (items created through it) and `changedItems` (items whose configuration was changed under it and not yet reviewed). Both are written only when non-empty, so older files load unchanged. `changedItems` follows renames and moves, loses an item when it is deleted or reviewed (an HTTP save by a native Item/Configure or Overall/Administer holder), and retention never deletes a grant file whose `changedItems` is non-empty. A run replayed under a grant carries an invisible marker action saved in its own `build.xml` by Jenkins (D-58c); Batch Control adds no file for it.
-- 비밀 마스킹: `hudson.model.PasswordParameterValue`와 `Secret` 타입은 `********`로 저장.
+- Grant file fields (D-35c, D-58a): besides its window, a grant keeps two optional lists of item full names, `createdItems` (items created through it) and `changedItems` (items whose configuration was changed under it and not yet reviewed). Both are written only when non-empty, so older files load unchanged. `changedItems` follows renames and moves (the entries of items below a renamed or moved folder follow in each item's own event), loses an item when it is deleted or reviewed (an HTTP save by a native Item/Configure or Overall/Administer holder), and retention never deletes a grant file whose `changedItems` is non-empty. A run replayed under a grant carries an invisible marker action saved in its own `build.xml` by Jenkins (D-58c); Batch Control adds no file for it.
+- Run request file fields (D-72): `parameterValues` holds the submitted `ParameterValue` objects as XStream writes them, as core does in `build.xml`; a `PasswordParameterValue` and any other `Secret` field are written in Jenkins' encrypted form, never as plaintext. `parameters` is the masked string map derived once at submission, and it is the only form in which a request's parameters are displayed or written elsewhere (screens, CSV, history); run records and incidents mask the build's own values with the same rule (D-72b (8)). Where the typed values are stored is replaced by the next bullet (D-74). The approved build is scheduled with `parameterValues` unchanged. File content stays where each parameter type keeps it (core `$JENKINS_HOME/fileParameterValueFiles/`, file-parameters `stashedFileParameterValueFiles/`, Base64 inside the request's values file); Batch Control copies none of it. When a request ends without a run (REJECTED, CANCELLED, EXPIRED, INVALIDATED, or the approved run could not be queued) Batch Control disposes of those temporary files; once the approved run is queued, the queue and the build own them.
+- Run request files (D-74, replaces the D-72b layout): `requests/run/<id>.xml` holds the request without typed values (status, ticket, masked `parameters`, …). The typed values are in `requests/run/<id>.values.xml`, root `io.jenkins.plugins.batchcontrol.model.RunRequestValues` (`requestId`, `values` = the submitted `ParameterValue` objects as XStream writes them, Secrets encrypted), written once at submission after `<id>.xml` (each via a temporary file and an atomic move; if the values file cannot be written, `<id>.xml` is deleted); there is no values file for a request without parameters. Listings, badges, the index and periodic work read only `<id>.xml`; approve, submit, startup recovery and disposal read the values file; a request with parameters whose values file is missing or unreadable cannot be approved or run. The values file is deleted when the approved run starts, when the approved run's queue item is cancelled (the request stays APPROVED, D-72b (7)), or when the request ends (after the end state is saved); retention deletes it with the request. Optional `queueCancelledAtMillis` records that an approved run's queue item was cancelled.
+- Incident file: optional `runTimestampMillis` (the failed build's `Run#getTimeInMillis()`); a rerun reuses a build's values only when that build still has this timestamp (D-72b(6)). Incidents stored without it cannot confirm their build, so their rerun opens the form (unreleased plugin, D-69).
+- Secret masking (D-72): Batch Control writes no plaintext secret. In every textual form (the request's `parameters` map, run records, CSV, incidents, diffs) a sensitive value (`ParameterValue#isSensitive()`, `hudson.model.PasswordParameterValue`, `Secret`) is `********`, and a file value appears only as `[file] <original file name>`, never its content, Base64 or a server path.
+- Grant request and grant file fields (D-71): `scope` is `{type: ITEM, fullName}`; `itemKind` records the item's kind at submission (descriptor id, display name and icon class name), and a grant copies it from its request. Files with the earlier scope types `JOB`, `FOLDER` or `FOLDER_ONLY` are not converted (D-69).
 - 보관: `retentionMonths` 초과 월 파일 삭제 + ChangeRecord(RETENTION).
 - 잡 이름 인코딩: `/` → `%2F`, 기타 URL-safe 인코딩. 디코딩 시 경로 탈출(`..`) 검증.
 
@@ -117,6 +127,7 @@ $JENKINS_HOME/batch-control/
                                             decisionComment, approverChanges[]
 ```
 
+- A job whose directory marker (identity) cannot be read counts as not activated (fail closed, SPEC 6a).
 - `policy.ActivationService#isActivated(Job)` is the single read the queue gate uses for timer and upstream causes; it is ANDed with `blockTimer`/`blockUpstream`.
 - Activation state is written only by an approved ACTIVATION request (or the one-time seeding), never by job configuration, so no config write path can activate a job.
 - Rename/move relocates the state file; deletion removes it. The file name uses `PathCodec` like snapshots.
@@ -128,6 +139,15 @@ $JENKINS_HOME/batch-control/
 사용자 → JobRequestAction(POST /job/X/batch-control/submit)
   → 권한 Request 확인 → RunRequestService.create(사유, 파라미터, 결재자)
   → 검증(결재자 목록, 자가 지정 금지, 사유 필수) → FileStore 저장(PENDING)
+  (D-72) After the permission check and before Batch Control reads the form, the declared body size
+  is checked against maxRequestBodyBytes (default 100 MB). Core may already have parsed a multipart
+  body into its temporary upload directory before any plugin code runs (URL dispatch under a job
+  reads request parameters); the cap guarantees that nothing is created or kept in JENKINS_HOME, and
+  the instance-wide upload limit is Stapler's FILEUPLOAD_MAX_SIZE system property (D-72a). Second stage
+  (D-74 (2)): after the form is read and before anything is stored, the size the request would keep
+  (uploaded parts read plus stored texts; base64File counted as its Base64 text) is checked against
+  the same cap; over it → 413, nothing kept. The stored request holds the typed ParameterValues and the
+  masked display map derived from them once.
 
 [결재]
 결재자 → BatchControlRootAction → RequestItem(POST /batch-control/requests/<id>/approve)

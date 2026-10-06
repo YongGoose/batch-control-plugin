@@ -117,7 +117,7 @@ public class GrantUsabilityTest {
     public void t_08_49_grantsScreenShowsExpiredWindowAndReRequestLink() throws Exception {
         j.createFreeStyleProject("win-job");
         BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
-        String id = submitGrantOk(j, "u1", "JOB", "win-job", Arrays.asList("CONFIGURE"), 30, "fix the schedule", null, "a1");
+        String id = submitGrantOk(j, "u1", "win-job", Arrays.asList("CONFIGURE"), 30, "fix the schedule", null, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval");
         assertTrue(GrantService.get().hasActiveGrant("u1", "win-job", Item.CONFIGURE), "fixture: the window is active");
 
@@ -157,14 +157,22 @@ public class GrantUsabilityTest {
     }
 
     /**
-     * T-08-50 (DEF-19, D-40): under a name-restricted CREATE grant, the New Item name check and the
-     * rename check answer with a message naming the restriction (not a 403, not "the same as the
-     * current name"), a matching name is accepted, the refused POSTs name the restriction instead
-     * of "missing the Job/Create permission", and typing logs no AccessDeniedException.
+     * T-08-50 (DEF-19, D-40, D-71c): under a name-restricted CREATE grant, the New Item name check
+     * answers with a message naming the restriction (not a 403), a matching name is accepted, the
+     * refused creation names the restriction instead of "missing the Job/Create permission", and
+     * typing logs no AccessDeniedException. Since D-71 the window on the folder carries [CREATE,
+     * CONFIGURE] (DELETE applies only to a job and can no longer be requested on a folder); the
+     * rename of {@code team/app-7} rests on the D-35c Configure of the item u1 created (note 260).
+     * Since D-71c no window allows a rename, so the rename check and the refused rename explain that
+     * instead of the restriction (note 266): the check answers 200 with an error reading "Renaming
+     * 'team/app-7' (Freestyle project) is not allowed: while change control is on, a permission
+     * window does not allow renaming a job or folder" (still not "the same as the current name"),
+     * and the refused rename answers 400 with the same text and "Nothing was renamed.", as a plain
+     * refusal.
      */
     @Test
     public void t_08_50_nameRestrictionIsExplainedWhileTypingAndOnRefusal() throws Exception {
-        String id = submitGrantOk(j, "u1", "FOLDER", "team", Arrays.asList("CREATE", "CONFIGURE", "DELETE"), 30,
+        String id = submitGrantOk(j, "u1", "team", Arrays.asList("CREATE", "CONFIGURE"), 30,
                 "create the app job", PATTERN, "a1");
         assertSuccess(decideGrant(j, "a1", id, "approve", "ok"), "fixture: approval");
         List<NameValuePair> create = new ArrayList<>();
@@ -190,8 +198,12 @@ public class GrantUsabilityTest {
 
             WebResponse renameCheck = ApproverFormFixtures.get(j, "u1", team.getUrl() + "job/app-7/checkNewName?newName=evil");
             String renameText = renameCheck.getContentAsString();
+            String windowRename = RenameRefusalFixtures.refusal("team/app-7", "Freestyle project");
+            assertEquals(200, renameCheck.getStatusCode(), "the rename check must answer a message, not HTTP " + renameCheck.getStatusCode());
             assertFalse(renameText.contains("same as the current name"), "the rename check must not answer a misleading message: " + excerpt(renameText));
-            assertTrue(renameText.contains("app-[0-9]+"), "the rename check must name the restriction: " + excerpt(renameText));
+            assertEquals("error", RenameRefusalFixtures.validationKind(renameCheck), "D-71c: the rename check is an error: " + excerpt(renameText));
+            assertTrue(RenameRefusalFixtures.visible(renameText).contains(windowRename), "D-71c: the rename check must say '" + windowRename
+                    + "': " + excerpt(renameText));
 
             List<String> offenders = log.getRecords().stream()
                     .filter(r -> mentionsAccessDenied(r))
@@ -213,9 +225,11 @@ public class GrantUsabilityTest {
         List<NameValuePair> rename = new ArrayList<>();
         rename.add(new NameValuePair("newName", "evil"));
         WebResponse refusedRename = ApproverFormFixtures.post(j, "u1", team.getUrl() + "job/app-7/confirmRename", rename);
-        assertClientError(refusedRename, "renaming to a non-matching name");
+        RenameRefusalFixtures.assertWindowRenameRefused(refusedRename, "team/app-7", "Freestyle project", "renaming to a non-matching name");
         assertNotNull(team.getItem("app-7"), "the item keeps its name");
-        UsabilityFixtures.assertPlainRefusal("refused rename", refusedRename.getContentAsString(), Pattern.compile(Pattern.quote("app-[0-9]+")));
+        assertNull(team.getItem("evil"), "nothing carries the new name");
+        UsabilityFixtures.assertPlainRefusal("refused rename", RenameRefusalFixtures.visible(refusedRename.getContentAsString()),
+                Pattern.compile(Pattern.quote(RenameRefusalFixtures.REASON)));
     }
 
     /**
@@ -268,7 +282,7 @@ public class GrantUsabilityTest {
         j.createFreeStyleProject("off-job");
         java.util.Set<Object> before = byUser("u1").stream().map(r -> (Object) r.getId()).collect(Collectors.toSet());
 
-        WebResponse refused = submitGrant(j, "u1", "JOB", "off-job", Arrays.asList("CONFIGURE"), 30, "needs a change", null, "a1");
+        WebResponse refused = submitGrant(j, "u1", "off-job", Arrays.asList("CONFIGURE"), 30, "needs a change", null, "a1");
         assertClientError(refused, "a grant request while change control is off");
         assertTrue(refused.getContentAsString().toLowerCase(Locale.ROOT).contains("change control"),
                 "the refusal names the switch: " + excerpt(refused.getContentAsString()));

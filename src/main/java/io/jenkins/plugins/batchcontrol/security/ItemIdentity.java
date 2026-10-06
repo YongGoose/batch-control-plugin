@@ -9,15 +9,14 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * S-09: an opaque marker of an item's directory on disk, recorded with a D-35c created-item
- * record so that an item deleted (on disk or otherwise unseen) and recreated under the same name
- * is not taken for the created one.
+ * security-13 S-13-09: an opaque marker of an item's directory on disk, recorded with an
+ * activation state so that a state left behind by a deleted item is not taken for a new item of
+ * the same name.
  *
  * <p>The file key (device and inode on POSIX file systems) is used where the file system has one:
  * it survives restarts, renames and moves inside {@code $JENKINS_HOME}, and a recreated directory
- * gets a new one. Without a file key (Windows) the creation time is used, which is a real birth
- * time there. A directory copied back from a backup gets a new marker, which only takes the
- * grant's Read/Configure on it away (fail-safe).
+ * normally gets a new one. Without a file key (Windows) the creation time is used. Permission
+ * windows do not use it: they follow their item through item events (D-74, {@link WindowItemListener}).
  */
 @Restricted(NoExternalUse.class)
 public final class ItemIdentity {
@@ -25,7 +24,7 @@ public final class ItemIdentity {
     private ItemIdentity() {
     }
 
-    /** The marker of {@code rootDir}, or {@code null} when it does not exist or cannot be read. */
+    /** The marker of {@code rootDir}, or {@code null} when it does not exist or cannot be read. Uncached. */
     @CheckForNull
     public static String of(@CheckForNull File rootDir) {
         if (rootDir == null) {
