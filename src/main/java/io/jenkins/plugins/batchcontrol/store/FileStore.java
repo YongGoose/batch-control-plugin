@@ -1439,6 +1439,12 @@ public final class FileStore implements Store {
      * first: a file that does not end with a line end (a line torn by a crash or a failed write) is
      * terminated before the record is written, so the record never merges into the torn line and
      * stays readable (T-SEC-108); the torn line stays an unreadable line of its own.
+     *
+     * <p>The append itself needs only write access (T-GAP-387): the file is opened for writing alone
+     * and its last byte is read through a channel of its own. When that byte cannot be read (a file
+     * that can be written but not read), the record is written after a line end of its own, as for a
+     * torn line, instead of failing: at worst that leaves a blank line, which every reader of these
+     * files skips ({@link #parseLines}, the paged reads, the month counters, retention).
      */
     private void appendLine(Path dir, YearMonth month, JSONObject json) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
@@ -1447,12 +1453,9 @@ public final class FileStore implements Store {
         lock.lock();
         try {
             Files.createDirectories(dir);
-            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.READ,
-                    StandardOpenOption.WRITE)) {
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
                 long end = channel.size();
-                if (end > 0 && !endsWithLineEnd(channel, end)) {
-                    LOGGER.warning(() -> "The last line of " + file + " was not terminated (torn); it is ended before"
-                            + " the next record is appended and stays an unreadable line of its own");
+                if (end > 0 && !lastLineEnded(file, end)) {
                     line = System.lineSeparator() + line;
                 }
                 ByteBuffer bytes = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
@@ -1467,15 +1470,32 @@ public final class FileStore implements Store {
         }
     }
 
-    /** Whether the byte before {@code end} in {@code channel} is a line feed. */
-    private static boolean endsWithLineEnd(FileChannel channel, long end) throws IOException {
-        ByteBuffer last = ByteBuffer.allocate(1);
-        while (last.hasRemaining()) {
-            if (channel.read(last, end - 1) < 0) {
-                return false;
+    /**
+     * Whether the byte before {@code end} in {@code file} is a line feed, read through a read-only
+     * channel of its own. {@code false}, with a warning, when it is not (a torn last line) or when it
+     * cannot be read: the caller then writes a line end before the record.
+     */
+    private static boolean lastLineEnded(Path file, long end) {
+        try (SeekableByteChannel in = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            in.position(end - 1);
+            ByteBuffer last = ByteBuffer.allocate(1);
+            while (last.hasRemaining()) {
+                if (in.read(last) < 0) {
+                    break;
+                }
             }
+            if (!last.hasRemaining() && last.get(0) == '\n') {
+                return true;
+            }
+            LOGGER.warning(() -> "The last line of " + file + " was not terminated (torn); it is ended before"
+                    + " the next record is appended and stays an unreadable line of its own");
+            return false;
+        } catch (IOException e) {
+            LOGGER.warning(() -> "The last byte of " + file + " could not be read (" + e.getClass().getName()
+                    + "); the record is appended after a line end of its own, which leaves at worst a blank line"
+                    + " that readers skip");
+            return false;
         }
-        return last.get(0) == '\n';
     }
 
     /**
