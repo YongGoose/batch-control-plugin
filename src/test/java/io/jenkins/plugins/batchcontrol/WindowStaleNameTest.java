@@ -13,6 +13,7 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 import hudson.security.AuthorizationMatrixProperty;
 import hudson.security.Permission;
+import hudson.tasks.Mailer;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
@@ -20,12 +21,17 @@ import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.model.RequestStatus;
+import io.jenkins.plugins.batchcontrol.ops.BatchControlNotifier;
 import io.jenkins.plugins.batchcontrol.ops.ExpiryPeriodicWork;
+import io.jenkins.plugins.batchcontrol.ops.Notification;
+import io.jenkins.plugins.batchcontrol.ops.NotificationEvent;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
+import jakarta.mail.Message;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +57,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import jenkins.model.Jenkins;
+import jenkins.model.JenkinsLocationConfiguration;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
@@ -66,6 +73,7 @@ import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.jvnet.mock_javamail.Mailbox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -87,7 +95,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (note 275). T-SEC-100's fixture as the owner settled it on 2026-10-06, its twin T-SEC-105 (an
  * item created as SYSTEM inside the guarded folder keeps its own changed-under-grant state) and
  * T-SEC-112 (a stale changed-under-grant entry of a vanished item does not pass to an item renamed
- * into its name), from D-58a, D-75 (2) and ARCHITECTURE 5 (note 278).
+ * into its name), from D-58a, D-75 (2) and ARCHITECTURE 5; T-SEC-115 (the APPROVED notice of a
+ * window that ended at registration because its item was deleted says so), from the owner's
+ * decision of 2026-10-06 (note 278).
  *
  * <p>"Changed under a grant" is read two ways: the stored window's {@code changedItems} list
  * (ARCHITECTURE 5, D-58a (5)) and its consequence once every window has ended: a script's
@@ -116,6 +126,7 @@ public class WindowStaleNameTest {
 
     /** The job of the template window whose stored file {@link #registerAsApproval} copies. */
     private static final String TEMPLATE_JOB = "template-job-q7z";
+    private static final String U1_MAIL = "requester.one@example.com";
 
     private JenkinsRule j;
     private GrantRequest templateRequest;
@@ -599,7 +610,132 @@ public class WindowStaleNameTest {
         assertTrue(can("u1", keep, Item.CONFIGURE), "guard: the window on fol-keep still confers");
     }
 
+    /**
+     * T-SEC-115 (owner decision of 2026-10-06 on D-71c (3) / D-75 (2); SPEC 13 (APPROVED goes to
+     * the requester); LIMITATIONS 11 "the request itself stays APPROVED: the requester is sent the
+     * usual approval notification"; note 278): with e-mail notifications on (u1's address), u1
+     * requests a CONFIGURE window on {@code hf/rr}, a job in the test folder of T-SEC-102. The
+     * administrator deletes {@code hf/rr}; the folder's hook, after every item listener has seen the
+     * deletion and before the name is freed, runs a1's approval of the request (the service call,
+     * on the deleting thread; premise: the name still carries the job and the approval goes
+     * through). The window ends at registration (premise: not active, its stored file revoked with
+     * the reason "its item was deleted", the request APPROVED), and the APPROVED notice to u1 (its
+     * mail, which carries the request id) contains a line saying that the window ended at once and
+     * why: one line with the words "ended" and "deleted". Control first: the APPROVED mail of an
+     * ordinary approval ({@code hf/stay}) has no such line. Red until the owner's decision is
+     * implemented (r6/int-core6).
+     */
+    @Test
+    public void t_sec_115_approvalNoticeSaysTheWindowEndedAtOnceWhenItsItemWasDeletedBeforeRegistration() throws Exception {
+        JenkinsLocationConfiguration.get().setAdminAddress("batch-control@example.com");
+        User.getById("u1", true).addProperty(new Mailer.UserProperty(U1_MAIL));
+        BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
+        cfg.setEmailNotifications(true);
+        cfg.save();
+        NotificationCapture.clear();
+        Mailbox.clearAll();
+
+        HookFolder hf = j.jenkins.createProject(HookFolder.class, "hf");
+        hf.createProject(FreeStyleProject.class, "stay");
+        GrantRequest onStay = request("u1", "hf/stay");
+        approve(onStay);
+        String stayBody = body(awaitMailCarrying(U1_MAIL, onStay.getId()));
+        assertTrue(endedLines(stayBody).isEmpty(), "control: the APPROVED mail of an ordinary approval says nothing about an ended window: "
+                + ApproverFormFixtures.excerpt(stayBody));
+
+        FreeStyleProject rr = hf.createProject(FreeStyleProject.class, "rr");
+        GrantRequest pending = request("u1", "hf/rr");
+        AtomicBoolean ran = new AtomicBoolean();
+        AtomicBoolean nameTaken = new AtomicBoolean();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        HookFolder.afterListeners = item -> {
+            if (item != rr) {
+                return;
+            }
+            nameTaken.set(hf.getItem("rr") == rr);
+            try (ACLContext ignored = ACL.as2(User.getById("a1", true).impersonate2())) {
+                GrantRequestService.get().approve(pending.getId(), "ok");
+                ran.set(true);
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        };
+        try (ACLContext ignored = ACL.as2(User.getById("admin", true).impersonate2())) {
+            rr.delete();
+        } finally {
+            HookFolder.afterListeners = null;
+        }
+        if (failure.get() != null) {
+            throw new AssertionError("premise: a1's approval during the deletion must go through (LIMITATIONS 11: the request stays APPROVED"
+                    + " and its window ends at registration), but it threw", failure.get());
+        }
+        assertTrue(ran.get(), "premise: the approval ran inside the deletion, after every item listener");
+        assertTrue(nameTaken.get(), "premise: when it ran, the name hf/rr still carried the deleted job");
+        assertNull(hf.getItem("rr"), "premise: hf/rr is deleted");
+
+        assertEquals(RequestStatus.APPROVED, GrantRequestService.get().load(pending.getId()).getStatus(),
+                "premise (LIMITATIONS 11): the request stays APPROVED");
+        Grant ended = storedWindowOf(pending.getId());
+        assertNull(WindowStateFixtures.active(ended.getId()), "premise (D-71c (3)): the window registered for the deleted job is not active");
+        assertNotNull(ended.getRevokedAt(), "premise (D-71c (3)): the stored window has ended (revokedAt)");
+        assertTrue(String.valueOf(ended.getRevokedReason()).toLowerCase(Locale.ROOT).contains(WindowStateFixtures.DELETED_REASON),
+                "premise (ARCHITECTURE 4): the window ended with the reason '" + WindowStateFixtures.DELETED_REASON + "', was: "
+                        + ended.getRevokedReason());
+
+        List<NotificationCapture> notices = NotificationCapture.await(NotificationEvent.APPROVED, pending.getId());
+        assertEquals(List.of("u1"), notices.get(0).recipients, "premise (SPEC 13): the APPROVED notice goes to the requester");
+        String body = body(awaitMailCarrying(U1_MAIL, pending.getId()));
+        assertFalse(endedLines(body).isEmpty(), "owner decision 2026-10-06: the APPROVED notice of a window that ended at registration because"
+                + " its item was deleted must contain a line saying the window ended at once and why (a line with 'ended' and 'deleted');"
+                + " notice: " + notices.get(0) + "; mail body: " + ApproverFormFixtures.excerpt(body));
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** The lines of {@code body} that contain both "ended" and "deleted" (case-insensitive). */
+    private static List<String> endedLines(String body) {
+        return body.lines().filter(l -> l.toLowerCase(Locale.ROOT).contains("ended") && l.toLowerCase(Locale.ROOT).contains("deleted"))
+                .collect(Collectors.toList());
+    }
+
+    /** Waits for the mail to {@code address} whose body carries {@code requestId} (SPEC 13: messages contain the request id). */
+    private static Message awaitMailCarrying(String address, String requestId) throws Exception {
+        long deadline = System.currentTimeMillis() + NotificationCapture.DELIVERY_TIMEOUT_MS;
+        while (true) {
+            for (Message mail : new ArrayList<>(Mailbox.get(address))) {
+                if (body(mail).contains(requestId)) {
+                    return mail;
+                }
+            }
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("no mail carrying " + requestId + " arrived at " + address + " within "
+                        + NotificationCapture.DELIVERY_TIMEOUT_MS + " ms; notices so far: " + NotificationCapture.describeAll());
+            }
+            Thread.sleep(50); // polling for asynchronous delivery, not waiting for an expiry
+        }
+    }
+
+    private static String body(Message message) throws Exception {
+        Object content = message.getContent();
+        assertTrue(content instanceof String, "a text/plain message has a String body, was " + content);
+        return (String) content;
+    }
+
+    /** The stored window ({@code grants/<id>.xml}, ARCHITECTURE 5) whose {@code grantRequestId} is {@code requestId} (SPEC 3), asserted unique. */
+    private Grant storedWindowOf(String requestId) throws Exception {
+        Path dir = j.jenkins.getRootDir().toPath().resolve("batch-control/grants");
+        List<Grant> found = new ArrayList<>();
+        try (Stream<Path> files = Files.list(dir)) {
+            for (Path file : files.filter(p -> p.getFileName().toString().endsWith(".xml")).toList()) {
+                Object read = Jenkins.XSTREAM2.fromXML(Files.readString(file, StandardCharsets.UTF_8));
+                if (read instanceof Grant g && requestId.equals(g.getGrantRequestId())) {
+                    found.add(g);
+                }
+            }
+        }
+        assertEquals(1, found.size(), "premise (ARCHITECTURE 5): exactly one stored window belongs to the request " + requestId);
+        return found.get(0);
+    }
 
     /** What {@link #failedFollowOfACreatedJob} leaves: u1's CREATE window on fo, u1's job (now fo/k) and the job now at fo/j. */
     private record FailedFollow(Grant window, FreeStyleProject created, Item nowJ) {
@@ -868,6 +1004,29 @@ public class WindowStaleNameTest {
             public String getDisplayName() {
                 return "Hook folder (T-SEC-102)";
             }
+        }
+
+        /** The same folder for T-SEC-115 (a {@code @TestExtension} names one test). */
+        @TestExtension("t_sec_115_approvalNoticeSaysTheWindowEndedAtOnceWhenItsItemWasDeletedBeforeRegistration")
+        public static class ApprovalNoticeDescriptor extends Folder.DescriptorImpl {
+            @Override
+            public TopLevelItem newInstance(ItemGroup parent, String name) {
+                return new HookFolder(parent, name);
+            }
+
+            @Override
+            public String getDisplayName() {
+                return "Hook folder (T-SEC-115)";
+            }
+        }
+    }
+
+    /** Records the notifications of T-SEC-115. */
+    @TestExtension("t_sec_115_approvalNoticeSaysTheWindowEndedAtOnceWhenItsItemWasDeletedBeforeRegistration")
+    public static class CapturingNotifier extends BatchControlNotifier {
+        @Override
+        public void notify(NotificationEvent event, Notification notification) {
+            NotificationCapture.record(event, notification);
         }
     }
 
