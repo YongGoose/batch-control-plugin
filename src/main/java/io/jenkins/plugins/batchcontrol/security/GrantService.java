@@ -1028,8 +1028,11 @@ public final class GrantService {
      * item at its full name is still the approved object and its deletion has not been reported, the
      * window ends at once, with {@link Grant#REVOKED_ITEM_DELETED} as the reason and a
      * {@code GRANT_REVOKE} record, like any other end ({@link #revokeOne}).
+     *
+     * @return {@code true} when the window is in effect; {@code false} when it ended at once because
+     *         its item was deleted (the caller's APPROVED notice says so, owner decision 2026-10-06)
      */
-    public synchronized void register(Grant grant, Item item) {
+    public synchronized boolean register(Grant grant, Item item) {
         Objects.requireNonNull(grant, "grant");
         Objects.requireNonNull(item, "item");
         String current = item.getFullName();
@@ -1041,12 +1044,13 @@ public final class GrantService {
                     + " deleted before the window could be registered; the window ends at once");
             revokeOne(grant, Jenkins.getAuthentication2().getName(), Grant.REVOKED_ITEM_DELETED,
                     ENDED + "its item '" + current + "' was deleted before the window was registered");
-            return;
+            return false;
         }
         save(grant);
         List<Grant> grants = grants();
         grants.removeIf(existing -> existing.getId().equals(grant.getId()));
         grants.add(grant);
+        return true;
     }
 
     /**
