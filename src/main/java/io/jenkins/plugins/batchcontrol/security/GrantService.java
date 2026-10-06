@@ -92,6 +92,10 @@ public final class GrantService {
      */
     private static final String UNCONFIRMED = "revoked: " + Grant.REVOKED_UNCONFIRMED;
 
+    /** How the detail of a window's {@code GRANT_REVOKE} record of {@link #endUnconfirmed} ends, after {@link #describe}. */
+    private static final String UNCONFIRMED_DETAIL = UNCONFIRMED + ": the change records since it was granted could not"
+            + " all be read at startup, so its end could not be ruled out";
+
     private final Store store = Store.get();
 
     /** All known grants (active or not); guarded by {@code this}. */
@@ -1687,7 +1691,10 @@ public final class GrantService {
      *
      * <p>S-39-03: the records are read back to the oldest such window's grant time, however many
      * there are ({@link Store#grantRevokeRecordsSince}); a window lasts at most
-     * {@code maxGrantMinutes}, so that is what bounds the read, never a record count. If the read
+     * {@code maxGrantMinutes}, so that is what bounds the read, never a record count. Nor is the read
+     * taken past the record of an earlier fail-closed start older than every open window
+     * ({@link #isStartupEnd}, T-SEC-109), so damage that start already answered ends no window
+     * granted after it. If the read
      * fails or cannot be completed, no open window's end can be ruled out: every window not already
      * ended by a record read ends now (fail-closed), revoked by SYSTEM with
      * {@link Grant#REVOKED_UNCONFIRMED} as the reason and a {@code GRANT_REVOKE} record, so its holder
@@ -1710,7 +1717,7 @@ public final class GrantService {
         }
         io.jenkins.plugins.batchcontrol.store.RecordPage<ChangeRecord> page;
         try {
-            page = store.grantRevokeRecordsSince(oldest, java.util.Set.copyOf(open.keySet()));
+            page = store.grantRevokeRecordsSince(oldest, java.util.Set.copyOf(open.keySet()), GrantService::isStartupEnd);
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.SEVERE, "Could not read the GRANT_REVOKE records since " + open.size()
                     + " open permission window(s) were granted; they end, because none of them can be shown to be"
@@ -1751,8 +1758,7 @@ public final class GrantService {
             unsavedEnds.put(grant.getId(), grant);
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REVOKE,
                     grant.getScope() == null ? null : grant.getScope().getFullName(), hudson.security.ACL.SYSTEM_USERNAME,
-                    describe(grant) + UNCONFIRMED + ": the change records since it was granted could not all be read"
-                            + " at startup, so its end could not be ruled out");
+                    describe(grant) + UNCONFIRMED_DETAIL);
             record.setGrantId(grant.getId());
             try {
                 store.appendChangeRecord(record);
@@ -1766,6 +1772,24 @@ public final class GrantService {
             LOGGER.severe(() -> count + " open permission window(s) ended at startup, because the change records since"
                     + " they were granted could not all be read; their holders may request them again");
         }
+    }
+
+    /**
+     * T-SEC-109, D-75 (2): whether {@code record} is the {@code GRANT_REVOKE} record by which a start
+     * ended a window because the change records could not all be read ({@link #endUnconfirmed}).
+     * Such a start ended every window that was open then, before any window could be registered in
+     * that session ({@link #register} loads the cache first), and a window's end is appended only
+     * after it was registered. So for windows that were all granted after such a record, no line
+     * appended before it can be an end: the startup read stops there instead of reading, again at
+     * every later start, the damaged line that start already answered by failing closed. The store
+     * offers only records older than the oldest open window, so that condition holds.
+     */
+    static boolean isStartupEnd(ChangeRecord record) {
+        String detail = record.getDetail();
+        String grantId = record.getGrantId();
+        return record.getType() == ChangeType.GRANT_REVOKE && grantId != null && detail != null
+                && hudson.security.ACL.SYSTEM_USERNAME.equals(record.getUser())
+                && detail.startsWith("Grant " + grantId + " for user '") && detail.endsWith(") " + UNCONFIRMED_DETAIL);
     }
 
     /** How the detail of {@code grant}'s {@code GRANT_REVOKE} record begins ({@link #revokeOne}). */

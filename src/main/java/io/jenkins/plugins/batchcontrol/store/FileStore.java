@@ -26,6 +26,7 @@ import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -819,10 +820,16 @@ public final class FileStore implements Store {
      * tells that it was appended within the part of the log read back. Logged once per read. A
      * complete line of another record type, also one this version does not know, is not such a
      * record and does not count.
+     *
+     * <p>T-SEC-109: reading also stops at the first record before {@code since} that
+     * {@code boundary} accepts, inside the append-order slack too, so damage behind such a record
+     * is not read again.
      */
     @Override
-    public RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds) {
+    public RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds,
+                                                            Predicate<? super ChangeRecord> boundary) {
         Objects.requireNonNull(since, "since");
+        Objects.requireNonNull(boundary, "boundary");
         Set<String> ids = Set.copyOf(grantIds);
         Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
                 .thenComparing(ChangeRecord::getId).reversed();
@@ -830,7 +837,7 @@ public final class FileStore implements Store {
                 new Period(since, null), K_AT, line -> line.optLong(K_AT), FileStore::changeRecordFromScanner,
                 FileStore::changeRecordOrOtherType, ChangeRecord::getAt,
                 r -> r.getType() == ChangeType.GRANT_REVOKE && r.getGrantId() != null && ids.contains(r.getGrantId()),
-                newestFirst, 0, Integer.MAX_VALUE, Integer.MAX_VALUE);
+                newestFirst, 0, Integer.MAX_VALUE, Integer.MAX_VALUE, boundary);
         int unread = page.getUnreadable() + page.getOversized();
         if (unread == 0 || page.isTruncated()) {
             return page;
@@ -1426,6 +1433,13 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * Appends one record line to a month file (every append-only JSONL file goes through here:
+     * changes, runs, the incident index). Under the file's lock, the file's last byte is checked
+     * first: a file that does not end with a line end (a line torn by a crash or a failed write) is
+     * terminated before the record is written, so the record never merges into the torn line and
+     * stays readable (T-SEC-108); the torn line stays an unreadable line of its own.
+     */
     private void appendLine(Path dir, YearMonth month, JSONObject json) {
         Path file = PathCodec.resolveUnder(dir, monthFileName(month));
         String line = json.toString() + System.lineSeparator();
@@ -1433,14 +1447,35 @@ public final class FileStore implements Store {
         lock.lock();
         try {
             Files.createDirectories(dir);
-            // Files.write opens, writes, flushes and closes in one call.
-            Files.write(file, line.getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.READ,
+                    StandardOpenOption.WRITE)) {
+                long end = channel.size();
+                if (end > 0 && !endsWithLineEnd(channel, end)) {
+                    LOGGER.warning(() -> "The last line of " + file + " was not terminated (torn); it is ended before"
+                            + " the next record is appended and stays an unreadable line of its own");
+                    line = System.lineSeparator() + line;
+                }
+                ByteBuffer bytes = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
+                while (bytes.hasRemaining()) {
+                    end += channel.write(bytes, end);
+                }
+            }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to append record to " + file, e);
         } finally {
             lock.unlock();
         }
+    }
+
+    /** Whether the byte before {@code end} in {@code channel} is a line feed. */
+    private static boolean endsWithLineEnd(FileChannel channel, long end) throws IOException {
+        ByteBuffer last = ByteBuffer.allocate(1);
+        while (last.hasRemaining()) {
+            if (channel.read(last, end - 1) < 0) {
+                return false;
+            }
+        }
+        return last.get(0) == '\n';
     }
 
     /**
@@ -1561,6 +1596,22 @@ public final class FileStore implements Store {
                                    Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
                                    Function<T, Instant> timeOf, Predicate<? super T> filter,
                                    Comparator<T> newestFirst, int offset, int limit, int maxScanned) {
+        return page(dir, months, period, timeKey, appendedAt, fastParser, fullParser, timeOf, filter, newestFirst,
+                offset, limit, maxScanned, null);
+    }
+
+    /**
+     * As {@link #page(Path, Collection, Period, byte[], ToLongFunction, Function, Function, Function,
+     * Predicate, Comparator, int, int, int)}; in addition, reading stops at the first record before
+     * the period that {@code boundary} accepts (a record that tells that no earlier line can matter
+     * to the caller), even inside the append-order slack.
+     */
+    private <T> RecordPage<T> page(Path dir, Collection<YearMonth> months, Period period, byte[] timeKey,
+                                   ToLongFunction<JsonLineScanner> appendedAt,
+                                   Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
+                                   Function<T, Instant> timeOf, Predicate<? super T> filter,
+                                   Comparator<T> newestFirst, int offset, int limit, int maxScanned,
+                                   @CheckForNull Predicate<? super T> boundary) {
         int from = Math.max(0, offset);
         int size = Math.max(0, limit);
         int cap = Math.max(0, maxScanned);
@@ -1597,6 +1648,10 @@ public final class FileStore implements Store {
                                 if (period.isBefore(at) && appendedAt.applyAsLong(scanner) < stopBefore) {
                                     break scan; // every earlier line, in this and older months, is older
                                 }
+                                if (boundary != null && period.isBefore(at)
+                                        && isBoundary(scanner, reader, fastParser, fullParser, boundary)) {
+                                    break scan; // no earlier line can matter to the caller
+                                }
                                 skippedBytes += reader.length();
                                 if (skippedBytes > MAX_SKIPPED_BYTES) {
                                     truncated = true;
@@ -1625,6 +1680,9 @@ public final class FileStore implements Store {
                             }
                             Instant at = value == null ? null : timeOf.apply(value);
                             if (at != null && (period.isAfter(at.toEpochMilli()) || period.isBefore(at.toEpochMilli()))) {
+                                if (boundary != null && period.isBefore(at.toEpochMilli()) && boundary.test(value)) {
+                                    break scan; // no earlier line can matter to the caller
+                                }
                                 continue;
                             }
                         }
@@ -1666,6 +1724,24 @@ public final class FileStore implements Store {
                 ? new ArrayList<>()
                 : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
         return new RecordPage<>(items, from, matched, truncated, oversized, unreadable);
+    }
+
+    /** Whether the line just scanned is a record {@code boundary} accepts; a line that cannot be parsed is not. */
+    private static <T> boolean isBoundary(JsonLineScanner scanner, ReverseLineReader reader,
+                                          Function<JsonLineScanner, T> fastParser, Function<JSONObject, T> fullParser,
+                                          Predicate<? super T> boundary) {
+        T value;
+        try {
+            value = fastParser.apply(scanner);
+        } catch (RuntimeException e) {
+            try {
+                value = fullParser.apply(JSONObject.fromObject(
+                        new String(reader.buffer(), reader.offset(), reader.length(), StandardCharsets.UTF_8)));
+            } catch (RuntimeException again) {
+                return false;
+            }
+        }
+        return value != null && boundary.test(value);
     }
 
     // ---------------------------------------------------------------- JSON codecs

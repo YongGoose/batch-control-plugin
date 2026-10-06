@@ -241,9 +241,14 @@ public interface Store {
      * {@code since}, and every record after it is read, however many there are. The page is
      * {@linkplain RecordPage#isTruncated() truncated} when that could not be done completely.
      *
+     * <p>Reading also stops at the first record before {@code since} that {@code boundary} accepts
+     * (T-SEC-109): the caller's statement that no line appended before that record can be the end of
+     * any window in {@code grantIds}, so the append-order slack is not read past it.
+     *
      * @throws java.io.UncheckedIOException when the change log cannot be read
      */
-    RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds);
+    RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds,
+                                                     Predicate<? super ChangeRecord> boundary);
 
     /**
      * Persists a freshly opened incident: writes {@code incidents/<id>.xml} and appends the
