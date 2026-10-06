@@ -324,7 +324,9 @@ Dashboard**는 인스턴스 전체에서 가장 최근의 빌드 50개를 원인
 붙입니다), 월간
 집계를 냅니다. **Change Records**는 생성·설정·삭제·이름 변경·이동의 궤적입니다. 어떤 경로로
 들어온 변경이든(UI, REST, CLI, Job DSL) 기록되며, unified diff와 그 변경이 어느 권한 창 아래에서
-이루어졌는지가, 창이 없었다면 없었다는 표시가 함께 남습니다.
+이루어졌는지가, 창이 없었다면 없었다는 표시가 함께 남습니다. 비교할 그 항목의 이전 설정을
+Batch Control이 갖고 있지 않거나 쓸 수 없으면, 설정 변경은 diff 없이 그 이유를 적은 메모와 함께
+기록됩니다([Limitations](docs/LIMITATIONS.md#records-and-screens) 53번).
 
 기록은 빌드와 분리된 `$JENKINS_HOME/batch-control/`에 있어서 빌드 로테이션보다 오래 남습니다.
 추가 전용입니다. 수정이나 삭제 API는 없고 보존 기간 만료만 있습니다.
