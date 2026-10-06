@@ -175,13 +175,6 @@ public class GrantRequiredFailure extends Failure {
         return windowApplies ? GrantRequestLinks.url(itemFullName, GrantAction.valueOf(action)) : null;
     }
 
-    /** The item as the viewer sees it, or {@code null}. */
-    @CheckForNull
-    public Item getItem() {
-        Jenkins jenkins = Jenkins.getInstanceOrNull();
-        return jenkins == null ? null : Visibility.findVisibleItem(itemFullName);
-    }
-
     @Override
     public void generateResponse(StaplerRequest2 req, StaplerResponse2 rsp, Object node,
                                  @CheckForNull Throwable throwable)
