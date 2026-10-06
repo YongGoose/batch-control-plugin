@@ -310,6 +310,11 @@ public final class GrantService {
      * D-36: marks and returns every active grant whose window ends within {@code lead} and whose
      * GRANT_EXPIRING notification was not sent yet. The flag is persisted before the caller
      * dispatches, so a restart never resends.
+     *
+     * <p>Each window is claimed on its own: a grant file that cannot be read or written now is
+     * logged and left unclaimed for the next run, and it never keeps the windows after it from being
+     * claimed nor drops the claims already written, which are all returned (a claim written but not
+     * returned would never be sent).
      */
     public synchronized List<Grant> claimExpiringNotifications(java.time.Duration lead) {
         Instant now = BatchClock.now();
@@ -319,14 +324,19 @@ public final class GrantService {
                     || now.isBefore(cached.getExpiresAt().minus(lead))) {
                 continue;
             }
-            Grant grant = load(cached.getId());
-            if (grant == null || !grant.isActiveAt(now) || grant.isExpiringNotified()) {
-                continue;
+            try {
+                Grant grant = load(cached.getId());
+                if (grant == null || !grant.isActiveAt(now) || grant.isExpiringNotified()) {
+                    continue;
+                }
+                grant.setExpiringNotified(true);
+                save(grant);
+                claimed.add(grant); // written: from here on it must reach the caller
+                replaceInCache(grant);
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not mark the GRANT_EXPIRING notification of grant "
+                        + cached.getId() + " as sent; it is tried again on the next run", e);
             }
-            grant.setExpiringNotified(true);
-            save(grant);
-            replaceInCache(grant);
-            claimed.add(grant);
         }
         return claimed;
     }

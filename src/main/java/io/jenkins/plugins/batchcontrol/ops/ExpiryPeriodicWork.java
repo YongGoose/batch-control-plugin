@@ -75,15 +75,26 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         } catch (RuntimeException e) {
             LOGGER.log(java.util.logging.Level.WARNING, "Could not close the refused re-run summaries", e);
         }
+        // Every step below runs in its own try, so a failure of one (a request file that cannot be
+        // read or written) never skips the steps after it.
+        //
         // Queue snapshot is taken outside the service lock (lock-order discipline): a request
         // whose approved submission is waiting in the queue is not "unsubmitted" and must not
         // expire while it waits for an executor. The snapshot instant is recorded first so the
         // service can recognize consumption tickets claimed after the snapshot (MINOR 1 fix).
-        Instant queueSnapshotAt = BatchClock.now();
-        Set<String> queuedIds = RunRequestService.queuedMarkerRequestIds(jenkins);
-        RunRequestService.get().expireOverdue(queuedIds, queueSnapshotAt);
+        try {
+            Instant queueSnapshotAt = BatchClock.now();
+            Set<String> queuedIds = RunRequestService.queuedMarkerRequestIds(jenkins);
+            RunRequestService.get().expireOverdue(queuedIds, queueSnapshotAt);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry of run requests failed", e);
+        }
         // Pending grant requests expire on the same cadence (SPEC item 8, T-08-12).
-        GrantRequestService.get().expireOverduePending();
+        try {
+            GrantRequestService.get().expireOverduePending();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry of pending change requests failed", e);
+        }
         // Pending activation and hold requests follow the run-request timeout (SPEC item 6a).
         try {
             ActivationService.get().expireOverduePending();
@@ -91,13 +102,23 @@ public class ExpiryPeriodicWork extends PeriodicWork {
             LOGGER.log(Level.WARNING, "Expiry of pending activation requests failed", e);
         }
         // D-36: EXPIRING / GRANT_EXPIRING once per request or window, notifyBeforeExpiryMinutes
-        // before the expiry. Guarded so a notification problem never stops the expiry work.
+        // before the expiry. Guarded so a notification problem never stops the expiry work, and
+        // one kind apart from the others so a failure of one never skips the notices of the next.
         try {
             RunRequestService.get().notifyExpiring();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry notifications of run requests failed; expiry itself is unaffected", e);
+        }
+        try {
             GrantRequestService.get().notifyExpiring();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Expiry notifications of change requests and permission windows failed;"
+                    + " expiry itself is unaffected", e);
+        }
+        try {
             ActivationService.get().notifyExpiring();
         } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, "Expiry notifications failed; expiry itself is unaffected", e);
+            LOGGER.log(Level.WARNING, "Expiry notifications of activation requests failed; expiry itself is unaffected", e);
         }
     }
 }

@@ -860,7 +860,9 @@ public final class RunRequestService {
      * D-36: sends {@link NotificationEvent#EXPIRING} once for every PENDING request whose pending
      * timeout falls within {@code notifyBeforeExpiryMinutes} from now. The "notified" flag is
      * persisted before dispatch, so a restart never resends. Expiry itself stays the clock
-     * comparison of {@link #expireOverdue}.
+     * comparison of {@link #expireOverdue}. Each request is handled on its own: one that cannot be
+     * read or written is logged and tried again on the next run, and never keeps the others from
+     * their notice.
      */
     public void notifyExpiring() {
         Instant now = BatchClock.now();
@@ -883,6 +885,10 @@ public final class RunRequestService {
                         notified = request;
                     }
                 }
+            } catch (RuntimeException e) {
+                // Not marked (the flag is only ever stored before the dispatch), so the next run tries again.
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not send the EXPIRING notification of run request "
+                        + snapshot.getId() + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
