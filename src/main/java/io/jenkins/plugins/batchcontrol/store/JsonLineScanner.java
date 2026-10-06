@@ -177,11 +177,19 @@ final class JsonLineScanner {
         return negative ? -v : v;
     }
 
-    /** A member holding an object of string values, or {@code null} if absent, null or empty. */
+    /**
+     * A member holding an object of string values, or {@code null} if absent, null or empty. Any
+     * other value (an array, a string, a number) is malformed and throws, so the line goes to the
+     * reference parser like every other line this scanner does not accept (S-02), and the page path
+     * and the full read treat it alike (T-GAP-147: both skip it).
+     */
     Map<String, String> optStringMap(byte[] key) {
         int i = find(key);
-        if (i < 0 || kind[i] != '{') {
+        if (i < 0 || kind[i] == 'n') {
             return null;
+        }
+        if (kind[i] != '{') {
+            throw new IllegalArgumentException("not an object");
         }
         if (isEmptyObject(valueStart[i], valueEnd[i])) {
             return null; // the common case ("parameters":{}): nothing to allocate
