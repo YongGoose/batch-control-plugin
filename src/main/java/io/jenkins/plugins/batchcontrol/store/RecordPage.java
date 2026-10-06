@@ -23,13 +23,20 @@ public final class RecordPage<T> {
     private final int matched;
     private final boolean truncated;
     private final int oversized;
+    private final int unreadable;
 
-    RecordPage(List<T> items, int offset, int matched, boolean truncated, int oversized) {
+    RecordPage(List<T> items, int offset, int matched, boolean truncated, int oversized, int unreadable) {
         this.items = Collections.unmodifiableList(items);
         this.offset = offset;
         this.matched = matched;
         this.truncated = truncated;
         this.oversized = Math.max(0, oversized);
+        this.unreadable = Math.max(0, unreadable);
+    }
+
+    /** This page, marked {@linkplain #isTruncated() truncated} (D-75 (2): a read that could not be completed). */
+    RecordPage<T> asTruncated() {
+        return new RecordPage<>(items, offset, matched, true, oversized, unreadable);
     }
 
     /** The rows of this page, newest first. */
@@ -55,6 +62,15 @@ public final class RecordPage<T> {
      */
     public int getOversized() {
         return oversized;
+    }
+
+    /**
+     * Lines among those read that could not be parsed (a torn or damaged line) and were therefore
+     * skipped. Their time is unknown; only their position tells that they were appended within the
+     * part of the log the query read.
+     */
+    public int getUnreadable() {
+        return unreadable;
     }
 
     /** Whether a further page of matches exists among the records read. */
