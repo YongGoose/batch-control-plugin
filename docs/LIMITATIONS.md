@@ -155,17 +155,45 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     administrator or a user with their own permissions renames or moves the
     item, the window follows it to the new full name, and when a folder is
     renamed or moved, the windows on the items inside it follow too. No window
-    can authorise the rename itself (item 33). Deleting the item ends its
-    windows, and deleting a folder ends the windows on everything inside it:
-    each is revoked, by the account that deleted the item, with the reason
-    "its item was deleted" and a `GRANT_REVOKE` record. Creating a new item at
-    a window's name ends that window the same way, since its own item must
-    have disappeared without a deletion event, and so does starting Jenkins
-    after the item has vanished, as if it had been deleted while Jenkins was
-    down. A window therefore either applies to its item, under whatever name
-    the item has now, or has ended; renaming, moving, swapping or re-creating
-    items, or combining several windows, cannot make a window reach an item
-    nobody approved.
+    can authorise the rename itself (item 33). A window that cannot follow its
+    item for certain ends instead of keeping a name its item no longer has:
+    when its grant file cannot be updated with the new name, when another item
+    already has the old name again by the time the rename or move is handled,
+    or when another item has just taken the name the window gives (renames
+    whose events interleave lead to the last two). It is revoked, by the
+    account whose rename or move was being handled, with the reason "it could
+    not follow its item" and a `GRANT_REVOKE` record, and its holder requests
+    it again (D-75, security-39 S-39-02).
+
+    Deleting the item ends its windows, and deleting a folder ends the windows
+    on everything inside it: each is revoked, by the account that deleted the
+    item, with the reason "its item was deleted" and a `GRANT_REVOKE` record.
+    Creating a new item at a window's name ends that window the same way,
+    since its own item must have disappeared without a deletion event (names
+    are compared as Jenkins looks them up, without regard to letter case), and
+    so does starting Jenkins after the item has vanished, as if it had been
+    deleted while Jenkins was down. A window approved while its item is being
+    deleted, after the approval checked the item and before the window was
+    registered, ends as soon as it is registered, with the same reason and a
+    `GRANT_REVOKE` record, revoked by the approving account (D-71c (3)). The
+    request itself stays `APPROVED`: the requester is sent the usual approval
+    notification, which does not say that the window has ended, and the
+    request's page shows the window's state as `Revoked (its item was deleted)
+    by <approver>`. A window therefore either applies to its item, under
+    whatever name the item has now, or has ended; renaming, moving, swapping
+    or re-creating items, or combining several windows, cannot make a window
+    reach an item nobody approved.
+
+    When a window has followed its item, the grant pages, the Grants list and
+    the expiry notice show the item's current full name only to a viewer, or a
+    recipient, who holds `Item/Read` on it. Anyone else, including the holder
+    and the approvers when they cannot read the item where it is now, sees the
+    name that was approved, with a fixed note that the item was moved and its
+    new location is not visible to them; administrators see the current name
+    (SPEC item 8, D-75, security-39 S-39-04). The audit history is not
+    filtered this way: a `ViewHistory` holder sees the new name in the
+    `RENAME` or `MOVE` record and in later records of the window, as for any
+    other item (item 19).
 
     Ending a window is built to survive a failed write and a restart. The
     window is marked ended in memory first, so it stops applying at once; then
@@ -174,16 +202,42 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     file that cannot be written is retried before every later grant write, on
     every item event and by the periodic work. At startup, a grant file that
     still says the window is open but has a `GRANT_REVOKE` record is ended
-    again from that record. Two gaps remain:
+    again from that record. To find those records, the change log is read in
+    full back to the time the oldest still-open window was granted, which is
+    never longer ago than the `maxGrantMinutes` in force when that window was
+    requested (default 240): the read is bounded by that time, never by a
+    number of records, so no amount of activity after a window's end can push
+    its record out of reach. If the change log cannot be read back that far
+    (a read error, or a read that has to stop early), no open window's end can
+    be ruled out, so every window still open ends: it is revoked by `SYSTEM`
+    with the reason "its state could not be confirmed at startup" and a
+    `GRANT_REVOKE` record, and its holder can request it again (D-75,
+    security-39 S-39-03). A record line that is damaged on disk is skipped
+    with a warning, as everywhere the change log is read, so it counts as a
+    record that was never written. Three gaps remain:
 
     - If both directories are unwritable, nothing durable records the
       window's end: the `GRANT_REVOKE` record could not be appended under
       `batch-control/changes/` when the window ended (that failure is logged,
       not retried), and the grant file under `batch-control/grants/` stays
       unwritable until Jenkins restarts. If, in addition, an item is created
-      at the window's name before that restart, the window applies to the new
-      item after the restart. Either write succeeding is enough for the end to
-      survive the restart.
+      at the window's name, or renamed or moved there, before that restart,
+      the window applies to that item after the restart. Either write
+      succeeding is enough for the end to survive the restart.
+    - A created-item record (D-35c: the `Item/Read` and `Item/Configure` that
+      a `CREATE` window's holder keeps on an item they created through it)
+      follows its item in memory at once when the item is renamed or moved,
+      and is dropped when the item is deleted or another item takes its name;
+      a failed write of that change is retried like an end. Unlike an end, the
+      change leaves no record under `batch-control/changes/`, so a restart
+      while `batch-control/grants/` still refuses writes loses it, and the
+      record names the item's old name again (the item it followed loses those
+      permissions). At startup a record whose name no item has is dropped; if
+      an item does have that name by then, created, renamed or moved there
+      before the restart, and lies directly inside the window's folder, the
+      holder has `Item/Read` and `Item/Configure` on it until the window ends.
+      This is the same class of gap as the one above, but it needs only the
+      grants directory to be unwritable.
     - An item replaced on disk outside Jenkins, followed by a reload, fires no
       item event, so a window naming it applies to the replacement. The
       precondition is file-system access to `$JENKINS_HOME`, which is outside
@@ -621,11 +675,11 @@ code does on purpose.
     therefore, like deleting or moving a folder (items 11 and 44), not
     something a permission window can authorise. When a rename does happen, it
     is recorded as `RENAME`, ends the item's pending requests (item 30), and
-    the windows on the item follow it to the new name (item 11). A folder
-    rename also changes the full name of everything inside the folder, ends
-    the pending run requests of the jobs inside, produces one `MOVE` record
-    per descendant job (item 26), and the windows on anything inside it follow
-    to the new full names.
+    the windows on the item follow it to the new name, or end where they
+    cannot follow it for certain (item 11). A folder rename also changes the
+    full name of everything inside the folder, ends the pending run requests
+    of the jobs inside, produces one `MOVE` record per descendant job (item
+    26), and the windows on anything inside it follow to the new full names.
 34. **Turning change control off cuts off work in progress.** The switch is a kill
     switch: while it is off no window confers anything, and flipping it off revokes
     every window open at that moment, one `GRANT_REVOKE` record per closure naming

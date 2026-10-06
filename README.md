@@ -572,10 +572,14 @@ follows the item through a rename or move made by someone entitled to it
 (windows on the items inside a renamed or moved folder follow too), and it ends
 when the item is deleted (so do the windows on anything inside a deleted
 folder), when a new item is created at its name, or when Jenkins starts and the
-item is gone. One gap remains: an item replaced on disk outside Jenkins and
-then reloaded fires no item event, so a window naming it applies to the
-replacement. That takes file-system access (reloading a single item needs only
-`Item/Configure` on it, not `Overall/Administer`)
+item is gone. A window that cannot follow its item for certain (its file cannot
+be updated with the new name, or another item has taken one of the names
+involved) ends instead, recorded with the reason "it could not follow its
+item", and its holder requests it again. Apart from Batch Control's storage
+directories refusing writes until a restart, one gap remains: an item replaced
+on disk outside Jenkins and then reloaded fires no item event, so a window
+naming it applies to the replacement. That takes file-system access (reloading
+a single item needs only `Item/Configure` on it, not `Overall/Administer`)
 ([item 11](docs/LIMITATIONS.md#the-authorization-strategy)).
 
 **A `CONFIGURE` window confers whatever Jenkins implies from `Item/Configure`.**
