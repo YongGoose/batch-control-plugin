@@ -848,6 +848,14 @@ public final class GrantService {
      * exactly its name, next to the moved item, stays (DEF-E17-01, {@link #ownItemStillAt}). The
      * entries change in the cache first and their write is retried ({@link #rewriteChangedItems}).
      *
+     * <p>T-GAP-320: core reports the location change of a folder and then of every item below it,
+     * each with its own old and new name, and this drop runs again in each of those events. So the
+     * entries of the items below a renamed or moved folder follow in their own item's event, exact
+     * names first, as windows and created-item records do ({@link #entriesFollowingLater}); were
+     * they moved here, the drop of the later event would take them for stale entries at a name the
+     * item below has just taken. An entry below the item that no item below it carries (its item is
+     * gone, so no event of its own comes) follows here.
+     *
      * @param moved the renamed or moved item ({@code null} when unknown)
      */
     public synchronized void relocateChanged(@CheckForNull Item moved, String oldFullName, String newFullName) {
@@ -875,11 +883,55 @@ public final class GrantService {
                 }
             }
         }
-        rewriteChanged(oldFullName, newFullName, true);
+        java.util.Set<String> later = entriesFollowingLater(moved, oldFullName, newFullName);
+        rewriteChangedWhere(name -> (name.equals(oldFullName) || name.startsWith(oldFullName + "/")) && !later.contains(name),
+                name -> newFullName + name.substring(oldFullName.length()),
+                "the changed-under-grant state follows '" + oldFullName + "' to '" + newFullName + "'");
         relocateMarkedRuns(oldFullName, newFullName);
         for (String grantId : carriers) {
             markChanged(grantId, newFullName);
         }
+    }
+
+    /**
+     * T-GAP-320: the changed entries below {@code oldFullName} that follow in a later event of the
+     * same rename or move, because an item strictly below {@code moved} is at, or above, the name the
+     * entry takes ({@link #carriedBelow}): core reports that item's own location change after this
+     * one, and the entry follows there. Empty when {@code moved} is not an item group (nothing
+     * below it gets an event) or is unknown.
+     */
+    private synchronized java.util.Set<String> entriesFollowingLater(@CheckForNull Item moved, String oldFullName,
+                                                                     String newFullName) {
+        if (!(moved instanceof ItemGroup)) {
+            return java.util.Set.of();
+        }
+        java.util.Set<String> later = new java.util.HashSet<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (Grant grant : grants()) {
+            for (String name : grant.getChangedItems()) {
+                if (name.startsWith(oldFullName + "/") && seen.add(name)
+                        && carriedBelow(moved, newFullName, newFullName + name.substring(oldFullName.length()))) {
+                    later.add(name);
+                }
+            }
+        }
+        return later;
+    }
+
+    /**
+     * Whether {@code target}, a name below {@code newFullName}, is at or below an item that lies
+     * strictly below {@code moved} under exactly its full name. Looked up as SYSTEM and only
+     * compared ({@link #itemAt}).
+     */
+    private static boolean carriedBelow(Item moved, String newFullName, String target) {
+        for (int end = target.length(); end > newFullName.length(); end = target.lastIndexOf('/', end - 1)) {
+            String candidate = target.substring(0, end);
+            Item at = itemAt(candidate);
+            if (at != null && at != moved && candidate.equals(at.getFullName()) && isAtOrBelow(at, moved)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** D-58a: a deleted item (and what was below it) leaves the "changed under a grant" state. */
@@ -1042,7 +1094,8 @@ public final class GrantService {
      * the reason for that ACL.SYSTEM2 switch: an item the acting user cannot read must not be taken
      * for a free name. The permission checks are complete before this is reached: the approver's
      * ({@code ApprovalPolicy.checkDecision}, the item check) for {@link #register}, core's own check
-     * of the rename or move for {@link #followItem} and {@link #relocateCreatedItem}. The item found
+     * of the rename or move for {@link #followItem}, {@link #relocateCreatedItem} and
+     * {@link #relocateChanged}. The item found
      * is only compared by identity, never returned to a caller or acted on.
      */
     @CheckForNull
