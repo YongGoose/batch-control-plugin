@@ -48,7 +48,10 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
    of this plugin.
 5. **Changes made outside Jenkins are not recorded.** Editing `config.xml` on
    disk and then using "Reload Configuration from Disk" produces no `CONFIGURE`
-   record, because Jenkins reports that as a load, not a change.
+   record, because Jenkins reports that as a load, not a change. The item's
+   configuration snapshot (item 17) is not updated either, so the next change
+   saved through Jenkins is compared with the configuration from before the
+   edit, and its diff, recorded under whoever saved, shows the edit as well.
 6. **Multibranch and organisation-folder children are not change-controlled.**
    Their configuration is generated, so only their runs and failures are
    recorded. A `CONFIGURE` window on the multibranch project or organization
@@ -479,7 +482,24 @@ from scripts.
     record is masked, but `batch-control/snapshots/<job>.xml` keeps the raw
     `config.xml`. Secrets inside it are Jenkins-encrypted exactly as they are in
     `$JENKINS_HOME/jobs/*/config.xml`: the same protection, on the same disk, and
-    no more.
+    no more. While recording is active (either switch on), Batch Control keeps
+    such a snapshot of every item, the baseline that the item's next
+    `CONFIGURE` diff is compared with. It is written when the item is
+    created, renamed or moved and on every recorded save; at startup the
+    items that have none are seeded in the background, and when recording is
+    turned on every item's snapshot is refreshed to its current configuration
+    (item 53). Nothing keeps the snapshots current while both switches are
+    off. The snapshot of an item deleted, renamed or moved while recording
+    was off therefore stays on disk until an item has that name again, as
+    does one that could not be removed at the time. A newly created item is
+    not compared with it: a creation while recording is active writes the
+    new item's own snapshot, and an item created while recording was off
+    gets a refreshed one when recording is turned on (except as item 54
+    describes). An item that reappears under that name without a creation
+    event, though, such as an item directory put back on disk and loaded by
+    "Reload Configuration from Disk" or a restart, is compared with the old
+    snapshot, so its first diff is taken against the configuration of the
+    item that had the name before.
 18. **A change that touched only secret values carries an explanatory note
     instead of a diff**, because both sides are masked identically and a real
     diff would be empty.
@@ -542,30 +562,101 @@ from scripts.
     name did change, but it means one rename can generate a large number of
     records.
 
-<!-- Items 52 and 53 were added after 27-51 and sit here by topic. The comment ends the list so that they render as 52 and 53, not 27 and 28. -->
+<!-- Items 52 to 55 were added after 27-51 and sit here by topic. The comment ends the list so that they render as 52 to 55, not 27 to 30. -->
 
 52. **A `DELETE` record of an item deleted together with its folder names the
     user who deleted the folder** only when core deletes the item on the same
     thread inside `AbstractItem.delete()`; an item removed in any other way, on
     another thread or outside `AbstractItem.delete()`, is recorded under the
     authentication current at that moment, which is often SYSTEM.
-53. **A `CONFIGURE` record whose previous snapshot cannot be read has no
-    diff.** The diff compares the saved `config.xml` with the item's snapshot
-    under `batch-control/snapshots/` (item 17). When that snapshot exists but
-    cannot be read (a permission or I/O error), or something other than a
-    file is in its place, the change is still recorded, with the window it
-    was made under if any, but without a diff: the record's detail carries
-    the note "No diff: the previous configuration of this item could not be
-    read from its snapshot." instead (compare item 18), and a warning is
-    logged. The same save writes the new configuration as the item's
-    snapshot; once that succeeds, the next change has a diff again. While
-    the snapshot stays unusable (something other than a file stays in its
-    place, or the snapshots directory refuses writes), every save of the
-    item is recorded this way, including saves that change nothing, which
-    otherwise write no record. A snapshot that cannot be replaced after a
-    change does not stop the record either: it is written all the same, and
-    the item's next change is compared with the older snapshot, so its diff
-    also shows the change before it.
+53. **Some `CONFIGURE` records have no diff.** The diff compares the saved
+    `config.xml` with the item's snapshot under `batch-control/snapshots/`
+    (item 17). In three situations there is no usable snapshot to compare
+    with. The change is still recorded, with the window it was made under if
+    any, but without a diff: the record's detail carries a note instead
+    (compare item 18), and the same save writes the new configuration as the
+    item's snapshot, so once that succeeds the next change has a diff again.
+
+    - **No snapshot of the item exists.** The note is "No diff: no earlier
+      configuration of this item was recorded." This is the case for an
+      item saved before the seeding at startup, or the refresh when
+      recording is turned on, has reached it, and for an item whose snapshot
+      could not be written (when it was created, renamed or moved, or by
+      that seeding). With nothing to compare with, such a save is recorded
+      even if it changed nothing, and while the snapshots directory refuses
+      writes every save of the item is recorded this way.
+    - **Recording has just been turned on and the refresh has not reached the
+      item yet.** The note is "No diff: change recording had just been turned
+      on, and the configuration of this item before this change was not
+      recorded yet." When a switch turns recording on (no switch was on
+      before), every item's snapshot is refreshed to its current
+      configuration, so that changes made while recording was off are never
+      shown as the change of whoever saves the item first. Up to 1,000 items
+      are refreshed before the switch change returns, and the rest in the
+      background. Until the refresh has reached an item, a save whose
+      configuration differs from its old snapshot is recorded with this
+      note, even if that save itself changed nothing, and a save whose
+      configuration matches the old snapshot writes no record, as a save that
+      changes nothing does: a save that only undoes a change made while
+      recording was off is not recorded. An item whose refreshed
+      snapshot could not be written stays in this state until one of its
+      saves writes one. A restart before the refresh has finished leaves the
+      items it had not reached with their old snapshots (item 54).
+    - **The snapshot exists but cannot be read** (a permission or I/O error),
+      or something other than a file is in its place. The note is "No diff:
+      the previous configuration of this item could not be read from its
+      snapshot.", and a warning is logged. While the snapshot stays unusable
+      (something other than a file stays in its place, or the snapshots
+      directory refuses writes), every save of the item is recorded this way,
+      including saves that change nothing, which otherwise write no record.
+
+    In the first two situations, two kinds of save write only the snapshot
+    and no record: a save that is part of creating the item (item 55), and a
+    multibranch project or organization folder saving itself during its own
+    indexing. A snapshot that cannot be replaced after a change does not stop
+    the record either: it is written all the same, and the item's next change
+    is compared with the older snapshot, so its diff also shows the change
+    before it. One narrow race remains: when the seeding or the refresh
+    reaches an item in the instant after core has written a save of it to
+    disk and before Batch Control's listeners are told of that save, the
+    saved configuration becomes the snapshot, the save then compares equal
+    to it, and no record is written for it.
+54. **Recording turned on by editing the saved configuration while Jenkins
+    is stopped is not detected.** Every item's snapshot is refreshed (item
+    53) when a switch turns recording on while Jenkins runs, from either
+    configuration page, the script console or a JCasC reload, and when JCasC
+    turns recording on as Jenkins starts, that is, when the saved
+    configuration had both switches off. When the saved configuration itself
+    (`$JENKINS_HOME/io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration.xml`)
+    already has a switch on as Jenkins starts, because it was edited or
+    restored from a backup while Jenkins was stopped, Batch Control cannot
+    tell that from recording that stayed on, and only the missing snapshots
+    are seeded. The snapshots left from the last time recording was on are
+    kept, so the first diff of an item changed while recording was off
+    includes those changes, under whoever saves the item first, and an item
+    created while recording was off at the name of an item deleted while
+    recording was off is compared with the deleted item's configuration
+    (item 17). The same holds for the items that the background part of a
+    switch-on refresh had not reached when Jenkins stopped: the refresh is
+    held in memory only, and the next start seeds only the missing
+    snapshots.
+55. **A save made while core builds a new item counts as part of the
+    creation, whichever item it saves.** Creating an item writes one
+    `CREATE` record and no `CONFIGURE` record for the saves that make up the
+    creation (D-76 (2)): the saves of the new item before core has added it
+    to its parent, and every save made inside core's item-building methods
+    (`createProject`, `createProjectFromXML` and `copy`), which also run the
+    new item's own creation code, such as `onCreatedFromScratch`, where an
+    organization folder created from a `config.xml` saves itself several
+    times. Batch Control recognises these saves by those methods being on
+    the saving thread's call stack, not by the item saved, so a plugin that
+    changes another, existing item from code running there leaves that
+    change unrecorded: it writes no `CONFIGURE` record, and the item's
+    snapshot is updated to it, so it does not appear in that item's next
+    diff either. The creation announcement is treated differently: the item
+    listeners told of a new or copied item may save it, and the items inside
+    it, as part of the creation, but a change they make to any other item is
+    recorded as usual.
 
 <!-- The comment ends the list so that 27 to 32 render with their own numbers. -->
 
@@ -604,7 +695,8 @@ from scripts.
     while a run request is open, the request ends as `INVALIDATED` rather than
     executing against a job under a different name. This is deliberate, but it
     means a rename during a busy approval queue silently costs the requesters
-    their pending requests, and they have to file them again.
+    their pending requests, and they have to file them again. A request whose
+    file cannot be read at that moment is handled as item 32 describes.
 31. **No rate limiting, and the instance-wide upload limit is Jenkins' own.**
     There is a size cap on a reason (4,000 characters) and on every textual
     value a run request stores (10,000 characters per parameter), the plaintext
@@ -666,21 +758,37 @@ from scripts.
     request, grant request, activation request or grant file that cannot be
     read (a permission or I/O error, or damaged content) is skipped with a
     warning naming it, instead of breaking the whole listing; a skipped grant
-    confers nothing (item 11). The expiry job is the exception, a known gap
-    rather than a design choice. It reads the open run, change and activation
-    requests from a list built when Jenkins starts, so an open request whose
-    file stops being readable while Jenkins runs stops the expiry job's work
-    on its own kind of request for as long as it stays unreadable. Meanwhile
-    no other open request of that kind is expired in storage (which also
-    holds back its `EXPIRED` notification and, for a run request, the
-    deletion of its values file and the disposal of its files) or sent its
-    `EXPIRING` notice. A pending request past its timeout still cannot be
-    approved, and an approved run past its timeout is not submitted, because
-    each decision and each submission compares the clock itself. The other
-    kinds of request, and the windows' `GRANT_EXPIRING` notices (item 11),
-    are not affected. A request whose file can be read but not written when
-    its `EXPIRING` notice falls due is tried again on the next run and does
-    not hold up the others. Request
+    confers nothing (item 11). The expiry job, the pending counts on the
+    tabs, the activation approval inbox, startup recovery and the
+    invalidation of open requests work instead from a list of the open run,
+    change and activation requests built when Jenkins starts. An open
+    request whose file stops being readable while Jenkins runs is skipped
+    there too, with a warning naming it, repeated at most once an hour while
+    it stays unreadable: it is not counted, expired, approved or submitted,
+    and the other open requests are handled as usual. It is picked up again
+    as soon as its file can be read; a pending request past its timeout
+    still cannot be approved then, and an approved run past its timeout is
+    not submitted, because each decision and each submission compares the
+    clock itself. An invalidation that such a request missed (its job
+    renamed or moved, D-21; for an activation request also its job deleted,
+    or another request on the job approved, SPEC item 6a), or whose end
+    could not be written, is kept in memory: the request cannot be approved,
+    its approved run waiting in the queue on a job that is renamed or moved
+    is cancelled at once, and within a minute of its file becoming readable
+    and writable it ends `INVALIDATED` if the invalidation concerns its job.
+    A restart forgets a missed invalidation: a request that can be read at
+    the next start is an ordinary open request again, under its job's old
+    full name, so it can be approved, and an approved run recovered, against
+    whatever item has that name by then (item 30). A request file that
+    cannot be read when Jenkins starts never enters the list in that
+    session, even once it can be read again: until the next restart it is
+    not counted, expired, recovered or invalidated, so if its job is renamed
+    or moved meanwhile, an approval of it acts on whatever item then has the
+    old name. The request screens, which read every file, show it once it
+    can be read, and a decision made on its page puts it back on the list. A
+    request whose file can be read but not written when it falls due for
+    expiry or for its `EXPIRING` notice is logged, tried again on the next
+    run and does not hold up the others. Request
     files are kept until retention deletes the closed requests last active
     before the first kept month (`retentionMonths`, 24 by default), so up to
     that age every one of them is read. SPEC item 6's target of 5,000 runs a

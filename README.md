@@ -481,7 +481,10 @@ spreadsheet does not evaluate it, and gives a monthly summary.
 **Change Records** is the create / configure / delete / rename / move trail,
 recorded whatever path the change came through (UI, REST, CLI, Job DSL), with a
 unified diff and the window the change was made under, or an explicit note where
-there was none.
+there was none. A configuration change is recorded without a diff, with a note
+saying why, when Batch Control holds no usable earlier configuration of the item
+to compare it with
+([Limitations](docs/LIMITATIONS.md#records-and-screens) item 53).
 
 Records live in `$JENKINS_HOME/batch-control/`, separately from builds, so they
 outlive build rotation. They are append-only: no edit or delete API exists, only
