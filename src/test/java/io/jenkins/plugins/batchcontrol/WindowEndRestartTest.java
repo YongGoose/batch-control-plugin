@@ -6,6 +6,8 @@ import hudson.model.User;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -41,6 +43,7 @@ import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -51,7 +54,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Matrix row T-SEC-95 (note 274); the restart half without the record volume and with the store
  * writable again before the restart is T-08-190 ({@link ItemScopeRestartTest}). T-SEC-103 (note
  * 275): when the change records cannot be read at startup, every open window ends (fail closed,
- * D-75 (2), ARCHITECTURE 4).
+ * D-75 (2), ARCHITECTURE 4). T-SEC-106 (a torn last line of the change log is a record that could
+ * not be read: every open window ends), its negative twin T-SEC-107 (a complete line of an unknown
+ * type is readable: open windows stay open), T-SEC-108 (the records written after the torn line
+ * stay readable) and T-SEC-109 (a window opened after the torn line was handled survives a plain
+ * restart) (note 278).
  *
  * <p>The change records are appended while Jenkins is down, directly to the newest
  * {@code changes/YYYY-MM.jsonl} (ARCHITECTURE section 5), as copies of the newest line the store
@@ -193,7 +200,134 @@ public class WindowEndRestartTest {
         }
     }
 
+    /**
+     * T-SEC-106 (D-75 (2), ARCHITECTURE 4 "if they cannot all be read, every open window ends";
+     * note 278): u1's open CONFIGURE windows on the jobs {@code a} and {@code c}. Jenkins stops; a
+     * torn line (a GRANT_REVOKE record for {@code a} cut off inside the user field: no closing brace,
+     * no line end) is appended to the newest {@code changes/YYYY-MM.jsonl}; Jenkins starts. Neither
+     * window is active and u1 holds no Configure on {@code a} or {@code c}; each stored window reads
+     * back as revoked by SYSTEM with a reason saying its state could not be confirmed at startup;
+     * u1's Ended list shows both with that reason. The twin with a complete line of an unknown type
+     * is T-SEC-107; what the records written after the torn line must still be is T-SEC-108 and
+     * T-SEC-109.
+     */
+    @Test
+    public void t_sec_106_tornChangeLogLineEndsEveryOpenWindowAtStartup() throws Throwable {
+        openWindowsOnAAndC();
+        appendTornLine();
+
+        session.then(r -> {
+            for (String[] window : new String[][] {{onA, "a"}, {onC, "c"}}) {
+                assertFalse(can("u1", r.jenkins.getItemByFullName(window[1]), Item.CONFIGURE),
+                        "D-75 (2): after a start whose change log ends in a torn line, the window on " + window[1] + " must not confer");
+                assertTrue(GrantService.get().listActive().stream().noneMatch(g -> window[0].equals(g.getId())),
+                        "D-75 (2): the window on " + window[1] + " must not be active after a start with a torn change log line");
+                Grant stored = storedWindow(window[0]);
+                assertEquals(ACL.SYSTEM_USERNAME, stored.getRevokedBy(),
+                        "D-75 (2): the window on " + window[1] + " ended at startup is revoked by SYSTEM (stored revokedBy, SPEC 3)");
+                assertTrue(String.valueOf(stored.getRevokedReason()).toLowerCase(Locale.ROOT).contains(UNCONFIRMED_REASON),
+                        "D-63, ARCHITECTURE 4: the stored revocation reason of the window on " + window[1] + " must say '" + UNCONFIRMED_REASON
+                                + "', was: " + stored.getRevokedReason());
+            }
+            HtmlPage list = UsabilityFixtures.htmlPage(r, "u1", "batch-control/grants/");
+            for (String name : new String[] {"a", "c"}) {
+                List<DomElement> rows = WindowStateFixtures.endedRowsNaming(list, name);
+                assertTrue(rows.stream().anyMatch(row -> row.asNormalizedText().toLowerCase(Locale.ROOT).contains(UNCONFIRMED_REASON)),
+                        "D-63: the Ended list must show the window on " + name + " with the reason '" + UNCONFIRMED_REASON + "'; rows naming it: "
+                                + rows.stream().map(row -> ApproverFormFixtures.excerpt(row.asNormalizedText())).toList());
+            }
+        });
+    }
+
+    /**
+     * T-SEC-107 (negative twin of T-SEC-106; D-75 (2), ARCHITECTURE 4; note 278): u1's open
+     * CONFIGURE windows on {@code a} and {@code c}. Jenkins stops; a complete, well-formed line with
+     * an unknown record type ({@code "type":"FUTURE_TYPE"}, target {@code a}, a current {@code at}
+     * in the stored lines' epoch-millisecond form) is appended to the newest
+     * {@code changes/YYYY-MM.jsonl}; Jenkins starts. Both windows are still active and confer, and
+     * neither stored window is revoked: a record that can be read but is of a type this version does
+     * not know is not a record that could not be read.
+     */
+    @Test
+    public void t_sec_107_completeLineOfAnUnknownTypeLeavesOpenWindowsOpen() throws Throwable {
+        openWindowsOnAAndC();
+        Path month = newestMonthFile();
+        List<String> lines = Files.readAllLines(month, StandardCharsets.UTF_8);
+        String newest = lines.stream().filter(l -> !l.isBlank()).reduce((x, y) -> y).orElse("");
+        assertTrue(Pattern.compile("\"at\"\\s*:\\s*\\d+").matcher(newest).find(),
+                "premise (ARCHITECTURE 5): a stored change record carries its time as epoch milliseconds: " + ApproverFormFixtures.excerpt(newest));
+        String future = "{\"id\":\"" + UUID.randomUUID() + "\",\"type\":\"FUTURE_TYPE\",\"target\":\"a\",\"user\":\"admin\",\"at\":"
+                + System.currentTimeMillis() + ",\"detail\":\"a record type of a later version\"}";
+        appendRaw(month, future + "\n");
+        assertEquals(future, Files.readAllLines(month, StandardCharsets.UTF_8).get(lines.size()),
+                "premise: the complete FUTURE_TYPE line is the last line of " + month);
+
+        session.then(r -> {
+            for (String[] window : new String[][] {{onA, "a"}, {onC, "c"}}) {
+                assertTrue(GrantService.get().listActive().stream().anyMatch(g -> window[0].equals(g.getId())),
+                        "D-75 (2): a complete line of an unknown type must not end the window on " + window[1] + " at startup");
+                assertTrue(can("u1", r.jenkins.getItemByFullName(window[1]), Item.CONFIGURE),
+                        "D-75 (2): the window on " + window[1] + " still confers after a start with a complete FUTURE_TYPE line");
+                assertNull(storedWindow(window[0]).getRevokedAt(), "the stored window on " + window[1] + " must not be revoked");
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /** Session 1 of T-SEC-106/107: the fixture, u1's windows on {@code a} and {@code c}, both conferring. */
+    private void openWindowsOnAAndC() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            onA = approve(request("u1", "a")).getId();
+            onC = approve(request("u1", "c")).getId();
+            home = r.jenkins.getRootDir().toPath();
+            assertTrue(can("u1", r.jenkins.getItemByFullName("a"), Item.CONFIGURE), "premise: the window confers on a");
+            assertTrue(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE), "premise: the window confers on c");
+        });
+    }
+
+    private Path newestMonthFile() throws IOException {
+        Path month = newestMonthPath();
+        assertTrue(Files.readString(month, StandardCharsets.UTF_8).endsWith("\n"), "premise: the stored month file ends with a complete line: " + month);
+        return month;
+    }
+
+    private Path newestMonthPath() throws IOException {
+        List<Path> months = monthFiles();
+        assertFalse(months.isEmpty(), "premise (ARCHITECTURE 5): change records are stored under " + home.resolve("batch-control/changes"));
+        return months.get(months.size() - 1);
+    }
+
+    /**
+     * Appends to the newest change month file, while Jenkins is down, a GRANT_REVOKE record for
+     * {@code a} cut off inside its user field: no closing brace and no line end (a write torn by a
+     * crash).
+     */
+    private void appendTornLine() throws IOException {
+        Path month = newestMonthFile();
+        String torn = "{\"id\":\"" + UUID.randomUUID() + "\",\"type\":\"GRANT_REVOKE\",\"target\":\"a\",\"user\":\"adm";
+        appendRaw(month, torn);
+        assertTrue(Files.readString(month, StandardCharsets.UTF_8).endsWith("\n" + torn),
+                "premise: the torn line is the last, unterminated line of " + month);
+    }
+
+    /** The last {@code count} lines of {@code file}, each shortened, for failure messages. */
+    private static String tail(Path file, int count) throws IOException {
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        return lines.subList(Math.max(0, lines.size() - count), lines.size()).stream()
+                .map(l -> l.length() > 220 ? l.substring(0, 220) + "..." : l).toList().toString();
+    }
+
+    private static void appendRaw(Path file, String text) throws IOException {
+        Files.writeString(file, text, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+    }
+
+    private Grant storedWindow(String id) throws IOException {
+        Path file = grantsDir().resolve(id + ".xml");
+        assertTrue(Files.isRegularFile(file), "premise (ARCHITECTURE 5): the window is stored at " + file);
+        return (Grant) Jenkins.XSTREAM2.fromXML(Files.readString(file, StandardCharsets.UTF_8));
+    }
 
     private List<Path> monthFiles() throws IOException {
         try (Stream<Path> files = Files.list(home.resolve("batch-control/changes"))) {

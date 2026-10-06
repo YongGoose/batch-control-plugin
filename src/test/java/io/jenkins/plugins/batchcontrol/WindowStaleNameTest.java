@@ -11,8 +11,11 @@ import hudson.model.View;
 import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
+import hudson.security.AuthorizationMatrixProperty;
+import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -22,16 +25,24 @@ import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -47,6 +58,8 @@ import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,7 +84,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * written), T-SEC-101 (an item created under a case variant of a vanished item's name), T-SEC-102
  * (the approval's registration after the deletion event, before the name is freed) and T-SEC-104
  * (a window that cannot follow its item ends with a record), from D-75 (2) and ARCHITECTURE 4
- * (note 275).
+ * (note 275). T-SEC-100's fixture as the owner settled it on 2026-10-06, its twin T-SEC-105 (an
+ * item created as SYSTEM inside the guarded folder keeps its own changed-under-grant state) and
+ * T-SEC-112 (a stale changed-under-grant entry of a vanished item does not pass to an item renamed
+ * into its name), from D-58a, D-75 (2) and ARCHITECTURE 5 (note 278).
+ *
+ * <p>"Changed under a grant" is read two ways: the stored window's {@code changedItems} list
+ * (ARCHITECTURE 5, D-58a (5)) and its consequence once every window has ended: a script's
+ * (SYSTEM, not an HTTP request) widening of an item's authorization is reverted and recorded as
+ * GRANT_VIOLATION on an item in that state and kept on any other (D-58a (2); T-02-58, T-02-65).
+ * The windows end by moving the plugin clock ({@code BatchClock}), never by sleeping.
  *
  * <p>The approval race cannot be timed from a test: approval checks the item, writes the request,
  * then registers the window under the checked object's full name, and no public extension point
@@ -116,6 +138,11 @@ public class WindowStaleNameTest {
         cfg.setChangeControlEnabled(true);
         cfg.setApprovers(Arrays.asList("a1"));
         cfg.save();
+    }
+
+    @AfterEach
+    public void resetClock() {
+        BatchClock.reset();
     }
 
     /**
@@ -248,88 +275,150 @@ public class WindowStaleNameTest {
 
     /**
      * T-SEC-100 (S-39-02 (b), D-35c; D-75 (2); ARCHITECTURE 4 "D-35c records are updated in memory
-     * first and their write is retried"): u1 holds a CREATE window on the folder {@code fo} and
-     * creates {@code fo/j} through it (HTTP {@code createItem}; u1 configures it, D-35c). The
-     * grants directory and the window's file refuse writes while the administrator renames
-     * {@code fo/j} to {@code fo/k} (HTTP, 3xx); write access is restored; the administrator renames
-     * {@code fo/m} (the administrator's own job) to {@code fo/j}. u1 holds no Configure on the item now at
-     * {@code fo/j} and keeps Configure on {@code fo/k}; after the next write (the periodic work at
-     * the latest) the stored window's {@code createdItems} lists {@code fo/k} and not {@code fo/j},
-     * and its {@code changedItems} (ARCHITECTURE 5: follows renames and moves) does not keep
-     * {@code fo/j} and, if it listed {@code fo/j} before, lists {@code fo/k}. Guard: the window on
-     * {@code fo} stays active; before the failing phase, with writes succeeding, both lists follow the
+     * first and their write is retried"; fixture as the owner settled it on 2026-10-06, note 278):
+     * u1 holds a CREATE window on the folder {@code fo} and creates {@code fo/j} through it (HTTP
+     * {@code createItem}; u1 configures it, D-35c; it is changed under the window, D-58a (1),
+     * premise). The administrator creates {@code fo/m} over HTTP {@code createItem}, the creation
+     * D-58a (2) exempts, so it is not changed under the window (premise). The grants directory and
+     * the window's file refuse writes while the administrator renames {@code fo/j} to {@code fo/k}
+     * (HTTP, 3xx); write access is restored; the administrator renames {@code fo/m} to
+     * {@code fo/j}. u1 holds no Configure on the item now at {@code fo/j} and keeps Configure on
+     * {@code fo/k}; after the next write (the periodic work at the latest) the stored window's
+     * {@code createdItems} and {@code changedItems} (ARCHITECTURE 5: both follow renames and moves)
+     * list {@code fo/k} and not {@code fo/j}; and {@code fo/j} is not changed under a grant: once the
+     * window has ended, a script's widening of its authorization is kept and not recorded, while the
+     * same widening of {@code fo/k} is reverted and recorded. Guard: the window on {@code fo} stays
+     * active; before the failing phase, with writes succeeding, both lists follow the
      * administrator's rename of another created job {@code fo/g1} to {@code fo/g2}. Skipped where
-     * this process can write despite the read-only bits.
+     * this process can write despite the read-only bits. The twin with {@code fo/m} created as
+     * SYSTEM is T-SEC-105.
      */
     @Test
     public void t_sec_100_createdItemRecordFollowsARenameWhoseWriteFailedAndNothingReachesTheOldName() throws Exception {
+        FailedFollow run = failedFollowOfACreatedJob(false);
+
+        String stored = WindowStateFixtures.storedGrant(j, run.window().getId());
+        String flat = stored.replaceAll("\\s+", " ");
+        String changedList = listed(stored, "changedItems");
+        assertTrue(changedList.contains(">fo/k<"), "ARCHITECTURE 5 (changedItems follows renames and moves): fo/j was changed under the"
+                + " window, so after its rename to fo/k the stored changedItems must list fo/k: " + flat);
+        assertFalse(changedList.contains(">fo/j<"), "D-58a (2), D-75 (2): the stored changedItems must not list fo/j, which now names the"
+                + " administrator's job created over HTTP: " + flat);
+
+        afterWindows();
+        assertFalse(can("u1", run.created(), Item.CONFIGURE), "premise: after the window ended u1 holds no Configure on fo/k");
+        Set<String> violationsBefore = violationIds();
+        assertTrue(scriptWideningKept((FreeStyleProject) run.nowJ()),
+                "D-58a: fo/j, the administrator's job created over HTTP, is not changed under a grant, so after the window a script's"
+                        + " widening of its authorization must be kept; GRANT_VIOLATION records since: " + describeViolationsSince(violationsBefore));
+        assertTrue(violationsNaming(violationsBefore, "fo/j").isEmpty(), "D-58a: no GRANT_VIOLATION for fo/j: "
+                + describeViolationsSince(violationsBefore));
+        assertFalse(scriptWideningKept(run.created()), "guard (D-58a (2)): fo/k is still changed under the window, so the same widening of"
+                + " it is reverted");
+        assertFalse(violationsNaming(violationsBefore, "fo/k").isEmpty(), "guard (D-58a (2)): the reverted widening of fo/k is recorded"
+                + " as GRANT_VIOLATION: " + describeViolationsSince(violationsBefore));
+    }
+
+    /**
+     * T-SEC-105 (twin of T-SEC-100; D-58a (2) and (5), ARCHITECTURE 5 "changedItems follows renames
+     * and moves"; owner decision of 2026-10-06, note 278): as T-SEC-100, but {@code fo/m} is created
+     * as SYSTEM (a script, not an administrator's HTTP request) while the window is active, so it
+     * enters the window's changed-under-grant state (premise: the stored {@code changedItems} lists
+     * it). After the failed-write rename of {@code fo/j} to {@code fo/k} and the administrator's
+     * rename of {@code fo/m} to {@code fo/j}: u1 holds no Configure on {@code fo/j}; the stored
+     * {@code createdItems} lists {@code fo/k} and not {@code fo/j}; the stored {@code changedItems}
+     * lists {@code fo/j} (fo/m's own state, followed) and {@code fo/k}; once the window has ended, a
+     * script's widening of {@code fo/j} is reverted and recorded (it is still changed under the
+     * grant).
+     */
+    @Test
+    public void t_sec_105_systemCreatedItemKeepsItsOwnChangedStateWhenRenamedIntoTheOldName() throws Exception {
+        FailedFollow run = failedFollowOfACreatedJob(true);
+
+        String stored = WindowStateFixtures.storedGrant(j, run.window().getId());
+        String flat = stored.replaceAll("\\s+", " ");
+        String changedList = listed(stored, "changedItems");
+        assertTrue(changedList.contains(">fo/k<"), "ARCHITECTURE 5: fo/j was changed under the window, so after its rename to fo/k the"
+                + " stored changedItems must list fo/k: " + flat);
+        assertTrue(changedList.contains(">fo/j<"), "D-58a (2)/(5), ARCHITECTURE 5: fo/m, created as SYSTEM inside the guarded folder, is"
+                + " changed under the window and that state follows its rename to fo/j, so the stored changedItems must list fo/j: " + flat);
+
+        afterWindows();
+        Set<String> violationsBefore = violationIds();
+        assertFalse(scriptWideningKept((FreeStyleProject) run.nowJ()),
+                "D-58a (2): fo/j (formerly fo/m) is still changed under the grant, so after the window a script's widening of it must be"
+                        + " reverted");
+        assertFalse(violationsNaming(violationsBefore, "fo/j").isEmpty(), "D-58a (2): the reverted widening of fo/j is recorded as"
+                + " GRANT_VIOLATION: " + describeViolationsSince(violationsBefore));
+    }
+
+    /**
+     * T-SEC-112 (D-58a (1), (5); ARCHITECTURE 5 "changedItems ... loses an item when it is
+     * deleted"; D-75 (2) and LIMITATIONS 11 "dropped when the item is deleted or another item takes
+     * its name"; note 278): u1 holds a CREATE window on {@code fo} and creates {@code fo/j} and
+     * {@code fo/g} through it (both changed under the window, premise). The directory of
+     * {@code fo/j} is removed on disk and the configuration is reloaded ({@code Jenkins.reload()},
+     * no deletion event). The administrator creates {@code fo/n} over HTTP {@code createItem} (not
+     * changed under the window, premise) and renames it to {@code fo/j}. u1 holds no Configure on the
+     * job now at {@code fo/j}; after the periodic work the stored {@code changedItems} does not list
+     * {@code fo/j}; once the window has ended, a script's widening of {@code fo/j} is kept and not
+     * recorded. Guard: {@code fo/g} stays listed and the same widening of it is reverted and
+     * recorded. Whether the reload already dropped the stale entry is reported, not pinned.
+     */
+    @Test
+    public void t_sec_112_staleChangedEntryDoesNotPassToAJobRenamedIntoItsName() throws Exception {
         Folder fo = j.jenkins.createProject(Folder.class, "fo");
         Grant window = approve(request("u1", "fo", GrantAction.CREATE));
         assertTrue(createJob("u1", fo, "j") < 400, "fixture: u1 creates fo/j through the CREATE window on fo");
-        FreeStyleProject created = j.jenkins.getItemByFullName("fo/j", FreeStyleProject.class);
-        assertNotNull(created, "fixture: fo/j exists");
-        assertTrue(can("u1", created, Item.CONFIGURE), "premise (D-35c): u1 configures the job it created through the window");
-        FreeStyleProject m;
-        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator's own job in fo
-            m = fo.createProject(FreeStyleProject.class, "m");
-        }
-        assertFalse(can("u1", m, Item.CONFIGURE), "premise: fo/m, created by the administrator, gets nothing");
-
-        assertTrue(createJob("u1", fo, "g1") < 400, "guard fixture: u1 creates fo/g1 through the CREATE window");
-        boolean g1Changed = listed(WindowStateFixtures.storedGrant(j, window.getId()), "changedItems").contains(">fo/g1<");
-        assertRedirect(rename("admin", j.jenkins.getItemByFullName("fo/g1"), "g2"), "guard: the administrator renames fo/g1 to fo/g2 (writes succeed)");
-        String afterGuard = WindowStateFixtures.storedGrant(j, window.getId());
-        assertTrue(listed(afterGuard, "createdItems").contains(">fo/g2<") && !listed(afterGuard, "createdItems").contains(">fo/g1<"),
-                "guard (ARCHITECTURE 5): with writes succeeding createdItems follows fo/g1 to fo/g2: " + afterGuard.replaceAll("\\s+", " "));
-        if (g1Changed) {
-            assertTrue(listed(afterGuard, "changedItems").contains(">fo/g2<") && !listed(afterGuard, "changedItems").contains(">fo/g1<"),
-                    "guard (ARCHITECTURE 5): with writes succeeding changedItems follows fo/g1 to fo/g2: " + afterGuard.replaceAll("\\s+", " "));
-        }
-
+        assertTrue(createJob("u1", fo, "g") < 400, "fixture: u1 creates fo/g through the CREATE window on fo");
         String before = WindowStateFixtures.storedGrant(j, window.getId());
-        assertTrue(listed(before, "createdItems").contains(">fo/j<"), "premise (ARCHITECTURE 5): the stored window lists fo/j in createdItems: "
-                + before.replaceAll("\\s+", " "));
-        boolean changedBefore = listed(before, "changedItems").contains(">fo/j<");
+        assertTrue(listed(before, "changedItems").contains(">fo/j<") && listed(before, "changedItems").contains(">fo/g<"),
+                "premise (D-58a (1), ARCHITECTURE 5): the jobs u1 created through the window are changed under it: "
+                        + before.replaceAll("\\s+", " "));
+        j.jenkins.save(); // fixture: the security configuration must survive the reload from disk
 
-        Path dir = j.jenkins.getRootDir().toPath().resolve("batch-control/grants");
-        File dirFile = dir.toFile();
-        File storedFile = dir.resolve(window.getId() + ".xml").toFile();
-        assertTrue(storedFile.isFile(), "premise (ARCHITECTURE 5): the window is stored at " + storedFile);
-        try {
-            assertTrue(storedFile.setWritable(false, false), "fixture: the stored window made read-only");
-            assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
-            Assumptions.assumeTrue(writesRefused(dir) && !Files.isWritable(storedFile.toPath()),
-                    "the file system does not refuse writes to read-only files for this process");
-            assertRedirect(rename("admin", created, "k"), "the administrator renames fo/j to fo/k while the grant store refuses writes");
-            assertEquals("fo/k", created.getFullName(), "premise: fo/j is now fo/k");
-            assertTrue(can("u1", created, Item.CONFIGURE),
-                    "ARCHITECTURE 4: the created-item record follows to fo/k in memory although its write failed");
-        } finally {
-            dirFile.setWritable(true);
-            storedFile.setWritable(true);
+        deleteTree(j.jenkins.getRootDir().toPath().resolve("jobs").resolve("fo").resolve("jobs").resolve("j"));
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: the administrator reloads the configuration from disk
+            j.jenkins.reload();
         }
-        assertRedirect(rename("admin", m, "j"), "the administrator renames fo/m to fo/j after write access was restored");
-        Item nowJ = j.jenkins.getItemByFullName("fo/j");
-        assertNotNull(nowJ, "premise: fo/m is now fo/j");
+        assertNull(j.jenkins.getItemByFullName("fo/j"), "premise: fo/j vanished without a deletion event");
+        Folder foNow = j.jenkins.getItemByFullName("fo", Folder.class);
+        assertNotNull(foNow, "premise: fo survived the reload");
+        boolean staleAfterReload = listed(WindowStateFixtures.storedGrant(j, window.getId()), "changedItems").contains(">fo/j<");
+        System.out.println("T-SEC-112 observation: the stored changedItems still lists the vanished fo/j after the reload = " + staleAfterReload);
 
-        assertFalse(can("u1", nowJ, Item.CONFIGURE),
-                "S-39-02 (b), D-75 (2): the job renamed into fo/j must get nothing from u1's created-item record");
-        assertTrue(can("u1", created, Item.CONFIGURE), "D-35c: u1 keeps Configure on fo/k, the job it created");
+        assertTrue(createJob("admin", foNow, "n") < 400, "the administrator creates fo/n over HTTP createItem");
+        FreeStyleProject n = j.jenkins.getItemByFullName("fo/n", FreeStyleProject.class);
+        assertNotNull(n, "premise: fo/n exists");
+        assertFalse(listed(WindowStateFixtures.storedGrant(j, window.getId()), "changedItems").contains(">fo/n<"),
+                "premise (D-58a (2)): the administrator's HTTP creation is not changed under the window");
+        assertRedirect(rename("admin", n, "j"), "the administrator renames fo/n to fo/j");
+        assertEquals("fo/j", n.getFullName(), "premise: fo/n is now fo/j");
+
+        assertFalse(can("u1", n, Item.CONFIGURE), "D-75 (2), LIMITATIONS 11: u1's created-item record of the vanished fo/j must not pass to"
+                + " the job renamed into its name (stale entry still stored after the reload: " + staleAfterReload + ")");
         assertNotNull(WindowStateFixtures.active(window.getId()), "guard: the CREATE window on fo is still active");
         ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun(); // a documented retry point (ARCHITECTURE 4)
         String stored = WindowStateFixtures.storedGrant(j, window.getId());
         String flat = stored.replaceAll("\\s+", " ");
-        String createdList = listed(stored, "createdItems");
-        assertTrue(createdList.contains(">fo/k<"), "ARCHITECTURE 4/5: after the retried write the stored window's createdItems lists fo/k: "
-                + flat);
-        assertFalse(createdList.contains(">fo/j<"), "D-75 (2): the stored window's createdItems must not list fo/j any more: " + flat);
-        String changedList = listed(stored, "changedItems");
-        assertFalse(changedList.contains(">fo/j<"), "ARCHITECTURE 5 (changedItems follows renames and moves), D-75 (2): the stored window's"
-                + " changedItems must not keep fo/j, which now names the administrator's job: " + flat);
-        if (changedBefore) {
-            assertTrue(changedList.contains(">fo/k<"), "ARCHITECTURE 5: fo/j was listed as changed under the window, so after the rename"
-                    + " changedItems must list fo/k: " + flat);
-        }
+        assertFalse(listed(stored, "changedItems").contains(">fo/j<"), "ARCHITECTURE 5, D-58a: the stale changedItems entry of the vanished"
+                + " fo/j must not stay on the administrator's job renamed into that name (stale entry still stored after the reload: "
+                + staleAfterReload + "): " + flat);
+        assertTrue(listed(stored, "changedItems").contains(">fo/g<"), "guard: fo/g stays changed under the window: " + flat);
+
+        afterWindows();
+        FreeStyleProject g = j.jenkins.getItemByFullName("fo/g", FreeStyleProject.class);
+        assertNotNull(g, "premise: fo/g survived the reload");
+        assertFalse(can("u1", g, Item.CONFIGURE), "premise: after the window ended u1 holds no Configure on fo/g");
+        Set<String> violationsBefore = violationIds();
+        assertTrue(scriptWideningKept(n), "D-58a: the administrator's job renamed into fo/j is not changed under a grant, so after the window"
+                + " a script's widening of its authorization must be kept (stale entry still stored after the reload: " + staleAfterReload
+                + "); GRANT_VIOLATION records since: " + describeViolationsSince(violationsBefore));
+        assertTrue(violationsNaming(violationsBefore, "fo/j").isEmpty(), "D-58a: no GRANT_VIOLATION for fo/j: "
+                + describeViolationsSince(violationsBefore));
+        assertFalse(scriptWideningKept(g), "guard (D-58a (2)): fo/g is still changed under the window, so the same widening of it is reverted");
+        assertFalse(violationsNaming(violationsBefore, "fo/g").isEmpty(), "guard (D-58a (2)): the reverted widening of fo/g is recorded as"
+                + " GRANT_VIOLATION: " + describeViolationsSince(violationsBefore));
     }
 
     /**
@@ -511,6 +600,151 @@ public class WindowStaleNameTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** What {@link #failedFollowOfACreatedJob} leaves: u1's CREATE window on fo, u1's job (now fo/k) and the job now at fo/j. */
+    private record FailedFollow(Grant window, FreeStyleProject created, Item nowJ) {
+    }
+
+    /**
+     * The scenario T-SEC-100 and T-SEC-105 share, up to the periodic work: u1's CREATE window on
+     * {@code fo}; u1 creates {@code fo/j} through it (HTTP); {@code fo/m} is created by the
+     * administrator over HTTP {@code createItem} ({@code mBySystem} false) or by a script as SYSTEM
+     * while the window is active ({@code mBySystem} true); guard rename of {@code fo/g1} to
+     * {@code fo/g2} with writes succeeding; then, while the grants directory and the window's file
+     * refuse writes, the administrator renames {@code fo/j} to {@code fo/k}; write access is
+     * restored; the administrator renames {@code fo/m} to {@code fo/j}; the periodic work runs.
+     * Asserts what both rows expect alike: u1 holds no Configure on the job now at {@code fo/j} and
+     * keeps it on {@code fo/k}, the window stays active, and the stored {@code createdItems} lists
+     * {@code fo/k} and not {@code fo/j}. Aborts (assumption) where the process can write despite the
+     * read-only bits.
+     */
+    private FailedFollow failedFollowOfACreatedJob(boolean mBySystem) throws Exception {
+        Folder fo = j.jenkins.createProject(Folder.class, "fo");
+        Grant window = approve(request("u1", "fo", GrantAction.CREATE));
+        assertTrue(createJob("u1", fo, "j") < 400, "fixture: u1 creates fo/j through the CREATE window on fo");
+        FreeStyleProject created = j.jenkins.getItemByFullName("fo/j", FreeStyleProject.class);
+        assertNotNull(created, "fixture: fo/j exists");
+        assertTrue(can("u1", created, Item.CONFIGURE), "premise (D-35c): u1 configures the job it created through the window");
+        FreeStyleProject m;
+        if (mBySystem) {
+            try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // fixture: a script (SYSTEM, not an HTTP request) creates fo/m
+                m = fo.createProject(FreeStyleProject.class, "m");
+            }
+        } else {
+            assertTrue(createJob("admin", fo, "m") < 400, "fixture: the administrator creates fo/m over HTTP createItem");
+            m = j.jenkins.getItemByFullName("fo/m", FreeStyleProject.class);
+            assertNotNull(m, "fixture: fo/m exists");
+        }
+        assertFalse(can("u1", m, Item.CONFIGURE), "premise: fo/m, which u1 did not create, gets nothing");
+
+        assertTrue(createJob("u1", fo, "g1") < 400, "guard fixture: u1 creates fo/g1 through the CREATE window");
+        boolean g1Changed = listed(WindowStateFixtures.storedGrant(j, window.getId()), "changedItems").contains(">fo/g1<");
+        assertRedirect(rename("admin", j.jenkins.getItemByFullName("fo/g1"), "g2"), "guard: the administrator renames fo/g1 to fo/g2 (writes succeed)");
+        String afterGuard = WindowStateFixtures.storedGrant(j, window.getId());
+        assertTrue(listed(afterGuard, "createdItems").contains(">fo/g2<") && !listed(afterGuard, "createdItems").contains(">fo/g1<"),
+                "guard (ARCHITECTURE 5): with writes succeeding createdItems follows fo/g1 to fo/g2: " + afterGuard.replaceAll("\\s+", " "));
+        if (g1Changed) {
+            assertTrue(listed(afterGuard, "changedItems").contains(">fo/g2<") && !listed(afterGuard, "changedItems").contains(">fo/g1<"),
+                    "guard (ARCHITECTURE 5): with writes succeeding changedItems follows fo/g1 to fo/g2: " + afterGuard.replaceAll("\\s+", " "));
+        }
+
+        String before = WindowStateFixtures.storedGrant(j, window.getId());
+        String beforeFlat = before.replaceAll("\\s+", " ");
+        assertTrue(listed(before, "createdItems").contains(">fo/j<"), "premise (ARCHITECTURE 5): the stored window lists fo/j in createdItems: "
+                + beforeFlat);
+        assertTrue(listed(before, "changedItems").contains(">fo/j<"), "premise (D-58a (1), ARCHITECTURE 5): fo/j, created by u1 through the"
+                + " window, is listed in changedItems: " + beforeFlat);
+        if (mBySystem) {
+            assertTrue(listed(before, "changedItems").contains(">fo/m<"), "premise (D-58a (2)/(5)): fo/m, created as SYSTEM inside the guarded"
+                    + " folder, is listed in changedItems: " + beforeFlat);
+        } else {
+            assertFalse(listed(before, "changedItems").contains(">fo/m<"), "premise (D-58a (2)): fo/m, created by the administrator over HTTP,"
+                    + " is not listed in changedItems: " + beforeFlat);
+        }
+
+        Path dir = j.jenkins.getRootDir().toPath().resolve("batch-control/grants");
+        File dirFile = dir.toFile();
+        File storedFile = dir.resolve(window.getId() + ".xml").toFile();
+        assertTrue(storedFile.isFile(), "premise (ARCHITECTURE 5): the window is stored at " + storedFile);
+        try {
+            assertTrue(storedFile.setWritable(false, false), "fixture: the stored window made read-only");
+            assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
+            Assumptions.assumeTrue(writesRefused(dir) && !Files.isWritable(storedFile.toPath()),
+                    "the file system does not refuse writes to read-only files for this process");
+            assertRedirect(rename("admin", created, "k"), "the administrator renames fo/j to fo/k while the grant store refuses writes");
+            assertEquals("fo/k", created.getFullName(), "premise: fo/j is now fo/k");
+            assertTrue(can("u1", created, Item.CONFIGURE),
+                    "ARCHITECTURE 4: the created-item record follows to fo/k in memory although its write failed");
+        } finally {
+            dirFile.setWritable(true);
+            storedFile.setWritable(true);
+        }
+        assertRedirect(rename("admin", m, "j"), "the administrator renames fo/m to fo/j after write access was restored");
+        Item nowJ = j.jenkins.getItemByFullName("fo/j");
+        assertNotNull(nowJ, "premise: fo/m is now fo/j");
+
+        assertFalse(can("u1", nowJ, Item.CONFIGURE),
+                "S-39-02 (b), D-75 (2): the job renamed into fo/j must get nothing from u1's created-item record");
+        assertTrue(can("u1", created, Item.CONFIGURE), "D-35c: u1 keeps Configure on fo/k, the job it created");
+        assertNotNull(WindowStateFixtures.active(window.getId()), "guard: the CREATE window on fo is still active");
+        ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun(); // a documented retry point (ARCHITECTURE 4)
+        String stored = WindowStateFixtures.storedGrant(j, window.getId());
+        String flat = stored.replaceAll("\\s+", " ");
+        String createdList = listed(stored, "createdItems");
+        assertTrue(createdList.contains(">fo/k<"), "ARCHITECTURE 4/5: after the retried write the stored window's createdItems lists fo/k: "
+                + flat);
+        assertFalse(createdList.contains(">fo/j<"), "D-75 (2): the stored window's createdItems must not list fo/j any more: " + flat);
+        return new FailedFollow(window, created, nowJ);
+    }
+
+    /** Ends every window of the row: the plugin clock moves past their 30-minute lifetime (no sleep). */
+    private static void afterWindows() {
+        BatchClock.setForTest(Clock.fixed(Instant.now().plus(Duration.ofMinutes(31)), ZoneOffset.UTC));
+    }
+
+    /**
+     * A script (SYSTEM, not an HTTP request) adds an authorization property giving carol
+     * Item/Configure to {@code job}: a widening D-58a (2) reverts on an item that is guarded and
+     * leaves alone on any other. True if the entry was kept, in memory and in the stored
+     * {@code config.xml} (the two must agree).
+     */
+    private static boolean scriptWideningKept(FreeStyleProject job) throws Exception {
+        Map<Permission, Set<PermissionEntry>> entries = new HashMap<>();
+        entries.put(Item.CONFIGURE, new HashSet<>(Set.of(PermissionEntry.user("carol"))));
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            job.addProperty(new AuthorizationMatrixProperty(entries, new InheritParentStrategy()));
+        } catch (IOException | RuntimeException refused) {
+            // the guard may refuse the save outright; the result is read below either way
+        }
+        boolean inMemory = job.getAllProperties().stream().filter(p -> p instanceof AuthorizationMatrixProperty)
+                .map(p -> (AuthorizationMatrixProperty) p)
+                .anyMatch(p -> p.getGrantedPermissionEntries().values().stream()
+                        .anyMatch(s -> s.stream().anyMatch(pe -> "carol".equals(pe.getSid()))));
+        boolean onDisk = job.getConfigFile().asString().contains(":carol</permission>");
+        assertEquals(inMemory, onDisk, "the widening of " + job.getFullName() + " must be kept or reverted alike in memory (" + inMemory
+                + ") and in config.xml (" + onDisk + ")");
+        return inMemory;
+    }
+
+    private static Set<String> violationIds() {
+        return violations().stream().map(ChangeRecord::getId).collect(Collectors.toSet());
+    }
+
+    /** GRANT_VIOLATION records stored since {@code before} whose target is {@code fullName} or whose detail names it. */
+    private static List<ChangeRecord> violationsNaming(Set<String> before, String fullName) {
+        return violations().stream().filter(r -> !before.contains(r.getId()))
+                .filter(r -> fullName.equals(r.getTarget()) || String.valueOf(r.getDetail()).contains(fullName))
+                .collect(Collectors.toList());
+    }
+
+    private static String describeViolationsSince(Set<String> before) {
+        return WindowStateFixtures.describe(violations().stream().filter(r -> !before.contains(r.getId())).collect(Collectors.toList()));
+    }
+
+    /** GRANT_VIOLATION records of the plugin clock's month and of the real month (the plugin clock may have moved). */
+    private static List<ChangeRecord> violations() {
+        return ApproverFormFixtures.records(ChangeType.GRANT_VIOLATION, Instant.now());
+    }
 
     /** u1's PENDING CONFIGURE request on {@code fullName}, designating a1. */
     private static GrantRequest request(String user, String fullName) {
