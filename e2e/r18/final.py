@@ -1,6 +1,6 @@
 """e2e-18: what changed in src/main after the e2e-17 build (bd449cd..d696d5d), checked in the browser.
 
-usage: python final.py [KMDAS]   rows: out/final.jsonl, shots: R18-*.png
+usage: python final.py [KMDAS] (D runs E)   rows: out/final.jsonl, shots: R18-*.png
 Switches the global switches, revokes every window (change control off) and replaces the authorization strategy for a
 moment (S restores it), so ci/shard.py runs it as a `last` unit. Run r18/arrange.py first.
 
