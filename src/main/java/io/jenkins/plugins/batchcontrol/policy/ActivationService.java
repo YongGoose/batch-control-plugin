@@ -8,7 +8,6 @@ import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
-import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.PendingCount;
@@ -108,8 +107,9 @@ public final class ActivationService {
      * truthful: a computed child, which nobody activates, reports not activated; whether it may run
      * is {@link #mayRunUnattended(Job)}, which asks its computed-folder ancestor (D-46c).
      *
-     * <p>Fails closed: a state that cannot be read, or one bound to another directory than the
-     * item's current one (a re-created item under an old name, S-13-09), counts as not activated.
+     * <p>Fails closed: a state that cannot be read, one bound to another directory than the
+     * item's current one (a re-created item under an old name, S-13-09), or one bound to a directory
+     * whose marker cannot be read now, counts as not activated.
      */
     public boolean isActivated(Item item) {
         Objects.requireNonNull(item, "item");
@@ -136,7 +136,14 @@ public final class ActivationService {
         }
         if (cached.identity() != null) {
             String current = ItemIdentity.of(item.getRootDir());
-            if (current != null && !current.equals(cached.identity())) {
+            if (current == null) {
+                // SPEC 6a "fails closed": without the directory's marker the state cannot be shown to
+                // be this item's own, so it does not count.
+                LOGGER.warning(() -> "The directory of '" + fullName + "' cannot be read, so its activation cannot "
+                        + "be confirmed as its own; treating the item as not activated");
+                return false;
+            }
+            if (!current.equals(cached.identity())) {
                 LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
                         + "treating the item as not activated");
                 return false;
@@ -527,11 +534,6 @@ public final class ActivationService {
         } finally {
             lock.unlock();
         }
-    }
-
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public ActivationRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
     }
 
     /**

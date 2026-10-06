@@ -156,6 +156,11 @@ UNITS = [
         ("mb-folder-compare", py("r15/folder_compare.py")),
         ("mb-menu", py("r15/menu.py", "ci")),
     ], doc="e2e-15: multibranch activation page and the DEF-08 job pages"),
+    # e2e-17 (security-39 fixes, D-75). r17/arrange.py is idempotent and self-contained (account w17, items r17*).
+    Unit("r17-s39", 2.0, [("r17-arrange", py("r17/arrange.py")), ("r17-s39", py("r17/s39.py", "PRD")),
+                          ("r17-visibility", py("r17/s39.py", "H"))],
+         doc="e2e-17: 404 for malformed and aliased record ids (S-39-01); a window follows two renames and the page shows "
+             "the current name; delete + re-create ends it (S-39-02); followed name hidden from non-readers (D-75 (1), own step)"),
     Unit("role", 7.2, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
@@ -168,6 +173,11 @@ UNITS = [
     Unit("r16-durable", 2.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py"))],
          last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); restarts Jenkins, "
                         "after which JCasC has reset the arrangement's permissions (last)"),
+    Unit("r17-disk", 6.0, [("r17-arrange", py("r17/arrange.py")), ("r17-disk", py("r17/disk.py", "GFBU")),
+                           ("r17-case", py("r17/disk.py", "C"))],
+         last=True, doc="e2e-17: items removed on disk + reload (a rename onto the stale name: 'it could not follow its item'), "
+                        "startup end of a vanished item, fail-closed restart re-end with an unreadable change log (S-39-02/03); "
+                        "letter case after a restart (own step); reloads and restarts Jenkins (last)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}

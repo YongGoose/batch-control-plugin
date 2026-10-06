@@ -124,13 +124,41 @@ public final class NotificationDispatcher {
 
     /** Event for a change (grant) request. Recipients follow the D-36 rule for the event. */
     public static void grant(NotificationEvent event, GrantRequest request) {
+        grant(event, request, null);
+    }
+
+    /**
+     * {@link NotificationEvent#APPROVED} for a change request, sent to its requester.
+     *
+     * <p>Owner decision 2026-10-06 (D-71c (3), D-75 (2)): when the window ended at once because its
+     * item was deleted after the approval checked it and before the window was registered, the
+     * notice is still APPROVED (no other notice type) and carries one more details line, first,
+     * saying so: {@code Window: ended at once — <reason>}.
+     *
+     * @param endedAtOnceBecause why the window ended at registration (for example
+     *                           {@link Grant#REVOKED_ITEM_DELETED}), or {@code null} when it is in effect
+     */
+    public static void grantApproved(GrantRequest request, @CheckForNull String endedAtOnceBecause) {
+        grant(NotificationEvent.APPROVED, request,
+                endedAtOnceBecause == null ? null : windowEndedAtOnce(endedAtOnceBecause));
+    }
+
+    /** The details line of an APPROVED notice whose window ended at registration (owner decision 2026-10-06). */
+    static String windowEndedAtOnce(String reason) {
+        return "Window: ended at once \u2014 " + reason;
+    }
+
+    private static void grant(NotificationEvent event, GrantRequest request, @CheckForNull String firstDetail) {
         try {
             List<String> recipients = recipientsFor(event, request.getApprovers(), request.getRequester());
+            List<String> details = grantDetails(request.getItemKind(), request.getActions(),
+                    request.getDurationMinutes(), request.getCreateNamePattern());
+            if (firstDetail != null) {
+                details.add(0, firstDetail);
+            }
             dispatch(event, new Notification(Notification.KIND_GRANT, request.getId(),
                     request.getScope().getFullName(), request.getRequester(), request.getReason(),
-                    recipients, url("batch-control/grants/" + request.getId() + "/"), null,
-                    grantDetails(request.getItemKind(), request.getActions(), request.getDurationMinutes(),
-                            request.getCreateNamePattern())));
+                    recipients, url("batch-control/grants/" + request.getId() + "/"), null, details));
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not build the " + event + " notification of grant request "
                     + request.getId(), e);

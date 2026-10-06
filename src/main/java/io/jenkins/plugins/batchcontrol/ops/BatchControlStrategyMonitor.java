@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.ops;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.model.AdministrativeMonitor;
+import hudson.model.Failure;
 import hudson.security.AuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.Messages;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
@@ -162,7 +163,8 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
 
     /**
      * Installs the Batch Control subclass of the current plain matrix-auth (project or global) or
-     * role-strategy strategy with every entry kept, and saves. Other strategies are refused.
+     * role-strategy strategy with every entry kept, and saves. Other strategies are refused with a
+     * plain message page (HTTP 400).
      */
     @RequirePOST
     public HttpResponse doMigrate() throws IOException {
@@ -171,7 +173,8 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         AuthorizationStrategy current = jenkins.getAuthorizationStrategy();
         AuthorizationStrategy migrated = StrategyMigration.toBatchControl(current);
         if (migrated == null) {
-            return HttpResponses.error(400, "The installed authorization strategy ("
+            // SPEC 6 usability: a plain message page (400) in words, never core's crash page.
+            throw new Failure("The installed authorization strategy ("
                     + (current == null ? "none" : current.getClass().getName())
                     + ") has no Batch Control variant, or its plugin is not installed. Supported: "
                     + "matrix-auth's project-based and global matrix, and role-strategy's role-based "
@@ -187,7 +190,8 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
 
     /**
      * Installs the plain parent strategy of the current Batch Control strategy with every entry
-     * kept, and saves (the uninstall path). Grants stop conferring immediately.
+     * kept, and saves (the uninstall path). Grants stop conferring immediately. Refused with a plain
+     * message page (HTTP 400) when no Batch Control strategy is installed.
      */
     @RequirePOST
     public HttpResponse doRevert() throws IOException {
@@ -196,7 +200,8 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
         AuthorizationStrategy current = jenkins.getAuthorizationStrategy();
         AuthorizationStrategy plain = StrategyMigration.toPlain(current);
         if (plain == null) {
-            return HttpResponses.error(400, "The installed authorization strategy is not a Batch "
+            // As in doMigrate: a plain message page (400), never core's crash page.
+            throw new Failure("The installed authorization strategy is not a Batch "
                     + "Control strategy; there is nothing to revert.");
         }
         jenkins.setAuthorizationStrategy(plain);

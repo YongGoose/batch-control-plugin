@@ -5,7 +5,9 @@
      D-71: the Scope row shows the one item the request names, with its kind
      (tags/scopeItem.jelly); D-74: once approved, its window's item, which follows the item when
      it is renamed or moved. D-75 (1), S-39-04: the followed name only to a viewer who may read the
-     item, otherwise the approved name with a fixed note (GrantRequestItem#getShownScope). -->
+     item, otherwise the approved name with a fixed note (GrantRequestItem#getShownScope).
+     LIMITATIONS 29: with change control off this page is shown only as the refusal of an
+     approval (GrantsSection#getTarget), with the message above the details and no forms. -->
 <j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <l:layout title="Grant Request ${it.id}" type="one-column" permissions="${it.viewPermissions}">

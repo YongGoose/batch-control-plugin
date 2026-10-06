@@ -278,12 +278,6 @@ public class RequestItem implements ModelObject {
         return BatchControlGlobalConfiguration.get().getApprovedRunTimeoutMinutes();
     }
 
-    /** Whether the current user is the requester (view gating only; the service re-checks). */
-    public boolean isOwnedByCurrentUser() {
-        String requester = request.getRequester();
-        return requester != null && requester.equals(Jenkins.getAuthentication2().getName());
-    }
-
     /**
      * View gating for the approve/reject forms: only a member of the designated set sees them
      * (D-29, D-37). The endpoints and the service re-check for real.
@@ -324,11 +318,6 @@ public class RequestItem implements ModelObject {
     /** Permissions for this screen's {@code l:layout} (the same set its section gate checks). */
     public Permission[] getViewPermissions() {
         return SectionAccess.viewPermissions(SectionAccess.requests(), SectionAccess.canOpenRequests());
-    }
-
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
     }
 
     // ---------------------------------------------------------------- state-changing endpoints

@@ -370,11 +370,16 @@ public final class GrantRequestService {
      * {@link IllegalArgumentException} for a root scope or an item the approver cannot see
      * (T-SEC-18): the approver must be able to see the scope item to approve a window on it.
      *
-     * @return the created, immediately effective {@link Grant}
+     * <p>D-71c (3): if the item is deleted after it was checked and before the window is registered,
+     * the window ends at once; the request stays APPROVED and its APPROVED notice says that the
+     * window ended at once and why (owner decision 2026-10-06).
+     *
+     * @return the created, immediately effective {@link Grant}, or the window that ended at once
      */
     public Grant approve(String id, String comment) {
         Grant created;
         GrantRequest approved;
+        boolean endedAtOnce;
         lock.lock();
         try {
             GrantRequest request = require(id);
@@ -416,15 +421,19 @@ public final class GrantRequestService {
             // under its name at registration (it follows a rename that happened meanwhile).
             // D-71c (3), S-39-02: registration re-verifies that this item is still at its name;
             // if it was deleted meanwhile, the window ends at once ("its item was deleted").
-            GrantService.get().register(grant, item);
-            LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
-                    + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
+            endedAtOnce = !GrantService.get().register(grant, item);
+            if (!endedAtOnce) {
+                LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
+                        + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
+            }
             created = grant;
             approved = request;
         } finally {
             lock.unlock();
         }
-        NotificationDispatcher.grant(NotificationEvent.APPROVED, approved);
+        // Owner decision 2026-10-06: a window that ended at registration is still announced as
+        // APPROVED (no new notice type), with one details line saying it ended at once and why.
+        NotificationDispatcher.grantApproved(approved, endedAtOnce ? Grant.REVOKED_ITEM_DELETED : null);
         return created;
     }
 
@@ -452,11 +461,6 @@ public final class GrantRequestService {
         }
         NotificationDispatcher.grant(NotificationEvent.REJECTED, request);
         return request;
-    }
-
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public GrantRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
     }
 
     /**

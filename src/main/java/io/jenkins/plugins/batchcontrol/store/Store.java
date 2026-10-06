@@ -42,10 +42,9 @@ public interface Store {
 
     /**
      * Prepares derived in-memory data (indexes, caches) ahead of the first request so no later
-     * save pays for it. Called once at startup; an implementation without such data does nothing.
+     * save pays for it. Called once at startup.
      */
-    default void warmUp() {
-    }
+    void warmUp();
 
     /**
      * Writes (or rewrites, on a status transition) the request XML {@code <id>.xml} atomically.
@@ -88,7 +87,10 @@ public interface Store {
      */
     void deleteRunRequestValues(String id);
 
-    /** Loads every stored run request, sorted by creation time. */
+    /**
+     * Loads every stored run request, sorted by creation time. A file that cannot be read (corrupt,
+     * or not readable at all) is left out with a warning, so one such file never breaks a listing.
+     */
     List<RunRequest> listRunRequests();
 
     /**
@@ -129,7 +131,11 @@ public interface Store {
     /** Loads a grant by id, or returns {@code null} if it does not exist. */
     Grant loadGrant(String id);
 
-    /** Loads every stored grant, sorted by id (creation order). */
+    /**
+     * Loads every stored grant, sorted by id (creation order). A file that cannot be read (corrupt,
+     * or not readable at all) is left out with a warning: that grant confers nothing, and the
+     * permission checks of everyone else keep working.
+     */
     List<Grant> listGrants();
 
     // ---------------------------------------------------------------- activation (#15, D-39)
@@ -195,18 +201,12 @@ public interface Store {
     /**
      * One page of the run records of {@code months} that match {@code filter}, newest first
      * (start time, then run id). Reads newest first and stops after {@code maxScanned} records,
-     * so the cost of a page load is bounded whatever a month holds (#13).
+     * so the cost of a page load is bounded whatever a month holds (#13); only records whose start
+     * time lies inside {@code period} count toward {@code maxScanned} (security-10 S-03).
      *
      * @param offset     matches to skip (page index times page size)
      * @param limit      rows to return
      * @param maxScanned records to read at most; see {@link #MAX_SCANNED_RECORDS}
-     */
-    RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Predicate<? super RunRecord> filter,
-                                         int offset, int limit, int maxScanned);
-
-    /**
-     * As {@link #pageRunRecords(Collection, Predicate, int, int, int)}, counting only records whose
-     * start time lies inside {@code period} toward {@code maxScanned} (security-10 S-03).
      */
     RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Period period,
                                          Predicate<? super RunRecord> filter,
@@ -222,14 +222,14 @@ public interface Store {
     List<ChangeRecord> listChangeRecords(YearMonth month);
 
     /**
-     * As {@link #pageRunRecords} for change records (time, then id, newest first). Diff patches
-     * are read for the returned rows only.
+     * As {@link #pageRunRecords} for change records (time, then id, newest first), over all of
+     * {@code months}. Diff patches are read for the returned rows only.
      */
     RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months,
                                                Predicate<? super ChangeRecord> filter,
                                                int offset, int limit, int maxScanned);
 
-    /** As {@link #pageRunRecords(Collection, Period, Predicate, int, int, int)} for change records. */
+    /** As {@link #pageRunRecords} for change records, within {@code period}. */
     RecordPage<ChangeRecord> pageChangeRecords(Collection<YearMonth> months, Period period,
                                                Predicate<? super ChangeRecord> filter,
                                                int offset, int limit, int maxScanned);
@@ -241,9 +241,14 @@ public interface Store {
      * {@code since}, and every record after it is read, however many there are. The page is
      * {@linkplain RecordPage#isTruncated() truncated} when that could not be done completely.
      *
+     * <p>Reading also stops at the first record before {@code since} that {@code boundary} accepts
+     * (T-SEC-109): the caller's statement that no line appended before that record can be the end of
+     * any window in {@code grantIds}, so the append-order slack is not read past it.
+     *
      * @throws java.io.UncheckedIOException when the change log cannot be read
      */
-    RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds);
+    RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds,
+                                                     Predicate<? super ChangeRecord> boundary);
 
     /**
      * Persists a freshly opened incident: writes {@code incidents/<id>.xml} and appends the
@@ -267,12 +272,6 @@ public interface Store {
     /**
      * As {@link #pageRunRecords} for incidents, walking the monthly index newest first (creation
      * time, then id); every index line read counts against {@code maxScanned}.
-     */
-    RecordPage<Incident> pageIncidents(Collection<YearMonth> months, Predicate<? super Incident> filter,
-                                       int offset, int limit, int maxScanned);
-
-    /**
-     * As {@link #pageRunRecords(Collection, Period, Predicate, int, int, int)} for incidents:
      * {@code indexFilter} is tested on the index line and an incident's XML is loaded only when it
      * passes (security-10 S-06); {@code filter} then sees the loaded incident.
      */

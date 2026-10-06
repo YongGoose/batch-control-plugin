@@ -25,7 +25,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       ({@link DeletionAttribution}; SPEC 6: the history names who did what).</li>
  *   <li>{@code onCreated} (and a copy, which core reports as a creation): a window still naming the
  *       new item's name, in any letter case, belongs to an item that disappeared without an event,
- *       and ends ({@link GrantService#endWindowsOnNewItem}).</li>
+ *       and ends ({@link GrantService#endWindowsOnNewItem}), unless its own item is still at exactly
+ *       its name next to the new one (a folder loaded from disk looks its children up by exact name,
+ *       DEF-E17-01).</li>
  *   <li>{@code onLoaded} (startup): windows whose item no longer exists under exactly the name they
  *       give end ({@link GrantService#endWindowsOfMissingItems}).</li>
  * </ul>
@@ -39,6 +41,11 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * they can still ask {@link DeletionAttribution#deletingUser} who deleted an item, whose entry this
  * listener forgets in {@code onDeleted}.
  * Acts whatever the switches say: with change control off no window is active (S-15).
+ *
+ * <p>Each handler logs what it could not do and never fails the item operation. A grant file that
+ * cannot be read is left out of the window cache (it confers nothing), so what still reaches these
+ * handlers' catch blocks is a {@code batch-control/grants/} directory that cannot be listed while
+ * the cache is being loaded.
  */
 @Extension(ordinal = -1000)
 @Restricted(NoExternalUse.class)
@@ -55,7 +62,7 @@ public final class WindowItemListener extends ItemListener {
     @Override
     public void onCreated(Item item) {
         try {
-            GrantService.get().endWindowsOnNewItem(item.getFullName());
+            GrantService.get().endWindowsOnNewItem(item);
         } catch (RuntimeException e) {
             // Never fails the creation.
             LOGGER.log(Level.WARNING, "Could not end stale permission windows under the name of the new item '"

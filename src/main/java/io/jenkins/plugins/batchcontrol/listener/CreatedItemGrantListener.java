@@ -48,7 +48,7 @@ public class CreatedItemGrantListener extends ItemListener {
         // D-74: a created-item record still listed under the new item's name belongs to an item
         // that disappeared without a deletion event (deleted on disk and reloaded). It is dropped
         // before anything is recorded, so it never applies to the new item.
-        GrantService.get().forgetStaleCreatedItem(item.getFullName());
+        GrantService.get().forgetStaleCreatedItem(item);
         if (!GrantLayer.isGrantLayered(Jenkins.get().getAuthorizationStrategy())) {
             return;
         }
@@ -118,7 +118,7 @@ public class CreatedItemGrantListener extends ItemListener {
         // D-58a (S-27-03): the "changed under a grant" state follows the item whatever the switch
         // says; and an item covered by an active grant stays guarded under its new name. Before the
         // created-items record moves, so coverage by the old name is still visible.
-        GrantService.get().relocateChanged(oldFullName, newFullName);
+        GrantService.get().relocateChanged(item, oldFullName, newFullName);
         // With change control off every window was revoked (S-15), so no record can be active.
         if (BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
             GrantService.get().relocateCreatedItem(item, oldFullName, newFullName);

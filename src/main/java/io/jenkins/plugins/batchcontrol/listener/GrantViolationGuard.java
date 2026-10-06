@@ -8,6 +8,7 @@ import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.Items;
 import hudson.model.Job;
 import hudson.model.JobProperty;
@@ -25,9 +26,12 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.security.GrantLayer;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
 import java.io.StringReader;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -103,6 +107,7 @@ public class GrantViolationGuard extends SaveableListener {
             return;
         }
         AbstractItem item = (AbstractItem) o;
+        Baseline.noteCopyTarget(item); // T-GAP-205: the item a watched copy has just made, if this save is its first
         String fullName = item.getFullName();
         // S-28-04: the item's own monitor, taken first, is the lock: a save already holds it (core
         // Job/AbstractFolder save() is synchronized), and apply() needs it, so the order is always
@@ -116,8 +121,11 @@ public class GrantViolationGuard extends SaveableListener {
             }
             // S-05, D-35d (4): the baseline is the last recorded configuration snapshot (this guard
             // runs ahead of ConfigSnapshotListener, so the snapshot is still the previous save's).
-            // The in-memory copy is only the fallback for an item that has no snapshot yet.
-            String snapshot = snapshotPropertyXml(item);
+            // The in-memory copy is only the fallback for an item that has no snapshot yet, and the
+            // baseline of an item whose fail-closed change could not be saved (UnsavedItemWrites):
+            // its snapshot was taken from the stale file, for example with the payload property a
+            // failed removal left on disk, which must not be restored as "the previous property".
+            String snapshot = UnsavedItemWrites.isPending(item) ? null : snapshotPropertyXml(item);
             String before = snapshot != null ? snapshot : remembered;
             Authentication auth = Jenkins.getAuthentication2();
             boolean person = !ACL.SYSTEM2.equals(auth) && !ACL.isAnonymous2(auth);
@@ -672,6 +680,9 @@ public class GrantViolationGuard extends SaveableListener {
          */
         @Override
         public void onLoaded() {
+            synchronized (PENDING_COPIES) {
+                PENDING_COPIES.clear(); // a new Jenkins session: no copy of the previous one is still running
+            }
             if (!matrixAuthActive()) {
                 return;
             }
@@ -694,6 +705,7 @@ public class GrantViolationGuard extends SaveableListener {
          */
         @Override
         public void onCreated(Item item) {
+            copyCompleted(item); // a completed copy is handled here like any other creation
             if (!(item instanceof Job || item instanceof AbstractFolder) || !matrixAuthActive()) {
                 return;
             }
@@ -763,7 +775,8 @@ public class GrantViolationGuard extends SaveableListener {
                                     + "', created inside a guarded item", e);
                             appendViolation(fullName, user, grantId, "The item was created by '" + user + "' inside"
                                     + " a guarded item with authorization entries; removing them FAILED ("
-                                    + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+                                    + e.getClass().getSimpleName() + "), so an administrator must check the item."
+                                    + failedRemovalOutcome(item));
                         }
                     }
                     }
@@ -825,8 +838,13 @@ public class GrantViolationGuard extends SaveableListener {
             try {
                 apply(item, "");
             } catch (IOException | RuntimeException e) {
+                // S-06, SPEC item 2: recorded as GRANT_VIOLATION like every other failed restore here.
                 LOGGER.log(Level.SEVERE, "Could not remove the authorization property of '" + fullName
                         + "' created by '" + user + "' under grant " + grant.getId(), e);
+                appendViolation(fullName, user, grant, "The item was created by a user whose Item/Create comes only"
+                        + " from grant " + grant.getId() + " and carried an authorization property; removing it FAILED ("
+                        + e.getClass().getSimpleName() + "), so an administrator must check the item."
+                        + failedRemovalOutcome(item));
                 return;
             }
             BASELINE.put(fullName, "");
@@ -838,6 +856,253 @@ public class GrantViolationGuard extends SaveableListener {
             SelfGrantRevertFilter.flag(item); // D-48
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
                     + user + "' through grant " + grant.getId());
+        }
+
+        // ------------------------------------------------------------ copies that do not complete
+
+        /**
+         * T-GAP-205 (SPEC 2, D-35c "a copied item", D-58a): a copy the guard watches, from
+         * {@link #onCheckCopy} until it completes ({@link #onCreated}) or is finished as aborted.
+         * Core's copy ({@code ItemGroupMixIn#copy}) first creates and saves an empty item, then
+         * overwrites its {@code config.xml} with the source's and loads a second object from it;
+         * when that object's {@code onCopiedFrom} throws (a folder whose children the copier may not
+         * create inside the new folder, D-71), the copy stops there: the empty first object stays in
+         * the parent and no listener hears of it, while its file holds the source's configuration,
+         * authorization property included, which a restart would load.
+         */
+        private static final class PendingCopy {
+            final Thread owner;
+            final ItemGroup<?> parent;
+            final String user;
+            /** Whether the copier's Item/Create in the parent comes only from a window (else: a guarded parent, D-58a). */
+            final boolean grantOnly;
+            @CheckForNull
+            final String guardingGrantId;
+            final Instant started;
+            /** The empty item the copy created first (set by its first save), or {@code null}. */
+            @CheckForNull
+            AbstractItem target;
+
+            PendingCopy(ItemGroup<?> parent, String user, boolean grantOnly, @CheckForNull String guardingGrantId) {
+                this.owner = Thread.currentThread();
+                this.parent = parent;
+                this.user = user;
+                this.grantOnly = grantOnly;
+                this.guardingGrantId = guardingGrantId;
+                this.started = BatchClock.now();
+            }
+        }
+
+        /** The copies being watched; guarded by itself. Core types only, so it loads without matrix-auth (S-03). */
+        private static final List<PendingCopy> PENDING_COPIES = new ArrayList<>();
+
+        /** A watched copy whose owner still runs is finished by the periodic work only after this long. */
+        private static final Duration STALE_COPY = Duration.ofMinutes(10);
+
+        /**
+         * Starts watching a copy into {@code parent} by a user whose creation the guard acts on
+         * there: their Item/Create comes only from a window (D-35c), or the parent is guarded
+         * (D-58a) and they are not an administrator saving through an HTTP request. Never refuses
+         * the copy.
+         */
+        @Override
+        public void onCheckCopy(Item src, ItemGroup parent) {
+            if (!matrixAuthActive()) {
+                return;
+            }
+            try {
+                if (!guardApplies() || !(parent instanceof Item)) {
+                    return;
+                }
+                Authentication auth = Jenkins.getAuthentication2();
+                if (ACL.SYSTEM2.equals(auth) || ACL.isAnonymous2(auth)) {
+                    return;
+                }
+                Item group = (Item) parent;
+                boolean grantOnly = !GrantLayer.hasPermissionWithoutGrants(group, auth, Item.CREATE)
+                        && group.hasPermission2(auth, Item.CREATE);
+                String guarding = guardingGrantOfGroup(group);
+                boolean adminHttp = Stapler.getCurrentRequest2() != null
+                        && GrantLayer.hasPermissionWithoutGrants(Jenkins.get(), auth, Jenkins.ADMINISTER);
+                if (grantOnly || (guarding != null && !adminHttp)) {
+                    synchronized (PENDING_COPIES) {
+                        PENDING_COPIES.add(new PendingCopy(parent, auth.getName(), grantOnly, guarding));
+                    }
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Could not start watching a copy into '" + parent.getFullName() + "'", e);
+            }
+        }
+
+        /** The grant that guards {@code group} or one of its ancestors, or {@code null}. */
+        @CheckForNull
+        private static String guardingGrantOfGroup(Item group) {
+            Object at = group;
+            while (at instanceof Item) {
+                String id = GrantService.get().guardingGrantId(((Item) at).getFullName());
+                if (id != null) {
+                    return id;
+                }
+                at = ((Item) at).getParent();
+            }
+            return null;
+        }
+
+        /** The first save of an item made by a watched copy of this thread: the copy's empty first item. */
+        static void noteCopyTarget(AbstractItem item) {
+            synchronized (PENDING_COPIES) {
+                for (int i = PENDING_COPIES.size() - 1; i >= 0; i--) {
+                    PendingCopy copy = PENDING_COPIES.get(i);
+                    if (copy.owner == Thread.currentThread() && copy.target == null && copy.parent == item.getParent()) {
+                        copy.target = item;
+                        return;
+                    }
+                }
+            }
+        }
+
+        /** A creation event (core fires it for a completed copy too): this thread's copy into its parent is done. */
+        private static void copyCompleted(Item item) {
+            synchronized (PENDING_COPIES) {
+                for (int i = PENDING_COPIES.size() - 1; i >= 0; i--) {
+                    PendingCopy copy = PENDING_COPIES.get(i);
+                    if (copy.owner == Thread.currentThread() && copy.parent == item.getParent()
+                            && (copy.target == null || copy.target.getName().equals(item.getName()))) {
+                        PENDING_COPIES.remove(i);
+                        return;
+                    }
+                }
+            }
+        }
+
+        /**
+         * Finishes the watched copies of the current thread that did not complete: called when the
+         * HTTP request that made them ends ({@link SelfGrantRevertFilter}). Never throws.
+         */
+        public static void finishCopiesOfCurrentThread() {
+            finishCopies(copy -> copy.owner == Thread.currentThread());
+        }
+
+        /**
+         * Finishes the watched copies of other paths (a script, the CLI over WebSocket) that did not
+         * complete: those whose thread has ended or that started more than {@link #STALE_COPY} ago.
+         * Called by the periodic work. Never throws.
+         */
+        public static void finishStaleCopies() {
+            Instant now = BatchClock.now();
+            finishCopies(copy -> !copy.owner.isAlive() || copy.started.plus(STALE_COPY).isBefore(now));
+        }
+
+        private static void finishCopies(java.util.function.Predicate<PendingCopy> which) {
+            List<PendingCopy> done = new ArrayList<>();
+            synchronized (PENDING_COPIES) {
+                if (PENDING_COPIES.isEmpty()) {
+                    return;
+                }
+                for (java.util.Iterator<PendingCopy> it = PENDING_COPIES.iterator(); it.hasNext();) {
+                    PendingCopy copy = it.next();
+                    if (which.test(copy)) {
+                        it.remove();
+                        done.add(copy);
+                    }
+                }
+            }
+            if (!matrixAuthActive()) {
+                return;
+            }
+            for (PendingCopy copy : done) {
+                if (copy.target != null) {
+                    try {
+                        finishAbortedCopy(copy, copy.target);
+                    } catch (RuntimeException e) {
+                        LOGGER.log(Level.WARNING, "Could not check the item left by a copy into '"
+                                + copy.parent.getFullName() + "'", e);
+                    }
+                }
+            }
+        }
+
+        /**
+         * T-GAP-205: a watched copy stopped after creating {@code target}. If the item's file still
+         * holds an authorization property (the source's), the item as it is in memory (the empty
+         * first object, which has none) is saved over it, so no entry of the source survives a
+         * restart, and the removal is recorded as GRANT_VIOLATION, as for a completed copy. A save
+         * that fails is recorded so and retried ({@link #failedRemovalOutcome}).
+         */
+        private static void finishAbortedCopy(PendingCopy copy, AbstractItem target) {
+            String className = propertyClassName(target);
+            if (className == null || Jenkins.getInstanceOrNull() == null) {
+                return;
+            }
+            synchronized (target) { // S-28-04
+                // Only the item the copy left, still at its name: an item created at that name after it
+                // was deleted is another item. Looked up through ApprovalPolicy#itemForPolicy (its
+                // javadoc gives the reason for its ACL.SYSTEM2 lookup): the copier may not read the
+                // item; core checked the copier's Item/Create before the copy; the item found is only
+                // compared by identity, never returned or acted on.
+                if (io.jenkins.plugins.batchcontrol.policy.ApprovalPolicy.itemForPolicy(target.getFullName()) != target) {
+                    return;
+                }
+                String disk;
+                try {
+                    XmlFile file = target.getConfigFile();
+                    if (!file.exists()) {
+                        return; // deleted meanwhile
+                    }
+                    disk = file.asString();
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "Cannot read the configuration of '" + target.getFullName()
+                            + "', left by a copy that did not complete", e);
+                    return;
+                }
+                if (!disk.contains("<" + className)) {
+                    return; // no authorization property on disk
+                }
+                String fullName = target.getFullName();
+                Grant window = copy.grantOnly
+                        ? GrantService.get().findActiveCreateGrant(copy.user, copy.parent, target.getName()) : null;
+                String grantId = window != null ? window.getId() : copy.guardingGrantId;
+                String how = copy.grantOnly
+                        ? "made by '" + copy.user + "', whose Item/Create comes only from " + (window == null
+                                ? "a permission window" : "grant " + window.getId()) + ","
+                        : "made by '" + copy.user + "' inside an item that is guarded because of a permission window,";
+                try {
+                    apply(target, "");
+                    BASELINE.put(fullName, "");
+                    appendViolation(fullName, copy.user, grantId, "The item was left behind by a copy " + how
+                            + " that did not complete; its configuration file still carried the copied authorization"
+                            + " property, which was removed.");
+                    LOGGER.warning(() -> "Removed the copied authorization property from '" + fullName
+                            + "', left behind by a copy of '" + copy.user + "' that did not complete");
+                } catch (IOException | RuntimeException e) {
+                    LOGGER.log(Level.SEVERE, "Could not remove the copied authorization property from '" + fullName
+                            + "', left behind by a copy that did not complete", e);
+                    appendViolation(fullName, copy.user, grantId, "The item was left behind by a copy " + how
+                            + " that did not complete, and its configuration file carried the copied authorization"
+                            + " property; removing it FAILED (" + e.getClass().getSimpleName() + "), so an"
+                            + " administrator must check the item." + failedRemovalOutcome(target));
+                }
+            }
+        }
+
+        /**
+         * S-06, fail closed, after removing a created item's authorization property failed: the
+         * removal is in memory (the property no longer applies), but the item's file and the
+         * configuration snapshot taken from it still carry the property. The in-memory state becomes
+         * the guard's baseline, so a later save cannot restore the property from the snapshot as
+         * "the previous property", and the save is retried by the periodic work
+         * ({@link UnsavedItemWrites}). Called under the item's monitor.
+         *
+         * @return the end of the GRANT_VIOLATION record's detail, saying which of the two happened
+         */
+        private static String failedRemovalOutcome(AbstractItem item) {
+            if (propertyCount(item) > 0) {
+                return " The property is still in effect.";
+            }
+            BASELINE.put(item.getFullName(), "");
+            UnsavedItemWrites.add(item, "the removal of the authorization property");
+            return " The property no longer applies, and its removal is saved again every minute; until that"
+                    + " succeeds, a restart would load the item with the property.";
         }
 
         @Override
