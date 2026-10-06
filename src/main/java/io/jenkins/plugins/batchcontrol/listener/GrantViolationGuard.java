@@ -116,8 +116,11 @@ public class GrantViolationGuard extends SaveableListener {
             }
             // S-05, D-35d (4): the baseline is the last recorded configuration snapshot (this guard
             // runs ahead of ConfigSnapshotListener, so the snapshot is still the previous save's).
-            // The in-memory copy is only the fallback for an item that has no snapshot yet.
-            String snapshot = snapshotPropertyXml(item);
+            // The in-memory copy is only the fallback for an item that has no snapshot yet, and the
+            // baseline of an item whose fail-closed change could not be saved (UnsavedItemWrites):
+            // its snapshot was taken from the stale file, for example with the payload property a
+            // failed removal left on disk, which must not be restored as "the previous property".
+            String snapshot = UnsavedItemWrites.isPending(item) ? null : snapshotPropertyXml(item);
             String before = snapshot != null ? snapshot : remembered;
             Authentication auth = Jenkins.getAuthentication2();
             boolean person = !ACL.SYSTEM2.equals(auth) && !ACL.isAnonymous2(auth);
@@ -763,7 +766,8 @@ public class GrantViolationGuard extends SaveableListener {
                                     + "', created inside a guarded item", e);
                             appendViolation(fullName, user, grantId, "The item was created by '" + user + "' inside"
                                     + " a guarded item with authorization entries; removing them FAILED ("
-                                    + e.getClass().getSimpleName() + "), so an administrator must check the item.");
+                                    + e.getClass().getSimpleName() + "), so an administrator must check the item."
+                                    + failedRemovalOutcome(item));
                         }
                     }
                     }
@@ -825,8 +829,13 @@ public class GrantViolationGuard extends SaveableListener {
             try {
                 apply(item, "");
             } catch (IOException | RuntimeException e) {
+                // S-06, SPEC item 2: recorded as GRANT_VIOLATION like every other failed restore here.
                 LOGGER.log(Level.SEVERE, "Could not remove the authorization property of '" + fullName
                         + "' created by '" + user + "' under grant " + grant.getId(), e);
+                appendViolation(fullName, user, grant, "The item was created by a user whose Item/Create comes only"
+                        + " from grant " + grant.getId() + " and carried an authorization property; removing it FAILED ("
+                        + e.getClass().getSimpleName() + "), so an administrator must check the item."
+                        + failedRemovalOutcome(item));
                 return;
             }
             BASELINE.put(fullName, "");
@@ -838,6 +847,26 @@ public class GrantViolationGuard extends SaveableListener {
             SelfGrantRevertFilter.flag(item); // D-48
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
                     + user + "' through grant " + grant.getId());
+        }
+
+        /**
+         * S-06, fail closed, after removing a created item's authorization property failed: the
+         * removal is in memory (the property no longer applies), but the item's file and the
+         * configuration snapshot taken from it still carry the property. The in-memory state becomes
+         * the guard's baseline, so a later save cannot restore the property from the snapshot as
+         * "the previous property", and the save is retried by the periodic work
+         * ({@link UnsavedItemWrites}). Called under the item's monitor.
+         *
+         * @return the end of the GRANT_VIOLATION record's detail, saying which of the two happened
+         */
+        private static String failedRemovalOutcome(AbstractItem item) {
+            if (propertyCount(item) > 0) {
+                return " The property is still in effect.";
+            }
+            BASELINE.put(item.getFullName(), "");
+            UnsavedItemWrites.add(item, "the removal of the authorization property");
+            return " The property no longer applies, and its removal is saved again every minute; until that"
+                    + " succeeds, a restart would load the item with the property.";
         }
 
         @Override
