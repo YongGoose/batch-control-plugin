@@ -11,6 +11,7 @@ import hudson.model.ModelObject;
 import hudson.model.TopLevelItemDescriptor;
 import hudson.security.ACL;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -116,14 +117,24 @@ public class GrantRequestItem implements ModelObject {
      * (D-29, D-37). The endpoints and the service re-check for real.
      */
     public boolean isCanDecide() {
-        return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
+        return isPending() && isChangeControlOn()
+                && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)
                 && request.isDesignatedApprover(Jenkins.getAuthentication2().getName());
     }
 
     /** View gating for the change-approver form; the service enforces requester-only. */
     public boolean isCanChangeApprover() {
-        return isPending() && isOwnedByCurrentUser()
+        return isPending() && isChangeControlOn() && isOwnedByCurrentUser()
                 && Jenkins.get().hasPermission(BatchControlPermissions.REQUEST_GRANT);
+    }
+
+    /**
+     * LIMITATIONS 29: while change control is off this page is shown only as the refusal of an
+     * approval ({@link GrantsSection#getTarget()} closes everything else below the Grants screen),
+     * so it offers none of its forms: each would lead to a refusal (SPEC item 6).
+     */
+    private static boolean isChangeControlOn() {
+        return BatchControlGlobalConfiguration.get().isChangeControlEnabled();
     }
 
     /** Approver candidates for the change-approver form (global list, self excluded). */
@@ -138,7 +149,7 @@ public class GrantRequestItem implements ModelObject {
 
     /** View gating for the cancel link; the service enforces requester-or-Manage. */
     public boolean isCanCancel() {
-        return isPending()
+        return isPending() && isChangeControlOn()
                 && (isOwnedByCurrentUser() || Jenkins.get().hasPermission(BatchControlPermissions.MANAGE));
     }
 

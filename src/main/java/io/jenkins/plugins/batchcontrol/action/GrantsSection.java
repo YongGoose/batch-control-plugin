@@ -40,6 +40,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -74,7 +76,9 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * {@link GrantRequestService} and {@link GrantService}. Viewing requires one of the plugin
  * permissions (requesters see their requests, approvers their inbox, managers the active
  * grants), and the whole subtree additionally closes while change control is off — both enforced
- * by {@link #getTarget()}.
+ * by {@link #getTarget()}. The one exception to the closure is {@code POST <id>/approve}, which
+ * goes on to {@link GrantRequestService#approve} so that the service refuses and records the
+ * approval (LIMITATIONS 29).
  *
  * <p>The switch closes this screen and nothing else. It must never reach the audit trail: the
  * Change Records and History screens keep showing the windows that existed and the changes made
@@ -130,10 +134,35 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         // replacement for it, and the permission check above stays first so only a caller who
         // would otherwise be let in learns which switch is off.
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            if (isApprovalOfVisibleRequest()) {
+                // LIMITATIONS 29, P-15 (3): the one POST that passes. GrantRequestService#approve
+                // refuses an approval while the switch is off and writes its GRANT_REQUEST_BLOCKED
+                // record, so the rule and the record stay in the service; GrantRequestItem#doApprove
+                // still checks POST and Approve first and shows the refusal on the request's page.
+                return this;
+            }
             recordRefusedCreate();
             throw new Failure(CHANGE_CONTROL_OFF_MESSAGE);
         }
         return this;
+    }
+
+    /** {@code /<id>/approve} below this screen, with the id as the only segment before it. */
+    private static final Pattern APPROVE_PATH = Pattern.compile("/([^/]+)/approve/?");
+
+    /**
+     * T-GAP-230: whether this is a POST to {@code <id>/approve} of a grant request the caller may
+     * see ({@link #getDynamic}). Anything else below the closed screen keeps getting the
+     * explanation, an id that does not resolve included, so no other endpoint or view opens.
+     */
+    private boolean isApprovalOfVisibleRequest() {
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        if (req == null || !"POST".equals(req.getMethod())) {
+            return false;
+        }
+        String rest = req.getRestOfPath();
+        Matcher m = rest == null ? null : APPROVE_PATH.matcher(rest);
+        return m != null && m.matches() && getDynamic(m.group(1)) != null;
     }
 
     /**
