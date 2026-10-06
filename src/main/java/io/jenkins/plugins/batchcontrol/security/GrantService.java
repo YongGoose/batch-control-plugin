@@ -199,16 +199,6 @@ public final class GrantService {
     }
 
     /**
-     * Whether {@code user} currently holds {@code permission} on {@code item} through an active
-     * grant naming exactly its full name. For Item/Create, {@code item} is the group the new item is
-     * created in (core checks Create on the group's ACL).
-     */
-    public boolean hasActiveGrant(String user, @CheckForNull Item item, Permission permission) {
-        GrantAction action = GrantAction.fromPermission(permission);
-        return action != null && findActiveGrant(user, item, action) != null;
-    }
-
-    /**
      * The first active grant of {@code user} whose scope is the item {@code itemFullName} (an item
      * the caller can see must be at that name) and that includes {@code action}, or {@code null}.
      * A {@code null} action matches any action.
@@ -270,17 +260,9 @@ public final class GrantService {
     }
 
     /**
-     * Every active grant of {@code user} whose scope is the item {@code itemFullName} (an item the
-     * caller can see must be at that name) and that includes {@code action} (D-40: the CREATE check
-     * has to see all of them, since each may carry a different name restriction).
-     */
-    public List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
-        return findActiveGrants(user, resolve(itemFullName), itemFullName, action);
-    }
-
-    /**
      * Every active grant of {@code user} naming exactly {@code item}'s full name and including
-     * {@code action}.
+     * {@code action} (D-40: the CREATE check has to see all of them, since each may carry a different
+     * name restriction).
      *
      * <p>For {@link GrantAction#CREATE}, {@code item} is the item group the new item is created in
      * (Item/Create is checked on the group's ACL), so a CREATE window confers Create in its own
@@ -296,15 +278,6 @@ public final class GrantService {
             return new ArrayList<>();
         }
         return named(user, itemFullName, action);
-    }
-
-    /**
-     * D-40: the first active Create grant of {@code user} conferring Create in the item group
-     * {@code itemFullName} whose name restriction (if any) allows {@code itemName}, or {@code null}.
-     */
-    @CheckForNull
-    public Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
-        return firstAllowing(findActiveGrants(user, itemFullName, GrantAction.CREATE), itemName);
     }
 
     /**
@@ -757,6 +730,8 @@ public final class GrantService {
      * grant" state, and a {@code GUARD_REVIEWED} change record names the reviewer. The caller must
      * hold Item/Configure on the item natively (asked with every grant layer off) or
      * Overall/Administer; a user whose permission on the item comes from a grant cannot review it.
+     * The entries leave the state in memory at once and a grant file that cannot be written is
+     * written again later ({@link #removeChanged}), so the record says what the guard does.
      *
      * @throws org.springframework.security.access.AccessDeniedException (AccessDeniedException3)
      *         when the caller may not review the item
@@ -829,45 +804,34 @@ public final class GrantService {
         return found;
     }
 
-    /** Removes the exact entries {@code names} from every grant; the number of entries removed. */
+    /**
+     * Removes the exact entries {@code names} from every grant; the number of entries removed.
+     * D-75 (2), like every other changed-items write ({@link #rewriteChangedItems}): the entries
+     * leave the cache at once, so the count is what the guard sees from now on, and a grant file
+     * that cannot be written is written again later instead of keeping the entries.
+     */
     private synchronized int removeChanged(java.util.Set<String> names) {
-        int removed = 0;
         if (names.isEmpty()) {
             return 0;
         }
+        java.util.concurrent.atomic.AtomicInteger removed = new java.util.concurrent.atomic.AtomicInteger();
         for (Grant cached : new ArrayList<>(grants())) {
-            boolean affected = false;
-            for (String name : cached.getChangedItems()) {
-                if (names.contains(name)) {
-                    affected = true;
-                    break;
-                }
-            }
-            if (!affected) {
+            if (cached.getChangedItems().stream().noneMatch(names::contains)) {
                 continue;
             }
-            try {
-                Grant grant = load(cached.getId());
-                if (grant == null) {
-                    continue;
-                }
+            rewriteChangedItems(cached, items -> {
                 List<String> kept = new ArrayList<>();
-                for (String name : grant.getChangedItems()) {
+                for (String name : items) {
                     if (names.contains(name)) {
-                        removed++;
+                        removed.incrementAndGet();
                     } else {
                         kept.add(name);
                     }
                 }
-                grant.setChangedItems(kept);
-                save(grant);
-                replaceInCache(grant);
-            } catch (RuntimeException e) {
-                LOGGER.log(java.util.logging.Level.SEVERE, "Could not clear the changed-under-grant entries of grant "
-                        + cached.getId(), e);
-            }
+                return kept;
+            }, "changed-under-grant entries cleared by a review: " + String.join(", ", names));
         }
-        return removed;
+        return removed.get();
     }
 
     /**
@@ -880,16 +844,20 @@ public final class GrantService {
      * <p>D-75 (2), as for created-item records ({@link #relocateCreatedItem}): an entry already naming
      * {@code newFullName} (in any letter case) or an item below it, other than the moved item's own
      * entries, cannot be about the moved item, which only now took that name; it is dropped first, so
-     * the moved item does not inherit another item's state. The entries change in the cache first and
-     * their write is retried ({@link #rewriteChangedItems}).
+     * the moved item does not inherit another item's state. An entry whose own item is still at
+     * exactly its name, next to the moved item, stays (DEF-E17-01, {@link #ownItemStillAt}). The
+     * entries change in the cache first and their write is retried ({@link #rewriteChangedItems}).
+     *
+     * @param moved the renamed or moved item ({@code null} when unknown)
      */
-    public synchronized void relocateChanged(String oldFullName, String newFullName) {
+    public synchronized void relocateChanged(@CheckForNull Item moved, String oldFullName, String newFullName) {
         if (oldFullName == null || oldFullName.isEmpty() || newFullName == null || newFullName.isEmpty()
                 || oldFullName.equals(newFullName)) {
             return;
         }
         rewriteChangedWhere(name -> (sameName(name, newFullName) || startsWithFolder(name, newFullName))
-                        && !name.equals(oldFullName) && !name.startsWith(oldFullName + "/"),
+                        && !name.equals(oldFullName) && !name.startsWith(oldFullName + "/")
+                        && !ownItemStillAt(name, moved),
                 name -> null, "dropped stale changed-under-grant entries at or below '" + newFullName
                         + "', a name another item has just taken");
         Instant now = BatchClock.now();
@@ -1105,12 +1073,47 @@ public final class GrantService {
     }
 
     /**
-     * Whether two full names are one name for Jenkins: item names are looked up without regard to
-     * letter case (core keeps the items of {@code Jenkins} and of folders in case-insensitive maps),
-     * so a record under another spelling of a name is about the item at that name (S-39-02).
+     * Whether two full names may be one name for Jenkins: item names are usually looked up without
+     * regard to letter case (core keeps the items of {@code Jenkins} in a case-insensitive map, and a
+     * folder's are too until it is loaded again), so a record under another spelling of a name may be
+     * about the item now at that name (S-39-02). A folder loaded from disk (after a restart or a
+     * reload) looks its children up by exact name, though, and may then hold two items whose names
+     * differ only in letter case; so before a window ends, or a record is dropped, because of a name
+     * matched here, {@link #ownItemStillAt} asks whether its own item is still there (DEF-E17-01).
      */
     private static boolean sameName(@CheckForNull String a, @CheckForNull String b) {
         return a != null && b != null && String.CASE_INSENSITIVE_ORDER.compare(a, b) == 0;
+    }
+
+    /**
+     * DEF-E17-01: whether the item a window or record names, {@code fullName}, is still there under
+     * exactly that name, as an item other than {@code arrived} and the items below it (the item just
+     * created, renamed or moved to another spelling of that name). Then the window or record is about
+     * that item, not about the one that arrived, and keeps applying to it: next to it in a folder that
+     * looks its children up by exact name ({@link #sameName}). Otherwise (no item at that exact name,
+     * or the item found there is the one that arrived, which is what a case-insensitive lookup
+     * answers for another spelling) its own item is gone, and S-39-02 ends or drops it so it never
+     * reaches the new item. Looked up as SYSTEM, and only compared ({@link #itemAt}).
+     */
+    private static boolean ownItemStillAt(String fullName, @CheckForNull Item arrived) {
+        Item at = itemAt(fullName);
+        return at != null && fullName.equals(at.getFullName()) && !isAtOrBelow(at, arrived);
+    }
+
+    /** Whether {@code item} is {@code top} or lies below it. */
+    private static boolean isAtOrBelow(Item item, @CheckForNull Item top) {
+        if (top == null) {
+            return false;
+        }
+        Item current = item;
+        while (current != null) {
+            if (current == top) {
+                return true;
+            }
+            ItemGroup<?> parent = current.getParent();
+            current = parent instanceof Item ? (Item) parent : null;
+        }
+        return false;
     }
 
     /**
@@ -1164,16 +1167,18 @@ public final class GrantService {
      *
      * <p>S-39-02, as for windows ({@link #followItem}): a record already naming {@code newFullName}
      * (in any letter case, other than the moved item's own old name) cannot be about the moved item
-     * and is dropped first; and when another item is at {@code oldFullName} again by the time the
-     * event is handled, the records naming it are dropped instead of moved. Records change in the
-     * cache first and their write is retried ({@link #rewriteCreatedItems}).
+     * and is dropped first, unless its own item is still at exactly its name, next to the moved item
+     * (DEF-E17-01, {@link #ownItemStillAt}); and when another item is at {@code oldFullName} again by
+     * the time the event is handled, the records naming it are dropped instead of moved. Records
+     * change in the cache first and their write is retried ({@link #rewriteCreatedItems}).
      */
     public synchronized void relocateCreatedItem(@CheckForNull Item moved, String oldFullName, String newFullName) {
         if (oldFullName == null || oldFullName.isEmpty() || newFullName == null || newFullName.isEmpty()
                 || oldFullName.equals(newFullName)) {
             return;
         }
-        rewriteCreatedItemsWhere(name -> sameName(name, newFullName) && !name.equals(oldFullName),
+        rewriteCreatedItemsWhere(name -> sameName(name, newFullName) && !name.equals(oldFullName)
+                        && !ownItemStillAt(name, moved),
                 name -> null, "dropped the stale created-item record of '" + newFullName + "', now another item's name");
         boolean ambiguous = anyActive(grant -> grant.getCreatedItems().contains(oldFullName))
                 && otherItemAt(oldFullName, moved);
@@ -1209,7 +1214,9 @@ public final class GrantService {
      *   <li>an active window already naming {@code newFullName} (in any letter case, other than the
      *       moved item's own old name) cannot be about the moved item, which only now took that
      *       name; it ends first, as on the creation of a new item at its name (its own item vanished
-     *       without an event, or moved away and its event has not been handled yet);</li>
+     *       without an event, or moved away and its event has not been handled yet), unless its own
+     *       item is still at exactly its name, next to the moved item (DEF-E17-01,
+     *       {@link #ownItemStillAt});</li>
      *   <li>when another item is already at {@code oldFullName} again by the time the event is
      *       handled (renames whose events interleave), a window naming it can no longer be told to
      *       be about the moved item rather than that other item; it ends instead of following;</li>
@@ -1228,7 +1235,8 @@ public final class GrantService {
         }
         retryUnsavedWrites();
         String caller = Jenkins.getAuthentication2().getName();
-        endWindowsWhere(scope -> sameName(scope, newFullName) && !scope.equals(oldFullName),
+        endWindowsWhere(scope -> sameName(scope, newFullName) && !scope.equals(oldFullName)
+                        && !ownItemStillAt(scope, moved),
                 Grant.REVOKED_ITEM_NOT_FOLLOWED, NOT_FOLLOWED + "'" + newFullName + "' is now the name of another item",
                 caller);
         if (anyActive(grant -> grant.getScope() != null && grant.getScope().includes(oldFullName))
@@ -1297,14 +1305,18 @@ public final class GrantService {
      * on disk, then reloaded), or was deleted while the window was being approved. It ends, as for
      * a deletion, so it never applies to the new item. The name is compared as Jenkins looks names
      * up, without regard to letter case (S-39-02): a window under another spelling of the name could
-     * otherwise reach the new item through a later rename that only changes the case.
+     * otherwise reach the new item through a later rename that only changes the case. A window whose
+     * own item is still at exactly its name, next to the new item in a folder that looks its children
+     * up by exact name, is about that item and stays (DEF-E17-01, {@link #ownItemStillAt}).
      */
-    public synchronized void endWindowsOnNewItem(String fullName) {
+    public synchronized void endWindowsOnNewItem(Item created) {
+        String fullName = created.getFullName();
         if (fullName == null || fullName.isEmpty()) {
             return;
         }
-        endWindowsWhere(scope -> sameName(scope, fullName), Grant.REVOKED_ITEM_DELETED,
-                ENDED + "'" + fullName + "' is now the name of a new item", Jenkins.getAuthentication2().getName());
+        endWindowsWhere(scope -> sameName(scope, fullName) && !ownItemStillAt(scope, created),
+                Grant.REVOKED_ITEM_DELETED, ENDED + "'" + fullName + "' is now the name of a new item",
+                Jenkins.getAuthentication2().getName());
     }
 
     /**
@@ -1366,15 +1378,18 @@ public final class GrantService {
      * D-35c, D-74: a new item was created under {@code fullName}; a created-item record under that
      * name belongs to an item that disappeared without a deletion event (deleted on disk and
      * reloaded) and is dropped, so it never applies to the new item. The name is compared as Jenkins
-     * looks names up, without regard to letter case (S-39-02). That name only: a copied folder's
-     * children are created (and possibly recorded) before the folder's own creation event.
+     * looks names up, without regard to letter case (S-39-02), except that a record whose own item
+     * is still at exactly its name, next to the new item, stays (DEF-E17-01, {@link #ownItemStillAt}).
+     * That name only: a copied folder's children are created (and possibly recorded) before the
+     * folder's own creation event.
      */
-    public synchronized void forgetStaleCreatedItem(String fullName) {
+    public synchronized void forgetStaleCreatedItem(Item created) {
+        String fullName = created.getFullName();
         if (fullName == null || fullName.isEmpty()) {
             return;
         }
-        rewriteCreatedItemsWhere(name -> sameName(name, fullName), name -> null,
-                "dropped the stale created-item record of '" + fullName + "', now the name of a new item");
+        rewriteCreatedItemsWhere(name -> sameName(name, fullName) && !ownItemStillAt(name, created),
+                name -> null, "dropped the stale created-item record of '" + fullName + "', now the name of a new item");
     }
 
     /**

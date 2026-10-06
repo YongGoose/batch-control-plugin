@@ -249,12 +249,11 @@ public final class Grant {
         this.changedItems = items == null || items.isEmpty() ? null : new ArrayList<>(items);
     }
 
-    /** Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC item 8). */
-    public void markRevoked(Instant revokedAt, String revokedBy) {
-        markRevoked(revokedAt, revokedBy, null);
-    }
-
-    /** As {@link #markRevoked(Instant, String)}, recording why (#85); only {@code security.GrantService} calls this. */
+    /**
+     * Marks the grant revoked by {@code revokedBy}, recording why ({@code null}: an individual
+     * revocation, #85). Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC
+     * item 8).
+     */
     public void markRevoked(Instant revokedAt, String revokedBy, String reason) {
         this.revokedAtMillis = Objects.requireNonNull(revokedAt, "revokedAt").toEpochMilli();
         this.revokedBy = revokedBy;
