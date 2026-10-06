@@ -2,6 +2,7 @@ package io.jenkins.plugins.batchcontrol.listener;
 
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
 import com.cloudbees.hudson.plugins.folder.computed.FolderComputation;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.Executor;
@@ -44,6 +45,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * configuration is generated. Their runs are still recorded (D-32). Any other save of such a
  * child (script, Job DSL, REST, CLI) is recorded, because that edit is in effect until the next
  * indexing (security-07 S-04).
+ *
+ * <p>A snapshot that cannot be read or written never stops the record (SPEC item 9, ARCHITECTURE
+ * section 1, T-GAP-385): when the previous snapshot exists but cannot be read (also when something
+ * other than a file is in its place), the CONFIGURE record is written without a diff and with a
+ * note saying why; a snapshot that cannot be written is logged and the record is written anyway.
+ * Nothing escapes this listener.
  *
  * <p>The read → diff → snapshot swap of one item runs under that item's lock stripe, so rapid
  * consecutive saves chain baseline-consistently (each diff is previous-config vs new-config,
@@ -106,11 +113,21 @@ public class ConfigSnapshotListener extends SaveableListener {
                 return;
             }
             Store store = Store.get();
-            String oldXml = store.loadConfigSnapshot(fullName);
+            String oldXml;
+            try {
+                oldXml = store.loadConfigSnapshot(fullName);
+            } catch (RuntimeException e) {
+                // T-GAP-385, SPEC 9, ARCHITECTURE 1: the change is recorded whatever happens to the diff.
+                LOGGER.log(Level.WARNING, "Cannot read the config snapshot of '" + fullName
+                        + "'; the configuration change is recorded without a diff", e);
+                saveSnapshot(store, fullName, newXml);
+                append(store, item, fullName, null, NO_DIFF_DETAIL);
+                return;
+            }
             if (oldXml == null) {
                 // First sighting: the creation-time initial save (the CREATE record comes from
                 // the ItemListener) or an item predating the switch. Establish the baseline.
-                store.saveConfigSnapshot(fullName, newXml);
+                saveSnapshot(store, fullName, newXml);
                 return;
             }
             if (oldXml.equals(newXml)) {
@@ -133,14 +150,46 @@ public class ConfigSnapshotListener extends SaveableListener {
             } else {
                 diff = UnifiedDiff.diff(maskedOld, maskedNew);
             }
-            String user = ChangeRecording.currentUser();
-            ChangeRecord record = ChangeRecord.create(ChangeType.CONFIGURE, fullName, user, null);
-            record.setDiff(diff);
-            record.setGrantId(ChangeRecording.configureGrantIdFor(user, item));
-            store.saveConfigSnapshot(fullName, newXml);
-            store.appendChangeRecord(record);
+            saveSnapshot(store, fullName, newXml);
+            append(store, item, fullName, diff, null);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** The note of a CONFIGURE record written without a diff (T-GAP-385). */
+    static final String NO_DIFF_DETAIL = "No diff: the previous configuration of this item could not be read"
+            + " from its snapshot.";
+
+    /**
+     * Writes {@code xml} as the item's new diff baseline. A failure is logged and does not stop the
+     * record (SPEC 9: a change is recorded whatever happens to the diff); the next change is then
+     * compared with whatever baseline is left.
+     */
+    private static void saveSnapshot(Store store, String fullName, String xml) {
+        try {
+            store.saveConfigSnapshot(fullName, xml);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not write the config snapshot of '" + fullName
+                    + "' (the diff baseline); configuration changes are recorded all the same", e);
+        }
+    }
+
+    /**
+     * Appends the CONFIGURE record of {@code item}, with {@code diff} (or none) and {@code detail}
+     * (or none). A store failure is logged; nothing escapes the listener.
+     */
+    private static void append(Store store, Item item, String fullName, @CheckForNull String diff,
+                               @CheckForNull String detail) {
+        String user = ChangeRecording.currentUser();
+        try {
+            ChangeRecord record = ChangeRecord.create(ChangeType.CONFIGURE, fullName, user, detail);
+            record.setDiff(diff);
+            record.setGrantId(ChangeRecording.configureGrantIdFor(user, item));
+            store.appendChangeRecord(record);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Could not record the configuration change of '" + fullName + "' by '" + user
+                    + "'", e);
         }
     }
 }

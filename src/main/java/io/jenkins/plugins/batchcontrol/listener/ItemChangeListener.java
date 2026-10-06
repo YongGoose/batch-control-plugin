@@ -79,7 +79,7 @@ public class ItemChangeListener extends ItemListener {
         Grant deleteGrant = GrantService.get().findActiveDeleteGrant(user, item);
         record.setGrantId(deleteGrant == null ? null : deleteGrant.getId());
         Store.get().appendChangeRecord(record);
-        Store.get().deleteConfigSnapshot(fullName);
+        deleteSnapshot(fullName);
     }
 
     @Override
@@ -112,7 +112,7 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         // The diff baseline follows the item to its new full name.
-        Store.get().deleteConfigSnapshot(oldFullName);
+        deleteSnapshot(oldFullName);
         seedSnapshot(item);
         // onLocationChanged fires for renames too (which onRenamed already recorded); a MOVE
         // is a location change whose parent path changed.
@@ -318,7 +318,10 @@ public class ItemChangeListener extends ItemListener {
 
     // ---------------------------------------------------------------- snapshots
 
-    /** Stores the item's current config.xml as the diff baseline. */
+    /**
+     * Stores the item's current config.xml as the diff baseline. A failure (also a store failure,
+     * T-GAP-385) is logged and never stops the record of the event (SPEC item 9).
+     */
     private static void seedSnapshot(Item item) {
         if (!(item instanceof AbstractItem)) {
             return;
@@ -328,8 +331,17 @@ public class ItemChangeListener extends ItemListener {
             if (config.exists()) {
                 Store.get().saveConfigSnapshot(item.getFullName(), config.asString());
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Failed to snapshot config of '" + item.getFullName() + "'", e);
+        }
+    }
+
+    /** Removes the diff baseline of {@code fullName}; a store failure is logged (T-GAP-385). */
+    private static void deleteSnapshot(String fullName) {
+        try {
+            Store.get().deleteConfigSnapshot(fullName);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Failed to remove the config snapshot of '" + fullName + "'", e);
         }
     }
 

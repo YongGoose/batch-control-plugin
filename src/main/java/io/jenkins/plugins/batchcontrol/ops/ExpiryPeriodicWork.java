@@ -24,7 +24,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * session: an APPROVED request from before a restart must be judged from the recovery moment
  * (SPEC item 7 exception), so it may not be expired before recovery has re-based it. Writing the
  * ends of permission windows that could not be written before (D-74) does not wait for it, nor
- * does saving the items whose fail-closed change could not be saved before.
+ * does saving the items whose fail-closed change could not be saved before, nor writing the
+ * cancelled queue items of approved runs that could not be written before.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -59,6 +60,8 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not save the items whose fail-closed change is not saved yet", e);
         }
+        // T-GAP-384: and for the cancelled queue items of approved runs whose request file could not be written.
+        RunRequestService.get().retryUnsavedQueueCancels();
         // T-GAP-205: copies that stopped half-way outside an HTTP request (a script, the CLI over WebSocket).
         try {
             io.jenkins.plugins.batchcontrol.listener.GrantViolationGuard.Baseline.finishStaleCopies();

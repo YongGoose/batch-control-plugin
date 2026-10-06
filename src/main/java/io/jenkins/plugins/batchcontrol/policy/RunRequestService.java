@@ -90,6 +90,17 @@ public final class RunRequestService {
             new RequesterBuildCache(Duration.ofMinutes(5), 1000);
     private final Store store = Store.get();
 
+    /**
+     * T-GAP-384, D-72b (7): queue cancellations of approved runs that are in effect but could not be
+     * written to their request file yet (request id to the moment of the cancellation). Every read of
+     * a request file in this service applies them ({@link #loadCurrent}), so no other write puts a
+     * request back without its mark; the periodic work writes them again
+     * ({@link #retryUnsavedQueueCancels}), and so does any later write of the request, until one
+     * succeeds. Kept in memory only: a restart while the store still refuses writes loses them, the
+     * storage-failure class LIMITATIONS documents.
+     */
+    private final Map<String, Instant> unsavedQueueCancels = new java.util.concurrent.ConcurrentHashMap<>();
+
     private RunRequestService() {
     }
 
@@ -104,7 +115,24 @@ public final class RunRequestService {
      * screen, listing or listener never needs them.
      */
     public RunRequest load(String id) {
-        return store.loadRunRequest(id);
+        return loadCurrent(id);
+    }
+
+    /**
+     * The stored request {@code id}, or {@code null}, with a queue cancellation that could not be
+     * written yet applied ({@link #unsavedQueueCancels}). Every read of a request file in this service
+     * goes through here.
+     */
+    @CheckForNull
+    private RunRequest loadCurrent(String id) {
+        RunRequest request = store.loadRunRequest(id);
+        if (request != null && request.getQueueCancelledAt() == null) {
+            Instant cancelledAt = unsavedQueueCancels.get(id);
+            if (cancelledAt != null) {
+                request.setQueueCancelledAt(cancelledAt);
+            }
+        }
+        return request;
     }
 
     /** All stored requests, in creation order. */
@@ -239,6 +267,9 @@ public final class RunRequestService {
     private void persist(RunRequest request) {
         store.saveRunRequest(request);
         requesterBuildCache.invalidate(request.getId());
+        if (request.getQueueCancelledAt() != null) {
+            unsavedQueueCancels.remove(request.getId()); // written now (T-GAP-384)
+        }
     }
 
     /**
@@ -682,7 +713,7 @@ public final class RunRequestService {
     public boolean consumeMarker(String requestId, String jobFullName) {
         lock.lock();
         try {
-            RunRequest request = store.loadRunRequest(requestId);
+            RunRequest request = loadCurrent(requestId);
             if (request == null) {
                 LOGGER.warning(() -> "Refusing approval marker for unknown request " + requestId);
                 return false;
@@ -774,7 +805,7 @@ public final class RunRequestService {
     public void markExecuted(String requestId, String runId) {
         lock.lock();
         try {
-            RunRequest request = store.loadRunRequest(requestId);
+            RunRequest request = loadCurrent(requestId);
             if (request == null) {
                 return;
             }
@@ -818,7 +849,7 @@ public final class RunRequestService {
             }
             lock.lock();
             try {
-                RunRequest request = store.loadRunRequest(snapshot.getId());
+                RunRequest request = loadCurrent(snapshot.getId());
                 if (request == null) {
                     continue;
                 }
@@ -875,7 +906,7 @@ public final class RunRequestService {
             RunRequest notified = null;
             lock.lock();
             try {
-                RunRequest request = store.loadRunRequest(snapshot.getId());
+                RunRequest request = loadCurrent(snapshot.getId());
                 if (request != null && request.getStatus() == RequestStatus.PENDING
                         && !request.isExpiringNotified()) {
                     Instant expiresAt = pendingExpiry(request);
@@ -932,7 +963,7 @@ public final class RunRequestService {
             }
             lock.lock();
             try {
-                RunRequest request = store.loadRunRequest(snapshot.getId());
+                RunRequest request = loadCurrent(snapshot.getId());
                 if (request == null) {
                     continue;
                 }
@@ -1028,7 +1059,7 @@ public final class RunRequestService {
             List<ParameterValue> values = null;
             lock.lock();
             try {
-                request = store.loadRunRequest(snapshot.getId());
+                request = loadCurrent(snapshot.getId());
                 if (request == null || request.getStatus() != RequestStatus.APPROVED
                         || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null) {
                     continue;
@@ -1083,7 +1114,7 @@ public final class RunRequestService {
     // ---------------------------------------------------------------- internals
 
     private RunRequest require(String id) {
-        RunRequest request = store.loadRunRequest(id);
+        RunRequest request = loadCurrent(id);
         if (request == null) {
             throw new IllegalArgumentException("No such run request: " + id);
         }
@@ -1218,7 +1249,7 @@ public final class RunRequestService {
             }
             lock.lock();
             try {
-                RunRequest request = store.loadRunRequest(requestId);
+                RunRequest request = loadCurrent(requestId);
                 if (request == null || request.getStatus() != RequestStatus.APPROVED
                         || request.getQueuedAt() == null || request.getExecutedRunId() != null
                         || request.getQueueCancelledAt() != null) {
@@ -1246,19 +1277,33 @@ public final class RunRequestService {
      * more, is deleted now (D-72b (5)). Called by the queue listener, as
      * SYSTEM, while Jenkins holds the queue lock (lock order as for {@link #consumeMarker}).
      * Never throws.
+     *
+     * <p>T-GAP-384: when the request file cannot be written, the mark stays in effect in memory
+     * ({@link #unsavedQueueCancels}) and is written by the periodic work as soon as the store accepts
+     * it ({@link #retryUnsavedQueueCancels}), so a restart after that does not submit the run again
+     * either (LIMITATIONS 32).
      */
     public void recordQueueCancelled(String requestId, String jobFullName) {
         lock.lock();
         try {
-            RunRequest request = store.loadRunRequest(requestId);
+            RunRequest request = loadCurrent(requestId);
             if (request == null || request.getStatus() != RequestStatus.APPROVED
                     || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null
                     || !request.getJobFullName().equals(jobFullName)) {
                 return;
             }
-            request.setQueueCancelledAt(BatchClock.now());
-            // The queued values were the queue's to dispose of (done by the cancellation itself).
-            persistEnded(request, false);
+            Instant cancelledAt = BatchClock.now();
+            request.setQueueCancelledAt(cancelledAt);
+            try {
+                // The queued values were the queue's to dispose of (done by the cancellation itself).
+                persistEnded(request, false);
+            } catch (RuntimeException e) {
+                unsavedQueueCancels.put(requestId, cancelledAt);
+                LOGGER.log(java.util.logging.Level.SEVERE, "Could not save the cancelled queue item of approved run"
+                        + " request " + requestId + "; it is in effect (the run is not submitted again), and it is"
+                        + " written again by the periodic work until that succeeds", e);
+                return;
+            }
             LOGGER.info(() -> "The queue item of approved run request " + requestId
                     + " was cancelled; it will not be submitted again");
         } catch (RuntimeException e) {
@@ -1266,6 +1311,38 @@ public final class RunRequestService {
                     + requestId, e);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * T-GAP-384, D-72b (7): writes the queue cancellations that could not be written when they
+     * happened ({@link #recordQueueCancelled}), with the deletion of the typed values file that goes
+     * with them. One that still fails stays for the next attempt; one whose request has no file any
+     * more, or whose file already carries a cancellation, is dropped. Called by the periodic work;
+     * never throws.
+     */
+    public void retryUnsavedQueueCancels() {
+        for (String id : new ArrayList<>(unsavedQueueCancels.keySet())) {
+            lock.lock();
+            try {
+                Instant cancelledAt = unsavedQueueCancels.get(id);
+                if (cancelledAt == null) {
+                    continue; // written meanwhile by another write of the request
+                }
+                RunRequest request = store.loadRunRequest(id);
+                if (request == null || request.getQueueCancelledAt() != null) {
+                    unsavedQueueCancels.remove(id);
+                    continue;
+                }
+                request.setQueueCancelledAt(cancelledAt);
+                persistEnded(request, false); // persist() drops the entry
+                LOGGER.info(() -> "The cancelled queue item of run request " + id + " is now written");
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.FINE, "The cancelled queue item of run request " + id
+                        + " still cannot be written", e);
+            } finally {
+                lock.unlock();
+            }
         }
     }
 

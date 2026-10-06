@@ -186,7 +186,12 @@ public interface Store {
      */
     void saveConfigSnapshot(String jobFullName, String configXml);
 
-    /** The stored config snapshot text of a job, or {@code null} if none exists. */
+    /**
+     * The stored config snapshot text of a job, or {@code null} if none exists.
+     *
+     * @throws java.io.UncheckedIOException when a snapshot exists but cannot be read, also when
+     *         something other than a file is in its place
+     */
     String loadConfigSnapshot(String jobFullName);
 
     /** Removes the config snapshot of a job (after deletion, rename or move). */
