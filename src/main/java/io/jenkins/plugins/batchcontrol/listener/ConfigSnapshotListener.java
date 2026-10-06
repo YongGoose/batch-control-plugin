@@ -11,6 +11,7 @@ import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Queue;
 import hudson.model.Saveable;
+import hudson.model.listeners.ItemListener;
 import hudson.model.listeners.SaveableListener;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
@@ -20,6 +21,8 @@ import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.store.UnifiedDiff;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -64,10 +67,12 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * created ({@link ItemChangeListener}) and, for the items that exist when recording becomes active,
  * at startup and when a switch turns recording on
  * ({@link io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding}), so a save finds none only before
- * that seeding reached its item or after the snapshot could not be written. Two kinds of save
- * without a snapshot store the baseline and write no record: a save that is part of creating the
- * item (its CREATE record stands for it, {@link #isCreationSave}), and a computed folder saving
- * itself during its own indexing, which changes no user-editable configuration (#20).
+ * that seeding reached its item or after the snapshot could not be written.
+ *
+ * <p>A save that is part of creating the item ({@link #isCreationSave}) stores the baseline and
+ * writes no record, with or without an earlier snapshot: the CREATE record stands for it (#20). A
+ * computed folder saving itself during its own indexing also only stores the baseline when there is
+ * none to compare with, because such a save changes no user-editable configuration (#20).
  *
  * <p>The read → diff → snapshot swap of one item runs under that item's lock stripe, so rapid
  * consecutive saves chain baseline-consistently (each diff is previous-config vs new-config,
@@ -101,19 +106,38 @@ public class ConfigSnapshotListener extends SaveableListener {
     private static final ConcurrentHashMap<String, Integer> SAVING = new ConcurrentHashMap<>();
 
     /**
-     * The core methods inside which a save is part of creating an item ({@link #isCreationSave}):
-     * {@code createProjectFromXML} adds the item to its parent and then calls
-     * {@code onCreatedFromScratch} (an organization folder saves itself there) before it announces the
-     * creation; a copy loads the copied configuration into a new object before it announces it; and
-     * every creation is announced through {@code fireOnCreated} or {@code fireOnCopied}, whose listeners
-     * (other plugins' included) may save the item before {@link ItemChangeListener} stores its baseline.
+     * The core methods that build a new item ({@link #isCreationSave}): {@code createProject} (which a
+     * copy uses as well) saves the new item before it adds it to its parent; {@code createProjectFromXML}
+     * adds the item to its parent and then calls {@code onCreatedFromScratch}, where an organization
+     * folder saves itself several times; and a copy loads the copied configuration into a new object.
+     * All of this happens before the creation is announced.
      */
-    private static final Set<String> CREATION_FRAMES = Set.of(
+    private static final Set<String> BUILDING_FRAMES = Set.of(
             "hudson.model.ItemGroupMixIn#createProject",
             "hudson.model.ItemGroupMixIn#createProjectFromXML",
-            "hudson.model.ItemGroupMixIn#copy",
+            "hudson.model.ItemGroupMixIn#copy");
+
+    /**
+     * The core methods that announce a creation ({@link #isCreationSave}). Their listeners (other
+     * plugins' included) may save the new item, and they may save other items too, so a save inside
+     * them belongs to the creation only when it saves the announced item or an item inside it
+     * ({@link #ANNOUNCED}).
+     */
+    private static final Set<String> ANNOUNCING_FRAMES = Set.of(
             "hudson.model.listeners.ItemListener#fireOnCreated",
             "hudson.model.listeners.ItemListener#fireOnCopied");
+
+    /** The method names of {@link #BUILDING_FRAMES} and {@link #ANNOUNCING_FRAMES}, checked first. */
+    private static final Set<String> CREATION_METHODS = Set.of(
+            "createProject", "createProjectFromXML", "copy", "fireOnCreated", "fireOnCopied");
+
+    /**
+     * The items whose creation is being announced on this thread, innermost last: set by
+     * {@link CreationAnnounced} (the first item listener to run) and cleared by
+     * {@link CreationAnnouncedEnd} (the last), which core runs whatever the listeners in between
+     * throw. Removed when empty, so pooled threads keep nothing.
+     */
+    private static final ThreadLocal<List<Item>> ANNOUNCED = new ThreadLocal<>();
 
     /** The outcome of {@link #seedIfMissing} for one item. */
     public enum Seeding {
@@ -207,6 +231,12 @@ public class ConfigSnapshotListener extends SaveableListener {
                 // snapshot is left as it is (it still compares equal next time).
                 return;
             }
+            if (isCreationSave(item)) {
+                // Part of creating the item (an organization folder saves itself several times while
+                // it is created): its CREATE record stands for it, the configuration is the baseline.
+                saveSnapshot(store, fullName, newXml);
+                return;
+            }
             // Mask BOTH sides before diffing so no hunk can ever carry a secret.
             String maskedOld = SecretMasker.mask(normalizedOld);
             String maskedNew = SecretMasker.mask(normalizedNew);
@@ -244,19 +274,52 @@ public class ConfigSnapshotListener extends SaveableListener {
     }
 
     /**
-     * Whether a save of {@code item} is part of creating it. Core saves a new item before it adds it to
-     * its parent ({@code ItemGroupMixIn#createProject}, which a copy uses as well), so an item that is
-     * not in its parent is being created (or loaded); and a save made inside one of the core creation
-     * methods named by {@link #CREATION_FRAMES} belongs to a creation too. Only a save that finds no
-     * snapshot asks this (at most once per item while recording is active), so the stack is never
-     * walked on the ordinary save path.
+     * Whether a save of {@code item} is part of creating it, whether or not a snapshot of it exists.
+     * <ul>
+     *   <li>An item that is not in its parent is being created (or loaded): core saves a new item before
+     *       it adds it to its parent.</li>
+     *   <li>Otherwise the innermost core creation method on the stack decides. Inside a method that
+     *       builds the item ({@link #BUILDING_FRAMES}) the save belongs to the creation. Inside one that
+     *       announces it ({@link #ANNOUNCING_FRAMES}) it belongs to the creation only when it saves the
+     *       announced item or an item inside it ({@link #ANNOUNCED}): a listener saving another item
+     *       while a creation is announced changes that item, and the change is recorded.</li>
+     * </ul>
+     * Asked only by a save that would otherwise write a record (it changed the configuration, or no
+     * baseline exists), so a no-op save never walks the stack.
      */
     static boolean isCreationSave(Item item) {
         if (!isRegistered(item)) {
             return true;
         }
-        return StackWalker.getInstance().walk(frames -> frames.anyMatch(
-                frame -> CREATION_FRAMES.contains(frame.getClassName() + '#' + frame.getMethodName())));
+        String innermost = StackWalker.getInstance().walk(frames -> frames
+                .filter(frame -> CREATION_METHODS.contains(frame.getMethodName()))
+                .map(frame -> frame.getClassName() + '#' + frame.getMethodName())
+                .filter(frame -> BUILDING_FRAMES.contains(frame) || ANNOUNCING_FRAMES.contains(frame))
+                .findFirst()
+                .orElse(null));
+        if (innermost == null) {
+            return false;
+        }
+        return BUILDING_FRAMES.contains(innermost) || isAnnounced(item);
+    }
+
+    /** Whether the creation of {@code item}, or of an item it is inside, is being announced on this thread. */
+    private static boolean isAnnounced(Item item) {
+        List<Item> announced = ANNOUNCED.get();
+        if (announced == null) {
+            return false;
+        }
+        Item current = item;
+        while (current != null) {
+            for (Item created : announced) {
+                if (created == current) {
+                    return true;
+                }
+            }
+            ItemGroup<? extends Item> parent = current.getParent();
+            current = parent instanceof Item ? (Item) parent : null;
+        }
+        return false;
     }
 
     /**
@@ -370,6 +433,62 @@ public class ConfigSnapshotListener extends SaveableListener {
             if (o instanceof Item) {
                 SAVING.merge(((Item) o).getFullName(), 1, Integer::sum);
             }
+        }
+    }
+
+    /**
+     * Marks the item whose creation (or copy) is being announced on this thread ({@link #ANNOUNCED})
+     * before any other item listener runs, so {@link #isCreationSave} can tell a save of the new item
+     * from a save of another item made by a listener of that announcement.
+     */
+    @Extension(ordinal = Integer.MAX_VALUE)
+    @Restricted(NoExternalUse.class)
+    public static final class CreationAnnounced extends ItemListener {
+
+        @Override
+        public void onCreated(Item item) {
+            List<Item> announced = ANNOUNCED.get();
+            if (announced == null) {
+                announced = new ArrayList<>(2);
+                ANNOUNCED.set(announced);
+            }
+            announced.add(item);
+        }
+
+        @Override
+        public void onCopied(Item src, Item item) {
+            onCreated(item);
+        }
+    }
+
+    /**
+     * Clears the mark of {@link CreationAnnounced} after every other item listener has run (core calls
+     * each listener whatever the previous ones threw).
+     */
+    @Extension(ordinal = Integer.MIN_VALUE)
+    @Restricted(NoExternalUse.class)
+    public static final class CreationAnnouncedEnd extends ItemListener {
+
+        @Override
+        public void onCreated(Item item) {
+            List<Item> announced = ANNOUNCED.get();
+            if (announced == null) {
+                return;
+            }
+            for (int i = announced.size() - 1; i >= 0; i--) {
+                if (announced.get(i) == item) {
+                    announced.remove(i);
+                    break;
+                }
+            }
+            if (announced.isEmpty()) {
+                ANNOUNCED.remove();
+            }
+        }
+
+        @Override
+        public void onCopied(Item src, Item item) {
+            onCreated(item);
         }
     }
 }
