@@ -11,6 +11,7 @@ import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Queue;
 import hudson.model.Saveable;
+import hudson.model.listeners.ItemListener;
 import hudson.model.listeners.SaveableListener;
 import hudson.security.ACL;
 import hudson.security.ACLContext;
@@ -20,11 +21,16 @@ import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.store.UnifiedDiff;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -61,13 +67,23 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>A save that finds no snapshot at all is recorded too, without a diff and with a note saying
  * that no earlier configuration of the item was recorded, and its configuration becomes the
  * baseline (SPEC item 9: every path's change is recorded). Snapshots are seeded when an item is
- * created ({@link ItemChangeListener}) and, for the items that exist when recording becomes active,
- * at startup and when a switch turns recording on
+ * created ({@link ItemChangeListener}), at startup for the items that have none, and refreshed for
+ * every item when a switch turns recording on
  * ({@link io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding}), so a save finds none only before
- * that seeding reached its item or after the snapshot could not be written. Two kinds of save
- * without a snapshot store the baseline and write no record: a save that is part of creating the
- * item (its CREATE record stands for it, {@link #isCreationSave}), and a computed folder saving
- * itself during its own indexing, which changes no user-editable configuration (#20).
+ * that seeding reached its item or after the snapshot could not be written.
+ *
+ * <p>While recording was off nothing kept the snapshots current, so when it is turned on every
+ * stored snapshot may be older than the configuration (changed meanwhile, or left by a deleted
+ * item whose name a new item took). Until the refresh has reached an item ({@link Refresh}), a save
+ * that changed the configuration compared with that outdated snapshot is recorded without a diff
+ * ({@link #STALE_BASELINE_DETAIL}), so the changes made while recording was off are never shown as
+ * the change of whoever saves the item first.
+ *
+ * <p>A save that is part of creating the item ({@link #isCreationSave}) stores the baseline and
+ * writes no record, with or without an earlier snapshot: the CREATE record stands for it (#20). A
+ * computed folder saving itself during its own indexing also only stores the baseline when there is
+ * none (or only an outdated one) to compare with, because such a save changes no user-editable
+ * configuration (#20).
  *
  * <p>The read → diff → snapshot swap of one item runs under that item's lock stripe, so rapid
  * consecutive saves chain baseline-consistently (each diff is previous-config vs new-config,
@@ -101,29 +117,80 @@ public class ConfigSnapshotListener extends SaveableListener {
     private static final ConcurrentHashMap<String, Integer> SAVING = new ConcurrentHashMap<>();
 
     /**
-     * The core methods inside which a save is part of creating an item ({@link #isCreationSave}):
-     * {@code createProjectFromXML} adds the item to its parent and then calls
-     * {@code onCreatedFromScratch} (an organization folder saves itself there) before it announces the
-     * creation; a copy loads the copied configuration into a new object before it announces it; and
-     * every creation is announced through {@code fireOnCreated} or {@code fireOnCopied}, whose listeners
-     * (other plugins' included) may save the item before {@link ItemChangeListener} stores its baseline.
+     * The core methods that build a new item ({@link #isCreationSave}): {@code createProject} (which a
+     * copy uses as well) saves the new item before it adds it to its parent; {@code createProjectFromXML}
+     * adds the item to its parent and then calls {@code onCreatedFromScratch}, where an organization
+     * folder saves itself several times; and a copy loads the copied configuration into a new object.
+     * All of this happens before the creation is announced.
      */
-    private static final Set<String> CREATION_FRAMES = Set.of(
+    private static final Set<String> BUILDING_FRAMES = Set.of(
             "hudson.model.ItemGroupMixIn#createProject",
             "hudson.model.ItemGroupMixIn#createProjectFromXML",
-            "hudson.model.ItemGroupMixIn#copy",
+            "hudson.model.ItemGroupMixIn#copy");
+
+    /**
+     * The core methods that announce a creation ({@link #isCreationSave}). Their listeners (other
+     * plugins' included) may save the new item, and they may save other items too, so a save inside
+     * them belongs to the creation only when it saves the announced item or an item inside it
+     * ({@link #ANNOUNCED}).
+     */
+    private static final Set<String> ANNOUNCING_FRAMES = Set.of(
             "hudson.model.listeners.ItemListener#fireOnCreated",
             "hudson.model.listeners.ItemListener#fireOnCopied");
 
-    /** The outcome of {@link #seedIfMissing} for one item. */
+    /** The method names of {@link #BUILDING_FRAMES} and {@link #ANNOUNCING_FRAMES}, checked first. */
+    private static final Set<String> CREATION_METHODS = Set.of(
+            "createProject", "createProjectFromXML", "copy", "fireOnCreated", "fireOnCopied");
+
+    /**
+     * The items whose creation is being announced on this thread, innermost last: set by
+     * {@link CreationAnnounced} (the first item listener to run) and cleared by
+     * {@link CreationAnnouncedEnd} (the last), which core runs whatever the listeners in between
+     * throw. Removed when empty, so pooled threads keep nothing.
+     */
+    private static final ThreadLocal<List<Item>> ANNOUNCED = new ThreadLocal<>();
+
+    /** The refresh of every snapshot started when recording was last turned on, or {@code null}. */
+    private static final AtomicReference<Refresh> REFRESH = new AtomicReference<>();
+
+    /**
+     * The refresh of every snapshot after change recording was turned on
+     * ({@link io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding}). It holds the full names of the
+     * items that existed then and whose snapshot has not been brought up to date since: by the
+     * refresh itself, or by a save, a creation, a rename or a move that stored the current
+     * configuration. Held in memory only, for one Jenkins session; a newer refresh replaces it.
+     */
+    public static final class Refresh {
+
+        private final Set<String> pending = ConcurrentHashMap.newKeySet();
+
+        private final WeakReference<Jenkins> jenkins;
+
+        private Refresh(Jenkins jenkins) {
+            this.jenkins = new WeakReference<>(jenkins);
+        }
+
+        /** Whether the snapshot of {@code fullName} may still be older than the configuration. */
+        public boolean isPending(String fullName) {
+            return pending.contains(fullName);
+        }
+    }
+
+    /** The outcome of {@link #seedIfMissing} or {@link #refresh} for one item. */
     public enum Seeding {
-        /** The item had no snapshot; its configuration was stored as one. */
+        /**
+         * The item's configuration was stored as its snapshot: it had none or, when refreshing, the
+         * snapshot differed from the configuration (or could not be read).
+         */
         SEEDED,
-        /** The item already had a snapshot (or something else is in its place); nothing was done. */
+        /**
+         * The snapshot was left as it was: seeding found one (or something else in its place), or the
+         * refresh found it equal to the configuration or no longer waiting for the refresh.
+         */
         PRESENT,
         /**
          * Not seeded on purpose: it has no configuration file, it is not (or no longer) in its parent,
-         * or a save of it is being reported (that save stores the baseline).
+         * a save of it is being reported (that save stores the baseline), or a newer refresh started.
          */
         SKIPPED,
         /** The configuration could not be read or the snapshot could not be written. */
@@ -194,17 +261,41 @@ public class ConfigSnapshotListener extends SaveableListener {
                 return;
             }
             if (oldXml == null) {
-                recordWithoutBaseline(store, item, fullName, newXml);
+                recordWithoutBaseline(store, item, fullName, newXml, NO_BASELINE_DETAIL);
                 return;
             }
+            Refresh refresh = currentRefresh();
+            boolean outdated = refresh != null && refresh.isPending(fullName);
             if (oldXml.equals(newXml)) {
-                return; // no-op save, nothing changed
+                // No-op save, nothing changed. An outdated snapshot equal to the configuration is current.
+                if (outdated) {
+                    upToDate(fullName);
+                }
+                return;
             }
             String normalizedOld = ConfigNormalizer.normalize(oldXml);
             String normalizedNew = ConfigNormalizer.normalize(newXml);
             if (normalizedOld.equals(normalizedNew)) {
                 // Only plugin versions or persisted actions differ: no user-editable change, and the
-                // snapshot is left as it is (it still compares equal next time).
+                // snapshot is left as it is (it still compares equal next time). An outdated one is
+                // replaced by the configuration, which is current.
+                if (outdated) {
+                    saveSnapshot(store, fullName, newXml);
+                }
+                return;
+            }
+            if (outdated) {
+                // Recording was turned on and the refresh has not reached this item yet: the snapshot
+                // may predate changes made while recording was off, and a diff would show them as this
+                // save's change. (A save that restores exactly the snapshot's content cannot be told
+                // from a save that changes nothing, and is not recorded, above.)
+                recordWithoutBaseline(store, item, fullName, newXml, STALE_BASELINE_DETAIL);
+                return;
+            }
+            if (isCreationSave(item)) {
+                // Part of creating the item (an organization folder saves itself several times while
+                // it is created): its CREATE record stands for it, the configuration is the baseline.
+                saveSnapshot(store, fullName, newXml);
                 return;
             }
             // Mask BOTH sides before diffing so no hunk can ever carry a secret.
@@ -225,38 +316,72 @@ public class ConfigSnapshotListener extends SaveableListener {
     }
 
     /**
-     * A save that finds no snapshot of its item (SPEC item 9): the change is recorded without a diff,
-     * with {@link #NO_BASELINE_DETAIL}, because what it changed cannot be shown, and the configuration
-     * becomes the item's baseline. Only the baseline is stored for a save that is part of creating the
-     * item (its CREATE record comes from {@link ItemChangeListener}) and for a computed folder saving
-     * itself during its own indexing (#20). Under the item's lock.
+     * A save with no usable baseline (SPEC item 9): no snapshot of the item is stored, or the stored one
+     * may be outdated because recording was off before. The change is recorded without a diff, with
+     * {@code detail}, because what it changed cannot be shown, and the configuration becomes the item's
+     * baseline. Only the baseline is stored for a save that is part of creating the item (its CREATE
+     * record comes from {@link ItemChangeListener}) and for a computed folder saving itself during its
+     * own indexing (#20). Under the item's lock.
      */
-    private static void recordWithoutBaseline(Store store, Item item, String fullName, String newXml) {
+    private static void recordWithoutBaseline(Store store, Item item, String fullName, String newXml, String detail) {
         boolean ownIndexing = item instanceof ComputedFolder && isIndexing((ComputedFolder<?>) item);
         if (ownIndexing || isCreationSave(item)) {
             saveSnapshot(store, fullName, newXml);
             return;
         }
-        LOGGER.fine(() -> "No configuration snapshot of '" + fullName + "' is stored; its configuration change is"
-                + " recorded without a diff and its configuration becomes the baseline");
-        append(store, item, fullName, null, NO_BASELINE_DETAIL);
+        LOGGER.fine(() -> "No usable configuration snapshot of '" + fullName + "' is stored; its configuration"
+                + " change is recorded without a diff and its configuration becomes the baseline");
+        append(store, item, fullName, null, detail);
         saveSnapshot(store, fullName, newXml);
     }
 
     /**
-     * Whether a save of {@code item} is part of creating it. Core saves a new item before it adds it to
-     * its parent ({@code ItemGroupMixIn#createProject}, which a copy uses as well), so an item that is
-     * not in its parent is being created (or loaded); and a save made inside one of the core creation
-     * methods named by {@link #CREATION_FRAMES} belongs to a creation too. Only a save that finds no
-     * snapshot asks this (at most once per item while recording is active), so the stack is never
-     * walked on the ordinary save path.
+     * Whether a save of {@code item} is part of creating it, whether or not a snapshot of it exists.
+     * <ul>
+     *   <li>An item that is not in its parent is being created (or loaded): core saves a new item before
+     *       it adds it to its parent.</li>
+     *   <li>Otherwise the innermost core creation method on the stack decides. Inside a method that
+     *       builds the item ({@link #BUILDING_FRAMES}) the save belongs to the creation. Inside one that
+     *       announces it ({@link #ANNOUNCING_FRAMES}) it belongs to the creation only when it saves the
+     *       announced item or an item inside it ({@link #ANNOUNCED}): a listener saving another item
+     *       while a creation is announced changes that item, and the change is recorded.</li>
+     * </ul>
+     * Asked only by a save that would otherwise write a record (it changed the configuration, or no
+     * baseline exists), so a no-op save never walks the stack.
      */
     static boolean isCreationSave(Item item) {
         if (!isRegistered(item)) {
             return true;
         }
-        return StackWalker.getInstance().walk(frames -> frames.anyMatch(
-                frame -> CREATION_FRAMES.contains(frame.getClassName() + '#' + frame.getMethodName())));
+        String innermost = StackWalker.getInstance().walk(frames -> frames
+                .filter(frame -> CREATION_METHODS.contains(frame.getMethodName()))
+                .map(frame -> frame.getClassName() + '#' + frame.getMethodName())
+                .filter(frame -> BUILDING_FRAMES.contains(frame) || ANNOUNCING_FRAMES.contains(frame))
+                .findFirst()
+                .orElse(null));
+        if (innermost == null) {
+            return false;
+        }
+        return BUILDING_FRAMES.contains(innermost) || isAnnounced(item);
+    }
+
+    /** Whether the creation of {@code item}, or of an item it is inside, is being announced on this thread. */
+    private static boolean isAnnounced(Item item) {
+        List<Item> announced = ANNOUNCED.get();
+        if (announced == null) {
+            return false;
+        }
+        Item current = item;
+        while (current != null) {
+            for (Item created : announced) {
+                if (created == current) {
+                    return true;
+                }
+            }
+            ItemGroup<? extends Item> parent = current.getParent();
+            current = parent instanceof Item ? (Item) parent : null;
+        }
+        return false;
     }
 
     /**
@@ -317,12 +442,135 @@ public class ConfigSnapshotListener extends SaveableListener {
         }
     }
 
+    /**
+     * Starts the refresh of every snapshot of {@code items} after change recording was turned on
+     * (SPEC item 9), replacing any earlier refresh. Only names are collected here; nothing is read or
+     * written. From now on a save of one of these items that changed its configuration is recorded
+     * without a diff until {@link #refresh} (or that save itself) has brought the item's snapshot up
+     * to date.
+     */
+    public static Refresh startRefresh(Jenkins jenkins, Iterable<? extends Item> items) {
+        Refresh refresh = new Refresh(jenkins);
+        for (Item item : items) {
+            if (item instanceof AbstractItem) {
+                refresh.pending.add(item.getFullName());
+            }
+        }
+        REFRESH.set(refresh);
+        return refresh;
+    }
+
+    /** The refresh of the running Jenkins session that is still current, or {@code null}. */
+    @CheckForNull
+    public static Refresh currentRefresh() {
+        Refresh refresh = REFRESH.get();
+        if (refresh == null) {
+            return null;
+        }
+        Jenkins jenkins = refresh.jenkins.get();
+        return jenkins != null && jenkins == Jenkins.getInstanceOrNull() ? refresh : null;
+    }
+
+    /** Whether {@code refresh} is still the current one (no newer refresh started and none was ended). */
+    public static boolean isCurrent(Refresh refresh) {
+        return REFRESH.get() == refresh;
+    }
+
+    /**
+     * Drops {@code refresh} if it is still the current one, because recording was switched off: the
+     * next switch-on starts a new one. A newer refresh is left alone.
+     */
+    public static void endRefresh(Refresh refresh) {
+        REFRESH.compareAndSet(refresh, null);
+    }
+
+    /** Drops any refresh: a new Jenkins session starts, and a refresh belongs to one session. */
+    public static void clearRefresh() {
+        REFRESH.set(null);
+    }
+
+    /**
+     * Brings the snapshot of {@code item} up to date for {@code refresh}: stores the item's current
+     * configuration unless the snapshot already equals it, for SPEC item 9 after recording was turned
+     * on. An item that no longer waits for this refresh is left alone, and so is an item whose save is
+     * being reported ({@link #SAVING}; that save compares with the outdated snapshot, records without
+     * a diff and stores the baseline itself), an item that is not in its parent, or every item once a
+     * newer refresh started. Runs under the item's lock, like {@link #seedIfMissing}, so it never
+     * interleaves with the comparison of a save of the same item. Never throws.
+     *
+     * <p>The item's monitor is deliberately not taken: the global configuration form reaches this
+     * method holding the Jenkins monitor, and core holds item monitors during saves and other long
+     * operations, so waiting for them here would tie the switch change to every item's lock order.
+     * What remains open is the moment between core writing {@code config.xml} and {@link SaveStart}
+     * marking the save, as for {@link #seedIfMissing}.
+     */
+    public static Seeding refresh(Item item, Refresh refresh) {
+        if (!(item instanceof AbstractItem)) {
+            return Seeding.SKIPPED;
+        }
+        String fullName = item.getFullName();
+        if (!refresh.isPending(fullName)) {
+            return Seeding.PRESENT;
+        }
+        ReentrantLock lock = lockFor(fullName);
+        lock.lock();
+        try {
+            if (!isCurrent(refresh) || SAVING.containsKey(fullName) || !isRegistered(item)) {
+                return Seeding.SKIPPED;
+            }
+            XmlFile config = ((AbstractItem) item).getConfigFile();
+            if (!config.exists()) {
+                refresh.pending.remove(fullName);
+                return Seeding.SKIPPED;
+            }
+            String xml = config.asString();
+            Store store = Store.get();
+            String stored;
+            try {
+                stored = store.loadConfigSnapshot(fullName);
+            } catch (RuntimeException e) {
+                stored = null; // unreadable: replaced below (a directory in its place makes the write fail)
+            }
+            Seeding outcome = Seeding.PRESENT;
+            if (!xml.equals(stored)) {
+                store.saveConfigSnapshot(fullName, xml);
+                outcome = Seeding.SEEDED;
+            }
+            refresh.pending.remove(fullName);
+            return outcome;
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not refresh the config snapshot of '" + fullName + "'", e);
+            return Seeding.FAILED;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * The snapshot of {@code fullName} was just written from the current configuration, or removed,
+     * so it no longer waits for the refresh ({@link ItemChangeListener} after a creation, rename, move
+     * or deletion, and every snapshot write of this listener).
+     */
+    static void upToDate(String fullName) {
+        Refresh refresh = REFRESH.get();
+        if (refresh != null) {
+            refresh.pending.remove(fullName);
+        }
+    }
+
     /** The note of a CONFIGURE record written without a diff (T-GAP-385). */
     static final String NO_DIFF_DETAIL = "No diff: the previous configuration of this item could not be read"
             + " from its snapshot.";
 
     /** The note of a CONFIGURE record of a save that found no snapshot of its item (SPEC item 9). */
     static final String NO_BASELINE_DETAIL = "No diff: no earlier configuration of this item was recorded.";
+
+    /**
+     * The note of a CONFIGURE record of a save made after change recording was turned on, before the
+     * item's snapshot was brought up to date (SPEC item 9).
+     */
+    static final String STALE_BASELINE_DETAIL = "No diff: change recording had just been turned on, and the"
+            + " configuration of this item before this change was not recorded yet.";
 
     /**
      * Writes {@code xml} as the item's new diff baseline. A failure is logged and does not stop the
@@ -332,6 +580,7 @@ public class ConfigSnapshotListener extends SaveableListener {
     private static void saveSnapshot(Store store, String fullName, String xml) {
         try {
             store.saveConfigSnapshot(fullName, xml);
+            upToDate(fullName);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not write the config snapshot of '" + fullName
                     + "' (the diff baseline); configuration changes are recorded all the same", e);
@@ -370,6 +619,62 @@ public class ConfigSnapshotListener extends SaveableListener {
             if (o instanceof Item) {
                 SAVING.merge(((Item) o).getFullName(), 1, Integer::sum);
             }
+        }
+    }
+
+    /**
+     * Marks the item whose creation (or copy) is being announced on this thread ({@link #ANNOUNCED})
+     * before any other item listener runs, so {@link #isCreationSave} can tell a save of the new item
+     * from a save of another item made by a listener of that announcement.
+     */
+    @Extension(ordinal = Integer.MAX_VALUE)
+    @Restricted(NoExternalUse.class)
+    public static final class CreationAnnounced extends ItemListener {
+
+        @Override
+        public void onCreated(Item item) {
+            List<Item> announced = ANNOUNCED.get();
+            if (announced == null) {
+                announced = new ArrayList<>(2);
+                ANNOUNCED.set(announced);
+            }
+            announced.add(item);
+        }
+
+        @Override
+        public void onCopied(Item src, Item item) {
+            onCreated(item);
+        }
+    }
+
+    /**
+     * Clears the mark of {@link CreationAnnounced} after every other item listener has run (core calls
+     * each listener whatever the previous ones threw).
+     */
+    @Extension(ordinal = Integer.MIN_VALUE)
+    @Restricted(NoExternalUse.class)
+    public static final class CreationAnnouncedEnd extends ItemListener {
+
+        @Override
+        public void onCreated(Item item) {
+            List<Item> announced = ANNOUNCED.get();
+            if (announced == null) {
+                return;
+            }
+            for (int i = announced.size() - 1; i >= 0; i--) {
+                if (announced.get(i) == item) {
+                    announced.remove(i);
+                    break;
+                }
+            }
+            if (announced.isEmpty()) {
+                ANNOUNCED.remove();
+            }
+        }
+
+        @Override
+        public void onCopied(Item src, Item item) {
+            onCreated(item);
         }
     }
 }

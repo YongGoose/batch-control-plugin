@@ -319,8 +319,9 @@ public class ItemChangeListener extends ItemListener {
     // ---------------------------------------------------------------- snapshots
 
     /**
-     * Stores the item's current config.xml as the diff baseline. A failure (also a store failure,
-     * T-GAP-385) is logged and never stops the record of the event (SPEC item 9).
+     * Stores the item's current config.xml as the diff baseline (current, so no longer waiting for the
+     * refresh after recording was turned on). A failure (also a store failure, T-GAP-385) is logged
+     * and never stops the record of the event (SPEC item 9).
      */
     private static void seedSnapshot(Item item) {
         if (!(item instanceof AbstractItem)) {
@@ -330,6 +331,7 @@ public class ItemChangeListener extends ItemListener {
             XmlFile config = ((AbstractItem) item).getConfigFile();
             if (config.exists()) {
                 Store.get().saveConfigSnapshot(item.getFullName(), config.asString());
+                ConfigSnapshotListener.upToDate(item.getFullName());
             }
         } catch (IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Failed to snapshot config of '" + item.getFullName() + "'", e);
@@ -340,6 +342,7 @@ public class ItemChangeListener extends ItemListener {
     private static void deleteSnapshot(String fullName) {
         try {
             Store.get().deleteConfigSnapshot(fullName);
+            ConfigSnapshotListener.upToDate(fullName);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Failed to remove the config snapshot of '" + fullName + "'", e);
         }

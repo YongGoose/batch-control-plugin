@@ -166,9 +166,10 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     /**
-     * SPEC item 9: recording has just become active, so the items that exist now get the diff
-     * baseline their first change is compared with. Called once the new state is applied and
-     * outside this instance's monitor, so a long seeding never holds up the switches. Never throws.
+     * SPEC item 9: recording has just become active, so the snapshot of every item that exists now
+     * is brought up to date (nothing kept them current while recording was off) and becomes the
+     * diff baseline its next change is compared with. Called once the new state is applied and
+     * outside this instance's monitor, so a long refresh never holds up the switches. Never throws.
      */
     private static void seedSnapshots() {
         try {
