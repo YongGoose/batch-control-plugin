@@ -105,7 +105,14 @@ public final class SelfGrantRevertFilter implements Filter {
         HttpServletRequest req = (HttpServletRequest) request;
         req.setAttribute(GUARDED, Boolean.TRUE);
         GuardedResponse guarded = new GuardedResponse(req, (HttpServletResponse) response);
-        chain.doFilter(request, guarded);
+        try {
+            chain.doFilter(request, guarded);
+        } finally {
+            // T-GAP-205: a copy this request started that stopped half-way leaves an item whose file
+            // still holds the source's authorization property; no listener hears of it, so it is
+            // handled here, when the request ends (also when it ends with the copy's exception).
+            GrantViolationGuard.Baseline.finishCopiesOfCurrentThread();
+        }
         guarded.finish();
     }
 

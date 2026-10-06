@@ -59,6 +59,12 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not save the items whose fail-closed change is not saved yet", e);
         }
+        // T-GAP-205: copies that stopped half-way outside an HTTP request (a script, the CLI over WebSocket).
+        try {
+            io.jenkins.plugins.batchcontrol.listener.GrantViolationGuard.Baseline.finishStaleCopies();
+        } catch (RuntimeException | LinkageError e) {
+            LOGGER.log(Level.WARNING, "Could not check the items left by copies that did not complete", e);
+        }
         if (!StartupRecovery.isCompletedForCurrentSession()) {
             return;
         }
