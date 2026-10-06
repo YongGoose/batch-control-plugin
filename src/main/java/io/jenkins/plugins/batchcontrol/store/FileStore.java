@@ -644,13 +644,6 @@ public final class FileStore implements Store {
     }
 
     @Override
-    public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months,
-                                                Predicate<? super RunRecord> filter,
-                                                int offset, int limit, int maxScanned) {
-        return pageRunRecords(months, Period.ALL, filter, offset, limit, maxScanned);
-    }
-
-    @Override
     public RecordPage<RunRecord> pageRunRecords(Collection<YearMonth> months, Period period,
                                                 Predicate<? super RunRecord> filter,
                                                 int offset, int limit, int maxScanned) {
@@ -907,13 +900,6 @@ public final class FileStore implements Store {
             }
         }
         return incidents;
-    }
-
-    @Override
-    public RecordPage<Incident> pageIncidents(Collection<YearMonth> months,
-                                              Predicate<? super Incident> filter,
-                                              int offset, int limit, int maxScanned) {
-        return pageIncidents(months, Period.ALL, summary -> true, filter, offset, limit, maxScanned);
     }
 
     @Override

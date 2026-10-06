@@ -454,11 +454,6 @@ public final class GrantRequestService {
         return request;
     }
 
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public GrantRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
-    }
-
     /**
      * Replaces the designated approver set of a PENDING grant request; requester only (SPEC
      * item 3 rules reused, D-26, D-37). Recorded as (previous set, new set, changed by, time).

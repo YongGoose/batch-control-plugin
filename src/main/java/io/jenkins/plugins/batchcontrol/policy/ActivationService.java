@@ -8,7 +8,6 @@ import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.ActivationState;
-import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.PendingCount;
@@ -527,11 +526,6 @@ public final class ActivationService {
         } finally {
             lock.unlock();
         }
-    }
-
-    /** Single-approver form of {@link #changeApprovers(String, List)}. */
-    public ActivationRequest changeApprover(String id, String newApprover) {
-        return changeApprovers(id, Approvers.of(newApprover));
     }
 
     /**

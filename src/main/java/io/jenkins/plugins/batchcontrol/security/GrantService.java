@@ -195,16 +195,6 @@ public final class GrantService {
     }
 
     /**
-     * Whether {@code user} currently holds {@code permission} on {@code item} through an active
-     * grant naming exactly its full name. For Item/Create, {@code item} is the group the new item is
-     * created in (core checks Create on the group's ACL).
-     */
-    public boolean hasActiveGrant(String user, @CheckForNull Item item, Permission permission) {
-        GrantAction action = GrantAction.fromPermission(permission);
-        return action != null && findActiveGrant(user, item, action) != null;
-    }
-
-    /**
      * The first active grant of {@code user} whose scope is the item {@code itemFullName} (an item
      * the caller can see must be at that name) and that includes {@code action}, or {@code null}.
      * A {@code null} action matches any action.
@@ -266,17 +256,9 @@ public final class GrantService {
     }
 
     /**
-     * Every active grant of {@code user} whose scope is the item {@code itemFullName} (an item the
-     * caller can see must be at that name) and that includes {@code action} (D-40: the CREATE check
-     * has to see all of them, since each may carry a different name restriction).
-     */
-    public List<Grant> findActiveGrants(String user, String itemFullName, GrantAction action) {
-        return findActiveGrants(user, resolve(itemFullName), itemFullName, action);
-    }
-
-    /**
      * Every active grant of {@code user} naming exactly {@code item}'s full name and including
-     * {@code action}.
+     * {@code action} (D-40: the CREATE check has to see all of them, since each may carry a different
+     * name restriction).
      *
      * <p>For {@link GrantAction#CREATE}, {@code item} is the item group the new item is created in
      * (Item/Create is checked on the group's ACL), so a CREATE window confers Create in its own
@@ -292,15 +274,6 @@ public final class GrantService {
             return new ArrayList<>();
         }
         return named(user, itemFullName, action);
-    }
-
-    /**
-     * D-40: the first active Create grant of {@code user} conferring Create in the item group
-     * {@code itemFullName} whose name restriction (if any) allows {@code itemName}, or {@code null}.
-     */
-    @CheckForNull
-    public Grant findActiveCreateGrant(String user, String itemFullName, String itemName) {
-        return firstAllowing(findActiveGrants(user, itemFullName, GrantAction.CREATE), itemName);
     }
 
     /**
