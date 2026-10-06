@@ -23,7 +23,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>The request work is a no-op until {@link StartupRecovery} has completed for the current Jenkins
  * session: an APPROVED request from before a restart must be judged from the recovery moment
  * (SPEC item 7 exception), so it may not be expired before recovery has re-based it. Writing the
- * ends of permission windows that could not be written before (D-74) does not wait for it.
+ * ends of permission windows that could not be written before (D-74) does not wait for it, nor
+ * does saving the items whose fail-closed change could not be saved before.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -50,6 +51,13 @@ public class ExpiryPeriodicWork extends PeriodicWork {
             io.jenkins.plugins.batchcontrol.security.GrantService.get().flushUnsavedEnds();
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not write the ends of permission windows", e);
+        }
+        // Likewise for items whose fail-closed change (the D-34 lock of a new job, the removal of a
+        // creation payload's authorization property) is in effect but could not be saved.
+        try {
+            io.jenkins.plugins.batchcontrol.listener.UnsavedItemWrites.retry();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not save the items whose fail-closed change is not saved yet", e);
         }
         if (!StartupRecovery.isCompletedForCurrentSession()) {
             return;

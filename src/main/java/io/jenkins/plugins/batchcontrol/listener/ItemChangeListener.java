@@ -1,11 +1,13 @@
 package io.jenkins.plugins.batchcontrol.listener;
 
 import com.cloudbees.hudson.plugins.folder.computed.ComputedFolder;
+import hudson.BulkChange;
 import hudson.Extension;
 import hudson.XmlFile;
 import hudson.model.AbstractItem;
 import hudson.model.Item;
 import hudson.model.Job;
+import hudson.model.JobProperty;
 import hudson.model.listeners.ItemListener;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
@@ -199,6 +201,12 @@ public class ItemChangeListener extends ItemListener {
      * creation and for a job moved under change control (D-59a). The caller decides whether the
      * switches call for it. A failure is logged, never thrown.
      *
+     * <p>Fail closed (S-20): the property is replaced in memory as one change and written by one
+     * save, so the job is locked in memory whatever happens to the write (every batch-control
+     * property it carried goes, not only the first, so a payload with two cannot leave an unlocked
+     * one in effect). If the save fails, the lock is in effect but its {@code config.xml} is stale,
+     * and the save is retried by the periodic work ({@link UnsavedItemWrites}) until it succeeds.
+     *
      * @param what    how the log line names the job, for example {@code "New job"}
      * @param outcome the end of the log line, saying what the lock means here
      */
@@ -211,72 +219,59 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
-        if (existing != null && existing.isActivationLocked()) {
+        List<BatchControlJobProperty> all = batchControlProperties(job);
+        if (existing != null && existing.isActivationLocked() && all.size() == 1) {
             return;
         }
+        BatchControlJobProperty applied = existing == null
+                ? BatchControlJobProperty.activationLocked()
+                : existing.withActivationLock();
         boolean previouslySuppressed = ChangeRecording.beginSuppression();
         try {
-            BatchControlJobProperty applied = existing == null
-                    ? BatchControlJobProperty.activationLocked()
-                    : existing.withActivationLock();
-            if (existing != null) {
-                job.removeProperty(BatchControlJobProperty.class);
-            }
-            try {
-                addProperty(job, applied);
-            } catch (IOException e) {
-                // S-20, fail closed. Core's removeProperty and addProperty each call save()
-                // (hudson/model/Job#removeProperty, #addProperty), so the rebuild is two
-                // persisted steps with a window between them. If the second fails the job is left
-                // with NO BatchControlJobProperty at all — losing not just approvalRequired but
-                // blockTimer, blockUpstream, allowedUpstreamJobs and jobApprovers, i.e. every
-                // control over the unattended trigger paths — and the failure is only a WARNING,
-                // so the job would go on running uncontrolled and unnoticed. Put the property the
-                // job already had back before reporting, so the worst outcome of a failed rebuild
-                // is the controls the creator supplied rather than none.
-                if (existing != null) {
-                    restoreAfterFailedRebuild(job, existing, fullName, e);
+            try (BulkChange bc = new BulkChange(job)) {
+                for (BatchControlJobProperty property : all) {
+                    removeProperty(job, property);
                 }
-                throw e;
+                addProperty(job, applied);
+                bc.commit();
             }
             LOGGER.info(() -> what + " '" + fullName + "' starts locked while run control is on: "
                     + "approvalRequired, blockTimer and blockUpstream are all on, so " + outcome);
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "Failed to apply the activation lock to the job '" + fullName + "'", e);
+        } catch (IOException | RuntimeException e) {
+            if (job.getProperty(BatchControlJobProperty.class) == applied) {
+                UnsavedItemWrites.add(job, "the activation lock");
+                LOGGER.log(Level.SEVERE, "The activation lock of the job '" + fullName + "' (approvalRequired,"
+                        + " blockTimer and blockUpstream on) is in effect but could not be saved; the save is retried"
+                        + " every minute. Until it succeeds, a restart would load the job from its config.xml without"
+                        + " the lock", e);
+            } else {
+                LOGGER.log(Level.SEVERE, "Could not apply the activation lock to the job '" + fullName + "'; an"
+                        + " administrator must check its Batch Control settings", e);
+            }
         } finally {
             ChangeRecording.endSuppression(previouslySuppressed);
         }
     }
 
-    /**
-     * Puts {@code existing} back after the D-31/D-34 rebuild removed it and failed to add the
-     * replacement (S-20). Still inside the suppressed window, so the restore is not recorded as a
-     * user CONFIGURE change.
-     *
-     * <p>If the restore itself fails there is nothing further to try — both writes go through the
-     * same {@code save()} — so it is attached to the original failure as a suppressed exception
-     * rather than replacing it: the operator needs to read "the default could not be applied"
-     * first and "and the job now has no property" second.
-     */
-    private static void restoreAfterFailedRebuild(Job<?, ?> job, BatchControlJobProperty existing,
-                                                  String fullName, IOException failure) {
-        try {
-            addProperty(job, existing);
-            LOGGER.log(Level.WARNING, () -> "Applying the new-job activation lock to '"
-                    + fullName + "' failed; the job's previous batch-control property was restored,"
-                    + " so its existing controls stay in force");
-        } catch (IOException restoreFailure) {
-            failure.addSuppressed(restoreFailure);
-            LOGGER.log(Level.SEVERE, () -> "Job '" + fullName + "' was left with no batch-control"
-                    + " property: applying the new-job activation lock failed and restoring"
-                    + " the previous property failed as well. The job is not run-controlled until"
-                    + " its configuration is saved again");
+    /** Every {@link BatchControlJobProperty} of {@code job}, in order. */
+    private static List<BatchControlJobProperty> batchControlProperties(Job<?, ?> job) {
+        List<BatchControlJobProperty> found = new ArrayList<>();
+        for (Object property : job.getAllProperties()) {
+            if (property instanceof BatchControlJobProperty) {
+                found.add((BatchControlJobProperty) property);
+            }
         }
+        return found;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void addProperty(Job job, BatchControlJobProperty property) throws IOException {
         job.addProperty(property);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void removeProperty(Job job, BatchControlJobProperty property) throws IOException {
+        job.removeProperty((JobProperty) property);
     }
 
     /**

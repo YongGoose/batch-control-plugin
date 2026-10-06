@@ -73,7 +73,7 @@ public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
 
     /**
      * Whether these settings already <em>are</em> the activation lock, so that applying it again
-     * would cost the job a property rebuild (two saves, S-20) and change nothing.
+     * would cost the job a property rebuild and a save (S-20) and change nothing.
      */
     public boolean isActivationLocked() {
         return approvalRequired && blockTimer && blockUpstream
