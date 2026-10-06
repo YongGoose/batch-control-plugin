@@ -70,11 +70,6 @@ public class RequestsSection implements ModelObject, StaplerProxy {
         return SectionAccess.viewPermissions(SectionAccess.requests(), SectionAccess.canOpenRequests());
     }
 
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
-    }
-
     /**
      * Stapler: serves {@code /batch-control/requests/<id>/}; {@code null} renders a 404.
      * A request the caller may not see (P-09, S-01) renders exactly like a nonexistent one so
@@ -152,11 +147,6 @@ public class RequestsSection implements ModelObject, StaplerProxy {
 
     public boolean isHasEndedNext() {
         return Paging.hasNext(getEndedPage(), getEndedTotal());
-    }
-
-    /** Every visible request, for the overall count. */
-    public int getTotal() {
-        return allSorted().size();
     }
 
     /** Jelly helper: an approver set for display ({@code a1, a2}). */

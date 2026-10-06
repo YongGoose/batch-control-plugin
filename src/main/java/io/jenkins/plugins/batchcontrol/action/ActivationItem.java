@@ -105,10 +105,6 @@ public class ActivationItem implements ModelObject {
         return request.getAction() == ActivationRequest.Action.HOLD;
     }
 
-    private boolean isOwnedByCurrentUser() {
-        return Approvers.sameUser(Jenkins.getAuthentication2().getName(), request.getRequester());
-    }
-
     /** View gating for the decision forms: a designated approver holding Approve (D-29, D-37). */
     public boolean isCanDecide() {
         return isPending() && Jenkins.get().hasPermission(BatchControlPermissions.APPROVE)

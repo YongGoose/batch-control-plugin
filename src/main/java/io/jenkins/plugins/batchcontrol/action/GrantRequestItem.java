@@ -324,11 +324,6 @@ public class GrantRequestItem implements ModelObject {
         return SectionAccess.grants();
     }
 
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
-    }
-
     // ---------------------------------------------------------------- state-changing endpoints
 
     /** POST {@code approve?comment=...} — approver decision (comment optional). */

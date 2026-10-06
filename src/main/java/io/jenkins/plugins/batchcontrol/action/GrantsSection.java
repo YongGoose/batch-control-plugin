@@ -207,11 +207,6 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         return SectionAccess.grants();
     }
 
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
-    }
-
     // ---------------------------------------------------------------- routing
 
     /**
@@ -504,11 +499,6 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /** Approver candidates (global list minus the current user, per the self-approval policy). */
     public List<String> getApproverOptions() {
         return ApproverOptions.forJob(null);
-    }
-
-    /** Jelly helper: human-readable timestamp. */
-    public String format(Instant instant) {
-        return Dates.format(instant);
     }
 
     /**

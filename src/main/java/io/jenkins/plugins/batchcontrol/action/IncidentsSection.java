@@ -65,11 +65,6 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return SectionAccess.history();
     }
 
-    /** Link predicates: a link to another screen is rendered only if the user may open it. */
-    public SectionAccess getLinks() {
-        return new SectionAccess();
-    }
-
     /**
      * Stapler: serves {@code /batch-control/incidents/<id>/}; {@code null} renders a 404, also for
      * every failed lookup (S-39-01, {@link RecordLookup}). Every ViewHistory holder, whom
