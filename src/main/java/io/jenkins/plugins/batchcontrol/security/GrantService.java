@@ -753,6 +753,8 @@ public final class GrantService {
      * grant" state, and a {@code GUARD_REVIEWED} change record names the reviewer. The caller must
      * hold Item/Configure on the item natively (asked with every grant layer off) or
      * Overall/Administer; a user whose permission on the item comes from a grant cannot review it.
+     * The entries leave the state in memory at once and a grant file that cannot be written is
+     * written again later ({@link #removeChanged}), so the record says what the guard does.
      *
      * @throws org.springframework.security.access.AccessDeniedException (AccessDeniedException3)
      *         when the caller may not review the item
@@ -825,45 +827,34 @@ public final class GrantService {
         return found;
     }
 
-    /** Removes the exact entries {@code names} from every grant; the number of entries removed. */
+    /**
+     * Removes the exact entries {@code names} from every grant; the number of entries removed.
+     * D-75 (2), like every other changed-items write ({@link #rewriteChangedItems}): the entries
+     * leave the cache at once, so the count is what the guard sees from now on, and a grant file
+     * that cannot be written is written again later instead of keeping the entries.
+     */
     private synchronized int removeChanged(java.util.Set<String> names) {
-        int removed = 0;
         if (names.isEmpty()) {
             return 0;
         }
+        java.util.concurrent.atomic.AtomicInteger removed = new java.util.concurrent.atomic.AtomicInteger();
         for (Grant cached : new ArrayList<>(grants())) {
-            boolean affected = false;
-            for (String name : cached.getChangedItems()) {
-                if (names.contains(name)) {
-                    affected = true;
-                    break;
-                }
-            }
-            if (!affected) {
+            if (cached.getChangedItems().stream().noneMatch(names::contains)) {
                 continue;
             }
-            try {
-                Grant grant = load(cached.getId());
-                if (grant == null) {
-                    continue;
-                }
+            rewriteChangedItems(cached, items -> {
                 List<String> kept = new ArrayList<>();
-                for (String name : grant.getChangedItems()) {
+                for (String name : items) {
                     if (names.contains(name)) {
-                        removed++;
+                        removed.incrementAndGet();
                     } else {
                         kept.add(name);
                     }
                 }
-                grant.setChangedItems(kept);
-                save(grant);
-                replaceInCache(grant);
-            } catch (RuntimeException e) {
-                LOGGER.log(java.util.logging.Level.SEVERE, "Could not clear the changed-under-grant entries of grant "
-                        + cached.getId(), e);
-            }
+                return kept;
+            }, "changed-under-grant entries cleared by a review: " + String.join(", ", names));
         }
-        return removed;
+        return removed.get();
     }
 
     /**
