@@ -196,6 +196,9 @@ public class NotificationGapTest {
         Item moved = moveIntoVault("team/x");
         assertTrue(can("u1", moved, Item.DISCOVER), "premise: u1 may discover " + VAULT + "/x");
         assertFalse(can("u1", moved, Item.READ), "premise: u1 may not read " + VAULT + "/x");
+        // Delivery is asynchronous (D-36): wait for the APPROVED mail to u1, the requester, before clearing, so the
+        // only mail carrying the request id after the expiry work is the GRANT_EXPIRING one.
+        mailFor(requestX);
         NotificationCapture.clear();
         Mailbox.clearAll();
 
@@ -231,6 +234,7 @@ public class NotificationGapTest {
         String requestX = openWindow("u1", "team/x");
         String requestZ = openWindow("u2", "team/z");
         moveIntoVault("team/x");
+        mailFor(requestX); // the asynchronous APPROVED mail to u1 arrives while u1 is still known, before the mailbox is cleared (see T-GAP-371)
         User u1 = User.getById("u1", false);
         assertNotNull(u1, "premise: u1's user record exists");
         // the account is removed from the realm's user database (its Details property), the user record stays

@@ -381,9 +381,11 @@ public class StoreRestartGapTest {
      * T-GAP-384 (L3-24; SPEC 5 D-74, LIMITATIONS 32 "never submits that run again, not when Jenkins restarts
      * either"): session 1: the approval-required job {@code qj} is restricted to a label no agent has; r's
      * request is approved and its run waits in the queue. The {@code requests/run/} directory refuses writes
-     * while the queue item is cancelled: the cancel succeeds without an error. Writes are allowed again;
-     * the queue holds nothing for {@code qj} and the request is not EXECUTED. Session 2 (restart): the queue
-     * still holds nothing for {@code qj}, no build of {@code qj} exists, and the request is not EXECUTED.
+     * while the queue item is cancelled: the cancel succeeds without an error. Writes are allowed again and
+     * the periodic work runs; within ten seconds no queue item of {@code qj} appears and the request is not
+     * EXECUTED. Session 2 (restart): within ten seconds of the start no queue item of {@code qj} appears, no
+     * build of {@code qj} exists, and the request is not EXECUTED. (A bounded look at the queue, because a
+     * resubmitted run of a job bound to a label no agent has would never leave it.)
      */
     @Test
     public void t_gap_384_cancelledApprovedRunIsNotResubmittedAfterARestart() throws Throwable {
@@ -410,16 +412,38 @@ public class StoreRestartGapTest {
             } finally {
                 dir.toFile().setWritable(true, false);
             }
-            assertNull(r.jenkins.getQueue().getItem(job), "nothing waits for qj");
+            ExtensionList.lookupSingleton(ExpiryPeriodicWork.class).doRun();
+            assertFalse(queuedWithin(r, job), "LIMITATIONS 32: after writes are allowed again and the periodic work ran, nothing waits for qj");
             assertFalse(RunRequestService.get().load(request.getId()).getStatus() == RequestStatus.EXECUTED, "the request is not EXECUTED");
         });
         session.then(r -> {
             FreeStyleProject job = (FreeStyleProject) r.jenkins.getItemByFullName("qj");
-            r.waitUntilNoActivity();
-            assertNull(r.jenkins.getQueue().getItem(job), "LIMITATIONS 32: after the restart the cancelled run is not submitted again");
-            assertTrue(job.getBuilds().isEmpty(), "no build of qj exists");
-            assertFalse(RunRequestService.get().load(ids.get("req")).getStatus() == RequestStatus.EXECUTED, "the request is not EXECUTED");
+            // The job is bound to a label no agent has, so a resubmitted run would wait forever: look for it in the queue
+            // for a bounded time instead of waiting for the queue to drain (a wait that would never end).
+            boolean resubmitted = queuedWithin(r, job);
+            try {
+                assertFalse(resubmitted, "LIMITATIONS 32: after the restart the cancelled run is not submitted again");
+                assertTrue(job.getBuilds().isEmpty(), "no build of qj exists");
+                assertFalse(RunRequestService.get().load(ids.get("req")).getStatus() == RequestStatus.EXECUTED, "the request is not EXECUTED");
+            } finally {
+                try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+                    r.jenkins.getQueue().cancel(job); // leave no item that can never run behind the test
+                }
+            }
         });
+    }
+
+    /** True if a queue item of {@code job} is present now or appears within ten seconds (queue maintained each poll). */
+    private static boolean queuedWithin(JenkinsRule r, FreeStyleProject job) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        do {
+            r.jenkins.getQueue().maintain();
+            if (r.jenkins.getQueue().getItem(job) != null) {
+                return true;
+            }
+            Thread.sleep(200); // polling for an asynchronous submission, not waiting for an expiry
+        } while (System.currentTimeMillis() < deadline);
+        return false;
     }
 
     // ------------------------------------------------------------------ helpers

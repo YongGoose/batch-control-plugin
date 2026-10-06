@@ -67,7 +67,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Coverage lane 3, scenarios L3-01, L3-04, L3-20 (restart half) and L3-21: store files that cannot be
  * read when Jenkins starts, ends found again at startup per reason, created-item records across restarts,
  * and a GRANT_REVOKE record that cannot be appended. Matrix rows T-GAP-301 .. T-GAP-304, T-GAP-314 ..
- * T-GAP-316, T-GAP-374, T-GAP-377 and T-GAP-378 (note 279).
+ * T-GAP-316, T-GAP-374, T-GAP-377, T-GAP-378 and T-GAP-387 (note 279).
  *
  * <p>Basis: SPEC 4 "컨트롤러 재시작 후에도 대기 중인 요청과 유효한 권한 부여가 유지된다"; SPEC 8 line 157 (a restart
  * keeps an unexpired window) and line 170; SPEC 6 usability (no stack trace or "Oops!" page from our own
@@ -317,8 +317,8 @@ public class WindowRestartGapTest {
      * open) and window K on {@code dk}; the administrator revokes A. Jenkins stops; A's open copy is copied
      * back and A's GRANT_REVOKE line is duplicated in the change month file (same content, a fresh id).
      * Session 2 starts (the restart completes: K is active and confers), A is not active, and the stored A
-     * is revoked by the administrator, as its record says. The number of GRANT_REVOKE records naming A after
-     * the start is printed.
+     * is revoked by the administrator, as its record says, and A is ended once: the records naming A are the
+     * two lines on disk plus at most one written by the start (the count is printed).
      */
     @Test
     public void t_gap_315_duplicatedRevokeLineEndsTheWindowOnce() throws Throwable {
@@ -354,6 +354,8 @@ public class WindowRestartGapTest {
             long records = ApproverFormFixtures.records(ChangeType.GRANT_REVOKE).stream()
                     .filter(rec -> WindowStateFixtures.identifies(rec, ids.get("A"), "da")).count();
             System.out.println("T-GAP-315 observation: GRANT_REVOKE records naming A after the start: " + records);
+            assertTrue(records >= 2 && records <= 3, "L3-04 'A ends once': the two lines on disk name A, and the start ends A at most once more"
+                    + " (at most one further GRANT_REVOKE record), got " + records);
         });
     }
 
@@ -363,11 +365,13 @@ public class WindowRestartGapTest {
      * superseded, note 279): session 1: u1's windows E ({@code te}) and F ({@code tf}, copied while open);
      * the administrator revokes F. Jenkins stops; F's open copy is copied back and a damaged line (a
      * GRANT_REVOKE record cut off inside the user field, followed by a line end) is appended to the change
-     * month file. Session 2: E is not active, confers nothing and is stored as revoked by SYSTEM with the
-     * reason "its state could not be confirmed at startup"; F is not active and is stored as revoked, with
-     * either its recorded end (the administrator, no reason) or that same fail-closed end (which of the two
-     * is not settled, printed). u1 opens window H ({@code th}). Guard, session 3 (plain restart): H, granted
-     * after the damaged line, is still active and confers.
+     * month file (the file as it stands once a torn line has been closed with a line end). Session 2: E is
+     * not active, confers nothing and is stored as revoked by SYSTEM with the reason "its state could not be
+     * confirmed at startup"; F is not active, confers nothing and is stored with its recorded end (revoked by
+     * the administrator, no reason: its GRANT_REVOKE record lies before the damaged line, and LIMITATIONS 11
+     * says such a window "is ended again from that record"). u1 opens window H ({@code th}). Guard, session 3
+     * (plain restart): H, granted after the damaged line, is still active and confers (the damaged line is
+     * read back by one start only, ARCHITECTURE 4's time bound).
      */
     @Test
     public void t_gap_316_damagedLineInsideTheStartupReadEndsEveryOpenWindow() throws Throwable {
@@ -397,12 +401,14 @@ public class WindowRestartGapTest {
             assertEquals(ACL.SYSTEM_USERNAME, e.getRevokedBy(), "ARCHITECTURE 4: E is revoked by SYSTEM");
             assertTrue(lower(e.getRevokedReason()).contains(UNCONFIRMED_REASON), "E's stored reason: " + e.getRevokedReason());
             assertNull(WindowStateFixtures.active(ids.get("F")), "F, open again on disk, is ended at startup");
+            assertFalse(can("u1", r.jenkins.getItemByFullName("tf"), Item.CONFIGURE), "F confers nothing");
             Grant f = stored(ids.get("F"));
             assertNotNull(f.getRevokedAt(), "F is stored as revoked");
             System.out.println("T-GAP-316 observation: F revoked by " + f.getRevokedBy() + " with reason '" + f.getRevokedReason() + "'");
-            assertTrue("admin".equals(f.getRevokedBy()) && f.getRevokedReason() == null
-                            || ACL.SYSTEM_USERNAME.equals(f.getRevokedBy()) && lower(f.getRevokedReason()).contains(UNCONFIRMED_REASON),
-                    "F is ended either from its record (admin, no reason) or by the fail-closed end: " + f.getRevokedBy() + " / " + f.getRevokedReason());
+            assertEquals("admin", f.getRevokedBy(), "LIMITATIONS 11 / ARCHITECTURE 4: F's GRANT_REVOKE record lies before the damaged line and"
+                    + " is readable, so F \"is ended again from that record\": revoked by the administrator, as recorded (reason '"
+                    + f.getRevokedReason() + "')");
+            assertNull(f.getRevokedReason(), "F keeps its recorded end: the administrator's revoke gave no reason");
             ids.put("H", window("u1", "th", 120));
         });
         session.then(r -> {
@@ -508,6 +514,47 @@ public class WindowRestartGapTest {
                 Grant stored = stored(ids.get("V"));
                 assertEquals(ACL.SYSTEM_USERNAME, stored.getRevokedBy(), "V is revoked by SYSTEM");
                 assertTrue(lower(stored.getRevokedReason()).contains(UNCONFIRMED_REASON), "V's stored reason: " + stored.getRevokedReason());
+            });
+        } finally {
+            Files.setPosixFilePermissions(month, original);
+        }
+    }
+
+    /**
+     * T-GAP-387 (L3-04 / L3-21; LIMITATIONS 11 "every window still open ends: it is revoked by SYSTEM with
+     * the reason 'its state could not be confirmed at startup' and a GRANT_REVOKE record"; ARCHITECTURE 4
+     * "Ending a window marks it ended in memory first, then appends the GRANT_REVOKE record, then rewrites the
+     * grant file"): session 1: u1's window U on {@code ru}. Between the sessions the current change month
+     * file loses its read permission only (it stays writable, so an append can still be made). Session 2
+     * starts: U is not active and is stored as revoked by SYSTEM with that reason. After the read permission
+     * is restored, the change log holds a GRANT_REVOKE record by SYSTEM that identifies U (the end was
+     * appended, not only written to the grant file). Skipped where this process can still read the file.
+     */
+    @Test
+    public void t_gap_387_startupEndIsRecordedInAChangeLogThatCannotBeReadButCanBeWritten() throws Throwable {
+        session.then(r -> {
+            prepare(r, false);
+            r.jenkins.createProject(FreeStyleProject.class, "ru");
+            ids.put("U", window("u1", "ru", 120));
+        });
+        Path month = newestMonth();
+        Set<PosixFilePermission> original = Files.getPosixFilePermissions(month);
+        try {
+            Files.setPosixFilePermissions(month, PosixFilePermissions.fromString("-w-------"));
+            Assumptions.assumeFalse(Files.isReadable(month), "the file system does not refuse reads for this process");
+            assertTrue(Files.isWritable(month), "fixture: the month file stays writable");
+            session.then(r -> {
+                assertNull(WindowStateFixtures.active(ids.get("U")), "ARCHITECTURE 4: U ends at a start whose change log cannot be read");
+                Grant stored = stored(ids.get("U"));
+                assertEquals(ACL.SYSTEM_USERNAME, stored.getRevokedBy(), "U is revoked by SYSTEM");
+                assertTrue(lower(stored.getRevokedReason()).contains(UNCONFIRMED_REASON), "U's stored reason: " + stored.getRevokedReason());
+                Files.setPosixFilePermissions(month, original);
+                List<String> revokes = ApproverFormFixtures.records(ChangeType.GRANT_REVOKE).stream()
+                        .filter(rec -> WindowStateFixtures.identifies(rec, ids.get("U"), "ru"))
+                        .map(rec -> rec.getUser() + " " + rec.getDetail()).toList();
+                assertTrue(revokes.stream().anyMatch(s -> s.startsWith(ACL.SYSTEM_USERNAME + " ")),
+                        "LIMITATIONS 11: U's end at startup is recorded by a GRANT_REVOKE record by SYSTEM in the writable change log;"
+                                + " records naming U: " + revokes + "; last lines: " + tail(month, 3));
             });
         } finally {
             Files.setPosixFilePermissions(month, original);
