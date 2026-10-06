@@ -23,11 +23,14 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import jenkins.model.Jenkins;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -46,7 +49,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ("deleting the item ends the window ... re-creating items never makes a window reach an item
  * nobody approved") and SPEC item 4 (restart durability); ARCHITECTURE section 4 (durable ends).
  * Matrix row T-SEC-95 (note 274); the restart half without the record volume and with the store
- * writable again before the restart is T-08-190 ({@link ItemScopeRestartTest}).
+ * writable again before the restart is T-08-190 ({@link ItemScopeRestartTest}). T-SEC-103 (note
+ * 275): when the change records cannot be read at startup, every open window ends (fail closed,
+ * D-75 (2), ARCHITECTURE 4).
  *
  * <p>The change records are appended while Jenkins is down, directly to the newest
  * {@code changes/YYYY-MM.jsonl} (ARCHITECTURE section 5), as copies of the newest line the store
@@ -59,6 +64,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class WindowEndRestartTest {
 
     private static final int APPENDED = 60_000;
+    /** The documented reason of a window ended because its state could not be confirmed at startup (ARCHITECTURE 4, D-75). */
+    private static final String UNCONFIRMED_REASON = "its state could not be confirmed at startup";
     private static final Pattern ID_FIELD = Pattern.compile("\"id\"\\s*:\\s*\"([^\"]*)\"");
 
     @RegisterExtension
@@ -125,7 +132,80 @@ public class WindowEndRestartTest {
         });
     }
 
+    /**
+     * T-SEC-103 (S-39-03 fix direction "fail closed", D-75 (2), ARCHITECTURE 4 "if they cannot all
+     * be read, every open window ends ('its state could not be confirmed at startup')"): u1's open
+     * CONFIGURE window on the job {@code c}. Guard: after a plain restart it is still active and
+     * confers. Jenkins stops; every change month file ({@code changes/YYYY-MM.jsonl}) is made
+     * unreadable; Jenkins starts. u1 holds no Configure on {@code c}, the window is not active, its
+     * stored file records it as revoked by SYSTEM with a reason saying its state could not be
+     * confirmed at startup, and u1's grants page lists it as ended with that reason. Skipped where
+     * this process can read the files despite the cleared read bits (root, Windows).
+     */
+    @Test
+    public void t_sec_103_openWindowEndsAtStartupWhenTheChangeLogCannotBeRead() throws Throwable {
+        session.then(r -> {
+            prepare(r);
+            onC = approve(request("u1", "c")).getId();
+            home = r.jenkins.getRootDir().toPath();
+            assertTrue(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE), "premise: the window confers on c");
+        });
+        session.then(r -> {
+            assertTrue(GrantService.get().listActive().stream().anyMatch(g -> onC.equals(g.getId())),
+                    "guard: after a plain restart the window on c is still active");
+            assertTrue(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE), "guard: after a plain restart the window confers on c");
+        });
+
+        List<Path> months = monthFiles();
+        assertFalse(months.isEmpty(), "premise (ARCHITECTURE 5): change records are stored under " + home.resolve("batch-control/changes"));
+        try {
+            for (Path month : months) {
+                assertTrue(month.toFile().setReadable(false, false), "fixture: " + month + " made unreadable");
+            }
+            Assumptions.assumeTrue(months.stream().noneMatch(Files::isReadable),
+                    "the file system does not refuse reads of unreadable files for this process");
+            session.then(r -> {
+                try {
+                    assertTrue(months.stream().noneMatch(Files::isReadable), "premise: the change log is still unreadable after the start");
+                    assertFalse(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE),
+                            "S-39-03: an open window whose state could not be confirmed at startup must not confer");
+                    assertTrue(GrantService.get().listActive().stream().noneMatch(g -> onC.equals(g.getId())),
+                            "S-39-03: the window on c must not be active after a start with an unreadable change log");
+                    Path file = grantsDir().resolve(onC + ".xml");
+                    assertTrue(Files.isRegularFile(file), "premise (ARCHITECTURE 5): the window is stored at " + file);
+                    Grant stored = (Grant) Jenkins.XSTREAM2.fromXML(Files.readString(file, StandardCharsets.UTF_8));
+                    assertEquals(ACL.SYSTEM_USERNAME, stored.getRevokedBy(),
+                            "S-39-03: the window ended at startup is revoked by SYSTEM (stored revokedBy, SPEC 3)");
+                    assertTrue(String.valueOf(stored.getRevokedReason()).toLowerCase(Locale.ROOT).contains(UNCONFIRMED_REASON),
+                            "D-63, ARCHITECTURE 4: the stored revocation reason must say '" + UNCONFIRMED_REASON + "', was: "
+                                    + stored.getRevokedReason());
+                    HtmlPage list = UsabilityFixtures.htmlPage(r, "u1", "batch-control/grants/");
+                    List<DomElement> rows = WindowStateFixtures.endedRowsNaming(list, "c");
+                    assertTrue(rows.stream().anyMatch(row -> row.asNormalizedText().toLowerCase(Locale.ROOT).contains(UNCONFIRMED_REASON)),
+                            "D-63: the Ended list must show the window on c with the reason '" + UNCONFIRMED_REASON + "'; rows naming it: "
+                                    + rows.stream().map(row -> ApproverFormFixtures.excerpt(row.asNormalizedText())).toList());
+                } finally {
+                    restoreReads(months);
+                }
+            });
+        } finally {
+            restoreReads(months);
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    private List<Path> monthFiles() throws IOException {
+        try (Stream<Path> files = Files.list(home.resolve("batch-control/changes"))) {
+            return files.filter(p -> p.getFileName().toString().matches("\\d{4}-\\d{2}\\.jsonl")).sorted().toList();
+        }
+    }
+
+    private static void restoreReads(List<Path> files) {
+        for (Path file : files) {
+            file.toFile().setReadable(true, false);
+        }
+    }
 
     /** Appends {@code count} copies of the newest non-GRANT_REVOKE line of the newest change month file, each with a new id. */
     private void appendChangeRecords(int count) throws IOException {
