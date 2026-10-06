@@ -194,6 +194,13 @@ public interface Store {
      */
     String loadConfigSnapshot(String jobFullName);
 
+    /**
+     * Whether anything is stored where the config snapshot of a job belongs: a snapshot, or
+     * something else in its place (which {@link #loadConfigSnapshot} refuses). Nothing is read, so
+     * seeding the missing snapshots of every item costs one file system lookup per item.
+     */
+    boolean hasConfigSnapshot(String jobFullName);
+
     /** Removes the config snapshot of a job (after deletion, rename or move). */
     void deleteConfigSnapshot(String jobFullName);
 

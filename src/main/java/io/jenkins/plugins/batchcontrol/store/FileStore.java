@@ -33,6 +33,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -626,6 +627,13 @@ public final class FileStore implements Store {
             throw new UncheckedIOException(new IOException("The config snapshot " + file + " is not a regular file"));
         }
         return readTextOrNull(file);
+    }
+
+    @Override
+    public boolean hasConfigSnapshot(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        return Files.exists(file, LinkOption.NOFOLLOW_LINKS);
     }
 
     @Override
