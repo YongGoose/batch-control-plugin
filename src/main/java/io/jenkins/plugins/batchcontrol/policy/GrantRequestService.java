@@ -547,6 +547,11 @@ public final class GrantRequestService {
                     LOGGER.info(() -> "Grant request " + request.getId()
                             + " expired (pending timeout)");
                 }
+            } catch (RuntimeException e) {
+                // One request that cannot be read or written never ends the expiry of the others; it
+                // is tried again on the next run (an approval compares the clock meanwhile).
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not expire change request " + snapshot.getId()
+                        + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }

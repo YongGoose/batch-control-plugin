@@ -5,17 +5,23 @@ import com.cloudbees.hudson.plugins.folder.computed.FolderComputation;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.XmlFile;
+import hudson.model.AbstractItem;
 import hudson.model.Executor;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.Queue;
 import hudson.model.Saveable;
 import hudson.model.listeners.SaveableListener;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import io.jenkins.plugins.batchcontrol.store.UnifiedDiff;
 import java.io.IOException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -52,9 +58,20 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * note saying why; a snapshot that cannot be written is logged and the record is written anyway.
  * Nothing escapes this listener.
  *
+ * <p>A save that finds no snapshot at all is recorded too, without a diff and with a note saying
+ * that no earlier configuration of the item was recorded, and its configuration becomes the
+ * baseline (SPEC item 9: every path's change is recorded). Snapshots are seeded when an item is
+ * created ({@link ItemChangeListener}) and, for the items that exist when recording becomes active,
+ * at startup and when a switch turns recording on
+ * ({@link io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding}), so a save finds none only before
+ * that seeding reached its item or after the snapshot could not be written. Two kinds of save
+ * without a snapshot store the baseline and write no record: a save that is part of creating the
+ * item (its CREATE record stands for it, {@link #isCreationSave}), and a computed folder saving
+ * itself during its own indexing, which changes no user-editable configuration (#20).
+ *
  * <p>The read → diff → snapshot swap of one item runs under that item's lock stripe, so rapid
  * consecutive saves chain baseline-consistently (each diff is previous-config vs new-config,
- * T-RT-20) while saves of unrelated items do not wait for each other.
+ * T-RT-20) while saves of unrelated items do not wait for each other. Seeding takes the same lock.
  */
 @Extension
 @Restricted(NoExternalUse.class)
@@ -71,6 +88,50 @@ public class ConfigSnapshotListener extends SaveableListener {
         for (int i = 0; i < STRIPES; i++) {
             LOCKS[i] = new ReentrantLock();
         }
+    }
+
+    /**
+     * The items whose save is being reported to the save listeners right now (full name to the number
+     * of such saves): marked by {@link SaveStart}, which runs before every other save listener, and
+     * cleared once this listener has handled the save. Seeding leaves such an item alone, so a baseline
+     * is never taken from a configuration whose own save has not reached this listener yet (that save
+     * would then compare equal to it and go unrecorded); the save stores the baseline itself. A count,
+     * because a save listener may save the same item again while its first save is being reported.
+     */
+    private static final ConcurrentHashMap<String, Integer> SAVING = new ConcurrentHashMap<>();
+
+    /**
+     * The core methods inside which a save is part of creating an item ({@link #isCreationSave}):
+     * {@code createProjectFromXML} adds the item to its parent and then calls
+     * {@code onCreatedFromScratch} (an organization folder saves itself there) before it announces the
+     * creation; a copy loads the copied configuration into a new object before it announces it; and
+     * every creation is announced through {@code fireOnCreated} or {@code fireOnCopied}, whose listeners
+     * (other plugins' included) may save the item before {@link ItemChangeListener} stores its baseline.
+     */
+    private static final Set<String> CREATION_FRAMES = Set.of(
+            "hudson.model.ItemGroupMixIn#createProject",
+            "hudson.model.ItemGroupMixIn#createProjectFromXML",
+            "hudson.model.ItemGroupMixIn#copy",
+            "hudson.model.listeners.ItemListener#fireOnCreated",
+            "hudson.model.listeners.ItemListener#fireOnCopied");
+
+    /** The outcome of {@link #seedIfMissing} for one item. */
+    public enum Seeding {
+        /** The item had no snapshot; its configuration was stored as one. */
+        SEEDED,
+        /** The item already had a snapshot (or something else is in its place); nothing was done. */
+        PRESENT,
+        /**
+         * Not seeded on purpose: it has no configuration file, it is not (or no longer) in its parent,
+         * or a save of it is being reported (that save stores the baseline).
+         */
+        SKIPPED,
+        /** The configuration could not be read or the snapshot could not be written. */
+        FAILED
+    }
+
+    private static ReentrantLock lockFor(String fullName) {
+        return LOCKS[Math.floorMod(fullName.hashCode(), STRIPES)];
     }
 
     /**
@@ -94,15 +155,23 @@ public class ConfigSnapshotListener extends SaveableListener {
         if (!(o instanceof Item)) {
             return;
         }
+        Item item = (Item) o;
+        String fullName = item.getFullName();
+        try {
+            record(item, fullName, file);
+        } finally {
+            SAVING.computeIfPresent(fullName, (name, count) -> count > 1 ? count - 1 : null);
+        }
+    }
+
+    private static void record(Item item, String fullName, XmlFile file) {
         if (ChangeRecording.isSuppressed() || !ChangeRecording.isActive()) {
             return;
         }
-        Item item = (Item) o;
         if (item.getParent() instanceof ComputedFolder && isIndexing((ComputedFolder<?>) item.getParent())) {
             return; // generated by indexing (#20); runs are still recorded (D-32)
         }
-        String fullName = item.getFullName();
-        ReentrantLock lock = LOCKS[Math.floorMod(fullName.hashCode(), STRIPES)];
+        ReentrantLock lock = lockFor(fullName);
         lock.lock();
         try {
             String newXml;
@@ -125,9 +194,7 @@ public class ConfigSnapshotListener extends SaveableListener {
                 return;
             }
             if (oldXml == null) {
-                // First sighting: the creation-time initial save (the CREATE record comes from
-                // the ItemListener) or an item predating the switch. Establish the baseline.
-                saveSnapshot(store, fullName, newXml);
+                recordWithoutBaseline(store, item, fullName, newXml);
                 return;
             }
             if (oldXml.equals(newXml)) {
@@ -157,9 +224,105 @@ public class ConfigSnapshotListener extends SaveableListener {
         }
     }
 
+    /**
+     * A save that finds no snapshot of its item (SPEC item 9): the change is recorded without a diff,
+     * with {@link #NO_BASELINE_DETAIL}, because what it changed cannot be shown, and the configuration
+     * becomes the item's baseline. Only the baseline is stored for a save that is part of creating the
+     * item (its CREATE record comes from {@link ItemChangeListener}) and for a computed folder saving
+     * itself during its own indexing (#20). Under the item's lock.
+     */
+    private static void recordWithoutBaseline(Store store, Item item, String fullName, String newXml) {
+        boolean ownIndexing = item instanceof ComputedFolder && isIndexing((ComputedFolder<?>) item);
+        if (ownIndexing || isCreationSave(item)) {
+            saveSnapshot(store, fullName, newXml);
+            return;
+        }
+        LOGGER.fine(() -> "No configuration snapshot of '" + fullName + "' is stored; its configuration change is"
+                + " recorded without a diff and its configuration becomes the baseline");
+        append(store, item, fullName, null, NO_BASELINE_DETAIL);
+        saveSnapshot(store, fullName, newXml);
+    }
+
+    /**
+     * Whether a save of {@code item} is part of creating it. Core saves a new item before it adds it to
+     * its parent ({@code ItemGroupMixIn#createProject}, which a copy uses as well), so an item that is
+     * not in its parent is being created (or loaded); and a save made inside one of the core creation
+     * methods named by {@link #CREATION_FRAMES} belongs to a creation too. Only a save that finds no
+     * snapshot asks this (at most once per item while recording is active), so the stack is never
+     * walked on the ordinary save path.
+     */
+    static boolean isCreationSave(Item item) {
+        if (!isRegistered(item)) {
+            return true;
+        }
+        return StackWalker.getInstance().walk(frames -> frames.anyMatch(
+                frame -> CREATION_FRAMES.contains(frame.getClassName() + '#' + frame.getMethodName())));
+    }
+
+    /**
+     * Whether {@code item} is the object its parent holds under its name. A lookup that fails counts
+     * as registered, so a save is recorded rather than taken for a creation.
+     */
+    private static boolean isRegistered(Item item) {
+        ItemGroup<? extends Item> parent = item.getParent();
+        if (parent == null) {
+            return true;
+        }
+        // ACL.SYSTEM2 switch, for this lookup only: whether core has put this object into its parent
+        // yet decides nothing for any user (no permission is checked or granted here), and a lookup
+        // as the saving user cannot tell (it hides an item the user cannot read and refuses one the
+        // user may only discover).
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            return parent.getItem(item.getName()) == item;
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not look up '" + item.getFullName() + "' in its parent", e);
+            return true;
+        }
+    }
+
+    /**
+     * Stores the current configuration of {@code item} as its baseline if no snapshot of it is stored
+     * (SPEC item 9), for {@link io.jenkins.plugins.batchcontrol.ops.SnapshotSeeding}. The configuration
+     * file is read once, and only when no snapshot exists; a snapshot, or something else in its place,
+     * is left alone. Runs under the item's lock, so it never interleaves with a save of the same item;
+     * an item whose save is being reported ({@link #SAVING}) or that is not in its parent (deleted or
+     * replaced meanwhile) is skipped. Never throws.
+     */
+    public static Seeding seedIfMissing(Item item) {
+        if (!(item instanceof AbstractItem)) {
+            return Seeding.SKIPPED;
+        }
+        String fullName = item.getFullName();
+        ReentrantLock lock = lockFor(fullName);
+        lock.lock();
+        try {
+            if (SAVING.containsKey(fullName) || !isRegistered(item)) {
+                return Seeding.SKIPPED;
+            }
+            Store store = Store.get();
+            if (store.hasConfigSnapshot(fullName)) {
+                return Seeding.PRESENT;
+            }
+            XmlFile config = ((AbstractItem) item).getConfigFile();
+            if (!config.exists()) {
+                return Seeding.SKIPPED;
+            }
+            store.saveConfigSnapshot(fullName, config.asString());
+            return Seeding.SEEDED;
+        } catch (IOException | RuntimeException e) {
+            LOGGER.log(Level.FINE, "Could not seed the config snapshot of '" + fullName + "'", e);
+            return Seeding.FAILED;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     /** The note of a CONFIGURE record written without a diff (T-GAP-385). */
     static final String NO_DIFF_DETAIL = "No diff: the previous configuration of this item could not be read"
             + " from its snapshot.";
+
+    /** The note of a CONFIGURE record of a save that found no snapshot of its item (SPEC item 9). */
+    static final String NO_BASELINE_DETAIL = "No diff: no earlier configuration of this item was recorded.";
 
     /**
      * Writes {@code xml} as the item's new diff baseline. A failure is logged and does not stop the
@@ -190,6 +353,23 @@ public class ConfigSnapshotListener extends SaveableListener {
         } catch (RuntimeException e) {
             LOGGER.log(Level.SEVERE, "Could not record the configuration change of '" + fullName + "' by '" + user
                     + "'", e);
+        }
+    }
+
+    /**
+     * Marks the save of an item as being reported ({@link #SAVING}) before any other save listener
+     * runs, so seeding never takes a baseline from a configuration whose save has not reached
+     * {@link ConfigSnapshotListener} yet. {@link ConfigSnapshotListener#onChange} clears the mark.
+     */
+    @Extension(ordinal = Integer.MAX_VALUE)
+    @Restricted(NoExternalUse.class)
+    public static final class SaveStart extends SaveableListener {
+
+        @Override
+        public void onChange(Saveable o, XmlFile file) {
+            if (o instanceof Item) {
+                SAVING.merge(((Item) o).getFullName(), 1, Integer::sum);
+            }
         }
     }
 }

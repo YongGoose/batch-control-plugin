@@ -101,6 +101,15 @@ public final class RunRequestService {
      */
     private final Map<String, Instant> unsavedQueueCancels = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * D-21 invalidations of requests whose file could not be read (or whose end could not be written)
+     * when their job was renamed or moved. Such a request cannot be approved (an approval ends it
+     * instead), and it is ended INVALIDATED as soon as it can be read and written
+     * ({@link #applyMissedInvalidations}, every minute). Memory only: startup recovery, the only other
+     * path that submits a run, starts with none.
+     */
+    private final MissedInvalidations missedInvalidations = new MissedInvalidations();
+
     private RunRequestService() {
     }
 
@@ -544,6 +553,12 @@ public final class RunRequestService {
                         + request.getStatus() + " and can no longer be approved.");
             }
             boolean selfApproval = ApprovalPolicy.checkDecision(request);
+            // D-21: its job was renamed or moved while its file could not be read; it ends now instead.
+            String missed = missedInvalidations.reasonFor(id, request.getJobFullName());
+            if (missed != null) {
+                invalidate(request, missed, Set.of());
+                throw new IllegalStateException("Request " + id + " is now INVALIDATED: " + missed);
+            }
             Instant now = BatchClock.now();
             // D-20 check-at-submit: a request whose pending timeout has already passed is
             // expired here instead of being approved, so it can never be submitted.
@@ -881,6 +896,11 @@ public final class RunRequestService {
                     LOGGER.info(() -> "Run request " + request.getId()
                             + " expired (approved-run timeout)");
                 }
+            } catch (RuntimeException e) {
+                // One request that cannot be read or written never ends the expiry of the others; it
+                // is tried again on the next run (its decisions compare the clock meanwhile).
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not expire run request " + snapshot.getId()
+                        + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
@@ -946,6 +966,12 @@ public final class RunRequestService {
      * Invalidates every PENDING/APPROVED request that targets the given (old) job full name
      * after a rename or move (D-21).
      *
+     * <p>Fail safe: an open request whose file cannot be read now (which job it names is unknown), or
+     * whose end cannot be written, is not ended here; the invalidation is remembered
+     * ({@link MissedInvalidations}), so the request cannot be approved, and it is ended INVALIDATED
+     * once it can be read and written, if it names this job ({@link #applyMissedInvalidations}). One
+     * such request never keeps the others from being invalidated.
+     *
      * @return the ids of the requests that were invalidated
      */
     public List<String> invalidateForJob(String oldFullName, String reason) {
@@ -953,7 +979,8 @@ public final class RunRequestService {
         // D-72: read before this service's lock is taken (lock order with the queue).
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         Set<String> queued = jenkins == null ? new HashSet<>() : queuedMarkerRequestIds(jenkins);
-        for (RunRequest snapshot : store.listOpenRunRequests()) {
+        List<String> unreadable = new ArrayList<>();
+        for (RunRequest snapshot : store.listOpenRunRequests(unreadable::add)) {
             if (!oldFullName.equals(snapshot.getJobFullName())) {
                 continue;
             }
@@ -964,32 +991,103 @@ public final class RunRequestService {
             lock.lock();
             try {
                 RunRequest request = loadCurrent(snapshot.getId());
-                if (request == null) {
-                    continue;
-                }
-                if (request.getStatus() == RequestStatus.PENDING
-                        || request.getStatus() == RequestStatus.APPROVED) {
-                    boolean wasPending = request.getStatus() == RequestStatus.PENDING;
-                    request.setStatus(RequestStatus.INVALIDATED);
-                    request.setInvalidationReason(reason);
-                    // e2e-03 DEF-17: the request explains why it was invalidated. The reason is
-                    // also the decision comment unless an approver already left one, which stays.
-                    String comment = request.getDecisionComment();
-                    if (comment == null || comment.trim().isEmpty()) {
-                        request.setDecisionComment(reason);
-                    }
-                    // D-72: an approval already handed to the queue is cancelled there
-                    // (RequestInvalidationListener), and the cancelled item disposes of its files.
-                    // A run that never reached the queue (S7 M-1 included: a claim released after a
-                    // later handler refused the submission) has its files disposed of here; a
-                    // cancelled queue item (D-72b (7)) already disposed of its own. The typed values
-                    // are removed either way (D-72b (5)).
-                    boolean notQueued = request.getQueuedAt() == null;
-                    persistEnded(request, wasPending || notQueued && !queued.contains(request.getId()));
-                    NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
+                if (request != null && invalidate(request, reason, queued)) {
                     invalidated.add(request.getId());
-                    LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
                 }
+            } catch (RuntimeException e) {
+                missedInvalidations.add(snapshot.getId(), oldFullName, false, reason);
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not invalidate run request " + snapshot.getId()
+                        + " (" + reason + "); it cannot be approved, and it is invalidated as soon as it can be read"
+                        + " and written", e);
+            } finally {
+                lock.unlock();
+            }
+        }
+        for (String id : unreadable) {
+            missedInvalidations.add(id, oldFullName, false, reason);
+        }
+        return invalidated;
+    }
+
+    /**
+     * Ends {@code request} as INVALIDATED for {@code reason} if it is still PENDING or APPROVED
+     * (D-21); under {@link #lock}. {@code queued} holds the ids whose approved run sits in the queue.
+     *
+     * @return whether it was ended
+     */
+    private boolean invalidate(RunRequest request, String reason, Set<String> queued) {
+        if (request.getStatus() != RequestStatus.PENDING && request.getStatus() != RequestStatus.APPROVED) {
+            return false;
+        }
+        boolean wasPending = request.getStatus() == RequestStatus.PENDING;
+        request.setStatus(RequestStatus.INVALIDATED);
+        request.setInvalidationReason(reason);
+        // e2e-03 DEF-17: the request explains why it was invalidated. The reason is
+        // also the decision comment unless an approver already left one, which stays.
+        String comment = request.getDecisionComment();
+        if (comment == null || comment.trim().isEmpty()) {
+            request.setDecisionComment(reason);
+        }
+        // D-72: an approval already handed to the queue is cancelled there
+        // (RequestInvalidationListener), and the cancelled item disposes of its files.
+        // A run that never reached the queue (S7 M-1 included: a claim released after a
+        // later handler refused the submission) has its files disposed of here; a
+        // cancelled queue item (D-72b (7)) already disposed of its own. The typed values
+        // are removed either way (D-72b (5)).
+        boolean notQueued = request.getQueuedAt() == null;
+        persistEnded(request, wasPending || notQueued && !queued.contains(request.getId()));
+        missedInvalidations.forget(request.getId());
+        NotificationDispatcher.runEnded(NotificationEvent.INVALIDATED, request, wasPending, reason);
+        LOGGER.info(() -> "Run request " + request.getId() + " invalidated: " + reason);
+        return true;
+    }
+
+    /**
+     * Whether request {@code id} missed a D-21 invalidation because its file could not be read or
+     * written ({@link #invalidateForJob}); its queued run, if any, is cancelled like that of an
+     * invalidated request.
+     */
+    public boolean hasMissedInvalidation(String id) {
+        return missedInvalidations.contains(id);
+    }
+
+    /** Whether any request missed a D-21 invalidation ({@link #hasMissedInvalidation}). */
+    public boolean hasMissedInvalidations() {
+        return !missedInvalidations.isEmpty();
+    }
+
+    /**
+     * Ends, as INVALIDATED, every request that missed a D-21 invalidation ({@link #invalidateForJob})
+     * and can now be read and written, when the invalidation applies to the job it names; forgets the
+     * ones it does not apply to or that are no longer open. Run by the periodic work every minute; a
+     * request that still cannot be read stays for the next run.
+     *
+     * @return the ids of the requests ended now, whose queued runs the caller cancels
+     */
+    public List<String> applyMissedInvalidations() {
+        if (missedInvalidations.isEmpty()) {
+            return List.of();
+        }
+        // D-72: read before this service's lock is taken (lock order with the queue).
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        Set<String> queued = jenkins == null ? new HashSet<>() : queuedMarkerRequestIds(jenkins);
+        List<String> invalidated = new ArrayList<>();
+        for (String id : missedInvalidations.ids()) {
+            lock.lock();
+            try {
+                RunRequest request = loadCurrent(id);
+                String reason = null;
+                if (request != null) {
+                    reason = missedInvalidations.reasonFor(id, request.getJobFullName());
+                }
+                if (request != null && reason != null && invalidate(request, reason, queued)) {
+                    invalidated.add(id);
+                } else {
+                    missedInvalidations.forget(id); // gone, no longer open, or not about its job
+                }
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.FINE, "Run request " + id + " still cannot be read or written;"
+                        + " its missed invalidation is applied on a later run", e);
             } finally {
                 lock.unlock();
             }

@@ -33,11 +33,13 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -53,7 +55,9 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToLongFunction;
@@ -134,6 +138,12 @@ public final class FileStore implements Store {
 
     /** Month file to its incremental summary; guarded by itself. */
     private final Map<Path, StatsEntry> statsCache = new HashMap<>();
+
+    /** How often an open request that stays unreadable is warned about again ({@link #skipUnreadableOpen}). */
+    private static final Duration UNREADABLE_WARNING_INTERVAL = Duration.ofHours(1);
+
+    /** Open requests left out of a listing as unreadable ("kind id") to when that was last warned about. */
+    private final Map<String, Instant> unreadableOpenWarnedAt = new ConcurrentHashMap<>();
 
     private FileStore() {
         for (int i = 0; i < LOCK_STRIPES; i++) {
@@ -378,7 +388,8 @@ public final class FileStore implements Store {
     }
 
     @Override
-    public List<RunRequest> listOpenRunRequests() {
+    public List<RunRequest> listOpenRunRequests(Consumer<String> unreadable) {
+        Objects.requireNonNull(unreadable, "unreadable");
         EntityIndex idx = index();
         List<String> ids = new ArrayList<>();
         for (EntityIndex.RunEntry entry : idx.runRequests.values()) {
@@ -388,7 +399,16 @@ public final class FileStore implements Store {
         }
         List<RunRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            RunRequest request = loadRunRequest(id);
+            RunRequest request;
+            try {
+                request = loadRunRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("run request", id, e);
+                unreadable.accept(id);
+                continue;
+            }
+            readableAgain("run request", id, request != null);
             if (request == null) {
                 idx.runRequests.remove(id);
                 continue;
@@ -460,7 +480,15 @@ public final class FileStore implements Store {
         }
         List<GrantRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            GrantRequest request = loadGrantRequest(id);
+            GrantRequest request;
+            try {
+                request = loadGrantRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("grant request", id, e);
+                continue;
+            }
+            readableAgain("grant request", id, request != null);
             if (request == null) {
                 idx.grantRequests.remove(id);
                 continue;
@@ -528,7 +556,8 @@ public final class FileStore implements Store {
     }
 
     @Override
-    public List<ActivationRequest> listOpenActivationRequests() {
+    public List<ActivationRequest> listOpenActivationRequests(Consumer<String> unreadable) {
+        Objects.requireNonNull(unreadable, "unreadable");
         EntityIndex idx = index();
         List<String> ids = new ArrayList<>();
         for (EntityIndex.GrantRequestEntry entry : idx.activationRequests.values()) {
@@ -538,7 +567,16 @@ public final class FileStore implements Store {
         }
         List<ActivationRequest> open = new ArrayList<>(ids.size());
         for (String id : ids) {
-            ActivationRequest request = loadActivationRequest(id);
+            ActivationRequest request;
+            try {
+                request = loadActivationRequest(id);
+            } catch (RuntimeException e) {
+                // Its index entry stays, so the next listing reads it again.
+                skipUnreadableOpen("activation request", id, e);
+                unreadable.accept(id);
+                continue;
+            }
+            readableAgain("activation request", id, request != null);
             if (request == null) {
                 idx.activationRequests.remove(id);
                 continue;
@@ -626,6 +664,13 @@ public final class FileStore implements Store {
             throw new UncheckedIOException(new IOException("The config snapshot " + file + " is not a regular file"));
         }
         return readTextOrNull(file);
+    }
+
+    @Override
+    public boolean hasConfigSnapshot(String jobFullName) {
+        Objects.requireNonNull(jobFullName, "jobFullName");
+        Path file = PathCodec.resolveUnder(snapshotDir(), PathCodec.encode(jobFullName) + ".xml");
+        return Files.exists(file, LinkOption.NOFOLLOW_LINKS);
     }
 
     @Override
@@ -1376,6 +1421,36 @@ public final class FileStore implements Store {
         }
         LOGGER.log(Level.WARNING, "Skipping the " + what + " '" + stem + "' (" + file
                 + "): its file cannot be read; it is left out until it can be read and Jenkins is restarted", e);
+    }
+
+    /**
+     * Logs that the open {@code what} {@code id} is left out of an open-request listing because its file
+     * cannot be read. The listings run every minute and on every page that shows a pending count, so
+     * one request that stays unreadable is warned about when it is first seen and then once an hour,
+     * and logged at FINE in between.
+     */
+    private void skipUnreadableOpen(String what, String id, RuntimeException e) {
+        String key = what + ' ' + id;
+        Instant now = BatchClock.now();
+        Instant warned = unreadableOpenWarnedAt.get(key);
+        if (warned == null || now.isBefore(warned) || !now.isBefore(warned.plus(UNREADABLE_WARNING_INTERVAL))) {
+            unreadableOpenWarnedAt.put(key, now);
+            LOGGER.log(Level.WARNING, "Skipping the open " + what + " '" + id + "': its file cannot be read. While it"
+                    + " cannot be read it is not counted, expired, approved, run or recovered; it is picked up again"
+                    + " as soon as it can be read", e);
+        } else {
+            LOGGER.log(Level.FINE, "Still skipping the open " + what + " '" + id + "': its file cannot be read", e);
+        }
+    }
+
+    /**
+     * Notes that the open {@code what} {@code id}, once skipped as unreadable, was read again
+     * ({@code found}) or is gone.
+     */
+    private void readableAgain(String what, String id, boolean found) {
+        if (!unreadableOpenWarnedAt.isEmpty() && unreadableOpenWarnedAt.remove(what + ' ' + id) != null) {
+            LOGGER.info(() -> "The open " + what + " '" + id + "' " + (found ? "can be read again" : "is gone"));
+        }
     }
 
     /** Writes a plain-text file atomically (temp file, then {@code ATOMIC_MOVE}). */

@@ -15,6 +15,7 @@ import java.time.YearMonth;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -98,8 +99,22 @@ public interface Store {
      * creation time (#13). Served from the in-memory entity index, so closed requests are never
      * read; this is what the per-minute expiry work, startup recovery and rename invalidation
      * iterate.
+     *
+     * <p>An open request whose file cannot be read (permission, I/O error or damaged content) is
+     * left out with a warning naming it, so it is never expired, approved, run, recovered or counted
+     * while unreadable, and it never breaks the listing for the others. Its index entry is kept, so
+     * the next listing reads it again and it is back as soon as it can be read.
      */
-    List<RunRequest> listOpenRunRequests();
+    default List<RunRequest> listOpenRunRequests() {
+        return listOpenRunRequests(id -> { });
+    }
+
+    /**
+     * As {@link #listOpenRunRequests()}, and hands the id of every open request left out because its
+     * file cannot be read to {@code unreadable}, for a caller that must act on it once it can be read
+     * (an invalidation it would otherwise miss).
+     */
+    List<RunRequest> listOpenRunRequests(Consumer<String> unreadable);
 
     /**
      * The listing fields of every stored run request, sorted by id, from memory (#13). A listing
@@ -122,7 +137,11 @@ public interface Store {
     /** Loads every stored grant request, sorted by id (creation order). */
     List<GrantRequest> listGrantRequests();
 
-    /** Loads the PENDING grant requests only, sorted by id, via the entity index (#13). */
+    /**
+     * Loads the PENDING grant requests only, sorted by id, via the entity index (#13). An open request
+     * whose file cannot be read is left out with a warning and its index entry kept, as for
+     * {@link #listOpenRunRequests()}.
+     */
     List<GrantRequest> listOpenGrantRequests();
 
     /** Writes (or rewrites, on revocation) the grant XML atomically. */
@@ -149,8 +168,20 @@ public interface Store {
     /** Loads every stored activation request, sorted by id (creation order). */
     List<ActivationRequest> listActivationRequests();
 
-    /** Loads the PENDING activation requests only, sorted by id, via the entity index (#13). */
-    List<ActivationRequest> listOpenActivationRequests();
+    /**
+     * Loads the PENDING activation requests only, sorted by id, via the entity index (#13). An open
+     * request whose file cannot be read is left out with a warning and its index entry kept, as for
+     * {@link #listOpenRunRequests()}.
+     */
+    default List<ActivationRequest> listOpenActivationRequests() {
+        return listOpenActivationRequests(id -> { });
+    }
+
+    /**
+     * As {@link #listOpenActivationRequests()}, and hands the id of every open request left out
+     * because its file cannot be read to {@code unreadable}.
+     */
+    List<ActivationRequest> listOpenActivationRequests(Consumer<String> unreadable);
 
     /**
      * Whether at least one stored activation or hold request, in any status, was filed by
@@ -193,6 +224,13 @@ public interface Store {
      *         something other than a file is in its place
      */
     String loadConfigSnapshot(String jobFullName);
+
+    /**
+     * Whether anything is stored where the config snapshot of a job belongs: a snapshot, or
+     * something else in its place (which {@link #loadConfigSnapshot} refuses). Nothing is read, so
+     * seeding the missing snapshots of every item costs one file system lookup per item.
+     */
+    boolean hasConfigSnapshot(String jobFullName);
 
     /** Removes the config snapshot of a job (after deletion, rename or move). */
     void deleteConfigSnapshot(String jobFullName);
