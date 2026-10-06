@@ -81,6 +81,23 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         // Every step below runs in its own try, so a failure of one (a request file that cannot be
         // read or written) never skips the steps after it.
         //
+        // Requests that missed an invalidation (D-21 rename or move, SPEC 6a deletion or superseding
+        // approval) because their file could not be read or written then are ended once they can be,
+        // before anything below could expire them with another reason.
+        try {
+            java.util.List<String> ended = RunRequestService.get().applyMissedInvalidations();
+            if (!ended.isEmpty()) {
+                io.jenkins.plugins.batchcontrol.listener.RequestInvalidationListener.cancelQueuedMarkers(ended, null);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not end the run requests that missed an invalidation", e);
+        }
+        try {
+            ActivationService.get().applyMissedInvalidations();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not end the activation requests that missed an invalidation", e);
+        }
+        //
         // Queue snapshot is taken outside the service lock (lock-order discipline): a request
         // whose approved submission is waiting in the queue is not "unsubmitted" and must not
         // expire while it waits for an executor. The snapshot instant is recorded first so the
