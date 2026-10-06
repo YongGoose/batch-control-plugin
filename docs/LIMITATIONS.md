@@ -227,7 +227,11 @@ and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
     unknown: the notice names the current name if the holder may read the
     item, and otherwise it is not sent, with a warning in the controller log.
     When the change request's file is there but cannot be read, no expiry
-    notice is sent for that window. Every other notice names the item by the
+    notice is sent for that window, and it is not tried again. Neither case
+    holds up the notices of the other windows, and neither does a window
+    whose grant file cannot be read or written when its notice falls due:
+    that window is tried again on the next run of the periodic work, a
+    minute later. Every other notice names the item by the
     name in the request, which is the approved name and never follows the
     item (SPEC item 8, D-75 (1), security-39 S-39-04). The audit history is
     not filtered this way: a `ViewHistory` holder sees the new name in the
@@ -537,11 +541,34 @@ from scripts.
     `RENAME` for the folder itself. This is accurate, since every child's full
     name did change, but it means one rename can generate a large number of
     records.
+
+<!-- Items 52 and 53 were added after 27-51 and sit here by topic. The comment ends the list so that they render as 52 and 53, not 27 and 28. -->
+
 52. **A `DELETE` record of an item deleted together with its folder names the
     user who deleted the folder** only when core deletes the item on the same
     thread inside `AbstractItem.delete()`; an item removed in any other way, on
     another thread or outside `AbstractItem.delete()`, is recorded under the
     authentication current at that moment, which is often SYSTEM.
+53. **A `CONFIGURE` record whose previous snapshot cannot be read has no
+    diff.** The diff compares the saved `config.xml` with the item's snapshot
+    under `batch-control/snapshots/` (item 17). When that snapshot exists but
+    cannot be read (a permission or I/O error), or something other than a
+    file is in its place, the change is still recorded, with the window it
+    was made under if any, but without a diff: the record's detail carries
+    the note "No diff: the previous configuration of this item could not be
+    read from its snapshot." instead (compare item 18), and a warning is
+    logged. The same save writes the new configuration as the item's
+    snapshot; once that succeeds, the next change has a diff again. While
+    the snapshot stays unusable (something other than a file stays in its
+    place, or the snapshots directory refuses writes), every save of the
+    item is recorded this way, including saves that change nothing, which
+    otherwise write no record. A snapshot that cannot be replaced after a
+    change does not stop the record either: it is written all the same, and
+    the item's next change is compared with the older snapshot, so its diff
+    also shows the change before it.
+
+<!-- The comment ends the list so that 27 to 32 render with their own numbers. -->
+
 27. **The expired-window denial page is Jenkins' own.** Saving a configuration
     after a `CONFIGURE` window has expired gives the stock Jenkins 403 page. The
     plugin deliberately does not intercept it: Jenkins does not offer that as an
@@ -639,7 +666,21 @@ from scripts.
     request, grant request, activation request or grant file that cannot be
     read (a permission or I/O error, or damaged content) is skipped with a
     warning naming it, instead of breaking the whole listing; a skipped grant
-    confers nothing (item 11). Request
+    confers nothing (item 11). The expiry job is the exception, a known gap
+    rather than a design choice. It reads the open run, change and activation
+    requests from a list built when Jenkins starts, so an open request whose
+    file stops being readable while Jenkins runs stops the expiry job's work
+    on its own kind of request for as long as it stays unreadable. Meanwhile
+    no other open request of that kind is expired in storage (which also
+    holds back its `EXPIRED` notification and, for a run request, the
+    deletion of its values file and the disposal of its files) or sent its
+    `EXPIRING` notice. A pending request past its timeout still cannot be
+    approved, and an approved run past its timeout is not submitted, because
+    each decision and each submission compares the clock itself. The other
+    kinds of request, and the windows' `GRANT_EXPIRING` notices (item 11),
+    are not affected. A request whose file can be read but not written when
+    its `EXPIRING` notice falls due is tried again on the next run and does
+    not hold up the others. Request
     files are kept until retention deletes the closed requests last active
     before the first kept month (`retentionMonths`, 24 by default), so up to
     that age every one of them is read. SPEC item 6's target of 5,000 runs a
@@ -687,7 +728,15 @@ from scripts.
     cancelled item's own parameter values delete their files, as for any
     cancelled queue item, and Batch Control deletes the request's values file
     and never submits that run again, not when Jenkins restarts
-    either. The request stays `APPROVED` until the approved-run timeout ends
+    either. If the store refuses to write the cancellation to the request
+    file at that moment, the cancellation is kept in memory, so the run is
+    still not submitted again in that session, and it is written, together
+    with the deletion of the values file, as soon as the store accepts writes
+    again: the periodic work tries every minute. If Jenkins restarts before
+    that write succeeds, the cancellation is lost, and startup recovery
+    submits the run again, as for an approved run whose queue item was never
+    cancelled. This is the storage-failure class of gap described under
+    item 11. The request stays `APPROVED` until the approved-run timeout ends
     it as `EXPIRED`, with the reason `Expired: approved but not started within
     <N> minutes; its queued run was cancelled.` When another plugin's queue
     handler refuses an approved run after Batch Control's gate has accepted
@@ -805,10 +854,14 @@ code does on purpose.
     The guard on a changed item ends only through **Mark as reviewed**, a
     deliberate action offered to administrators next to each item on the
     Manage Jenkins monitor, and to users who hold `Item/Configure` natively
-    (not from a grant) on the item's Batch Control page. That page exists
-    only for holders of `BatchControl/Request`, so a native Configure holder
-    needs `BatchControl/Request` as well to use the button there; otherwise
-    they ask an administrator, who uses the monitor. It writes a
+    (not from a grant) on a job's Batch Control page. That page exists only
+    for jobs and only for holders of `BatchControl/Request`, so a native
+    Configure holder needs `BatchControl/Request` as well to use the button
+    there; otherwise they ask an administrator, who uses the monitor. A
+    folder, a multibranch project or an organization folder has no Batch
+    Control page, so a changed one can be marked as reviewed only by an
+    administrator on the monitor: a user who holds `Item/Configure` on it
+    natively cannot review it (T-GAP-325). A review writes a
     `GUARD_REVIEWED` change record naming the reviewer. The review takes
     effect at once; if the grant file that holds the state cannot be written
     at that moment, the write is retried (item 11). An ordinary save, even an
@@ -1156,6 +1209,9 @@ code does on purpose.
     each file parameter and says to select the file again. The same URL
     mechanism and caps apply when an incident rerun continues on the Request
     Run form (item 16).
+
+<!-- Item 50 was added after 49 and sits here by topic. The comment ends the list so that it renders as 50, not 49. -->
+
 50. **The request dialogs on the new job page use a beta core API.** On the
     new job page an action can open a dialog only through
     `Action#getEvent()` returning `DialogEvent`, which core 2.568.x marks
