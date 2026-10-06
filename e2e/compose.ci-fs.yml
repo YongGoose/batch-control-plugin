@@ -1,0 +1,14 @@
+# Overlay (e2e-17): the Batch Control store (JENKINS_HOME/batch-control) on a host directory, so that it lives on the
+# host's file system. On macOS with Docker Desktop that file system is case-insensitive (default APFS), as on Windows
+# (NTFS): `requests/run/<id>.VALUES.xml` then resolves to the values file `<id>.values.xml`, the premise of
+# security-39 S-39-01, which the Linux volume of docker-compose.yml cannot reproduce. Used for the S-39-01 checks of
+# r17/s39.py (section P records whether the premise holds).
+#
+#   BC_CI_FS_DIR=<empty host directory> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/1
+#
+# The directory must be empty at the start (a fresh store) and is not removed by `down -v`; delete it afterwards.
+# Docker Desktop's file sharing maps ownership to the accessing user, so the jenkins user (uid 1000) can write there.
+services:
+  jenkins:
+    volumes:
+      - ${BC_CI_FS_DIR:?set BC_CI_FS_DIR to an empty host directory}:/var/jenkins_home/batch-control
