@@ -48,7 +48,7 @@ venv/bin/python e2e/ci/selftest_content.py             # the crawl's content che
 `run.sh` uses its own compose project (`bc-cov-<k>`), its own container names and ports 18080/18025, so it can run
 next to the regular stack; it never touches the `batch-control-e2e` volume and removes its own containers and volume
 at the end (`BC_KEEP=1` keeps them). One shard per checkout at a time: the drivers write to `r14/out/`,
-`r15/out/` and `screenshots/`, which `run.sh` moves into the shard's artefact directory (an earlier run's output is
+`r15/out/`, `r16/out/`, `r17/out/` and `screenshots/`, which `run.sh` moves into the shard's artefact directory (an earlier run's output is
 moved to `ci/out/_previous/` first). For shards in parallel on one machine, use separate checkouts and different
 `BC_PORT`, `BC_MAIL_PORT` and `BC_PROJECT`.
 
@@ -278,6 +278,7 @@ Other profiles:
 | `compose.ldap.yml` + `casc/profile-ldap.yaml` | `scripts/ldap-up.sh` (renders `out/ldap/bootstrap.ldif` from `ldap/bootstrap.ldif.template` with the `.env` passwords and starts `batch-control-e2e-ldap`), then Manage Jenkins -> Configuration as Code -> Apply configuration -> `/var/jenkins_casc/profile-ldap.yaml`; back with `/var/jenkins_casc/jenkins.yaml` (or a restart), then `scripts/ldap-down.sh` | LDAP realm (ldap plugin) with group entries: `bc-admins`, `bc-requesters`, `bc-approvers`, `bc-configurers`, `bc-auditors`; users `admin`, `lrequester`, `lapprover-1/2`, `lconfigurer`, `lauditor`, `lnobody` with `<id>@ldap.e2e.local` addresses (e2e-05) |
 | `compose.prefix.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml up -d --build`; back with `docker compose up -d jenkins` | Jenkins under the context path `/jenkins` (`http://localhost:8080/jenkins/`, Jenkins URL set through `BC_JENKINS_URL`) with the new job page experiment on for every user (`-Dnew-job-page.flag.defaultValue=true`; a user can still turn it off on `/me/experiments/`) (e2e-06) |
 | `compose.jdk25.yml` | `docker compose -f docker-compose.yml -f compose.prefix.yml -f compose.jdk25.yml up -d --build` | The same image built on `jenkins/jenkins:2.568.3-lts-jdk25` (Dockerfile `ARG JENKINS_TAG`), tagged `batch-control-e2e-jenkins:2.568.3-jdk25`; shares the JENKINS_HOME volume, so `down -v` first for a fresh home (e2e-11, R4-1) |
+| `compose.ci-fs.yml` | `BC_CI_FS_DIR=<empty host directory>` with `BC_COMPOSE_EXTRA` (`ci/run.sh`) or as an extra `-f` | `JENKINS_HOME/batch-control` on the host's file system, case-insensitive on default macOS: the S-39-01 premise for `r17/s39.py` P (e2e-17) |
 | `compose.coverage.yml` | last overlay, after `ci/fetch-jacoco.sh`; normally through `ci/run.sh` (section below) | JaCoCo agent in the Jenkins JVM (`JAVA_TOOL_OPTIONS`), exec file `/var/jenkins_home/jacoco/jacoco-${BC_SHARD}.exec`, own container names `${BC_CONTAINER}-jenkins` / `-mail` so it can run next to the regular stack (use another `-p` project and other `BC_PORT`/`BC_MAIL_PORT`); `BC_JACOCO_AGENT=<absolute path>` when used with another checkout's compose files |
 
 The permission names in `casc/jenkins.yaml` are `BatchControl/<Name>`; if the
@@ -520,6 +521,40 @@ that fail once when armed), and ends with the fixture preconditions above. Drive
 
 Against any running stack: `BC_BASE=http://localhost:<port>/jenkins BC_BROWSER_CHANNEL=chromium python r16/arrange.py`,
 then the drivers (the setup of `ci/shard.py` must have run on that Jenkins for the seeded accounts and jobs).
+
+## e2e-17 driver (`r17/`)
+
+Security-39 fixes and D-75 (2026-10-06). `r17/lib.py` loads `r16/lib.py` (screenshots in `screenshots/run-17/`, rows in
+`r17/out/<driver>.jsonl`, the same PASS/FAIL/NOTE lines). `arrange.py` (idempotent; `R17_RESET=1` first deletes what an
+earlier run renamed or created; `R17_PERMS_ONLY=1` only puts the account's permissions back) creates the window holder
+`w17` (Item/Read and RequestGrant only), the folder `r17` with its jobs, the folder `r17-vault` whose matrix blocks
+inheritance (administrators only) and the top-level jobs the disk scenarios remove, and ends with its fixture check.
+
+- `s39.py [PRDH]`: P, S-39-01: requester, approver-1 and admin get 404 (never 500) for `<id>.VALUES/`, `<id>.Values/`,
+  `<id>.values/`, the id in upper case, `x.y/`, `<id>~1/` and `no-such-id.VALUES/` under `requests/`, and the same shapes
+  under `grants/`, `activations/`, `incidents/` (a requester without ViewHistory gets the section's 403 for every incident
+  URL alike); the request stays PENDING with its values file, nothing is logged. The rows record whether
+  `<id>.VALUES.xml` resolves to the values file on the store's file system (the S-39-01 premise): false on the Linux
+  volume, true with `compose.ci-fs.yml` on macOS. R: a window follows two renames by the administrator and the grant
+  pages show the current name; new jobs at the earlier names give nothing; a case-only rename (allowed by core only after
+  a restart, see C below) keeps the window. D: deleting a windowed job (its Delete page) and creating a new one at the name
+  (New Item page; at the root under another letter case) gives the holder 403, the windows are listed under Ended as
+  "Revoked (its item was deleted) by admin". H: D-75 (1), the followed name hidden from a holder and an approver who cannot
+  read the item's new folder (its own CI step; red until the D-75 (1) fix).
+- `disk.py [GFBUC]` (a `last` unit: reloads and restarts Jenkins): G, the documented gap path without any fault: two jobs
+  removed on disk, Reload Configuration from Disk, then a job renamed onto one stale name (another letter case) and a new
+  job at the other: 403 for both, the windows end with "it could not follow its item" and "its item was deleted". F, the
+  same reason through a failed grant write (grants directory read-only during an administrator's rename, as in
+  `r16/durable.py`), then a job renamed onto the old name gets nothing (S-39-02 probe F3) and the end is written by the
+  periodic work. B, the startup end of a window whose job vanished before a restart (revoked by SYSTEM, "its item no longer
+  exists"; a control window still confers). U, fail-closed restart re-end: every change log month file unreadable across a
+  restart, every open window ends "its state could not be confirmed at startup" (S-39-03, D-75 (2)). C (own step): after a
+  restart the folders plugin looks a folder's children up case-sensitively, so `r17/CTL` can be created next to `r17/ctl`;
+  the window on `r17/ctl` must stay open (e2e-17 DEF-E17-01: it ends).
+
+`compose.ci-fs.yml` puts `JENKINS_HOME/batch-control` on a host directory (`BC_CI_FS_DIR`, empty at the start), which on
+macOS with Docker Desktop is case-insensitive, for the S-39-01 premise:
+`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/1`.
 
 ## e2e-15 driver (`r15/`)
 
