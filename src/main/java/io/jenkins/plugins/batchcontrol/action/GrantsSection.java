@@ -29,6 +29,7 @@ import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
+import io.jenkins.plugins.batchcontrol.ui.ScopeDisplay;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -113,6 +114,9 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /** Per-request cache of every stored grant by id. */
     private Map<String, Grant> grantsById;
+
+    /** Per-request cache of {@link #getRenewScope()}. */
+    private ScopeDisplay renewScope;
 
     @Override
     public Object getTarget() {
@@ -534,14 +538,18 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * {@code getFullName()}. An item that does not exist, or that the caller cannot see, yields
      * an empty field, so this cannot be used to reflect arbitrary text into the page or to probe
      * for names — it renders exactly what a caller could already read from the item's own URL.
-     * A renewed grant is likewise resolved from the store, and only the caller's own.
+     * A renewed grant is likewise resolved from the store, and only the caller's own; its item's
+     * name is the one {@link #getRenewScope()} shows (D-75 (1)).
      *
      * @return the canonical full name, or an empty string when there is nothing to prefill
      */
     public String getPrefillScopeFullName() {
-        Grant source = getRenewSource();
-        if (source != null) {
-            return source.getScope().getFullName();
+        ScopeDisplay renewed = getRenewScope();
+        if (renewed != null) {
+            // D-75 (1): the renewed window's followed name only to a viewer who may read the item;
+            // otherwise the field starts empty (the approved name may name another item by now, and
+            // a request for an item the requester cannot read is refused anyway).
+            return renewed.isMoved() ? "" : Util.fixNull(renewed.getFullName());
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         String raw = req == null ? null : req.getParameter("scopeFullName");
@@ -559,6 +567,25 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      */
     public boolean isPrefilled() {
         return !getPrefillScopeFullName().isEmpty();
+    }
+
+    /**
+     * D-75 (1), security-39 S-39-04: the name the form's prefill note shows for the renewed grant's
+     * item ({@code tags/scopeItem.jelly}), or {@code null} when the form renews nothing. A window's
+     * followed name only to a viewer who may read the item now; otherwise the approved name with
+     * the fixed "moved" note, and the name field starts empty ({@link #getPrefillScopeFullName()}).
+     */
+    @CheckForNull
+    public ScopeDisplay getRenewScope() {
+        Grant source = getRenewSource();
+        if (source == null) {
+            return null;
+        }
+        if (renewScope == null) {
+            GrantRequest request = GrantRequestService.get().load(source.getGrantRequestId());
+            renewScope = ScopeDisplay.of(request == null ? null : request.getScope(), source.getScope());
+        }
+        return renewScope;
     }
 
     /** The ended grant the form renews ({@code ?from=<grantId>}), or {@code null}. */
@@ -630,7 +657,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * <p>D-74: a row with a window names the window's item ({@link Grant#getScope()}), not the
      * name the request was made for: an open window follows its item when an administrator (or a
      * user with their own permissions) renames or moves it, and an ended one keeps the name its
-     * item had when it ended.
+     * item had when it ended. D-75 (1), security-39 S-39-04: that followed name is shown only to a
+     * viewer who may read the item ({@link #getShownScope()}).
      */
     public static final class Row {
 
@@ -642,7 +670,17 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
         private final String id;
 
+        /** The item the request was made for, or {@code null} for a window without its request. */
+        @CheckForNull
+        private final GrantScope approvedScope;
+
+        /** The item the row concerns now: the window's (D-74), else the request's. */
+        @CheckForNull
         private final GrantScope scope;
+
+        /** {@link #getShownScope()}, decided once per rendering, for the rows on the page only. */
+        @CheckForNull
+        private ScopeDisplay shownScope;
 
         /** D-71: the kind of the scope item, or {@code null} when none was recorded. */
         @CheckForNull
@@ -660,6 +698,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             this.request = request;
             this.grant = grant;
             this.id = request.getId();
+            this.approvedScope = request.getScope();
             this.scope = grant != null && grant.getScope() != null ? grant.getScope() : request.getScope();
             this.itemKind = request.getItemKind() != null || grant == null
                     ? request.getItemKind() : grant.getItemKind();
@@ -673,6 +712,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             this.request = null;
             this.grant = grant;
             this.id = grant.getId();
+            this.approvedScope = null;
             this.scope = grant.getScope();
             this.itemKind = grant.getItemKind();
             this.actions = grant.getActions();
@@ -699,8 +739,17 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             return request != null;
         }
 
-        public GrantScope getScope() {
-            return scope;
+        /**
+         * D-75 (1), security-39 S-39-04: the name the Scope cell shows ({@code tags/scopeItem.jelly}):
+         * a window's followed name only to a viewer who may read the item now (or an administrator),
+         * otherwise the approved name with the fixed "moved" note; unchanged when the name did not
+         * change. The current name itself has no view getter, so the page cannot show it otherwise.
+         */
+        public ScopeDisplay getShownScope() {
+            if (shownScope == null) {
+                shownScope = ScopeDisplay.of(approvedScope, scope);
+            }
+            return shownScope;
         }
 
         /** D-71: the kind of the item the row names (icon and display name), or {@code null}. */

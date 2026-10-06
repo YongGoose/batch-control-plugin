@@ -6,7 +6,9 @@
      do not wrap at 1280 px, only free text does. D-71: the Scope column shows the one item a
      request or window names, with its kind (tags/scopeItem.jelly). D-74: a row with a window names
      the window's item, which follows the item when it is renamed or moved; deleting the item ends
-     the window, so an active window simply shows its remaining time. -->
+     the window, so an active window simply shows its remaining time. D-75 (1), S-39-04: a followed
+     name only to a viewer who may read the item, otherwise the approved name with a fixed note
+     (GrantsSection.Row#getShownScope); the rows carry no other trace of the new location. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout"
          xmlns:bc="/io/jenkins/plugins/batchcontrol/tags">
   <j:set var="legacyQuery" value="${it.legacyFormQuery}"/>
@@ -58,7 +60,7 @@
               <j:forEach var="r" items="${it.pendingItems}">
                 <tr>
                   <td class="batch-control-nowrap"><bc:idLink href="${base}${r.id}/" value="${r.id}"/></td>
-                  <td class="batch-control-nowrap"><bc:scopeItem fullName="${r.scope.fullName}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
                   <td class="batch-control-nowrap">${it.join(r.actions)}</td>
                   <td class="batch-control-nowrap">${r.request.durationMinutes} min</td>
                   <td>${r.request.reason}</td>
@@ -110,7 +112,7 @@
                     </j:choose>
                   </td>
                   <td class="batch-control-nowrap">${g.user}</td>
-                  <td class="batch-control-nowrap"><bc:scopeItem fullName="${g.scope.fullName}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
                   <td class="batch-control-nowrap">${it.join(g.actions)}</td>
                   <td class="batch-control-nowrap"><code>${it.createNameLabel(r)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(g.grantedAt)}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
@@ -167,7 +169,7 @@
                     </j:choose>
                   </td>
                   <td class="batch-control-nowrap">${r.user}</td>
-                  <td class="batch-control-nowrap"><bc:scopeItem fullName="${r.scope.fullName}" kind="${r.itemKind}"/></td>
+                  <td class="batch-control-nowrap"><bc:scopeItem scope="${r.shownScope}" kind="${r.itemKind}"/></td>
                   <td class="batch-control-nowrap">${it.join(r.actions)}</td>
                   <td class="batch-control-nowrap"><code>${it.createNameLabel(r)}</code></td>
                   <td><j:forEach var="part" items="${it.formatParts(it.endedAt(r))}"><span class="batch-control-date-part">${part}</span><wbr/></j:forEach></td>
