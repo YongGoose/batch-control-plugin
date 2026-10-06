@@ -240,6 +240,62 @@ public class WindowEndRestartTest {
     }
 
     /**
+     * T-SEC-108 (D-63, SPEC 4 "records are append-only", ARCHITECTURE 4 "ending a window ... appends
+     * the GRANT_REVOKE record" and 5 (JSONL, one record per line); note 278): as T-SEC-106, a torn
+     * last line in the newest change month file at startup. Each of the two windows ended at that
+     * start is recorded by a readable GRANT_REVOKE record naming SYSTEM and identifying it: a record
+     * appended after the torn line is not merged into it and lost.
+     */
+    @Test
+    public void t_sec_108_recordsAppendedAfterATornLineStayReadable() throws Throwable {
+        openWindowsOnAAndC();
+        appendTornLine();
+
+        session.then(r -> {
+            assertTrue(GrantService.get().listActive().stream().noneMatch(g -> onA.equals(g.getId()) || onC.equals(g.getId())),
+                    "premise (T-SEC-106): both windows ended at the start");
+            List<ChangeRecord> revokes = ApproverFormFixtures.records(ChangeType.GRANT_REVOKE);
+            for (String[] window : new String[][] {{onA, "a"}, {onC, "c"}}) {
+                assertTrue(revokes.stream().anyMatch(rec -> WindowStateFixtures.identifies(rec, window[0], window[1])
+                                && ACL.SYSTEM_USERNAME.equals(rec.getUser())),
+                        "D-63, ARCHITECTURE 4: the end of the window on " + window[1] + " must be recorded by a readable GRANT_REVOKE record"
+                                + " naming SYSTEM (a record appended after the torn line must not be merged into it); readable GRANT_REVOKE"
+                                + " records: " + WindowStateFixtures.describe(revokes) + "; last lines of the month file: " + tail(newestMonthPath(), 3));
+            }
+        });
+    }
+
+    /**
+     * T-SEC-109 (SPEC 8 "a restart keeps an unexpired window", ARCHITECTURE 4 "the startup re-end
+     * reads the GRANT_REVOKE records since the oldest open window was granted, bounded by time";
+     * note 278): as T-SEC-106, a torn last line at startup ends u1's windows on {@code a} and
+     * {@code c} (premise). In that session a1 approves a new CONFIGURE window for u1 on {@code c}
+     * (premise: it confers). After a plain restart, with nothing appended, the new window is still
+     * active and confers: damage older than every open window does not end the windows opened after
+     * it at every later start.
+     */
+    @Test
+    public void t_sec_109_windowOpenedAfterATornLineWasHandledSurvivesAPlainRestart() throws Throwable {
+        openWindowsOnAAndC();
+        appendTornLine();
+        String[] renewed = new String[1];
+
+        session.then(r -> {
+            assertTrue(GrantService.get().listActive().stream().noneMatch(g -> onA.equals(g.getId()) || onC.equals(g.getId())),
+                    "premise (T-SEC-106): both windows ended at the start");
+            renewed[0] = approve(request("u1", "c")).getId();
+            assertTrue(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE), "premise: the new window on c confers");
+        });
+        session.then(r -> {
+            assertTrue(GrantService.get().listActive().stream().anyMatch(g -> renewed[0].equals(g.getId())),
+                    "SPEC 8, ARCHITECTURE 4: the window approved after the torn line was handled must still be active after a plain restart;"
+                            + " last lines of the month file: " + tail(newestMonthPath(), 4));
+            assertTrue(can("u1", r.jenkins.getItemByFullName("c"), Item.CONFIGURE),
+                    "SPEC 8: the window approved after the torn line was handled still confers on c after a plain restart");
+        });
+    }
+
+    /**
      * T-SEC-107 (negative twin of T-SEC-106; D-75 (2), ARCHITECTURE 4; note 278): u1's open
      * CONFIGURE windows on {@code a} and {@code c}. Jenkins stops; a complete, well-formed line with
      * an unknown record type ({@code "type":"FUTURE_TYPE"}, target {@code a}, a current {@code at}
