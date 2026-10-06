@@ -356,10 +356,10 @@ public final class FileStore implements Store {
                 }
             } catch (NoSuchFileException e) {
                 // Deleted between listing and reading; skip.
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to load run request file " + file, e);
-            } catch (RuntimeException e) {
-                LOGGER.log(Level.WARNING, "Skipping unreadable run request file " + file, e);
+            } catch (IOException | RuntimeException e) {
+                // As listXmlEntities: one file that cannot be read must not break every listing,
+                // badge and the request index.
+                warnSkipped("run request", file, e);
             }
         }
         all.sort(OLDEST_FIRST_RUNREQUEST);
@@ -1346,6 +1346,13 @@ public final class FileStore implements Store {
         return files;
     }
 
+    /**
+     * Every {@code type} stored in {@code dir}. A file that cannot be read is skipped with a warning
+     * naming it, whether it is corrupt (an XStream conversion error) or cannot be read at all
+     * (permission denied, an I/O error): one such file must not break every reader of the
+     * directory, which for grants would be every permission check of every user. A skipped grant
+     * confers nothing. Only a directory that cannot be listed fails the whole listing.
+     */
     private <T> List<T> listXmlEntities(Path dir, Class<T> type, String what) {
         List<T> entities = new ArrayList<>();
         for (Path file : listXmlFiles(dir, what)) {
@@ -1356,15 +1363,22 @@ public final class FileStore implements Store {
                 }
             } catch (NoSuchFileException e) {
                 // Deleted between listing and reading; skip.
-            } catch (IOException e) {
-                throw new UncheckedIOException("Failed to load " + what + " file " + file, e);
-            } catch (RuntimeException e) {
-                // One corrupt file (XStream conversion error, wrong type) must not break every
-                // reader of the directory -- for grants that would be every permission check.
-                LOGGER.log(Level.WARNING, "Skipping unreadable " + what + " file " + file, e);
+            } catch (IOException | RuntimeException e) {
+                warnSkipped(what, file, e);
             }
         }
         return entities;
+    }
+
+    /** Logs that the {@code what} file {@code file} is left out of a listing because it cannot be read. */
+    private static void warnSkipped(String what, Path file, Exception e) {
+        Path name = file.getFileName();
+        String stem = name == null ? "" : name.toString();
+        if (endsWithIgnoreCase(stem, ".xml")) {
+            stem = stem.substring(0, stem.length() - ".xml".length());
+        }
+        LOGGER.log(Level.WARNING, "Skipping the " + what + " '" + stem + "' (" + file
+                + "): its file cannot be read; it is left out until it can be read and Jenkins is restarted", e);
     }
 
     /** Writes a plain-text file atomically (temp file, then {@code ATOMIC_MOVE}). */

@@ -39,6 +39,11 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * they can still ask {@link DeletionAttribution#deletingUser} who deleted an item, whose entry this
  * listener forgets in {@code onDeleted}.
  * Acts whatever the switches say: with change control off no window is active (S-15).
+ *
+ * <p>Each handler logs what it could not do and never fails the item operation. A grant file that
+ * cannot be read is left out of the window cache (it confers nothing), so what still reaches these
+ * handlers' catch blocks is a {@code batch-control/grants/} directory that cannot be listed while
+ * the cache is being loaded.
  */
 @Extension(ordinal = -1000)
 @Restricted(NoExternalUse.class)

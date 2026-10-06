@@ -88,7 +88,10 @@ public interface Store {
      */
     void deleteRunRequestValues(String id);
 
-    /** Loads every stored run request, sorted by creation time. */
+    /**
+     * Loads every stored run request, sorted by creation time. A file that cannot be read (corrupt,
+     * or not readable at all) is left out with a warning, so one such file never breaks a listing.
+     */
     List<RunRequest> listRunRequests();
 
     /**
@@ -129,7 +132,11 @@ public interface Store {
     /** Loads a grant by id, or returns {@code null} if it does not exist. */
     Grant loadGrant(String id);
 
-    /** Loads every stored grant, sorted by id (creation order). */
+    /**
+     * Loads every stored grant, sorted by id (creation order). A file that cannot be read (corrupt,
+     * or not readable at all) is left out with a warning: that grant confers nothing, and the
+     * permission checks of everyone else keep working.
+     */
     List<Grant> listGrants();
 
     // ---------------------------------------------------------------- activation (#15, D-39)
