@@ -585,7 +585,9 @@ public final class GrantRequestService {
         }
         for (Grant grant : GrantService.get().claimExpiringNotifications(lead)) {
             GrantRequest request = store.loadGrantRequest(grant.getGrantRequestId());
-            NotificationDispatcher.grantExpiring(grant, request == null ? null : request.getReason());
+            // D-75 (1): the request gives the reason and the approved name, which the notice names
+            // instead of a followed name its holder cannot read.
+            NotificationDispatcher.grantExpiring(grant, request);
         }
     }
 

@@ -48,7 +48,9 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * permissions can move a window's name. S-39-02: no window or D-35c record is left on a name its
  * item no longer has: registration verifies the approved item is still at its name
  * ({@link #register}, D-71c (3)), and a window that cannot follow its item for certain ends instead
- * ({@link #followItem}).
+ * ({@link #followItem}). D-35c created-item records and, D-75 (2), the D-58a changed-under-grant
+ * lists follow in memory first and their write is retried; an entry at a name another item has just
+ * taken is dropped ({@link #relocateCreatedItem}, {@link #relocateChanged}).
  *
  * <p>D-74, a window's end is never lost: a window ends in memory first, so it confers nothing from
  * that moment, and its {@code GRANT_REVOKE} record is appended before its file is rewritten. If the
@@ -110,6 +112,14 @@ public final class GrantService {
     private final java.util.Map<String, List<String>> unsavedCreatedItems = new java.util.LinkedHashMap<>();
 
     /**
+     * D-58a, D-75 (2): changed-items lists ("changed under a grant") already in effect in the cache
+     * but not yet written to their grant file, by grant id; guarded by {@code this}. Handled exactly
+     * like {@link #unsavedCreatedItems}: written again before every grant write, by every item event
+     * and by the periodic work, and applied by every read of a grant file in this class.
+     */
+    private final java.util.Map<String, List<String>> unsavedChangedItems = new java.util.LinkedHashMap<>();
+
+    /**
      * S-39-02: the items whose deletion event has been handled ({@link #endWindowsOf}); guarded by
      * {@code this}. Core reports a deletion before it frees the name, so a window registered after
      * that event but before the name is free would otherwise still find its item at its name. Weak
@@ -141,6 +151,7 @@ public final class GrantService {
         // another home, in the same JVM); the GRANT_REVOKE records replace it (applyRecordedEnds).
         unsavedEnds.clear();
         unsavedCreatedItems.clear();
+        unsavedChangedItems.clear();
         deletedItems.clear();
         markedRuns.clear();
         markedRunsLoaded = false;
@@ -702,30 +713,34 @@ public final class GrantService {
 
     /**
      * D-58a: notes that {@code itemFullName} was changed under {@code grantId} (a save or creation
-     * by the holder while their permission came only from the grant), persisting the grant. A
-     * store failure is logged; it never fails the save.
+     * by the holder while their permission came only from the grant), persisting the grant. The mark
+     * is in effect in memory at once and a failed write is retried ({@link #rewriteChangedItems});
+     * it never fails the save.
      */
     public synchronized void markChanged(String grantId, String itemFullName) {
         if (grantId == null || itemFullName == null || itemFullName.isEmpty()) {
             return;
         }
-        for (Grant cached : grants()) {
-            if (cached.getId().equals(grantId) && cached.hasChanged(itemFullName)) {
-                return; // already marked
-            }
-        }
         try {
-            Grant grant = load(grantId);
-            if (grant == null) {
-                return;
+            Grant cached = null;
+            for (Grant grant : grants()) {
+                if (grant.getId().equals(grantId)) {
+                    cached = grant;
+                    break;
+                }
             }
-            List<String> items = grant.getChangedItems();
-            if (!items.contains(itemFullName)) {
-                items.add(itemFullName);
+            if (cached == null) {
+                cached = load(grantId);
             }
-            grant.setChangedItems(items);
-            save(grant);
-            replaceInCache(grant);
+            if (cached == null || cached.hasChanged(itemFullName)) {
+                return; // no such grant, or already marked
+            }
+            rewriteChangedItems(cached, items -> {
+                if (!items.contains(itemFullName)) {
+                    items.add(itemFullName);
+                }
+                return items;
+            }, "'" + itemFullName + "' marked as changed under it");
         } catch (RuntimeException e) {
             // S-28-06: a lost mark would let the item go unguarded once the window ends.
             LOGGER.log(java.util.logging.Level.SEVERE, "Could not mark '" + itemFullName
@@ -857,8 +872,22 @@ public final class GrantService {
      * but is not under its new name, is marked as changed under that grant, so it stays guarded. A
      * window naming the item or an item below it follows it (D-74, {@link #followItem}), so it
      * keeps covering the item and marks nothing.
+     *
+     * <p>D-75 (2), as for created-item records ({@link #relocateCreatedItem}): an entry already naming
+     * {@code newFullName} (in any letter case) or an item below it, other than the moved item's own
+     * entries, cannot be about the moved item, which only now took that name; it is dropped first, so
+     * the moved item does not inherit another item's state. The entries change in the cache first and
+     * their write is retried ({@link #rewriteChangedItems}).
      */
     public synchronized void relocateChanged(String oldFullName, String newFullName) {
+        if (oldFullName == null || oldFullName.isEmpty() || newFullName == null || newFullName.isEmpty()
+                || oldFullName.equals(newFullName)) {
+            return;
+        }
+        rewriteChangedWhere(name -> (sameName(name, newFullName) || startsWithFolder(name, newFullName))
+                        && !name.equals(oldFullName) && !name.startsWith(oldFullName + "/"),
+                name -> null, "dropped stale changed-under-grant entries at or below '" + newFullName
+                        + "', a name another item has just taken");
         Instant now = BatchClock.now();
         List<String> carriers = new ArrayList<>();
         for (Grant grant : grants()) {
@@ -889,45 +918,85 @@ public final class GrantService {
 
     /**
      * Replaces (or removes, with a {@code null} replacement) {@code fullName}, and with
-     * {@code descendants} what is below it, in the changed-items list of every grant.
+     * {@code descendants} what is below it, in the changed-items list of every grant, active or
+     * ended ({@link #rewriteChangedItems}).
      */
     private void rewriteChanged(String fullName, @CheckForNull String replacement, boolean descendants) {
         if (fullName == null || fullName.isEmpty()) {
             return;
         }
+        rewriteChangedWhere(item -> item.equals(fullName) || (descendants && item.startsWith(fullName + "/")),
+                item -> replacement == null ? null : replacement + item.substring(fullName.length()),
+                replacement == null ? "dropped the changed-under-grant state of '" + fullName + "'"
+                        : "the changed-under-grant state follows '" + fullName + "' to '" + replacement + "'");
+    }
+
+    /**
+     * In the changed-items list of every grant (active or ended: the state outlives the window,
+     * D-58a), replaces each entry {@code affected} accepts with what {@code replacement} makes of it,
+     * or drops it when that is {@code null} ({@link #rewriteChangedItems}).
+     */
+    private synchronized void rewriteChangedWhere(Predicate<String> affected,
+                                                  java.util.function.UnaryOperator<String> replacement, String what) {
         for (Grant cached : new ArrayList<>(grants())) {
-            boolean affected = false;
-            for (String item : cached.getChangedItems()) {
-                if (item.equals(fullName) || (descendants && item.startsWith(fullName + "/"))) {
-                    affected = true;
-                    break;
-                }
-            }
-            if (!affected) {
+            if (cached.getChangedItems().stream().noneMatch(affected)) {
                 continue;
             }
-            try {
-                Grant grant = load(cached.getId());
-                if (grant == null) {
-                    continue;
-                }
+            rewriteChangedItems(cached, items -> {
                 java.util.LinkedHashSet<String> updated = new java.util.LinkedHashSet<>();
-                for (String item : grant.getChangedItems()) {
-                    boolean match = item.equals(fullName) || (descendants && item.startsWith(fullName + "/"));
-                    if (!match) {
-                        updated.add(item);
-                    } else if (replacement != null) {
-                        updated.add(replacement + item.substring(fullName.length()));
+                for (String item : items) {
+                    String target = affected.test(item) ? replacement.apply(item) : item;
+                    if (target != null) {
+                        updated.add(target);
                     }
                 }
-                grant.setChangedItems(new ArrayList<>(updated));
-                save(grant);
-                replaceInCache(grant);
-            } catch (RuntimeException e) {
-                LOGGER.log(java.util.logging.Level.WARNING, "Could not update the changed-under-grant state of '"
-                        + fullName + "' in grant " + cached.getId(), e);
-            }
+                return new ArrayList<>(updated);
+            }, what);
         }
+    }
+
+    /**
+     * D-58a, D-75 (2): changes the changed-items list of {@code cached}'s grant to what {@code update}
+     * makes of it, exactly as {@link #rewriteCreatedItems} does for created-item records: in the cache
+     * first, so the guard follows the change at once, then in the grant file. A write that fails is
+     * kept in {@link #unsavedChangedItems} and written again before every later grant write, by every
+     * item event and by the periodic work ({@link #retryUnsavedWrites}); every read of the file in this
+     * class applies it meanwhile, so no other write puts the old list back. A grant file that cannot
+     * be read is changed from its copy in memory; a grant without a file only in memory.
+     */
+    private synchronized void rewriteChangedItems(Grant cached, java.util.function.UnaryOperator<List<String>> update,
+                                                  String what) {
+        Grant grant;
+        try {
+            grant = load(cached.getId());
+            if (grant == null) {
+                cached.setChangedItems(update.apply(cached.getChangedItems())); // nothing on disk to write
+                return;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not read grant " + cached.getId()
+                    + "; changing its changed-under-grant state from its copy in memory", e);
+            grant = cached;
+        }
+        List<String> updated = update.apply(grant.getChangedItems());
+        grant.setChangedItems(updated);
+        replaceInCache(grant);
+        Grant changed = grant;
+        try {
+            save(changed);
+            LOGGER.fine(() -> "Grant " + changed.getId() + ": " + what);
+        } catch (RuntimeException e) {
+            unsavedChangedItems.put(changed.getId(), new ArrayList<>(updated));
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not save grant " + changed.getId() + " (" + what
+                    + "); the change is in effect, and it is written again before every grant write and by the"
+                    + " periodic work until that succeeds", e);
+        }
+    }
+
+    /** Whether {@code name} lies below the item {@code folder}, compared as Jenkins looks names up (any letter case). */
+    private static boolean startsWithFolder(String name, String folder) {
+        return name.length() > folder.length() + 1 && name.charAt(folder.length()) == '/'
+                && name.regionMatches(true, 0, folder, 0, folder.length());
     }
 
     /** Every grant that is active right now (not expired, not revoked). */
@@ -1502,39 +1571,55 @@ public final class GrantService {
     // ---------------------------------------------------------------- D-74 writes not yet done
 
     /**
-     * D-74: writes the ends (and, S-39-02, the created-item records) that could not be written so
-     * far (called by the periodic work; every grant write and every item event does the same first).
+     * D-74: writes the ends (and, S-39-02, the created-item records, and, D-75 (2), the changed-item
+     * lists) that could not be written so far (called by the periodic work; every grant write and
+     * every item event does the same first).
      */
     public synchronized void flushUnsavedEnds() {
         retryUnsavedWrites();
     }
 
     /**
-     * Writes every end in {@link #unsavedEnds} and every created-items list in
-     * {@link #unsavedCreatedItems} into its grant file, reading the file first so that nothing else
-     * in it is lost. One that still fails stays for the next attempt; a window whose file is gone is
-     * dropped (it confers nothing).
+     * Writes every end in {@link #unsavedEnds}, every created-items list in
+     * {@link #unsavedCreatedItems} and every changed-items list in {@link #unsavedChangedItems} into
+     * its grant file, reading the file first so that nothing else in it is lost. One that still fails
+     * stays for the next attempt; a window whose file is gone is dropped (it confers nothing).
      */
     private synchronized void retryUnsavedWrites() {
-        if (unsavedEnds.isEmpty() && unsavedCreatedItems.isEmpty()) {
+        retryUnsavedWrites(null);
+    }
+
+    /**
+     * As {@link #retryUnsavedWrites()}, leaving out the grant {@code skip}: {@link #save} is about to
+     * write that one from a copy that already carries its pending changes and possibly newer ones, and
+     * putting the file's copy with only the pending changes into the cache would undo those (an end,
+     * or a list change made since the last failed write).
+     */
+    private synchronized void retryUnsavedWrites(@CheckForNull String skip) {
+        if (unsavedEnds.isEmpty() && unsavedCreatedItems.isEmpty() && unsavedChangedItems.isEmpty()) {
             return;
         }
         java.util.Set<String> ids = new java.util.LinkedHashSet<>(unsavedEnds.keySet());
         ids.addAll(unsavedCreatedItems.keySet());
+        ids.addAll(unsavedChangedItems.keySet());
+        if (skip != null) {
+            ids.remove(skip);
+        }
         for (String id : ids) {
             try {
                 Grant stored = store.loadGrant(id);
                 if (stored != null) {
                     boolean ended = stored.getRevokedAt() == null && unsavedEnds.containsKey(id);
-                    List<String> created = unsavedCreatedItems.get(id);
+                    boolean listed = unsavedCreatedItems.containsKey(id) || unsavedChangedItems.containsKey(id);
                     applyUnsaved(stored);
-                    if (ended || created != null) {
+                    if (ended || listed) {
                         store.saveGrant(stored);
                     }
                     replaceInCache(stored);
                 }
                 unsavedEnds.remove(id);
                 unsavedCreatedItems.remove(id);
+                unsavedChangedItems.remove(id);
                 LOGGER.info(() -> stored == null ? "Grant " + id + " has no file any more; its pending changes are dropped"
                         : "The pending changes of grant " + id + " are now written");
             } catch (RuntimeException e) {
@@ -1546,9 +1631,9 @@ public final class GrantService {
 
     /**
      * The stored grant {@code id}, or {@code null}; if its end (or a change of its created-item
-     * records) is not written yet, the copy read gets it as in memory, so a write of anything else in
-     * it also writes that and never re-opens the window or restores an old record. Every read of a
-     * grant file in this class goes through here.
+     * records or of its changed-item list) is not written yet, the copy read gets it as in memory, so
+     * a write of anything else in it also writes that and never re-opens the window or restores an
+     * old record. Every read of a grant file in this class goes through here.
      */
     @CheckForNull
     private synchronized Grant load(String id) {
@@ -1568,21 +1653,27 @@ public final class GrantService {
         if (created != null) {
             grant.setCreatedItems(created);
         }
+        List<String> changed = unsavedChangedItems.get(grant.getId());
+        if (changed != null) {
+            grant.setChangedItems(changed);
+        }
     }
 
     /**
      * Writes {@code grant} (the only grant write in this class), after the writes not done yet. Every
      * grant written here was read through {@link #load} or taken from the cache, so it carries its
-     * pending changes; once written it leaves {@link #unsavedEnds} (when ended) and
-     * {@link #unsavedCreatedItems}.
+     * pending changes; once written it leaves {@link #unsavedEnds} (when ended),
+     * {@link #unsavedCreatedItems} and {@link #unsavedChangedItems}. The other grants' pending writes
+     * are retried first; this grant's own are not, since writing {@code grant} writes them.
      */
     private synchronized void save(Grant grant) {
-        retryUnsavedWrites();
+        retryUnsavedWrites(grant.getId());
         store.saveGrant(grant);
         if (grant.getRevokedAt() != null) {
             unsavedEnds.remove(grant.getId());
         }
         unsavedCreatedItems.remove(grant.getId());
+        unsavedChangedItems.remove(grant.getId());
     }
 
     /**

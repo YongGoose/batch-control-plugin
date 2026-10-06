@@ -812,6 +812,13 @@ public final class FileStore implements Store {
      * it reads every line since {@code since} (and the lines inside the append-order slack before
      * it), keeping only the matching records, which are few. It is truncated only when the bytes of
      * skipped out-of-period lines exceed the page query's byte budget. No diff is attached.
+     *
+     * <p>D-75 (2): it is truncated too when a line it read could not be parsed (a torn or damaged
+     * line) or was too long to read: such a line may be a {@code GRANT_REVOKE} record of one of the
+     * windows, so their ends cannot be ruled out, and the caller ends them (fail-closed). Its position
+     * tells that it was appended within the part of the log read back. Logged once per read. A
+     * complete line of another record type, also one this version does not know, is not such a
+     * record and does not count.
      */
     @Override
     public RecordPage<ChangeRecord> grantRevokeRecordsSince(Instant since, Set<String> grantIds) {
@@ -819,11 +826,37 @@ public final class FileStore implements Store {
         Set<String> ids = Set.copyOf(grantIds);
         Comparator<ChangeRecord> newestFirst = Comparator.comparing(ChangeRecord::getAt)
                 .thenComparing(ChangeRecord::getId).reversed();
-        return page(changesDir(), listMonthsSince(changesDir(), monthOf(since).minusMonths(1)), new Period(since, null),
-                K_AT, line -> line.optLong(K_AT), FileStore::changeRecordFromScanner, FileStore::changeRecordFromJson,
-                ChangeRecord::getAt,
+        RecordPage<ChangeRecord> page = page(changesDir(), listMonthsSince(changesDir(), monthOf(since).minusMonths(1)),
+                new Period(since, null), K_AT, line -> line.optLong(K_AT), FileStore::changeRecordFromScanner,
+                FileStore::changeRecordOrOtherType, ChangeRecord::getAt,
                 r -> r.getType() == ChangeType.GRANT_REVOKE && r.getGrantId() != null && ids.contains(r.getGrantId()),
                 newestFirst, 0, Integer.MAX_VALUE, Integer.MAX_VALUE);
+        int unread = page.getUnreadable() + page.getOversized();
+        if (unread == 0 || page.isTruncated()) {
+            return page;
+        }
+        LOGGER.warning(() -> unread + " change record line(s) appended since " + since + " could not be read (torn,"
+                + " damaged or too long); any of them may end a permission window, so the read of the window ends"
+                + " is incomplete");
+        return page.asTruncated();
+    }
+
+    /**
+     * {@link #changeRecordFromJson}, except that a complete line whose {@code type} names another
+     * record type than {@code GRANT_REVOKE} (also one this version does not know) gives {@code null}
+     * instead of failing: it cannot be a window's end ({@link #grantRevokeRecordsSince}).
+     */
+    @CheckForNull
+    private static ChangeRecord changeRecordOrOtherType(JSONObject json) {
+        try {
+            return changeRecordFromJson(json);
+        } catch (RuntimeException e) {
+            Object type = json.opt("type");
+            if (type instanceof String name && !ChangeType.GRANT_REVOKE.name().equals(name)) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     /** The months of the bucket files in {@code dir} from {@code first} on. */
@@ -1632,7 +1665,7 @@ public final class FileStore implements Store {
         List<T> items = from >= sorted.size()
                 ? new ArrayList<>()
                 : new ArrayList<>(sorted.subList(from, Math.min(from + size, sorted.size())));
-        return new RecordPage<>(items, from, matched, truncated, oversized);
+        return new RecordPage<>(items, from, matched, truncated, oversized, unreadable);
     }
 
     // ---------------------------------------------------------------- JSON codecs

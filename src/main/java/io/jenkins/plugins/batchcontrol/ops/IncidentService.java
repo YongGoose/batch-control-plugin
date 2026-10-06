@@ -17,6 +17,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Ids;
 import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
+import io.jenkins.plugins.batchcontrol.store.PathCodec;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.io.IOException;
@@ -28,7 +29,6 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -53,9 +53,6 @@ public final class IncidentService {
 
     /** SPEC item 11: the console excerpt keeps at most the last 100 lines. */
     private static final int LOG_TAIL_LINES = 100;
-
-    /** Shape of an incident id ({@link Ids#newId}, generously) checked before any lookup (D-72a). */
-    private static final Pattern INCIDENT_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
 
     private static final IncidentService INSTANCE = new IncidentService();
 
@@ -241,7 +238,8 @@ public final class IncidentService {
      * linked to, when an incident rerun fell back to that form and the form carried the incident
      * id back. Returns the stored incident's id only when all of these hold, else {@code null}:
      * <ul>
-     *   <li>{@code incidentId} has the shape of an incident id and the incident exists;</li>
+     *   <li>{@code incidentId} has the shape of a store identifier ({@link PathCodec#isId}) and the
+     *       incident exists;</li>
      *   <li>it belongs to {@code job} (by full name);</li>
      *   <li>the current user holds {@code BatchControl/ViewHistory} (the Incidents screen, where
      *       the rerun button is) and may request a run of {@code job} ({@code BatchControl/Request}
@@ -254,7 +252,11 @@ public final class IncidentService {
      */
     @CheckForNull
     public String linkableIncident(@CheckForNull String incidentId, @CheckForNull Job<?, ?> job) {
-        if (incidentId == null || job == null || !INCIDENT_ID.matcher(incidentId).matches()) {
+        // D-72a: the shape is checked before any lookup, with the store's own identifier rule
+        // (PathCodec.isId: letters, digits and '-' only), so a form value can only ever name an
+        // incident file, never another file of the directory through a '.' (defence in depth: the
+        // store checks the same rule again before it builds the path).
+        if (incidentId == null || job == null || !PathCodec.isId(incidentId)) {
             return null;
         }
         try {
