@@ -165,13 +165,9 @@ public final class SectionAccess {
         if (requestId == null || requestId.isEmpty() || !isRequests()) {
             return false;
         }
-        RunRequest request;
-        try {
-            request = RunRequestService.get().load(requestId);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-        return request != null && Visibility.canSeeRunRequest(request);
+        // The same lookup as the detail URL (S-39-01), so a link is rendered iff its page resolves.
+        return RecordLookup.find(requestId, "run request", i -> RunRequestService.get().load(i),
+                RunRequest::getId, Visibility::canSeeRunRequest) != null;
     }
 
     /**
@@ -182,12 +178,8 @@ public final class SectionAccess {
         if (grantRequestId == null || grantRequestId.isEmpty() || !isGrants()) {
             return false;
         }
-        GrantRequest request;
-        try {
-            request = GrantRequestService.get().load(grantRequestId);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-        return request != null && Visibility.canSeeGrantRequest(request);
+        // The same lookup as the detail URL (S-39-01), so a link is rendered iff its page resolves.
+        return RecordLookup.find(grantRequestId, "grant request", i -> GrantRequestService.get().load(i),
+                GrantRequest::getId, Visibility::canSeeGrantRequest) != null;
     }
 }

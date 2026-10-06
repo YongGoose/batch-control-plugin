@@ -11,6 +11,7 @@ import io.jenkins.plugins.batchcontrol.ui.Dates;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
+import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -77,23 +78,15 @@ public class RequestsSection implements ModelObject, StaplerProxy {
     /**
      * Stapler: serves {@code /batch-control/requests/<id>/}; {@code null} renders a 404.
      * A request the caller may not see (P-09, S-01) renders exactly like a nonexistent one so
-     * its existence is not disclosed.
+     * its existence is not disclosed, and so does every failed lookup (S-39-01, {@link RecordLookup}):
+     * a malformed id such as {@code <id>.VALUES} never reaches the store, and an unreadable record
+     * answers 404, not 500.
      */
     @CheckForNull
     public RequestItem getDynamic(String id) {
-        if (id == null || id.isEmpty()) {
-            return null;
-        }
-        RunRequest request;
-        try {
-            request = RunRequestService.get().load(id);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-        if (request == null || !Visibility.canSeeRunRequest(request)) {
-            return null;
-        }
-        return new RequestItem(request);
+        RunRequest request = RecordLookup.find(id, "run request", i -> RunRequestService.get().load(i),
+                RunRequest::getId, Visibility::canSeeRunRequest);
+        return request == null ? null : new RequestItem(request);
     }
 
     // ------------------------------------------- the three lists (D-66, used from Jelly)

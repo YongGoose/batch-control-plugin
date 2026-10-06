@@ -28,6 +28,7 @@ import io.jenkins.plugins.batchcontrol.ui.KindIcon;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import io.jenkins.plugins.batchcontrol.ui.HttpVerbs;
 import io.jenkins.plugins.batchcontrol.ui.Paging;
+import io.jenkins.plugins.batchcontrol.ui.RecordLookup;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
@@ -183,23 +184,14 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /**
      * Stapler: serves {@code /batch-control/grants/<id>/}; {@code null} renders a 404.
      * A grant request the caller may not see (P-09, S-01) renders exactly like a nonexistent
-     * one so its existence is not disclosed.
+     * one so its existence is not disclosed, and so does every failed lookup (S-39-01,
+     * {@link RecordLookup}).
      */
     @CheckForNull
     public GrantRequestItem getDynamic(String id) {
-        if (id == null || id.isEmpty()) {
-            return null;
-        }
-        GrantRequest request;
-        try {
-            request = GrantRequestService.get().load(id);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-        if (request == null || !Visibility.canSeeGrantRequest(request)) {
-            return null;
-        }
-        return new GrantRequestItem(request);
+        GrantRequest request = RecordLookup.find(id, "grant request", i -> GrantRequestService.get().load(i),
+                GrantRequest::getId, Visibility::canSeeGrantRequest);
+        return request == null ? null : new GrantRequestItem(request);
     }
 
     /** Stapler: serves {@code /batch-control/grants/active/...} (revoke endpoints). */

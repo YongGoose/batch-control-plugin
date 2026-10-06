@@ -54,7 +54,10 @@ public class FolderCreateWindowAction implements Action {
         return null;
     }
 
-    /** The viewer's active Create windows that cover new items in this folder (bound to it, D-71a). */
+    /**
+     * The viewer's active Create windows that cover new items in this folder: those naming its
+     * current full name (a window follows its folder through a rename or move, D-74 (3)).
+     */
     public List<Grant> getWindows() {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()
                 || !folder.hasPermission(Item.READ)) {
@@ -64,9 +67,10 @@ public class FolderCreateWindowAction implements Action {
         if (ACL.isAnonymous2(me)) {
             return List.of();
         }
-        // CREATE is checked on the folder's own ACL, so the folder itself is the lookup key. D-71a:
-        // only windows bound to this very folder are listed; one whose folder was renamed, moved or
-        // deleted (and anything now at its old name) confers nothing here and is not shown.
+        // CREATE is checked on the folder's own ACL, so the folder itself is the lookup key: the
+        // windows naming its current full name. D-74 (3): when the folder (or a folder above it) is
+        // renamed or moved, its windows follow it to the new name and are still listed here;
+        // deleting the folder ends them.
         return GrantService.get().findActiveGrants(me.getName(), folder, GrantAction.CREATE);
     }
 
