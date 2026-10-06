@@ -558,11 +558,27 @@ public final class GrantRequestService {
      * pending timeout falls within {@code notifyBeforeExpiryMinutes}, and
      * {@link NotificationEvent#GRANT_EXPIRING} once for every active window ending within it. The
      * "notified" flags are persisted before dispatch, so a restart never resends.
+     *
+     * <p>One request or window that cannot be read or written never keeps the others from their
+     * notice: the pending requests and the windows are handled apart, each request and each window
+     * on its own, and a failure is logged.
      */
     public void notifyExpiring() {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
                 BatchControlGlobalConfiguration.get().getNotifyBeforeExpiryMinutes());
+        try {
+            notifyPendingExpiring(now, lead);
+        } catch (RuntimeException e) {
+            // Listing the pending requests failed; the windows below are told all the same.
+            LOGGER.log(java.util.logging.Level.WARNING,
+                    "Could not send the EXPIRING notifications of pending change requests", e);
+        }
+        notifyWindowsExpiring(lead);
+    }
+
+    /** EXPIRING for the PENDING requests close to their timeout; a request that fails is tried next run. */
+    private void notifyPendingExpiring(Instant now, Duration lead) {
         for (GrantRequest snapshot : store.listOpenGrantRequests()) {
             if (snapshot.getStatus() != RequestStatus.PENDING || snapshot.isExpiringNotified()) {
                 continue;
@@ -580,6 +596,10 @@ public final class GrantRequestService {
                         notified = request;
                     }
                 }
+            } catch (RuntimeException e) {
+                // Not marked (the flag is only ever stored before the dispatch), so the next run tries again.
+                LOGGER.log(java.util.logging.Level.WARNING, "Could not send the EXPIRING notification of change request "
+                        + snapshot.getId() + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
@@ -587,8 +607,22 @@ public final class GrantRequestService {
                 NotificationDispatcher.grant(NotificationEvent.EXPIRING, notified);
             }
         }
+    }
+
+    /** GRANT_EXPIRING for the active windows close to their end, each window on its own. */
+    private void notifyWindowsExpiring(Duration lead) {
         for (Grant grant : GrantService.get().claimExpiringNotifications(lead)) {
-            GrantRequest request = store.loadGrantRequest(grant.getGrantRequestId());
+            GrantRequest request;
+            try {
+                request = store.loadGrantRequest(grant.getGrantRequestId());
+            } catch (RuntimeException e) {
+                // LIMITATIONS 11: the change request's file is there but cannot be read, so no expiry
+                // notice is sent for this window (its approved name is unknown); its claim stands, so
+                // it is not retried. The windows after it are still told.
+                LOGGER.log(java.util.logging.Level.WARNING, "The change request of grant " + grant.getId()
+                        + " cannot be read; the GRANT_EXPIRING notification of its window is not sent", e);
+                continue;
+            }
             // D-75 (1): the request gives the reason and the approved name, which the notice names
             // instead of a followed name its holder cannot read.
             NotificationDispatcher.grantExpiring(grant, request);

@@ -599,7 +599,11 @@ public final class ActivationService {
         }
     }
 
-    /** D-36: sends {@link NotificationEvent#EXPIRING} once per PENDING request close to its timeout. */
+    /**
+     * D-36: sends {@link NotificationEvent#EXPIRING} once per PENDING request close to its timeout.
+     * Each request is handled on its own: one that cannot be read or written is logged and tried
+     * again on the next run, and never keeps the others from their notice.
+     */
     public void notifyExpiring() {
         Instant now = BatchClock.now();
         Duration lead = Duration.ofMinutes(
@@ -621,6 +625,10 @@ public final class ActivationService {
                         notified = request;
                     }
                 }
+            } catch (RuntimeException e) {
+                // Not marked (the flag is only ever stored before the dispatch), so the next run tries again.
+                LOGGER.log(Level.WARNING, "Could not send the EXPIRING notification of activation request "
+                        + snapshot.getId() + "; it is tried again on the next run", e);
             } finally {
                 lock.unlock();
             }
