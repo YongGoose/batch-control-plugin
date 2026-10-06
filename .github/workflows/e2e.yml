@@ -140,6 +140,7 @@ jobs:
           pattern: e2e-shard-*
           path: e2e/ci/out/
       - name: Install the Python packages
+        id: pip
         run: pip install -r e2e/ci/requirements.txt
       - name: Fetch the JaCoCo CLI
         run: e2e/ci/fetch-jacoco.sh
@@ -175,9 +176,24 @@ jobs:
           path: e2e/ci/out/coverage/
           if-no-files-found: warn
           retention-days: 14
-      # Self-test of the crawl's content checks (no Jenkins, about 10 s). Last, so that a
-      # failure here does not cost the coverage report.
+      # Self-test of the crawl's content checks (e2e/README.md, "Content checks in the crawl"):
+      # the real CONTENT_JS and content_checks() of e2e/r14/crawl.py on two synthetic pages in
+      # headless Chromium, no Jenkins, about 10 s. Last, so that a failure here does not cost the
+      # coverage report; and it runs whatever the JaCoCo and coverage steps did (also when there
+      # is no base commit), needing only the Python packages. Exit 1 = a page did not give exactly
+      # the expected findings; its PASS/FAIL lines go to the job summary.
       - name: Self-test of the content checks
+        if: ${{ !cancelled() && steps.pip.outcome == 'success' }}
+        shell: bash
+        env:
+          BC_BROWSER_CHANNEL: chromium
         run: |
           python -m playwright install --with-deps chromium
-          python e2e/ci/selftest_content.py
+          {
+            echo '### Self-test of the content checks'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          python e2e/ci/selftest_content.py 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
