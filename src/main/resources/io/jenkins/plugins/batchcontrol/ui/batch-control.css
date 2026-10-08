@@ -4,7 +4,8 @@
  * caches it: <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>.
  */
 
-/* Backlog #89: a short table cell (or a header row) that does not wrap at 1280 px. */
+/* Backlog #89: a short table cell, a header row, or one part of a cell (the kind or the name in
+   tags/scopeItem.jelly) that does not wrap at 1280 px. */
 .batch-control-nowrap {
   white-space: nowrap;
 }
@@ -17,7 +18,7 @@
 
 /*
  * D-75 (1) (tags/scopeItem.jelly): the note after the approved name of a moved window. It may wrap
- * inside a short (nowrap) table cell, so the list does not widen for it.
+ * even inside a nowrap cell, so the list does not widen for it.
  */
 .batch-control-scope-note {
   white-space: normal;
