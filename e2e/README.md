@@ -557,6 +557,9 @@ starts with the D-31/D-34 lock and not activated), a username/password credentia
   masking; the self-grant guard's 403 (config.xml and matrix-auth's real form).
 - `restart.py` (a step of the `last` unit `r16-durable`: restarts Jenkins): a pending and a queued approved request with
   a core file and a password survive a restart; the queued one runs exactly once with its own bytes and secret.
+- `naming.py` (G-27, step `role-naming` of the `role` unit): applies `casc/profile-role-naming-window.yaml` and
+  role-strategy's `RoleBasedProjectNamingStrategy`; a CREATE window (with and without a name restriction) does not get
+  past the naming strategy, and the restriction still refuses and records; restores `profile-role.yaml` at its end.
 
 ## e2e-17 driver (`r17/`)
 

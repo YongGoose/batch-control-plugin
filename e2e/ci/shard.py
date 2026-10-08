@@ -182,15 +182,17 @@ UNITS = [
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
              "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
-    Unit("role", 7.2, [
+    Unit("role", 7.7, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
         ("role-assign", py("r14/role/assign_roles.py")),
         ("role-overlay", py("r14/role/grant_overlay.py")),
         ("role-endpoints", py("r14/role/endpoints.py")),
+        ("role-naming", py("r19/naming.py")),  # e2e-19 G-27; re-applies profile-role.yaml at its end
         ("flag-role-crawl", flag("true", *ROLE_CRAWL)),
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
-        last=True, doc="e2e-13/14 RS: role-strategy 927 profile, then a crawl under it (replaces the strategy: last)"),
+        last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
+            "window), then a crawl under it (replaces the strategy: last)"),
     Unit("r16-durable", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
                               ("r19-arrange", py("r19/arrange.py")), ("r19-restart", py("r19/restart.py"))],
          last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); e2e-19: pending and "
