@@ -92,8 +92,9 @@ re-enables the plugin's monitors.
 `ci/shard.py units` lists the units with their steps. A unit is a group of driver invocations that must run in order on
 one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account in between).
 Units are assigned with a deterministic longest-processing-time split over the measured minutes, so the same N always
-gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins) and `r17-disk`
-(reloads and restarts Jenkins) are `last` units: each runs last in its shard, and never two in one shard.
+gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins; e2e-19 added
+`r19/restart.py` to it rather than a fifth `last` unit, which would need N >= 5), `r17-disk` (reloads and restarts
+Jenkins) and `r18-final` (switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
 
 Measured 2026-10-06 (e2e-17: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards and one
 supplementary run at a time on one machine; the image was cached, so no build time is included). Every shard: about
@@ -524,6 +525,38 @@ that fail once when armed), and ends with the fixture preconditions above. Drive
 
 Against any running stack: `BC_BASE=http://localhost:<port>/jenkins BC_BROWSER_CHANNEL=chromium python r16/arrange.py`,
 then the drivers (the setup of `ci/shard.py` must have run on that Jenkins for the seeded accounts and jobs).
+
+## e2e-19 driver (`r19/`)
+
+Gap audit (2026-10-08, docs/reports/e2e-19.md): SPEC acceptance lines that no CI step checked before. `r19/lib.py` loads
+`r16/lib.py` (screenshots in `screenshots/run-19/`, rows in `r19/out/<driver>.jsonl`, the same PASS/FAIL/NOTE lines) and
+adds the CLI (inside the Jenkins container), the mailpit sink (`BC_MAIL_PORT`), queue and change-record helpers.
+`arrange.py` (idempotent, ends with its fixture check) creates the `r19-*` jobs (every one under run control, so each
+starts with the D-31/D-34 lock and not activated), a username/password credential `r19-cred-id`, the lockable resource
+`r19-res`, a multi-configuration project `r19-mx` and an organization folder `r19-org`. Accounts are JCasC's.
+
+- `gate.py [BPARXM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
+  may request); REST `build`/`buildWithParameters`, the CLI `build`, the build token on core's endpoint and on
+  build-token-root, a Pipeline Replay and the rebuild plugin's Rebuild are refused, nothing is queued, the refusals are
+  recorded; an approved request runs exactly once with exactly its values, the build page names request, requester and
+  approver, the request links the build; a consumed approval marker presented again is MARKER_REUSE_BLOCKED (Changes,
+  `changes.csv`).
+- `plugins.py [NCLZHI]` (unit `r19-plugins`): naginator's retry of an approved run refused and recorded;
+  customize-build-now keeps Request Run; lockable-resources and authorize-project ("Run as Specific User" admin; the
+  project default authenticator is added and removed again) with an approved run; jobConfigHistory and the CLI
+  `update-job` each give exactly one CONFIGURE record.
+- `triggers.py [TU]` (unit `r19-triggers`, about 6 minutes: it waits for real cron ticks): blockTimer, the trigger-lock
+  notice, one TRIGGER_BLOCKED record per hour, clearing blockTimer is not activation, ACTIVATE and HOLD approved in the
+  browser; parameterized-trigger upstream with blockUpstream, the allow list and activation.
+- `lifecycle.py [VDCSEXBF]` (unit `r19-lifecycle`): form validation, the decision rules (non-designated approver, empty
+  rejection comment), approver change, cancel through the confirmation dialog, admin self-approval, approved-run expiry
+  (a queued approved run is not expired by design; the job is disabled to cancel its queue item), the disabled-job
+  decision form, the missing-Build notice, `requests.csv` formula prefix and columns, and the mails of each step.
+- `kinds.py [KMCRFT]` and `guard.py [XF]` (unit `r19-kinds`): kinds and windows of the matrix project and the
+  organization folder, credentials and run parameters through an approved run, the rerun of a deleted build, the log tail
+  masking; the self-grant guard's 403 (config.xml and matrix-auth's real form).
+- `restart.py` (a step of the `last` unit `r16-durable`: restarts Jenkins): a pending and a queued approved request with
+  a core file and a password survive a restart; the queued one runs exactly once with its own bytes and secret.
 
 ## e2e-17 driver (`r17/`)
 

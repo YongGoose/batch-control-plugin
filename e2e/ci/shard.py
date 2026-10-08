@@ -161,6 +161,27 @@ UNITS = [
                           ("r17-visibility", py("r17/s39.py", "H"))],
          doc="e2e-17: 404 for malformed and aliased record ids (S-39-01); a window follows two renames and the page shows "
              "the current name; delete + re-create ends it (S-39-02); followed name hidden from non-readers (D-75 (1), own step)"),
+    # e2e-19 (gap audit, docs/reports/e2e-19.md): SPEC acceptance lines no CI step checked before. r19/arrange.py is
+    # idempotent and self-contained (items r19-*, accounts from JCasC). Each driver exits non-zero and prints FAIL lines,
+    # and restores what it changes globally (executors, authorize-project's authenticator). Weights: minutes measured on
+    # the 2026-10-08 local runs (arrangement included).
+    Unit("r19-gate", 1.5, [("r19-arrange", py("r19/arrange.py")), ("r19-gate", py("r19/gate.py"))],
+         doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
+             "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
+             "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+    Unit("r19-plugins", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
+         doc="e2e-19: naginator retry refused and recorded, customize-build-now keeps Request Run, lockable-resources and "
+             "authorize-project with an approved run, jobConfigHistory one CONFIGURE record (SPEC 6 #34/#36, SPEC 9)"),
+    Unit("r19-triggers", 6.0, [("r19-arrange", py("r19/arrange.py")), ("r19-triggers", py("r19/triggers.py"))],
+         doc="e2e-19: a real cron schedule (blockTimer, TRIGGER_BLOCKED coalescing, activation, hold) and a real "
+             "parameterized-trigger upstream (blockUpstream, allow list) (SPEC 6, 6a)"),
+    Unit("r19-lifecycle", 2.5, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
+         doc="e2e-19: request form validation, decision and cancel rules, approver change, self-approval, approved-run "
+             "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12)"),
+    Unit("r19-kinds", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-kinds", py("r19/kinds.py")),
+                            ("r19-guard", py("r19/guard.py"))],
+         doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
+             "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
     Unit("role", 7.2, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
@@ -170,9 +191,11 @@ UNITS = [
         ("flag-role-crawl", flag("true", *ROLE_CRAWL)),
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
         last=True, doc="e2e-13/14 RS: role-strategy 927 profile, then a crawl under it (replaces the strategy: last)"),
-    Unit("r16-durable", 2.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py"))],
-         last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); restarts Jenkins, "
-                        "after which JCasC has reset the arrangement's permissions (last)"),
+    Unit("r16-durable", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
+                              ("r19-arrange", py("r19/arrange.py")), ("r19-restart", py("r19/restart.py"))],
+         last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); e2e-19: pending and "
+                        "queued approved requests with typed values survive a restart and run once with the exact values; "
+                        "restarts Jenkins, after which JCasC has reset the arrangement's permissions (last)"),
     Unit("r17-disk", 6.0, [("r17-arrange", py("r17/arrange.py")), ("r17-disk", py("r17/disk.py", "GFBU")),
                            ("r17-case", py("r17/disk.py", "C"))],
          last=True, doc="e2e-17: items removed on disk + reload (a rename onto the stale name: 'it could not follow its item'), "
