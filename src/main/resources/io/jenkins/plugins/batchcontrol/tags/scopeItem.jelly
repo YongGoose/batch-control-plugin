@@ -29,8 +29,10 @@
   <j:set var="bcItemNameHidden" value="${bcScope != null and bcScope.nameHidden}"/>
   <!-- Written on one line so that the element's text is exactly "<kind> <full name>": the icon is
        spaced by a margin, and the one separator is an expression. The note, when there is one, is
-       a sibling after it, after one space, so that text stays the same. -->
-  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}" class="batch-control-nowrap"><j:if test="${bcItemKind != null}"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span class="jenkins-!-text-color-secondary${bcItemIcon != null ? ' jenkins-!-margin-left-1' : ''}">${bcItemKind.displayName}</span><j:if test="${!bcItemNameHidden}">${' '}</j:if></j:if><j:if test="${!bcItemNameHidden}"><span>${bcItemName}</span></j:if></span>
+       a sibling after it, after one space, so that text stays the same. The kind (icon and label)
+       and the name are each kept whole; the line may break only at the space between them, unless
+       the cell around it does not wrap. -->
+  <span data-batch-control-item-kind="${bcItemKind == null ? null : bcItemKind.descriptorId}"><j:if test="${bcItemKind != null}"><span class="batch-control-nowrap"><j:if test="${bcItemIcon != null}"><l:icon src="${bcItemIcon}" class="icon-sm"/></j:if><span class="jenkins-!-text-color-secondary${bcItemIcon != null ? ' jenkins-!-margin-left-1' : ''}">${bcItemKind.displayName}</span></span><j:if test="${!bcItemNameHidden}">${' '}</j:if></j:if><j:if test="${!bcItemNameHidden}"><span class="batch-control-nowrap">${bcItemName}</span></j:if></span>
   <j:choose>
     <j:when test="${bcItemNameHidden}">
       <j:set var="bcScopeNote" value="${%hiddenNote}"/>
