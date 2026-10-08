@@ -9,8 +9,13 @@ import hudson.security.ACLContext;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
+import io.jenkins.plugins.batchcontrol.model.GrantRequest;
+import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
+import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
@@ -19,6 +24,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.htmlunit.Page;
@@ -42,13 +48,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Hosting review UI polish (68b0f80), automated evidence for checklist items that only had e2e
- * coverage. Matrix rows T-UI-50..52 (note 202):
+ * coverage. Matrix rows T-UI-50..52 (note 202) and T-UI-52b (note 286):
  * <ul>
  *   <li>Batch Control's administrative monitors and the approval-required refusal page
  *   (ApprovalRequiredFailure) render their alert text without a leading {@code <p>} (core's alert
  *   padding then holds);</li>
  *   <li>the Cancel (request detail), Revoke (active grants) and Revert (strategy uninstall)
- *   controls carry core's {@code jenkins-!-destructive-color} class.</li>
+ *   controls, and (T-UI-52b) the Reject control on pending run, permission window and activation
+ *   request pages, carry core's {@code jenkins-!-destructive-color} class.</li>
  * </ul>
  * Written from the coordinator's checklist and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
@@ -160,6 +167,60 @@ public class PolishMarkupTest {
         }
         assertNotNull(config, "the Revert control must be offered while a Batch Control strategy is installed");
         assertDestructive(config, "/revert", "Revert of the Batch Control strategy");
+    }
+
+    /**
+     * T-UI-52b: on the detail page of a pending run request, a pending permission window (grant)
+     * request and a pending activation request, the Reject control the designated approver a1 sees
+     * carries {@code jenkins-!-destructive-color}. Guards: the Reject control must be on each page
+     * (a missing control fails, it is not skipped), and the Approve control on the same page is
+     * present and does not carry the class (the colour marks the destructive decision only).
+     */
+    @Test
+    public void t_ui_52b_rejectControlsCarryDestructiveColor() throws Exception {
+        BatchControlMatrixAuthorizationStrategy s = StrategyFixtures.matrix(new BatchControlMatrixAuthorizationStrategy());
+        s.add(BatchControlPermissions.REQUEST, PermissionEntry.user("bob"));
+        s.add(Item.BUILD, PermissionEntry.user("bob")); // a run request needs Item/Build on this branch (D-38)
+        j.jenkins.setAuthorizationStrategy(s);
+        BatchControlGlobalConfiguration cfg = StrategyFixtures.changeControlOn(); // a1 the only approver
+        cfg.setRunControlEnabled(true);
+        cfg.save();
+        FreeStyleProject job = j.createFreeStyleProject("batch-x");
+        BatchControlFixtures.setBatchControl(job, new BatchControlJobProperty(true));
+        FreeStyleProject inactive = j.createFreeStyleProject("batch-y");
+        BatchControlFixtures.setBatchControl(inactive, new BatchControlJobProperty(true));
+
+        RunRequest run = StrategyFixtures.as("bob",
+                () -> RunRequestService.get().create(job, new LinkedHashMap<>(), "month-end run", "a1"));
+        GrantRequest grant = StrategyFixtures.as("bob", () -> GrantRequestService.get().create(
+                new GrantScope(GrantScope.Type.ITEM, "batch-x"), Arrays.asList(GrantAction.CONFIGURE),
+                StrategyFixtures.WINDOW_MINUTES, "maintenance for batch-x", "a1"));
+        ActivationRequest activation = StrategyFixtures.as("bob", () -> ActivationService.get().create(inactive,
+                ActivationRequest.Action.ACTIVATE, "bring batch-y into service", Collections.singletonList("a1")));
+        assertNotNull(run, "fixture: bob's run request");
+        assertNotNull(grant, "fixture: bob's grant request");
+        assertNotNull(activation, "fixture: bob's activation request");
+
+        String[][] pages = {
+            {"batch-control/requests/" + run.getId() + "/", "Reject on the pending run request"},
+            {"batch-control/grants/" + grant.getId() + "/", "Reject on the pending permission window request"},
+            {"batch-control/activations/" + activation.getId() + "/", "Reject on the pending activation request"},
+        };
+        List<String> failures = new ArrayList<>();
+        for (String[] p : pages) {
+            HtmlPage detail = page("a1", p[0]);
+            // guard: a1 is offered the decision at all, and Approve stays uncoloured
+            HtmlElement approve = control(detail, "/approve");
+            assertNotNull(approve, p[1] + ": premise: a1 is offered Approve on " + p[0] + ": " + excerpt(detail.asNormalizedText()));
+            assertFalse(approve.getAttribute("class").contains(DESTRUCTIVE),
+                    p[1] + ": Approve must not carry " + DESTRUCTIVE + ": " + excerpt(approve.asXml()));
+            try {
+                assertDestructive(detail, "/reject", p[1]);
+            } catch (AssertionError e) {
+                failures.add(e.getMessage());
+            }
+        }
+        assertTrue(failures.isEmpty(), failures.size() + " of 3 Reject controls fail:\n" + String.join("\n", failures));
     }
 
     // ---------------------------------------------------------------- helpers
