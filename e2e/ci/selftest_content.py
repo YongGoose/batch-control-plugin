@@ -69,33 +69,42 @@ EXPECTED_INFO = {"Comment", "Decided by"}
 EXPECTED_ENUM = {"defects": {"ITEM:", "GRANT_REVOKE", "PENDING", "FOLDER_ONLY"}, "clean": {"JOB_NAME"}}
 
 
+PAGES = {"defects": (DEFECTS, EXPECTED_DEFECTS, EXPECTED_INFO), "clean": (CLEAN, set(), {"Comment"})}
+
+
+def check_page(page, name):
+    """Runs the crawl's checks on the synthetic page `name` in `page`; returns (good, report lines). Used by main() and
+    by the pytest-playwright test ci/test_selftest_content.py."""
+    html, want, want_info = PAGES[name]
+    ns, rows = load()
+    page.set_content(html)
+    # the probe's <img src=x onerror> fires once the image load fails; wait for that, not for a fixed time
+    page.wait_for_function("() => [...document.images].every(i => i.complete)", timeout=5000)
+    ns["content_checks"](type("S", (), {"page": page})(), "/batch-control/requests/", "/batch-control/requests/")
+    got = {(r["check"], r["key"]) for r in rows if r["result"] == "DEFECT"}
+    info = {r["key"] for r in rows if r["check"] == "empty-optional"}
+    enums = {r["key"] for r in rows if r["check"] == "raw-enum"}
+    errors = [r for r in rows if r["result"] == "ERROR"]
+    good = got == want and info == want_info and enums == EXPECTED_ENUM[name] and not errors
+    lines = [f"{'PASS' if good else 'FAIL'} selftest {name}: {len(got)} defect finding(s), empty-optional {sorted(info)}, "
+             f"raw-enum {sorted(enums)}"]
+    lines += [f"   raw-enum mismatch: {x}" for x in sorted(EXPECTED_ENUM[name] ^ enums)]
+    lines += [f"   missed:     {x}" for x in sorted(want - got)]
+    lines += [f"   unexpected: {x}" for x in sorted(got - want)]
+    lines += [f"   error:      {r}" for r in errors]
+    return good, lines
+
+
 def main():
     channel = os.environ.get("BC_BROWSER_CHANNEL", "chromium")
     ok = True
     with sync_playwright() as pw:
         b = pw.chromium.launch(channel=None if channel in ("", "chromium") else channel)
-        for name, html, want, want_info in (("defects", DEFECTS, EXPECTED_DEFECTS, EXPECTED_INFO), ("clean", CLEAN, set(), {"Comment"})):
-            ns, rows = load()
+        for name in PAGES:
             page = b.new_page()
-            page.set_content(html)
-            page.wait_for_timeout(300)  # let the probe's <img onerror> fire
-            ns["content_checks"](type("S", (), {"page": page})(), "/batch-control/requests/", "/batch-control/requests/")
-            got = {(r["check"], r["key"]) for r in rows if r["result"] == "DEFECT"}
-            info = {r["key"] for r in rows if r["check"] == "empty-optional"}
-            enums = {r["key"] for r in rows if r["check"] == "raw-enum"}
-            errors = [r for r in rows if r["result"] == "ERROR"]
-            good = got == want and info == want_info and enums == EXPECTED_ENUM[name] and not errors
+            good, lines = check_page(page, name)
             ok &= good
-            print(f"{'PASS' if good else 'FAIL'} selftest {name}: {len(got)} defect finding(s), empty-optional {sorted(info)}, "
-                  f"raw-enum {sorted(enums)}")
-            for x in sorted(EXPECTED_ENUM[name] ^ enums):
-                print(f"   raw-enum mismatch: {x}")
-            for x in sorted(want - got):
-                print(f"   missed:     {x}")
-            for x in sorted(got - want):
-                print(f"   unexpected: {x}")
-            for r in errors:
-                print(f"   error:      {r}")
+            print("\n".join(lines))
             page.close()
         b.close()
     sys.exit(0 if ok else 1)
