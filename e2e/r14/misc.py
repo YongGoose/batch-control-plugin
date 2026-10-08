@@ -10,7 +10,7 @@ M job page "Mark as reviewed" (JobRequestAction) and Request again on the grants
 K dark theme render of every Batch Control page
 Rows: out/misc.jsonl."""
 import json, re, sys, time
-from lib import Session, close, api, groovy, BASE, clean, pw
+from lib import opened, gone, Session, close, api, groovy, BASE, clean, pw
 import lib
 
 WANT = sys.argv[1] if len(sys.argv) > 1 else "CHPBTRSMK"
@@ -388,11 +388,11 @@ def sec_S():
     row["mark_reviewed_links"] = mr.count()
     if mr.count():
         item = re.search(r"item=([^&]+)", mr.first.get_attribute("data-url")).group(1)
-        mr.first.click(); s.page.wait_for_timeout(700)
-        s.page.locator("dialog[open] button[data-id=cancel]").click(); s.page.wait_for_timeout(500)
+        mr.first.click(); opened(s.page)  # e2e-20: dialog waits instead of fixed 0.5-0.9 s (section S)
+        s.page.locator("dialog[open] button[data-id=cancel]").click(); gone(s.page)
         s.go("/manage/")
         row["after_cancel_links"] = s.page.locator("a[data-url*='markReviewed']").count()
-        s.page.locator("a[data-url*='markReviewed']").first.click(); s.page.wait_for_timeout(700)
+        s.page.locator("a[data-url*='markReviewed']").first.click(); opened(s.page)
         with s.page.expect_navigation() as nav:
             s.page.locator("dialog[open] button[data-id=ok]").click()
         row["mark_status"] = nav.value.status if nav.value else "no response (same-document)"
@@ -409,10 +409,10 @@ def sec_S():
     rv = s.page.locator("a[data-url*='/revert']")
     row["revert_link"] = rv.count()
     if rv.count():
-        rv.first.click(); s.page.wait_for_timeout(700)
-        s.page.locator("dialog[open] button[data-id=cancel]").click(); s.page.wait_for_timeout(500)
+        rv.first.click(); opened(s.page)
+        s.page.locator("dialog[open] button[data-id=cancel]").click(); gone(s.page)
         row["after_revert_cancel"] = strategy()
-        rv.first.click(); s.page.wait_for_timeout(700)
+        rv.first.click(); opened(s.page)
         with s.page.expect_navigation() as nav:
             s.page.locator("dialog[open] button[data-id=ok]").click()
         row["revert_status"] = nav.value.status if nav.value else None
@@ -424,13 +424,13 @@ def sec_S():
     inst = s.page.locator("#main-panel button, #main-panel a", has_text=re.compile("Install"))
     row["install_controls"] = [t.strip() for t in inst.all_inner_texts()]
     if inst.count():
-        inst.first.click(); s.page.wait_for_timeout(900)
+        inst.first.click(); opened(s.page)
         d = s.page.locator("dialog[open]")
         row["install_dialog"] = re.sub(r"\s+", " ", d.first.inner_text())[:200] if d.count() else None
         if d.count():
-            d.first.locator("button[data-id=cancel], button:has-text('Cancel')").first.click(); s.page.wait_for_timeout(500)
+            d.first.locator("button[data-id=cancel], button:has-text('Cancel')").first.click(); gone(s.page)
             row["after_install_cancel"] = strategy()
-            inst.first.click(); s.page.wait_for_timeout(900)
+            inst.first.click(); opened(s.page)
             with s.page.expect_navigation() as nav:
                 s.page.locator("dialog[open] button[data-id=ok], dialog[open] button.jenkins-button--primary").first.click()
             row["install_status"] = nav.value.status if nav.value else None

@@ -67,7 +67,8 @@ def main():
     st, w, _ = run_req("requester", "r19-life", "e2e-19 approved, queued across a restart (no parameters file)", params={"DATE": "2026-05-05"})
     assert w, st
     assert lib.decide("approver-1", "requests", w, "approve") in (200, 302)
-    time.sleep(3)
+    # e2e-20: wait for both queue items (was a fixed 3 s)
+    wait_until(lambda: len(queue_items(JOB)) == 1 and len(queue_items("r19-life")) == 1, 30, 0.5)
     check("Q", "before the restart both approved runs wait in the queue (no executor): APPROVED, one queue item each",
           request_state(q)[1] == "APPROVED" and len(queue_items(JOB)) == 1 and len(queue_items("r19-life")) == 1,
           q=request_state(q)[1], queue=len(queue_items(JOB)), queue_life=len(queue_items("r19-life")))
