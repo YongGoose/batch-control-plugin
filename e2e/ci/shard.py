@@ -183,6 +183,11 @@ UNITS = [
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
                         "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
                         "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
+    # e2e-19 (71d267b). r19/arrange.py is idempotent (item r19-reject). The lightest weight, listed last: the LPT split
+    # assigns it after every other unit, so adding it leaves the other units' shards as they were.
+    Unit("r19-reject-color", 0.3, [("r19-arrange", py("r19/arrange.py")), ("r19-reject-color", py("r19/reject_color.py", "RGA"))],
+         doc="e2e-19: approver-1's Reject button on the run, permission window and activation request pages renders in "
+             "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
