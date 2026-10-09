@@ -312,6 +312,7 @@ public class ExpiryNoticeIsolationTest {
     /** Makes {@code file} unreadable (mode 000) until {@link #tearDown}; skips the row where this process can still read it. */
     private void unreadable(Path file) throws IOException {
         assertTrue(Files.isRegularFile(file), "premise (ARCHITECTURE 5): " + file + " is stored");
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> none = PosixFilePermissions.fromString("---------");
         try {
             restore.add(file);

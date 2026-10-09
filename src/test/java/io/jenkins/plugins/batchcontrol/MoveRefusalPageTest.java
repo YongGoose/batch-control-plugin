@@ -57,9 +57,10 @@ public class MoveRefusalPageTest {
 
     /**
      * Allowed by Jenkins' item name check (which forbids {@code < > & ...}) but able to break out of
-     * an HTML attribute if written unescaped.
+     * an HTML attribute if written unescaped. With a double quote where the file system can hold one
+     * in the item's directory name, with single quotes on NTFS (TEST-MATRIX note 291).
      */
-    static final String HOSTILE = "x\"onmouseover='alert(1)' data-injected=\"1";
+    static final String HOSTILE = PlatformFixtures.HOSTILE_ITEM_NAME;
 
     private JenkinsRule j;
     private Folder prod;

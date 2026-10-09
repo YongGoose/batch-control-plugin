@@ -177,6 +177,7 @@ public class StoreFaultGapTest {
         assertEquals(200, ApproverFormFixtures.get(j, "u1", "batch-control/requests/").getStatusCode(), "premise: the list opens");
         Path file = store().resolve("requests/run/" + r + ".xml");
         try {
+            PlatformFixtures.assumeCanMakeUnreadable();
             assertTrue(file.toFile().setReadable(false, false), "fixture: R's file made unreadable");
             Assumptions.assumeFalse(Files.isReadable(file), "the file system does not refuse reads for this process");
             WebResponse page = ApproverFormFixtures.get(j, "u1", "batch-control/requests/" + r + "/");
@@ -214,6 +215,7 @@ public class StoreFaultGapTest {
         Path values = store().resolve("requests/run/" + request.getId() + ".values.xml");
         assertTrue(Files.isRegularFile(values), "premise (ARCHITECTURE 5): the values file is stored at " + values);
         try {
+            PlatformFixtures.assumeCanMakeUnreadable();
             assertTrue(values.toFile().setReadable(false, false), "fixture: the values file made unreadable");
             Assumptions.assumeFalse(Files.isReadable(values), "the file system does not refuse reads for this process");
             Throwable refused = null;

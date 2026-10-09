@@ -204,6 +204,7 @@ public class WindowStaleNameTest {
         File storedFile = dir.resolve(window.getId() + ".xml").toFile();
         assertTrue(storedFile.isFile(), "premise (ARCHITECTURE 5): the window is stored at " + storedFile);
         try {
+            PlatformFixtures.assumeCanMakeUnwritable();
             assertTrue(storedFile.setWritable(false, false), "fixture: the stored window made read-only");
             assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
             Assumptions.assumeTrue(writesRefused(dir) && !Files.isWritable(storedFile.toPath()),
@@ -576,6 +577,7 @@ public class WindowStaleNameTest {
         File storedFile = dir.resolve(window.getId() + ".xml").toFile();
         assertTrue(storedFile.isFile(), "premise (ARCHITECTURE 5): the window is stored at " + storedFile);
         try {
+            PlatformFixtures.assumeCanMakeUnwritable();
             assertTrue(storedFile.setWritable(false, false), "fixture: the stored window made read-only");
             assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
             Assumptions.assumeTrue(writesRefused(dir) && !Files.isWritable(storedFile.toPath()),
@@ -803,6 +805,7 @@ public class WindowStaleNameTest {
         File storedFile = dir.resolve(window.getId() + ".xml").toFile();
         assertTrue(storedFile.isFile(), "premise (ARCHITECTURE 5): the window is stored at " + storedFile);
         try {
+            PlatformFixtures.assumeCanMakeUnwritable();
             assertTrue(storedFile.setWritable(false, false), "fixture: the stored window made read-only");
             assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
             Assumptions.assumeTrue(writesRefused(dir) && !Files.isWritable(storedFile.toPath()),

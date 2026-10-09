@@ -249,6 +249,7 @@ public class WindowRestartGapTest {
             remember("A");
             Path grants = home.resolve("batch-control/grants");
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(grants.toFile().setWritable(false, false), "fixture: grants/ made read-only");
                 grantFile(ids.get("C")).toFile().setWritable(false, false);
                 Assumptions.assumeTrue(writesRefused(grants), "the file system does not refuse writes to a read-only directory for this process");
@@ -278,6 +279,7 @@ public class WindowRestartGapTest {
         });
         List<Path> months = monthFiles();
         try {
+            PlatformFixtures.assumeCanMakeUnreadable();
             for (Path month : months) {
                 assertTrue(month.toFile().setReadable(false, false), "fixture: " + month + " made unreadable");
             }
@@ -504,6 +506,7 @@ public class WindowRestartGapTest {
             ids.put("V", window("u1", "rv", 120));
         });
         Path month = newestMonth();
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> original = Files.getPosixFilePermissions(month);
         try {
             Files.setPosixFilePermissions(month, PosixFilePermissions.fromString("---------"));
@@ -538,6 +541,7 @@ public class WindowRestartGapTest {
             ids.put("U", window("u1", "ru", 120));
         });
         Path month = newestMonth();
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> original = Files.getPosixFilePermissions(month);
         try {
             Files.setPosixFilePermissions(month, PosixFilePermissions.fromString("-w-------"));
@@ -581,6 +585,7 @@ public class WindowRestartGapTest {
 
     /** Between the sessions of L3-01: the window's grant file and R's request file get no permission bits. */
     private void unreadableBetweenSessions() throws IOException {
+        PlatformFixtures.assumeCanMakeUnreadable();
         for (Path p : List.of(grantFile(ids.get("window")), home.resolve("batch-control/requests/run/" + ids.get("R") + ".xml"))) {
             assertTrue(Files.isRegularFile(p), "premise (ARCHITECTURE 5): " + p + " is stored");
             restore.add(p);

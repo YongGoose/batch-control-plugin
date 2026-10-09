@@ -516,6 +516,7 @@ public class ItemBindingEventsTest {
         File dirFile = dir.toFile();
         File storedFile = stored.toFile();
         try {
+            PlatformFixtures.assumeCanMakeUnwritable();
             assertTrue(storedFile.setWritable(false, false), "fixture: the stored grant made read-only");
             assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
             boolean enforced;

@@ -338,6 +338,7 @@ public class GuardRestoreGapTest {
 
         Path snapshot2 = store().resolve("snapshots/sj2.xml");
         assertTrue(Files.isRegularFile(snapshot2), "premise: the snapshot of sj2 is stored at " + snapshot2);
+        PlatformFixtures.assumeCanMakeUnreadable();
         Files.setPosixFilePermissions(snapshot2, PosixFilePermissions.fromString("---------"));
         restoreAfter.add(snapshot2);
         assumeTrue(!Files.isReadable(snapshot2), "chmod 000 did not make the snapshot unreadable (root?): skipped");
