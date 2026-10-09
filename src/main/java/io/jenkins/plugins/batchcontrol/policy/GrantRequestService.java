@@ -692,7 +692,13 @@ public final class GrantRequestService {
             ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_REQUEST_BLOCKED, target, user,
                     "A permission window for '" + target + "' could not be " + attemptedTransition
                             + ": change control is off");
-            Store.get().appendChangeRecord(record);
+            try {
+                Store.get().appendChangeRecord(record);
+            } catch (RuntimeException e) {
+                // R3-01 rule: the refusal below stands whatever happens to its record.
+                LOGGER.log(java.util.logging.Level.SEVERE, "Could not record the refused permission window for '"
+                        + target + "' (" + attemptedTransition + ") of '" + user + "'; it is refused all the same", e);
+            }
         }
         LOGGER.info(() -> "Refused to let '" + user + "' have a permission window for '" + target
                 + "' " + attemptedTransition + ": change control is off");
