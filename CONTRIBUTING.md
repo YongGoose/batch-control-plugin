@@ -382,11 +382,14 @@ behind any of them.
   (update it when GitHub says it is behind), and one approving review, from the
   maintainer.
 - The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e (shard 1)`
-  … `e2e (shard 5)`, `e2e coverage`) runs on the same events against a real
-  Jenkins in Docker and reports the JaCoCo coverage of the lines your change
-  touched in the job summary, as annotations and in the `e2e-coverage`
-  artifact. It is **not** a required check; a red shard is worth a look (its
-  logs and screenshots are in the `e2e-shard-<k>` artifact). See
+  … `e2e (shard 5)`, `e2e coverage`) runs against a real Jenkins in Docker and
+  reports the JaCoCo coverage of the lines your change touched in the job
+  summary, as annotations and in the `e2e-coverage` artifact. It runs on the
+  same events, but only when the change touches `src/main/`, `pom.xml`,
+  `.mvn/`, `e2e/` or the workflow file itself, so a docs-only or test-only pull
+  request does not start it (a maintainer can still run it by hand). It is
+  **not** a required check; a red shard is worth a look (its logs and
+  screenshots are in the `e2e-shard-<k>` artifact). See
   `e2e/README.md`, "CI runner and e2e coverage" and "CI contract".
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
