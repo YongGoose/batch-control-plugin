@@ -685,7 +685,13 @@ public final class FileStore implements Store {
     @Override
     public void appendRunRecord(RunRecord record) {
         Objects.requireNonNull(record, "record");
-        appendLine(runsDir(), monthOf(record.getStartedAt()), runRecordToJson(record));
+        JSONObject json = runRecordToJson(record);
+        if (record.getAppendedAt() == null) {
+            // D-81: every new line carries appendedAt; a caller that did not set it gets the plugin
+            // clock's instant of this append.
+            json.element("appendedAt", BatchClock.now().toEpochMilli());
+        }
+        appendLine(runsDir(), monthOf(record.getStartedAt()), json);
     }
 
     @Override
