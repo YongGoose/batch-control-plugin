@@ -395,8 +395,12 @@ public class ItemScopeUiTest {
     /** A sentence saying a rename is not allowed ("does not allow renaming it", "cannot rename it", ...). */
     private static final Pattern RENAME_REFUSED = Pattern.compile(
             "(?i)\\b(?:does not|doesn't|cannot|can't|will not|won't|may not|never)\\s+(?:allow\\s+|let\\s+\\w+\\s+)?renam");
-    /** Allowed by Jenkins' item name check, able to break out of an attribute if written unescaped (as MoveRefusalPageTest). */
-    static final String HOSTILE = "x\"onmouseover='alert(1)' data-injected=\"1";
+    /**
+     * Allowed by Jenkins' item name check, able to break out of an attribute if written unescaped (as MoveRefusalPageTest):
+     * with a double quote where the file system can hold one in the item's directory name, with single quotes on NTFS
+     * (TEST-MATRIX note 291).
+     */
+    static final String HOSTILE = PlatformFixtures.HOSTILE_ITEM_NAME;
 
     /**
      * The check answer for {@code name} is ok; its raw markup has an {@code <svg} element with no

@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -27,6 +28,10 @@ import org.junit.jupiter.api.Assumptions;
  * <p>The rows call {@link #assumeCanMakeUnreadable()} or {@link #assumeCanMakeUnwritable()} just
  * before their fixture takes a permission away; on a platform that can build the fault they run
  * exactly as before.
+ *
+ * <p>{@link #HOSTILE_ITEM_NAME} is the HTML-sensitive item name of the escaping rows. It keeps the
+ * double quote wherever the file system can hold one in a directory name (an item's directory is
+ * named after it); NTFS forbids {@code "}, so there the name uses the single quote instead.
  */
 final class PlatformFixtures {
 
@@ -34,6 +39,16 @@ final class PlatformFixtures {
             + " (Windows, or a process running as root), so this storage fault cannot be built here (TEST-MATRIX note 291)";
     private static final String UNWRITABLE_MESSAGE = "the platform cannot make a file or directory unwritable to its owner"
             + " (Windows, or a process running as root), so this storage fault cannot be built here (TEST-MATRIX note 291)";
+
+    /**
+     * An item name Jenkins' name check allows (it forbids {@code < > & ...}) that would break out of an
+     * HTML attribute if written unescaped and carries attribute-like text ({@code onmouseover},
+     * {@code data-injected}) and a script fragment ({@code alert(1)}). With the double quote where the
+     * file system allows it in a directory name; otherwise (NTFS) the same text with single quotes.
+     */
+    static final String HOSTILE_ITEM_NAME = canNameDirectoryWith('"')
+            ? "x\"onmouseover='alert(1)' data-injected=\"1"
+            : "x'onmouseover='alert(1)' data-injected='1";
 
     private PlatformFixtures() {
     }
@@ -146,6 +161,31 @@ final class PlatformFixtures {
             }
         } catch (IOException | RuntimeException e) {
             // a left-over scratch directory in the temp dir does not affect any row
+        }
+    }
+
+    /** Whether a directory whose name contains {@code c} can be created (NTFS forbids {@code "}). */
+    private static boolean canNameDirectoryWith(char c) {
+        Path root;
+        try {
+            root = Files.createTempDirectory("batch-control-name-probe");
+        } catch (IOException e) {
+            throw new AssertionError("fixture: cannot create the name probe directory", e);
+        }
+        try {
+            Path named = root.resolve("x" + c + "y");
+            Files.createDirectory(named);
+            boolean ok = Files.isDirectory(named) && named.getFileName().toString().indexOf(c) >= 0;
+            Files.delete(named);
+            return ok;
+        } catch (InvalidPathException | IOException e) {
+            return false;
+        } finally {
+            try {
+                Files.deleteIfExists(root);
+            } catch (IOException e) {
+                // a left-over scratch directory in the temp dir does not affect any row
+            }
         }
     }
 }
