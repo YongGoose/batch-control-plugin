@@ -184,6 +184,11 @@ UNITS = [
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
              "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
              "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+    # e2e-22 R4-02 (bug-hunt batch B). r22/scripted_build.py arranges its own item (r22-script) and a requester API token
+    # it revokes at its end.
+    Unit("r22-scripted-build", 0.4, [("r22-scripted-build", py("r22/scripted_build.py"))],
+         doc="e2e-22 R4-02: a scripted build of an approval-required job (API token, no or a non-HTML Accept, a session "
+             "without Accept) gets HTTP 400 with the approval message, also through curl -fL; browsers keep the D-60 303"),
     Unit("r19-plugins", 0.6, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
          doc="e2e-19: naginator retry refused and recorded, customize-build-now keeps Request Run, lockable-resources and "
              "authorize-project with an approved run, jobConfigHistory one CONFIGURE record (SPEC 6 #34/#36, SPEC 9)"),
@@ -261,7 +266,7 @@ GROUPS = [
         "jobui-new-others", "jobui-classic-others"]),
     ("runs and switches", [  # the run gate, reruns and the prefilled form, triggers, other plugins, the request
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
-        "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
+        "r19-gate", "r22-scripted-build", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
