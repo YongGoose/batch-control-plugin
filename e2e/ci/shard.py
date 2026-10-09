@@ -61,6 +61,9 @@ SETUP = [
     ("preconditions", py("ci/preconditions.py")),  # e2e-16: the seeded fixtures the drivers assume, asserted
 ]
 SETUP_WEIGHT = 3.4
+# What a CI job spends outside the steps (checkout, the Python packages and Chromium, the fonts, starting Jenkins, the
+# coverage dump and upload): job minus driver minutes in run 37883661045 were 3.1-3.4, of which Jenkins' start 2.4-2.6.
+JOB_OVERHEAD = 3.2
 
 
 class Unit:
@@ -83,10 +86,11 @@ def crawl_unit(role, weight):
 
 
 # jobui.py <ui> [role ...] runs each role on its own; the roles are grouped so that the groups take similar time.
-# Measured 2026-10-05 (minutes): new UI requester 9.1, admin 6.6, reqonly+approver-1+manager+nobc 15.9; classic UI
-# 7.9, 5.0, 13.6. The last group is split by its entry counts (reqonly has most of them).
-JOBUI_GROUPS = {"new": [("requester", 9.1), ("admin", 6.6), ("reqonly", 8.3), ("approver-1 manager nobc", 7.6)],
-                "classic": [("requester", 7.9), ("admin", 5.0), ("reqonly", 7.1), ("approver-1 manager nobc", 6.5)]}
+# Weights: the minutes of CI run 37883661045 (see UNITS). The local measurement of 2026-10-05 had reqonly and
+# approver-1+manager+nobc as one figure (new UI 15.9, classic 13.6) and split it by a guess that reqonly had most of
+# the entries; on CI reqonly logged 38 entries and took 3.0 / 2.7 min, approver-1+manager+nobc 90 entries, 9.3 / 7.3.
+JOBUI_GROUPS = {"new": [("requester", 6.9), ("admin", 5.2), ("reqonly", 3.0), ("approver-1 manager nobc", 9.3)],
+                "classic": [("requester", 6.2), ("admin", 4.0), ("reqonly", 2.7), ("approver-1 manager nobc", 7.3)]}
 
 
 def jobui_unit(ui, group, weight):
@@ -99,26 +103,32 @@ def jobui_unit(ui, group, weight):
     ], doc=f"e2e-12/14 G2c: entry points and dialog cycles, {ui} job UI, {', '.join(roles)}")
 
 
-# Canonical order = the e2e-14 order. Weights: minutes per unit measured on the local shard runs of 2026-10-05
-# (MacBook, Docker Desktop, machine under load from other builds: pessimistic; Playwright Chromium headless).
+# Canonical order = the e2e-14 order. Weights: minutes per unit on the GitHub Actions runner. They were measured on
+# local shard runs (2026-10-05..08: MacBook, Docker Desktop, under load from other builds) and calibrated on 2026-10-09
+# against CI run 37883661045 (ubuntu-latest; each shard's summary.json, step seconds summed per unit): where the CI
+# minutes differed from the weight by more than 0.3 min and more than 10%, the weight is now the CI minutes, rounded to
+# 0.1. That changed def07, misc, crawl-admin/-requester/-reqonly/-manager, all eight jobui units, r16-follow/-params/
+# -rerun/-d60/-names/-durable, r17-s39, r17-disk, r19-plugins, role and r18-final (the local runs had been off by a
+# factor of 0.17 to 3.2, in both directions, not by a common factor). The others, and SETUP_WEIGHT, were within that
+# margin and are unchanged. One CI run: take a weight as good to about 10%.
 UNITS = [
-    Unit("def07", 0.3, [
+    Unit("def07", 1.0, [
         ("flag-def07-new", flag("true", *DEF07_ROLES)),
         ("def07-new", py("r14/def07.py", "new")),
         ("flag-def07-classic", flag("false", *DEF07_ROLES)),
         ("def07-classic", py("r14/def07.py", "classic")),
         ("flag-def07-reset", flag("true", *DEF07_ROLES)),
     ], doc="e2e-14 G1: DEF-07 recheck on both job UIs"),
-    crawl_unit("admin", 9.2),
-    crawl_unit("requester", 8.7),
-    crawl_unit("reqonly", 5.0),
+    crawl_unit("admin", 5.3),
+    crawl_unit("requester", 4.8),
+    crawl_unit("reqonly", 2.6),
     crawl_unit("approver-1", 1.2),
-    crawl_unit("manager", 8.2),
+    crawl_unit("manager", 3.9),
     crawl_unit("nobc", 1.2),
     Unit("actions", 2.3, [("actions", py("r14/actions.py", "all"))],
          doc="e2e-12/14 G2b: every state-changing control per role"),
 ] + [jobui_unit(ui, group, w) for ui in ("new", "classic") for group, w in JOBUI_GROUPS[ui]] + [
-    Unit("misc", 1.1, [("misc", py("r14/misc.py", "CHPBTRMKS"))], doc="e2e-12/14 G2d: targeted checks C H P B T R M K S"),
+    Unit("misc", 1.8, [("misc", py("r14/misc.py", "CHPBTRMKS"))], doc="e2e-12/14 G2d: targeted checks C H P B T R M K S"),
     Unit("targeted", 0.9, [
         ("errpages", py("r14/errpages.py")),
         ("listpager", py("r14/s_listpager.py")),
@@ -130,24 +140,24 @@ UNITS = [
     Unit("round3", 0.6, [("round3", py("r14/round3.py", "ABCDEFGHI"))], doc="e2e-14 R3-A..I: the e2e-11 round-3 checks"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
-    # measured on the 2026-10-06 runs (arrangement included).
+    # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
     Unit("r16-items", 1.0, [("r16-arrange", py("r16/arrange.py")), ("r16-items", py("r16/items.py"))],
          doc="e2e-16: one-item windows on job/folder/multibranch (D-71): Configure/Create reach, legacy scope refused, kind+icon"),
     Unit("r16-rename", 0.8, [("r16-arrange", py("r16/arrange.py")), ("r16-rename", py("r16/rename.py"))],
          doc="e2e-16: no rename through a window via UI and every URL form; allowed for admin/own permission (D-71c)"),
-    Unit("r16-follow", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-follow", py("r16/follow.py"))],
+    Unit("r16-follow", 2.4, [("r16-arrange", py("r16/arrange.py")), ("r16-follow", py("r16/follow.py"))],
          doc="e2e-16: windows follow admin rename/move, deletion ends them and DELETE records name the deleting user (D-74, "
              "1864bdc); refused moves once per minute (D-73); CREATE window under a naming strategy (T-08-168)"),
-    Unit("r16-params", 2.0, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
+    Unit("r16-params", 1.4, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
          doc="e2e-16: typed parameters (core file, stashedFile, base64File, password) page+dialog; values file; 413 at both "
              "stages; repeated name, U+0000, disposal (D-72, D-72b, D-74)"),
-    Unit("r16-rerun", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-rerun", py("r16/rerun.py"))],
+    Unit("r16-rerun", 0.5, [("r16-arrange", py("r16/arrange.py")), ("r16-rerun", py("r16/rerun.py"))],
          doc="e2e-16: incident rerun reuses the secret/core file; stashedFile falls back to the validated prefilled form; "
              "fromRerun validation; incident actions need ViewHistory (D-72, D-72a, SPEC 11)"),
-    Unit("r16-d60", 1.2, [("r16-arrange", py("r16/arrange.py")), ("r16-d60", py("r16/d60.py"))],
+    Unit("r16-d60", 0.4, [("r16-arrange", py("r16/arrange.py")), ("r16-d60", py("r16/d60.py"))],
          doc="e2e-16: refused direct build -> prefilled form: run parameter carried (T-06-103), new job page dialog, files "
              "and secrets not carried (D-60, #115)"),
-    Unit("r16-names", 0.8, [("r16-arrange", py("r16/arrange.py")), ("r16-names", py("r16/names.py"))],
+    Unit("r16-names", 0.2, [("r16-arrange", py("r16/arrange.py")), ("r16-names", py("r16/names.py"))],
          doc="e2e-16: CREATE name restriction in the #107 optionalBlock (ticks Create before filling); exact and /regex/"),
     Unit("multibranch", 2.8, [
         ("mb-arrange", py("r15/arrange.py")),
@@ -162,19 +172,19 @@ UNITS = [
         ("mb-menu", py("r15/menu.py", "ci")),
     ], doc="e2e-15: multibranch activation page and the DEF-08 job pages"),
     # e2e-17 (security-39 fixes, D-75). r17/arrange.py is idempotent and self-contained (account w17, items r17*).
-    Unit("r17-s39", 2.0, [("r17-arrange", py("r17/arrange.py")), ("r17-s39", py("r17/s39.py", "PRD")),
+    Unit("r17-s39", 1.5, [("r17-arrange", py("r17/arrange.py")), ("r17-s39", py("r17/s39.py", "PRD")),
                           ("r17-visibility", py("r17/s39.py", "H"))],
          doc="e2e-17: 404 for malformed and aliased record ids (S-39-01); a window follows two renames and the page shows "
              "the current name; delete + re-create ends it (S-39-02); followed name hidden from non-readers (D-75 (1), own step)"),
     # e2e-19 (gap audit, docs/reports/e2e-19.md): SPEC acceptance lines no CI step checked before. r19/arrange.py is
     # idempotent and self-contained (items r19-*, accounts from JCasC). Each driver exits non-zero and prints FAIL lines,
     # and restores what it changes globally (executors, authorize-project's authenticator). Weights: minutes measured on
-    # the 2026-10-08 local runs (arrangement included).
+    # the 2026-10-08 local runs (arrangement included), calibrated against CI (above).
     Unit("r19-gate", 1.5, [("r19-arrange", py("r19/arrange.py")), ("r19-gate", py("r19/gate.py"))],
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
              "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
              "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
-    Unit("r19-plugins", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
+    Unit("r19-plugins", 0.6, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
          doc="e2e-19: naginator retry refused and recorded, customize-build-now keeps Request Run, lockable-resources and "
              "authorize-project with an approved run, jobConfigHistory one CONFIGURE record (SPEC 6 #34/#36, SPEC 9)"),
     Unit("r19-triggers", 6.0, [("r19-arrange", py("r19/arrange.py")), ("r19-triggers", py("r19/triggers.py"))],
@@ -187,7 +197,7 @@ UNITS = [
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
              "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
-    Unit("role", 7.7, [
+    Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
         ("role-assign", py("r14/role/assign_roles.py")),
@@ -198,18 +208,18 @@ UNITS = [
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
         last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
             "window), then a crawl under it (replaces the strategy: last)"),
-    Unit("r16-durable", 3.0, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
+    Unit("r16-durable", 2.2, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
                               ("r19-arrange", py("r19/arrange.py")), ("r19-restart", py("r19/restart.py"))],
          last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); e2e-19: pending and "
                         "queued approved requests with typed values survive a restart and run once with the exact values; "
                         "restarts Jenkins, after which JCasC has reset the arrangement's permissions (last)"),
-    Unit("r17-disk", 6.0, [("r17-arrange", py("r17/arrange.py")), ("r17-disk", py("r17/disk.py", "GFBU")),
+    Unit("r17-disk", 1.3, [("r17-arrange", py("r17/arrange.py")), ("r17-disk", py("r17/disk.py", "GFBU")),
                            ("r17-case", py("r17/disk.py", "C"))],
          last=True, doc="e2e-17: items removed on disk + reload (a rename onto the stale name: 'it could not follow its item'), "
                         "startup end of a vanished item, fail-closed restart re-end with an unreadable change log (S-39-02/03); "
                         "letter case after a restart (own step); reloads and restarts Jenkins (last)"),
     # e2e-18 (bd449cd..d696d5d). r18/arrange.py is idempotent and self-contained (account w18, items r18*).
-    Unit("r18-final", 4.0, [("r18-arrange", py("r18/arrange.py")), ("r18-final", py("r18/final.py", "KMDAS"))],
+    Unit("r18-final", 2.2, [("r18-arrange", py("r18/arrange.py")), ("r18-final", py("r18/final.py", "KMDAS"))],
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
                         "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
                         "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
@@ -229,22 +239,28 @@ ORDER = {u.name: i for i, u in enumerate(UNITS)}
 # workflow's plan job reads) fails when a unit is in no group or in two, when a group holds two `last` units or a name
 # that is no unit, or when a label is not valid; it prints the weight per group and the heaviest group against an automatic split of the
 # same weights, so the balance stays visible. A new unit: add it to UNITS and to the group whose label it fits.
-# Weight sums when the groups were drawn (2026-10-09, minutes; the setup adds 3.4 to each): 29.8, 28.5, 29.0, 30.0,
-# 29.1; the longest-processing-time split of the same weights into 5 that these groups replace had 29.6 at most.
+# Seven groups (2026-10-09), drawn on the CI-calibrated weights. The five before them took 26.9, 26.8, 26.8, 19.8 and
+# 35.0 min per job in run 37883661045 (E2E wall clock 36.7). The floor is approver-1/manager/nobc's job UI (16.6 min of
+# units, kept together by the rule above); every other group stays near it. Weight sums: 15.6, 13.1, 15.2, 16.7, 13.9,
+# 16.6, 13.7 (+ SETUP_WEIGHT + JOB_OVERHEAD = about 23.3 min for the longest job); the longest-processing-time split of
+# the same weights into 7 has 15.1 at most, but splits each role's job UI and mixes unrelated units.
 GROUPS = [
-    ("crawl and ui checks", [  # the crawls of five roles (admin's is in the next group), the e2e-12/14 targeted checks
-        "crawl-requester", "crawl-reqonly", "crawl-approver-1", "crawl-manager", "crawl-nobc",
-        "def07", "actions", "misc", "targeted", "round3", "r21-reject-color"]),
-    ("admin and role strategy", [  # admin's crawl and job UI, then the role-strategy profile and its crawl (last)
-        "crawl-admin", "jobui-new-admin", "jobui-classic-admin", "role"]),
-    ("job ui params and restart", [  # requester's job UI, the multibranch job pages, typed parameters, reruns, the
-        "jobui-new-requester", "jobui-classic-requester", "multibranch",  # prefilled form, a restart (last)
-        "r16-params", "r16-rerun", "r16-d60", "r16-durable"]),
+    ("crawl and ui checks", [  # requester's and manager's crawls, the DEF-07 recheck, every control per role, the
+        "def07", "crawl-requester", "crawl-manager",  # e2e-12/14 targeted checks, round 3, the Reject colour
+        "actions", "misc", "targeted", "round3", "r21-reject-color"]),
+    ("crawls and multibranch", [  # the crawls of admin, reqonly, approver-1 and nobc, the multibranch job pages
+        "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch"]),
+    ("admin and role strategy", [  # admin's job UI, then the role-strategy profile and its crawl (last)
+        "jobui-new-admin", "jobui-classic-admin", "role"]),
+    ("job ui params and restart", [  # requester's job UI, typed parameters, requests with typed values across a
+        "jobui-new-requester", "jobui-classic-requester", "r16-params", "r16-durable"]),  # restart (last)
     ("job ui windows and disk", [  # reqonly's job UI, permission windows on items and renames, item kinds, items
         "jobui-new-reqonly", "jobui-classic-reqonly",  # removed on disk with reload and restart (last)
         "r16-items", "r16-rename", "r16-follow", "r16-names", "r17-s39", "r19-kinds", "r17-disk"]),
-    ("job ui runs and switches", [  # approver-1/manager/nobc's job UI, the run gate, triggers, other plugins, the
-        "jobui-new-others", "jobui-classic-others",  # request lifecycle, then the global switches and strategy (last)
+    ("job ui other roles", [  # the job UI of approver-1, manager and nobc
+        "jobui-new-others", "jobui-classic-others"]),
+    ("runs and switches", [  # the run gate, reruns and the prefilled form, triggers, other plugins, the request
+        "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
@@ -344,6 +360,11 @@ def weight(names):
     return sum(BY_NAME[x].weight for x in names)
 
 
+def job_minutes(names):
+    """The estimated minutes of the group's CI job: its units, the setup and the runner's own steps."""
+    return weight(names) + SETUP_WEIGHT + JOB_OVERHEAD
+
+
 def lpt_loads(n):
     """The automatic split the groups replaced (deterministic longest-processing-time over the weights, at most one
     `last` unit per shard), kept only to compare the balance in `shard.py check`: its shard loads without the setup."""
@@ -369,14 +390,15 @@ def check():
         return 1
     loads = [weight(names) for _, names in GROUPS]
     lpt = max(lpt_loads(len(GROUPS)))
-    lines = ["| Shard | Job label | Minutes | `last` unit | Units |", "|---:|---|---:|---|---|"]
+    lines = ["| Shard | Job label | Minutes | Job minutes | `last` unit | Units |", "|---:|---|---:|---:|---|---|"]
     for i, (label, names) in enumerate(GROUPS, 1):
         last = next((x for x in names if BY_NAME[x].last), "")
-        lines.append(f"| {i}/{len(GROUPS)} | {label} | {loads[i - 1]:.1f} | {last} | "
+        lines.append(f"| {i}/{len(GROUPS)} | {label} | {loads[i - 1]:.1f} | {job_minutes(names):.1f} | {last} | "
                      f"{', '.join(u.name for u in group_units(names))} |")
-    lines.append(f"| | total | {sum(loads):.1f} | | {len(UNITS)} units |")
-    note = (f"heaviest group {max(loads):.1f} min of units (+{SETUP_WEIGHT} setup); an automatic split of the same "
-            f"weights into {len(GROUPS)} would have {lpt:.1f} at most")
+    lines.append(f"| | total | {sum(loads):.1f} | | | {len(UNITS)} units |")
+    note = (f"heaviest group {max(loads):.1f} min of units (job estimate with {SETUP_WEIGHT} setup and {JOB_OVERHEAD} "
+            f"runner overhead: {max(job_minutes(n) for _, n in GROUPS):.1f}); an automatic split of the same weights "
+            f"into {len(GROUPS)} would have {lpt:.1f} at most")
     print("\n".join(lines))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
@@ -698,7 +720,8 @@ def main():
             raise SystemExit(f"plan-all {a.n}: there are {n} groups (shard.py check lists them)")
         for i, (label, names) in enumerate(GROUPS, 1):
             print(f"shard {i}/{n} ({label}): ~{SETUP_WEIGHT + weight(names):.0f} min drivers "
-                  f"(incl. {SETUP_WEIGHT:.0f} setup): {[u.name for u in group_units(names)]}")
+                  f"(incl. {SETUP_WEIGHT:.0f} setup), ~{job_minutes(names):.0f} min job: "
+                  f"{[u.name for u in group_units(names)]}")
     elif a.cmd == "run":
         k, n = parse_shard(a.shard)
         sys.exit(run(k, n, a.out))
