@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.Visibility;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -27,7 +28,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * changes state. The link to the form is rendered only for a {@code BatchControl/Request}
  * holder, the only user who may open it (SPEC item 2). A computed child (a branch job) has no
  * activation of its own: the notice names the computed folder that carries it (D-46c) and
- * links to that folder for a viewer who may read it.
+ * links to that folder for a viewer who may read it. A job's sub-item (a matrix configuration, a
+ * Maven module) has neither an activation nor run approval of its own (D-82): the notice says it
+ * follows its parent job's, links to that job for a viewer who may read it, and offers no request
+ * link of its own.
  */
 @Restricted(NoExternalUse.class)
 public class JobActivationNoticeAction implements Action {
@@ -78,7 +82,29 @@ public class JobActivationNoticeAction implements Action {
      * read why and where to go. The link to the request form follows {@link #isCanRequest()}.
      */
     public boolean isApprovalRequired() {
-        return isShown() && new JobRequestAction(job).isActive();
+        // D-82: a sub-item has no approval property of its own; the sub-item notice speaks for it.
+        return isShown() && !isSubItem() && new JobRequestAction(job).isActive();
+    }
+
+    /**
+     * D-82: whether the job is a sub-item of a job (a matrix configuration, a Maven module), which
+     * follows its parent job's activation and run approval and has no requests of its own.
+     */
+    public boolean isSubItem() {
+        return ActivationService.isSubItem(job);
+    }
+
+    /** D-82: the job whose activation and run approval a sub-item follows (its topmost parent job). */
+    public Job<?, ?> getParentJob() {
+        return ActivationService.governingJob(job);
+    }
+
+    /**
+     * D-82: what the sub-item is called, from its own pronoun ("configuration" for a matrix
+     * configuration, "module" for a Maven module).
+     */
+    public String getSubItemNoun() {
+        return job.getPronoun().toLowerCase(Locale.ROOT);
     }
 
     public boolean isActivated() {
