@@ -22,6 +22,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
+import io.jenkins.plugins.batchcontrol.store.XmlChars;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -157,9 +158,13 @@ public final class GrantRequestService {
             throw new IllegalArgumentException("The reason must not exceed "
                     + MAX_REASON_LENGTH + " characters.");
         }
+        // R1-01: the reason is written into the request file, which XML 1.0 must be able to read back.
+        XmlChars.requireStorable(reason, "reason");
         // Approver rules mirror run requests; there is no per-job approver restriction here.
         List<String> designated = ApprovalPolicy.checkDesignation(requester, approvers, null);
         String pattern = CreateNamePattern.normalize(createNamePattern);
+        // R1-01: the name restriction is stored in the request file as well.
+        XmlChars.requireStorable(pattern, "name restriction");
         if (pattern != null) {
             if (!actions.contains(GrantAction.CREATE)) {
                 throw new IllegalArgumentException("A name restriction applies only to a request "
@@ -389,6 +394,9 @@ public final class GrantRequestService {
             // caller happens to be its designated approver. Existence was already disclosed to any
             // caller by require(id) before this change, so nothing new leaks.
             checkChangeControlEnabled("approved", request.getScope() == null ? null : request.getScope().getFullName());
+            // R1-01: refused before anything changes, as for run requests (D-72b (2)); after the S-15
+            // refusal, which does not depend on the request or the decision being well-formed.
+            XmlChars.requireStorable(comment, "comment");
             if (request.getStatus() != RequestStatus.PENDING) {
                 throw new IllegalStateException("Grant request " + id + " is "
                         + request.getStatus() + " and can no longer be approved.");
@@ -442,6 +450,7 @@ public final class GrantRequestService {
         if (comment == null || comment.trim().isEmpty()) {
             throw new IllegalArgumentException("A comment is required to reject a grant request.");
         }
+        XmlChars.requireStorable(comment, "comment"); // R1-01
         GrantRequest request;
         lock.lock();
         try {

@@ -6,6 +6,7 @@ import hudson.model.Job;
 import hudson.util.AlternativeUiTextProvider;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import jenkins.model.ParameterizedJobMixIn;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -60,7 +61,10 @@ public class RequestRunUiDecorator extends AlternativeUiTextProvider {
         if (!BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
             return null;
         }
-        BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
+        // D-82: a job's sub-item (a matrix configuration) is judged by its parent job's property at
+        // the queue gate, so its build entry is labelled by that property too.
+        BatchControlJobProperty property = ActivationService.governingJob(job)
+                .getProperty(BatchControlJobProperty.class);
         if (property == null || !property.isApprovalRequired()) {
             return null;
         }

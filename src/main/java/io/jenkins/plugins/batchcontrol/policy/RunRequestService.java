@@ -274,7 +274,7 @@ public final class RunRequestService {
         }
         String requester = request.getRequester();
         org.springframework.security.core.Authentication current = Jenkins.getAuthentication2();
-        if (requester != null && requester.equals(current.getName())) {
+        if (Approvers.sameUser(requester, current.getName())) {
             return !job.hasPermission(Item.BUILD);
         }
         Boolean cached = requesterBuildCache.get(request.getId());
@@ -341,6 +341,7 @@ public final class RunRequestService {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         checkCanRequest(job);
+        checkNotSubItem(job);
         checkReason(reason);
         return create(job, typedValues(job, parameters), reason, Approvers.of(approver), null);
     }
@@ -370,6 +371,10 @@ public final class RunRequestService {
      * request is refused (permission, reason, size, approvers) they are disposed of before the
      * exception propagates ({@link ParameterFiles}).
      *
+     * <p>D-82: right after the permission checks, a request for a job's sub-item (a matrix
+     * configuration, a Maven module) is refused with {@link IllegalArgumentException} naming the
+     * parent job to request instead; its files are disposed of and nothing is stored.
+     *
      * <p>D-74 (2): right after the permission checks, a request whose values would keep more than
      * the body cap ({@link RequestBodyLimit#keptSize}) is refused with
      * {@link RequestTooLargeException} (an {@link IllegalArgumentException}), its files disposed of
@@ -397,6 +402,7 @@ public final class RunRequestService {
         boolean stored = false;
         try {
             checkCanRequest(job);
+            checkNotSubItem(job);
             // D-74 (2): what the request would keep, measured on the values and the uploaded parts
             // they were created from; the declared Content-Length is an early filter only. Over the
             // cap: RequestTooLargeException, files disposed of below.
@@ -450,6 +456,20 @@ public final class RunRequestService {
     private static void checkCanRequest(Job<?, ?> job) {
         job.checkPermission(BatchControlPermissions.REQUEST);
         job.checkPermission(Item.READ);
+    }
+
+    /**
+     * D-82: a job's sub-item (a matrix configuration, a Maven module) takes no run request of its
+     * own; the queue gate applies its parent job's rules, and the parent's run starts it. Refused
+     * with {@link IllegalArgumentException} naming the job to request instead, as an activation
+     * request on a sub-item is ({@link ActivationService#create}); checked after the permission
+     * checks and before anything is stored.
+     */
+    private static void checkNotSubItem(Job<?, ?> job) {
+        if (ActivationService.isSubItem(job)) {
+            throw new IllegalArgumentException("'" + job.getFullName() + "' does not take run requests of its own;"
+                    + " request it on '" + ActivationService.governingJob(job).getFullName() + "'.");
+        }
     }
 
     private static void checkReason(String reason) {
@@ -1285,13 +1305,27 @@ public final class RunRequestService {
         }
     }
 
-    /** Request ids whose approval marker is currently sitting on a queue item. */
+    /**
+     * Request ids whose approval marker is currently sitting on a queue item, whoever asks.
+     *
+     * <p>ACL.SYSTEM2 switch, for reading the queue only (R2-04): {@code Queue.getItems()} lists only
+     * the items the current user can read, and this answer decides whether an ending request's
+     * parameter files are still the queue's (a queued item disposes of its own files when it is
+     * cancelled) or are disposed of now; reading the queue as, for example, a user who just renamed
+     * a job they can no longer read would dispose of the files of a run that is still queued. No
+     * permission is exercised for the caller: the result is a set of request ids that is never
+     * shown to anyone, and every caller has completed its own permission checks before it ends a
+     * request.
+     */
     public static Set<String> queuedMarkerRequestIds(Jenkins jenkins) {
         Set<String> ids = new java.util.HashSet<>();
-        for (Queue.Item item : jenkins.getQueue().getItems()) {
-            ApprovedRunAction marker = item.getAction(ApprovedRunAction.class);
-            if (marker != null) {
-                ids.add(marker.getRequestId());
+        // ACL.SYSTEM2 switch: read only, for the reason in the javadoc.
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            for (Queue.Item item : jenkins.getQueue().getItems()) {
+                ApprovedRunAction marker = item.getAction(ApprovedRunAction.class);
+                if (marker != null) {
+                    ids.add(marker.getRequestId());
+                }
             }
         }
         return ids;

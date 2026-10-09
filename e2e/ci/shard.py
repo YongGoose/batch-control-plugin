@@ -127,6 +127,11 @@ UNITS = [
     crawl_unit("nobc", 1.2),
     Unit("actions", 2.3, [("actions", py("r14/actions.py", "all"))],
          doc="e2e-12/14 G2b: every state-changing control per role"),
+    # e2e-22 R4-01 (a) (bug-hunt batch B). r22/approver_case.py arranges its own item (r22-case). R4-01 (b), LDAP letter
+    # case, needs compose.ldap.yml, which no CI group runs: T-08-194/195 (GrantIdStrategyTest, case-insensitive realm).
+    Unit("r22-approver-case", 0.4, [("r22-approver-case", py("r22/approver_case.py"))],
+         doc="e2e-22 R4-01: a job approver restriction spelled 'Approver-1' offers the global approver-1 on the Request Run "
+             "form (which files the request) and on the Change Approvers form, as the service accepts it"),
 ] + [jobui_unit(ui, group, w) for ui in ("new", "classic") for group, w in JOBUI_GROUPS[ui]] + [
     Unit("misc", 1.8, [("misc", py("r14/misc.py", "CHPBTRMKS"))], doc="e2e-12/14 G2d: targeted checks C H P B T R M K S"),
     Unit("targeted", 0.9, [
@@ -138,6 +143,10 @@ UNITS = [
         ("monitor", py("r14/s_monitor.py")),
     ], doc="e2e-12/14 G2d: error pages, list pager, incident, help, strategy monitor"),
     Unit("round3", 0.6, [("round3", py("r14/round3.py", "ABCDEFGHI"))], doc="e2e-14 R3-A..I: the e2e-11 round-3 checks"),
+    # e2e-23 R1-01 (bug-hunt batch A). r23/xml_chars.py arranges its own items (r23-ansi-fail, r23-plain-fail).
+    Unit("r23-xml-chars", 0.6, [("r23-xml-chars", py("r23/xml_chars.py"))], group="crawl and ui checks",
+         doc="e2e-23 R1-01: an ANSI-coloured console tail leaves the incident readable (list, page, incidents.csv, "
+             "summary); a comment or grant reason holding U+000B is refused with a 4xx and stores nothing"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
@@ -188,6 +197,11 @@ UNITS = [
                           ("r17-visibility", py("r17/s39.py", "H"))],
          doc="e2e-17: 404 for malformed and aliased record ids (S-39-01); a window follows two renames and the page shows "
              "the current name; delete + re-create ends it (S-39-02); followed name hidden from non-readers (D-75 (1), own step)"),
+    # e2e-22 R4-03 (bug-hunt batch B). r22/nonascii_reason.py arranges its own item (r22-reason) and cancels the requests
+    # it files.
+    Unit("r22-nonascii-reason", 0.5, [("r22-nonascii-reason", py("r22/nonascii_reason.py"))],
+         doc="e2e-22 R4-03: a non-ASCII reason survives the refusal of the multipart Request Run form and is stored as "
+             "typed; a multipart client without the json field stores reason and DATE as sent; url-encoded guard"),
     # e2e-19 (gap audit, docs/reports/e2e-19.md): SPEC acceptance lines no CI step checked before. r19/arrange.py is
     # idempotent and self-contained (items r19-*, accounts from JCasC). Each driver exits non-zero and prints FAIL lines,
     # and restores what it changes globally (executors, authorize-project's authenticator). Weights: minutes measured on
@@ -196,6 +210,11 @@ UNITS = [
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
              "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
              "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+    # e2e-22 R4-02 (bug-hunt batch B). r22/scripted_build.py arranges its own item (r22-script) and a requester API token
+    # it revokes at its end.
+    Unit("r22-scripted-build", 0.4, [("r22-scripted-build", py("r22/scripted_build.py"))],
+         doc="e2e-22 R4-02: a scripted build of an approval-required job (API token, no or a non-HTML Accept, a session "
+             "without Accept) gets HTTP 400 with the approval message, also through curl -fL; browsers keep the D-60 303"),
     Unit("r19-plugins", 0.6, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
          doc="e2e-19: naginator retry refused and recorded, customize-build-now keeps Request Run, lockable-resources and "
              "authorize-project with an approved run, jobConfigHistory one CONFIGURE record (SPEC 6 #34/#36, SPEC 9)"),
@@ -205,10 +224,19 @@ UNITS = [
     Unit("r19-lifecycle", 2.5, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
          doc="e2e-19: request form validation, decision and cancel rules, approver change, self-approval, approved-run "
              "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12)"),
+    # e2e-22 R2-05 (bug-hunt batch B). r22/cancelled_notice.py arranges its own items (r22-cancelq, r22-cancelq-dis).
+    Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
+         doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "
+             "shown as starting shortly; the request page says the queued run was cancelled and will not start"),
     Unit("r19-kinds", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-kinds", py("r19/kinds.py")),
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
              "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
+    # e2e-23 R2-02 and R2-01 (bug-hunt batch A, D-82). r23/matrix_children.py arranges its own item (r23-mx).
+    Unit("r23-matrix-children", 0.8, [("r23-matrix-children", py("r23/matrix_children.py"))],
+         group="job ui windows and disk",
+         doc="e2e-23 R2-02/R2-01: an approved run of an activated matrix project runs its configurations; a configuration "
+             "has no activation or request UI of its own and points to its parent; its direct build is refused"),
     Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
@@ -220,6 +248,12 @@ UNITS = [
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
         last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
             "window), then a crawl under it (replaces the strategy: last)"),
+    # e2e-22 R2-04 (bug-hunt batch B). r22/rename_queue.py saves the authorization strategy, applies a Batch Control
+    # role-based profile through JCasC for its own items (r22-team-a-*), and restores the strategy, the change-control
+    # switch and the built-in node's labels exactly at its end (so it needs no `last`).
+    Unit("r22-rename-queue", 0.8, [("r22-rename-queue", py("r22/rename_queue.py"))],
+         doc="e2e-22 R2-04: a rename by a user who loses Item/Read on the new name still invalidates the approved request "
+             "and drops its queued run, which never builds once a node has the label; control: the administrator's rename"),
     Unit("r16-durable", 2.2, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
                               ("r19-arrange", py("r19/arrange.py")), ("r19-restart", py("r19/restart.py"))],
          last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); e2e-19: pending and "
@@ -235,10 +269,20 @@ UNITS = [
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
                         "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
                         "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
+    # e2e-23 R1-02 (bug-hunt batch A, D-81). r23/history_late.py arranges its own items (r23-late-slow, r23-late-fast),
+    # shifts the plugin clock's zone and installs a holding RunListener, and restores both at its end.
+    Unit("r23-history-late", 1.6, [("r23-history-late", py("r23/history_late.py"))], group="runs and switches",
+         doc="e2e-23 R1-02: a run recorded late (held 65 s in onCompleted) does not hide the run recorded before it from "
+             "the History listing of its day, which matches runs.csv"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
+    # e2e-22 R3-04 (bug-hunt batch B). r22/grant_monitor.py arranges its own item (r22-monitor) and holds the GrantService
+    # monitor for 10 s from the script console while the requester's REST requests run; REST only, no screenshot.
+    Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],
+         doc="e2e-22 R3-04: while another thread holds the GrantService monitor, the requester's job lists and an item "
+             "answer at once with the baseline content and no permission check is BLOCKED on it (T-08-196 end to end)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
@@ -258,22 +302,22 @@ ORDER = {u.name: i for i, u in enumerate(UNITS)}
 # the same weights into 7 has 15.1 at most, but splits each role's job UI and mixes unrelated units.
 GROUPS = [
     ("crawl and ui checks", [  # requester's and manager's crawls, the DEF-07 recheck, every control per role, the
-        "def07", "crawl-requester", "crawl-manager",  # e2e-12/14 targeted checks, round 3, the Reject colour
+        "def07", "crawl-requester", "crawl-manager", "r22-approver-case",  # e2e-12/14 targeted checks, round 3, the Reject colour
         "actions", "misc", "targeted", "round3", "r21-reject-color"]),
     ("crawls and multibranch", [  # the crawls of admin, reqonly, approver-1 and nobc, the multibranch job pages
-        "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch"]),
+        "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch", "r22-cancelled-notice"]),
     ("admin and role strategy", [  # admin's job UI, then the role-strategy profile and its crawl (last)
-        "jobui-new-admin", "jobui-classic-admin", "role"]),
+        "jobui-new-admin", "jobui-classic-admin", "r22-rename-queue", "role"]),
     ("job ui params and restart", [  # requester's job UI, typed parameters, requests with typed values across a
         "jobui-new-requester", "jobui-classic-requester", "r16-params", "r16-durable"]),  # restart (last)
     ("job ui windows and disk", [  # reqonly's job UI, permission windows on items and renames, item kinds, items
-        "jobui-new-reqonly", "jobui-classic-reqonly",  # removed on disk with reload and restart (last)
+        "jobui-new-reqonly", "jobui-classic-reqonly", "r22-nonascii-reason",  # removed on disk with reload and restart (last)
         "r16-items", "r16-rename", "r16-follow", "r16-names", "r17-s39", "r19-kinds", "r17-disk"]),
     ("job ui other roles", [  # the job UI of approver-1, manager and nobc
-        "jobui-new-others", "jobui-classic-others"]),
+        "jobui-new-others", "jobui-classic-others", "r22-grant-monitor"]),
     ("runs and switches", [  # the run gate, reruns and the prefilled form, triggers, other plugins, the request
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
-        "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
+        "r19-gate", "r22-scripted-build", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
 # A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
 # group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`

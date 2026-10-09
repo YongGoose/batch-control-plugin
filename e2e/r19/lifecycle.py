@@ -17,9 +17,10 @@ C  approvers changed and cancel: the requester re-designates approver-2 on the r
 S  administrator self-approval: admin requests a run designating admin and approves it: EXECUTED, the page says
    "Self-approved: Yes" and the stored request has selfApproved=true (SPEC 2)
 E  approved-run expiry: with no executor, an approved request waits in the queue (APPROVED, "starts shortly"); the
-   administrator disables the job, which cancels the queue item: the page says it waits because the job is disabled
-   (D-55); after approvedRunTimeoutMinutes (1) it is EXPIRED with "Why it expired"; once the job is enabled again no
-   build ever starts (check-at-submit, SPEC 7); the requester gets "Request expired" (D-54)
+   administrator disables the job, which cancels the queue item: the page says the queued run was cancelled and will
+   not start, with the hint to enable the job first and submit a new run request, and no longer says "starts shortly"
+   (D-55, amended by D-83); after approvedRunTimeoutMinutes (1) it is EXPIRED with "Why it expired"; once the job is
+   enabled again no build ever starts (check-at-submit, SPEC 7); the requester gets "Request expired" (D-54)
 X  disabled job: while r19-dis is disabled the decision form says so, has no Approve button, and a POST approve is
    refused (PENDING kept); Reject still works (SPEC 12 D-55)
 B  a request by reqonly (Request without Item/Build): the request page tells approver-1 that the requester does not
@@ -198,8 +199,9 @@ return new XmlSlurper().parse(f).selfApproved.text()""")
 
 def sec_E():
     """The approved run waits in the queue (no executor), then the administrator disables the job, which cancels its
-    queue item: the request stays APPROVED, says that it waits because the job is disabled, and ends EXPIRED after
-    approvedRunTimeoutMinutes. (An approved run that sits in the queue is not expired: RunRequestService#expireOverdue.)"""
+    queue item: the request stays APPROVED, says that its queued run was cancelled and will not start (with the hint to
+    enable the job first, then submit a new run request; D-83), and ends EXPIRED after approvedRunTimeoutMinutes. (An
+    approved run that sits in the queue is not expired: RunRequestService#expireOverdue.)"""
     job = "r19-exp"
     nb = next_build(job)
     gv("jenkins.model.Jenkins.get().setNumExecutors(0); return 0")
@@ -223,9 +225,14 @@ def sec_E():
         t = s.text()
         s.shot("#main-panel", "R19-LIFE-E-02-waiting-disabled")
         s.done()
-        check("E", "the job disabled (its queue item cancelled): the page says the approved request waits because the job is "
-              "disabled (SPEC 12 D-55)", not queue_items(job) and "(waiting: the job is disabled)" in (row(t, "Status") or "")
-              and "waiting because the job is disabled" in t, status=row(t, "Status"))
+        status = row(t, "Status") or ""
+        check("E", "the job disabled (its queue item cancelled): the page says the approved run was cancelled and will not "
+              "start, tells the user to enable the job first and submit a new run request, and does not say 'starts "
+              "shortly' (SPEC 12 D-55, amended by D-83)",
+              not queue_items(job) and status == "APPROVED (queued run cancelled: it will not start)"
+              and "its queued run was cancelled and will not start" in t
+              and "enable it first, then submit a new run request" in t and "starts shortly" not in t,
+              status=status, queue=len(queue_items(job)))
         gv("jenkins.model.Jenkins.get().setNumExecutors(2); return 2")
         end = wait_until(lambda: request_state(rid)[1] == "EXPIRED", 200, 5)
         s = Session("requester")

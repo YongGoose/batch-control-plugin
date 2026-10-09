@@ -20,13 +20,16 @@ import io.jenkins.plugins.batchcontrol.store.ParameterDisplay;
 import io.jenkins.plugins.batchcontrol.store.PathCodec;
 import io.jenkins.plugins.batchcontrol.store.SecretMasker;
 import io.jenkins.plugins.batchcontrol.store.Store;
+import io.jenkins.plugins.batchcontrol.store.XmlChars;
 import java.io.IOException;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Pattern;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
@@ -101,7 +104,7 @@ public final class IncidentService {
         String runId = run.getParent().getFullName() + "#" + run.getNumber();
         Incident incident = new Incident(Ids.newId(), runId, run.getParent().getFullName(),
                 result, BatchClock.now());
-        incident.setParameters(maskedParameters(run));
+        incident.setParameters(storableParameters(maskedParameters(run)));
         // D-72b (6): the build's own timestamp, so a rerun reuses the values of this build only.
         incident.setRunTimestampMillis(run.getTimeInMillis());
         incident.setLogTail(maskedLogTail(run));
@@ -118,8 +121,13 @@ public final class IncidentService {
 
     // ---------------------------------------------------------------- handling (SPEC section 4)
 
-    /** {@code OPEN -> ACKNOWLEDGED}; any other current status is refused (forward-only). */
+    /**
+     * {@code OPEN -> ACKNOWLEDGED}; any other current status is refused (forward-only). R1-01: a
+     * comment holding a character XML 1.0 cannot store is refused ({@link IllegalArgumentException})
+     * before anything changes.
+     */
     public Incident acknowledge(String id, String comment) {
+        XmlChars.requireStorable(comment, "comment");
         lock.lock();
         try {
             Incident incident = require(id);
@@ -137,8 +145,12 @@ public final class IncidentService {
         }
     }
 
-    /** {@code ACKNOWLEDGED -> RESOLVED} only (SPEC section 4: OPEN must pass ACKNOWLEDGED first). */
+    /**
+     * {@code ACKNOWLEDGED -> RESOLVED} only (SPEC section 4: OPEN must pass ACKNOWLEDGED first).
+     * R1-01: the comment is checked as for {@link #acknowledge}.
+     */
     public Incident resolve(String id, String comment) {
+        XmlChars.requireStorable(comment, "comment");
         lock.lock();
         try {
             Incident incident = require(id);
@@ -160,12 +172,13 @@ public final class IncidentService {
     /**
      * Appends a comment to the incident history without changing the status — allowed in every
      * status, RESOLVED included (SPEC section 4). The entry is recorded against the incident's
-     * current status.
+     * current status. R1-01: the comment is checked as for {@link #acknowledge}.
      */
     public Incident addComment(String id, String comment) {
         if (comment == null || comment.trim().isEmpty()) {
             throw new IllegalArgumentException("A comment must not be empty.");
         }
+        XmlChars.requireStorable(comment, "comment");
         lock.lock();
         try {
             Incident incident = require(id);
@@ -353,8 +366,28 @@ public final class IncidentService {
     }
 
     /**
+     * R1-01: the build's masked parameters with the characters XML 1.0 cannot store removed from
+     * names and values ({@link XmlChars#removeInvalid}). They are display text only (a rerun takes
+     * the build's own values, D-72), and an incident must never be lost to a stray control
+     * character in a value submitted to the build directly.
+     */
+    private static Map<String, String> storableParameters(Map<String, String> parameters) {
+        Map<String, String> storable = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : parameters.entrySet()) {
+            storable.put(XmlChars.removeInvalid(entry.getKey()), XmlChars.removeInvalid(entry.getValue()));
+        }
+        return storable;
+    }
+
+    /**
      * The last {@value #LOG_TAIL_LINES} console lines with D-19 masking applied: the build's
      * sensitive parameter plaintexts and encrypted {@code Secret} payloads become the mask.
+     *
+     * <p>R1-01: each line is first reduced to its printable text ({@link #consoleText}): terminal
+     * escape sequences (ANSI colours) and any other character XML 1.0 cannot store are removed, so
+     * the incident can always be stored and read back. The masking runs on that text, with each
+     * secret reduced the same way, so an escape sequence inside an echoed secret does not let it
+     * through.
      */
     private static List<String> maskedLogTail(Run<?, ?> run) {
         List<String> lines;
@@ -365,16 +398,48 @@ public final class IncidentService {
                     + run.getFullDisplayName() + "; the incident is stored without a logTail");
             return new ArrayList<>();
         }
-        List<String> secrets = sensitivePlaintexts(run);
+        List<String> secrets = new ArrayList<>();
+        for (String secret : sensitivePlaintexts(run)) {
+            String plain = consoleText(secret);
+            if (!plain.isEmpty()) {
+                secrets.add(plain);
+            }
+        }
         List<String> masked = new ArrayList<>(lines.size());
         for (String line : lines) {
-            String out = line;
+            String out = consoleText(line);
             for (String secret : secrets) {
                 out = out.replace(secret, SecretMasker.MASK);
             }
             masked.add(SecretMasker.mask(out));
         }
         return masked;
+    }
+
+    /**
+     * Terminal escape sequences: CSI ({@code ESC [}, parameter and intermediate bytes, a final
+     * byte), OSC ({@code ESC ]} up to BEL or {@code ESC \}, or the end of the line), DCS, SOS, PM
+     * and APC ({@code ESC P/X/^/_} up to {@code ESC \} or the end of the line) and the other
+     * escape sequences ({@code ESC}, intermediate bytes, a final byte).
+     */
+    private static final Pattern ESCAPE_SEQUENCE = Pattern.compile(
+            "\u001B(?:\\[[0-?]*[ -/]*[@-~]"
+                    + "|\\][^\u0007\u001B]*(?:\u0007|\u001B\\\\)?"
+                    + "|[PX^_][^\u001B]*(?:\u001B\\\\)?"
+                    + "|[ -/]*[0-~])");
+
+    /**
+     * R1-01: the printable text of a console line: terminal escape sequences
+     * ({@link #ESCAPE_SEQUENCE}) are removed, then any remaining character XML 1.0 cannot store (a
+     * lone {@code ESC} included). Everything else is kept: {@code "ESC[31mERROR ESC[0mfailed"}
+     * becomes {@code "ERROR failed"}.
+     */
+    static String consoleText(@CheckForNull String line) {
+        if (line == null) {
+            return "";
+        }
+        String text = line.indexOf('\u001B') < 0 ? line : ESCAPE_SEQUENCE.matcher(line).replaceAll("");
+        return XmlChars.removeInvalid(text);
     }
 
     /** The plaintexts of the build's sensitive parameter values (D-19 masking targets). */
