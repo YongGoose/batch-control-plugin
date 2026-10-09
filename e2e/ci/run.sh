@@ -3,6 +3,8 @@
 #
 #   e2e/ci/run.sh <k>/<N>          e.g. e2e/ci/run.sh 2/5
 #
+# Shard k is group k of ci/shard.py GROUPS (`ci/shard.py check` lists them); N must be the number of groups, checked
+# before anything starts (exit 64 otherwise).
 # 1. uses target/batch-control.hpi (builds it with `mvn -ntp -q clean package -DskipTests` only when it is missing
 #    and BC_BUILD is not "never"); records its sha256;
 # 2. writes e2e/.env with random passwords when it does not exist (CI: never commit one);
@@ -37,6 +39,10 @@ ROOT="$(cd "$E2E/.." && pwd)"
 OUT="${BC_OUT:-$E2E/ci/out/$K}"
 PY="${PY:-python3}"
 export PY
+# The group of shard K (and a clear error when N is not the number of groups), before Docker is touched.
+if ! LABEL="$("$PY" "$E2E/ci/shard.py" label "$K/$N")"; then
+  exit 64
+fi
 export TZ="${TZ:-Asia/Seoul}"
 export BC_PORT="${BC_PORT:-18080}"
 export BC_MAIL_PORT="${BC_MAIL_PORT:-18025}"
@@ -48,7 +54,7 @@ export BC_BROWSER_CHANNEL="${BC_BROWSER_CHANNEL:-chromium}"
 JENKINS_CONTAINER="$BC_CONTAINER-jenkins"
 EXEC_IN_CONTAINER="/var/jenkins_home/jacoco/jacoco-$K.exec"
 
-log() { echo "[$(date +%H:%M:%S)] run.sh $K/$N: $*"; }
+log() { echo "[$(date +%H:%M:%S)] run.sh $K/$N ($LABEL): $*"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
 compose_files=(-f "$E2E/docker-compose.yml" -f "$E2E/compose.prefix.yml" -f "$E2E/compose.coverage.yml")
@@ -73,6 +79,7 @@ fi
   echo "hpi_sha256=$(sha256 "$HPI")"
   echo "git_head=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "shard=$K/$N project=$BC_PROJECT port=$BC_PORT browser=$BC_BROWSER_CHANNEL tz=$TZ"
+  echo "label=$LABEL"
 } > "$OUT/build-info.txt"
 
 # ---------------------------------------------------------------- 2. .env (passwords only; never committed)
@@ -178,7 +185,7 @@ if [ "${BC_RUNNER:-pytest}" = legacy ]; then
   RC=$?
 else
   "$PY" -m pytest "$E2E/ci/test_shard.py" -s -p no:playwright --bc-shard "$K/$N" --bc-out "$OUT" \
-    --junitxml "$OUT/junit.xml" -o junit_suite_name="e2e shard $K of $N"
+    --junitxml "$OUT/junit.xml" -o junit_suite_name="e2e shard $K of $N ($LABEL)"
   RC=$?
   [ "$RC" -le 1 ] || log "pytest exited $RC (not a step verdict: usage or internal error)"
   [ "$RC" = 0 ] || RC=1

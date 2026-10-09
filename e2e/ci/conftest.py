@@ -28,8 +28,15 @@ def _plan(config):
     spec = config.getoption("--bc-shard")
     if not spec:
         return None
-    k, n = shard.parse_shard(spec)
-    return k, n, shard.steps_for(shard.units_for(k, n))
+    try:  # a malformed <k>/<N>, N other than the number of groups, inconsistent GROUPS: a usage error, not a crash
+        k, n = shard.parse_shard(spec)
+        return k, n, shard.steps_for(shard.units_for(k, n))
+    except SystemExit as e:
+        raise pytest.UsageError(str(e))
+
+
+def pytest_configure(config):
+    _plan(config)  # reports a bad --bc-shard as a plain usage error (exit 4) before collection
 
 
 def pytest_generate_tests(metafunc):
