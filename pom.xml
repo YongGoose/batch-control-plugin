@@ -14,7 +14,7 @@
   <packaging>hpi</packaging>
 
   <name>Batch Control</name>
-  <description>Run approval, just-in-time change permissions, and audit history for Jenkins instances used as a batch execution manager</description>
+  <description>Adds run approval, time-boxed change permissions and an append-only audit history to Jenkins instances used as a batch execution manager</description>
   <url>https://github.com/jenkinsci/${project.artifactId}-plugin</url>
 
   <licenses>

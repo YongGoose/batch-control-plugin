@@ -1,15 +1,5 @@
 <?jelly escape-by-default='true'?>
 <div>
-  Run approval, time-boxed change permissions, and an append-only audit history
-  for Jenkins instances that are used as a batch execution manager.
-  A manual run of a protected job waits for a designated approver before it
-  reaches the queue, and a user without standing permission to create, configure,
-  or delete a job can request a time-boxed permission window that adds those
-  permissions to what the delegate authorization strategy already grants.
-  A window never takes anything away and imposes nothing on users who already
-  hold the permission; the only exception is that deleting a job needs an active window while change
-  control is on.
-  Runs, decisions, configuration changes, and failures are recorded independently
-  of build retention, and installing the plugin changes nothing until an
-  administrator turns the controls on.
+  Adds run approval, time-boxed change permissions and an append-only audit
+  history to Jenkins instances used as a batch execution manager.
 </div>
