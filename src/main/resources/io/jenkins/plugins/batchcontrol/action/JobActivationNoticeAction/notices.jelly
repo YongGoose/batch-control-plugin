@@ -39,6 +39,27 @@
     <j:set var="formUrl" value="${rootURL}/${it.job.url}batch-control-activation/"/>
     <j:set var="carrier" value="${it.carrier}"/>
     <j:choose>
+      <j:when test="${it.subItem}">
+        <!-- D-82: a job's sub-item (a matrix configuration, a Maven module) has no activation,
+             run approval or requests of its own; it names the parent job it follows (only for a
+             viewer with Item/Read on it, S-14-02) and links no form of its own. -->
+        <j:set var="parentJob" value="${it.parentJob}"/>
+        <j:set var="parentUrl" value="${it.carrierUrl(parentJob)}"/>
+        <div class="jenkins-alert jenkins-alert-info ${noticeClass}" role="status">
+          <j:choose>
+            <j:when test="${parentUrl != null}">
+              <strong>Batch Control: this ${it.subItemNoun} is part of
+                <a class="model-link" href="${rootURL}/${parentUrl}">${parentJob.fullDisplayName}</a>
+                and follows its activation and run approval.</strong>
+            </j:when>
+            <j:otherwise>
+              <strong>Batch Control: this ${it.subItemNoun} follows the activation and run approval
+                of a job you cannot see.</strong>
+            </j:otherwise>
+          </j:choose>
+          It has none of its own: activation, hold and run requests are made on that job.
+        </div>
+      </j:when>
       <j:when test="${carrier != null}">
         <j:set var="carrierUrl" value="${it.carrierUrl(carrier)}"/>
         <div class="jenkins-alert jenkins-alert-info ${noticeClass}" role="status">
@@ -87,7 +108,7 @@
       </j:otherwise>
     </j:choose>
     <j:set var="pending" value="${it.pendingRequests}"/>
-    <j:if test="${carrier == null and !empty(pending)}">
+    <j:if test="${carrier == null and !it.subItem and !empty(pending)}">
       <ul class="jenkins-!-margin-top-1 jenkins-!-margin-bottom-1">
         <j:forEach var="r" items="${pending}">
           <li>

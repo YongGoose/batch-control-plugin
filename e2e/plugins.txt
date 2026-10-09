@@ -28,6 +28,10 @@ job-dsl
 # file-parameters: the stashedFile and base64File parameter types that a run request must keep (D-72, e2e-16);
 # core's own `file` parameter needs no plugin.
 file-parameters
+# matrix-project: the multi-configuration projects of e2e-19 (r19-mx) and e2e-23 (r23-mx, D-82: configurations follow
+# the parent's run control). It used to come in only as a dependency of parameterized-trigger and naginator; pinned to
+# the release those resolved to, so the matrix units do not depend on another plugin's dependency list.
+matrix-project:928.v1effc3f3a_236
 # Section E - plugin precedence. Each one adds a build button, a trigger, a
 # queue restriction, a configuration history or a build authenticator next to
 # Batch Control's own gate.
