@@ -29,9 +29,11 @@ Jenkins: `http://localhost:${BC_PORT:-8080}/`. Mail sink UI and API (mailpit):
 
 The scripted part of the e2e passes (the e2e-11 round-3 checks as `r14/round3.py`, the e2e-12 crawl with its dialog
 cycles and targeted checks, the e2e-13 role-strategy profile as `r14/role/`, the e2e-14 DEF-07 recheck and the e2e-15
-multibranch checks) as N independent shards. Each shard runs on a fresh Jenkins with the JaCoCo agent in its JVM, so
-the run also records which plugin code it executed; `ci/coverage-diff.py` then lists the lines a branch changed that no
-scenario executed. Made for GitHub Actions (one shard per runner); it runs the same way locally.
+multibranch checks, the e2e-16..21 drivers) as five independent shards, each a fixed, named group of units ("Units
+and groups" below; the GitHub Actions jobs are named after the groups, `e2e (crawl and ui checks)` and so on). Each
+shard runs on a fresh Jenkins with the JaCoCo agent in its JVM, so the run also records which plugin code it executed;
+`ci/coverage-diff.py` then lists the lines a branch changed that no scenario executed. Made for GitHub Actions (one
+shard per runner); it runs the same way locally.
 
 ### Run it locally
 
@@ -39,9 +41,10 @@ scenario executed. Made for GitHub Actions (one shard per runner); it runs the s
 mvn -ntp clean package -DskipTests                     # target/batch-control.hpi and target/classes, one build
 python3 -m venv venv && venv/bin/pip install -r e2e/ci/requirements.txt    # Python >= 3.10
 venv/bin/python -m playwright install chromium         # or BC_BROWSER_CHANNEL=chrome for the installed Chrome
-PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5              # shard 1 of 5; artefacts in e2e/ci/out/1/ (then 2/5 ... 5/5)
-venv/bin/python e2e/ci/shard.py plan-all 5             # which units each shard runs, estimated minutes
-BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1     # the setup plus just these units
+PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5              # shard 1 of 5 = group 1; artefacts in e2e/ci/out/1/ (then 2/5 ... 5/5)
+python3 e2e/ci/shard.py check                          # the groups: labels, units, minutes; fails on a bad GROUPS
+python3 e2e/ci/shard.py plan 3/5                       # the steps shard 3 runs (setup, then its units)
+BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5     # the setup plus just these units
 venv/bin/python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base main   # -> e2e/ci/out/coverage/summary.md
 venv/bin/python -m pytest e2e/ci/test_selftest_content.py --browser chromium   # the crawl's content checks on synthetic pages (no Jenkins)
 venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.zip    # the trace of a failed step
@@ -49,7 +52,8 @@ venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.z
 
 Against a stack that is already up (its setup done), one step or unit at a time:
 `BC_BASE=http://localhost:18080/jenkins BC_UNITS=round3 BC_SKIP_SETUP=1 venv/bin/python -m pytest e2e/ci/test_shard.py
---bc-shard 1/1 --bc-out /tmp/out -s` (add `-k round3` to select steps by name).
+--bc-shard 1/5 --bc-out /tmp/out -s` (add `-k round3` to select steps by name; `<k>/<N>` must name a group, `N` = 5,
+also with `BC_UNITS`, which then replaces that group's units).
 
 `run.sh` uses its own compose project (`bc-cov-<k>`), its own container names and ports 18080/18025, so it can run
 next to the regular stack; it never touches the `batch-control-e2e` volume and removes its own containers and volume
@@ -131,14 +135,41 @@ Every CI driver gets its browser through `r6/lib.py`, so these apply to all of t
   same). A step needs recorded evidence of an intermittent failure and a driver that is safe to run twice to be listed;
   the set is empty at e2e-20. A retry is listed in `summary.md` and keeps the failed attempt's log and traces.
 
-### Units and shards
+### Units and groups
 
-`ci/shard.py units` lists the units with their steps. A unit is a group of driver invocations that must run in order on
-one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account in between).
-Units are assigned with a deterministic longest-processing-time split over the measured minutes, so the same N always
-gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins; e2e-19 added
-`r19/restart.py` to it rather than a fifth `last` unit, which would need N >= 5), `r17-disk` (reloads and restarts
-Jenkins) and `r18-final` (switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
+`ci/shard.py units` lists the units with their steps and groups. A unit is a group of driver invocations that must run
+in order on one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account
+in between). `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins; e2e-19 added
+`r19/restart.py` to it rather than a fifth `last` unit), `r17-disk` (reloads and restarts Jenkins) and `r18-final`
+(switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
+
+The units are split into fixed, named groups (`GROUPS` in `ci/shard.py`), one CI job each, named `e2e (<label>)`.
+Shard k of N is group k, and N must be the number of groups (`run.sh 1/4` and `--bc-shard 1/4` stop with an error
+before anything starts). A label is lower-case words of letters and digits separated by single spaces or `-`, at most
+25 characters (the rule of `.github/test-shards.txt`), and says what the group tests. Each role's job-UI units stay in
+one group, so a red job also tells whose screens broke. Minutes are the unit weights (the setup adds 3.4 to each):
+
+| Shard | Job label | Units (in run order) | Minutes | `last` unit |
+|---|---|---|---:|---|
+| 1/5 | crawl and ui checks | `def07`, `crawl-requester`, `crawl-reqonly`, `crawl-approver-1`, `crawl-manager`, `crawl-nobc`, `actions`, `misc`, `targeted`, `round3`, `r21-reject-color` | 29.8 | none |
+| 2/5 | admin and role strategy | `crawl-admin`, `jobui-new-admin`, `jobui-classic-admin`, `role` | 28.5 | `role` |
+| 3/5 | job ui params and restart | `jobui-new-requester`, `jobui-classic-requester`, `r16-params`, `r16-rerun`, `r16-d60`, `multibranch`, `r16-durable` | 29.0 | `r16-durable` |
+| 4/5 | job ui windows and disk | `jobui-new-reqonly`, `jobui-classic-reqonly`, `r16-items`, `r16-rename`, `r16-follow`, `r16-names`, `r17-s39`, `r19-kinds`, `r17-disk` | 30.0 | `r17-disk` |
+| 5/5 | job ui runs and switches | `jobui-new-others` (approver-1, manager, nobc), `jobui-classic-others`, `r19-gate`, `r19-plugins`, `r19-triggers`, `r19-lifecycle`, `r18-final` | 29.1 | `r18-final` |
+
+The groups replaced (2026-10-09) a longest-processing-time split over the same weights, whose heaviest of five shards
+had 29.6 minutes of units; the heaviest group has 30.0.
+
+- `shard.py check` prints that table with the sums and fails (`::error::` lines, exit 1) when a unit is in no group or
+  in two (or twice in one), when a group holds two `last` units, a name that is not a unit or no unit at all, or when
+  a label is not valid or repeated. `shard.py matrix` (after the same check) prints the GitHub Actions matrix, one
+  entry per group: `{"include":[{"shard":1,"of":5,"label":"crawl and ui checks"},...]}`; `shard.py label <k>/<N>`
+  prints one label (`run.sh` uses it to fail early and names the JUnit suite after it).
+- A new unit: add it to `UNITS` and to the group whose label it fits, then run `shard.py check`; it prints the heaviest
+  group next to what an automatic split of the same weights would give, so the balance stays visible. If no label
+  fits, rename the group (the label is only the job name; the artefacts and `ci/out/<k>/` keep the index).
+
+The table below is the earlier automatic split, measured with the weights of that day.
 
 Measured 2026-10-06 (e2e-17: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards and one
 supplementary run at a time on one machine; the image was cached, so no build time is included). Every shard: about
@@ -157,8 +188,7 @@ On the plugin built from bd449cd every step passed except two r17 steps that ass
 `r17-visibility` (D-75 (1), not implemented yet) in shard 1 and `r17-case` (e2e-17 DEF-E17-01) in shard 5
 (docs/reports/e2e-17.md). The merged execution data of the five shards and two supplementary runs: **lines 72.4%
 (7961/10999), instructions 72.4%, branches 57.3%, methods 82.5%** of `io.jenkins.plugins.batchcontrol`; changed lines
-against cb5ad5d 73.8%. The crawls reported no content defect. N is free (`run.sh 1/3` works, `shard.py plan-all <N>`
-shows the split); 5 keeps every shard at about half an hour.
+against cb5ad5d 73.8%. The crawls reported no content defect. Five shards keep every shard at about half an hour.
 
 ### Coverage
 
@@ -260,17 +290,25 @@ Proposed workflow `e2e.yml`, non-blocking at first (not a required status). Pin 
 `build.yml` does; `permissions: contents: read` only (no PR comments, no uploads to third parties), so fork pull
 requests work with the default read-only token.
 
+The workflow runs only when an input of the suite changes: its `paths` filter (the same list on `push` to main and on
+`pull_request`, since #14) is `src/main/**`, `pom.xml`, `.mvn/**`, `e2e/**` and `.github/workflows/e2e.yml`;
+`workflow_dispatch` runs it on any ref. A change to `e2e/ci/shard.py` (the groups) is under `e2e/**`, so it runs the
+suite. Only a workflow with no required check may be path-filtered (a skipped workflow would leave a required check
+pending).
+
 | Job | Runner and tools | Steps |
 |---|---|---|
 | `build` | `ubuntu-latest`; `actions/setup-java` (temurin 21, `cache: maven`) | `mvn -ntp -B clean package -DskipTests`; upload artifact `e2e-build` = `target/batch-control.hpi` + `target/classes/` (one build: the classes must be the ones in the hpi) |
-| `e2e` (matrix `shard: [1, 2, 3, 4, 5]`, `fail-fast: false`, `timeout-minutes: 90`) | `ubuntu-latest` (Docker and Compose v2 are preinstalled); `actions/setup-python` 3.12 | download `e2e-build` into `target/`; `pip install -r e2e/ci/requirements.txt`; `python -m playwright install --with-deps chromium`; `BC_BUILD=never PY=python e2e/ci/run.sh ${{ matrix.shard }}/5`; `if: always()`: `cat e2e/ci/out/${{ matrix.shard }}/summary.md >> "$GITHUB_STEP_SUMMARY"` and upload artifact `e2e-shard-${{ matrix.shard }}` = `e2e/ci/out/${{ matrix.shard }}/` (exec, summaries, step logs, `jenkins.log`, screenshots; keep 7-14 days) |
+| `groups` (no `needs`, in parallel with `build`; output `matrix`) | `ubuntu-latest`; its `python3` (`shard.py` uses the standard library only) | `python3 e2e/ci/shard.py check` (fails the run on a bad `GROUPS`, writes the group table to the job summary), then `matrix="$(python3 e2e/ci/shard.py matrix)"` and `echo "matrix=$matrix" >> "$GITHUB_OUTPUT"` |
+| `e2e` (`needs: [build, groups]`, `name: e2e (${{ matrix.label }})`, `matrix: ${{ fromJSON(needs.groups.outputs.matrix) }}`, `fail-fast: false`, `timeout-minutes: 90`) | `ubuntu-latest` (Docker and Compose v2 are preinstalled); `actions/setup-python` 3.12 | download `e2e-build` into `target/`; `pip install -r e2e/ci/requirements.txt`; `python -m playwright install --with-deps chromium`; `BC_BUILD=never PY=python e2e/ci/run.sh "$SHARD/$OF"` with `SHARD=${{ matrix.shard }}` and `OF=${{ matrix.of }}`; `if: always()`: `cat e2e/ci/out/${{ matrix.shard }}/summary.md >> "$GITHUB_STEP_SUMMARY"` and upload artifact `e2e-shard-${{ matrix.shard }}` = `e2e/ci/out/${{ matrix.shard }}/` (exec, summaries, step logs, `jenkins.log`, screenshots; keep 7-14 days). The artefacts and directories keep the shard index, so `coverage` does not depend on the labels |
 | `coverage` (`needs: [build, e2e]`, `if: always() && needs.build.result == 'success'`) | `ubuntu-latest`; `actions/checkout` with `fetch-depth: 0` (the merge base must be present); setup-java 21 (to run the JaCoCo CLI) and setup-python 3.12 | download `e2e-build` into `target/`; download `pattern: e2e-shard-*` into `e2e/ci/out/` (without `merge-multiple`: one directory per artifact, `e2e/ci/out/e2e-shard-<k>/jacoco-<k>.exec`); `pip install -r e2e/ci/requirements.txt`; optionally `python -m playwright install --with-deps chromium` and `python e2e/ci/selftest_content.py` (about 10 s); `e2e/ci/fetch-jacoco.sh`; `python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base "$BASE" --annotations on` with `BASE=${{ github.event.pull_request.base.sha }}` on pull requests (`${{ github.event.before }}` on a push to main; skip the step when it is all zeros); upload `e2e/ci/out/coverage/` as `e2e-coverage` |
 
 - Merging: `coverage-diff.py` merges whatever `--exec` matches (one exec per shard, each with two identical sessions)
   with `jacococli merge`; to merge by hand: `java -jar e2e/ci/.cache/jacoco/jacococli.jar merge e2e/ci/out/*/jacoco-*.exec
   --destfile merged.exec` into a file that does not exist yet (`merge` appends to an existing one). A missing shard
   (failed to start) only lowers the coverage; the report says how many exec files it merged.
-- Exit codes: `run.sh` 1 = a scenario failed (red shard), 2 = the stack did not start; `coverage-diff.py` 0 whatever
+- Exit codes: `run.sh` 1 = a scenario failed (red shard), 2 = the stack did not start, 64 = usage (`<k>/<N>` malformed
+  or N not the number of groups); `shard.py check` and `matrix` 1 = `GROUPS` is inconsistent; `coverage-diff.py` 0 whatever
   the coverage, 3 = execution data and classes do not match (the build/download wiring is broken), 2 = tool error.
   Leave `--fail-under` off until the owner sets a threshold.
 - Services and ports: none as workflow `services:`. `run.sh` starts Jenkins (`localhost:18080/jenkins`) and mailpit
@@ -278,7 +316,7 @@ requests work with the default read-only token.
   plugins of `e2e/plugins.txt` from the Jenkins update centre) and pulling `axllent/mailpit`. Network needed:
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
-- Durations: per shard 24-33 min measured locally (2026-10-06, e2e-17) ("Units and shards" above: 2 min start, 3.5 min setup, the units);
+- Durations: per shard 24-33 min measured locally (2026-10-06, e2e-17) ("Units and groups" above: 2 min start, 3.5 min setup, the units);
   on a runner add the image build (the base image and the plugins of `plugins.txt`, a few minutes without a cache),
   the Playwright install (about 1 min) and the artifact upload. Expect 35-45 min per shard, the five in parallel, and
   2-3 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT` (default 2700 s) bounds one step.
@@ -554,7 +592,7 @@ a probe inserted next to it with `style="color: var(--destructive-color)"` (the 
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
 button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
 the three requests. Light theme only. Alone:
-`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1` (about 6 minutes, most of it the shared setup).
+`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5` (about 6 minutes, most of it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 
@@ -660,7 +698,7 @@ inheritance (administrators only) and the top-level jobs the disk scenarios remo
 
 `compose.ci-fs.yml` puts `JENKINS_HOME/batch-control` on a host directory (`BC_CI_FS_DIR`, empty at the start), which on
 macOS with Docker Desktop is case-insensitive, for the S-39-01 premise:
-`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/1`.
+`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/5`.
 
 ## e2e-15 driver (`r15/`)
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Shard plan and step runner for the CI e2e pass (called by ci/run.sh; usable on its own against a running stack).
 
-    shard.py units                      list the units, their weights and steps
-    shard.py plan <k>/<N> [--json]      the units and steps shard k of N runs
-    shard.py plan-all <N>               every shard of N with its estimated duration
+    shard.py units                      list the units, their weights, groups and steps
+    shard.py check                      check GROUPS (every unit in exactly one group, ...) and print the groups
+    shard.py matrix                     the GitHub Actions matrix of the groups as JSON (after the same check)
+    shard.py label <k>/<N>              the label of group k
+    shard.py plan <k>/<N> [--json]      the units and steps shard k of N (= group k) runs
+    shard.py plan-all [N]               every group with its estimated duration
     shard.py run <k>/<N> --out DIR      run shard k of N against $BC_BASE, write DIR/summary.{json,md}
 
 A *unit* is a group of existing driver invocations that must run in order on one Jenkins (for example the
 crawl of one role on both job UIs). Every shard starts from a fresh JENKINS_HOME and first runs the SETUP steps
 (the e2e-14 arrangement and seed), then its units in the canonical e2e-14 order; a unit marked `last` replaces the
-authorization strategy and therefore runs last in its shard. Units are assigned with a deterministic
-longest-processing-time split over the weights below (minutes measured locally, see e2e/README.md), so the same N
-always gives the same shards; BC_UNITS=a,b runs just those units (debugging).
+authorization strategy and therefore runs last in its shard. The units are split into the fixed, named GROUPS below,
+one CI job each, named after the group's label; shard k of N is group k, and N must be the number of groups.
+BC_UNITS=a,b runs just those units instead of group k's (debugging).
 
 A step fails when the driver exits non-zero, or prints one of the drivers' own failure markers: a line starting
 with "FAIL " (round3.py, def07.py, the crawl's content checks), `"ok": false` (r15/check.py) or `"EXCEPTION":`
@@ -210,14 +213,42 @@ UNITS = [
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
                         "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
                         "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
-    # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject). The lightest weight, listed last: the LPT split
-    # assigns it after every other unit, so adding it leaves the other units' shards as they were.
+    # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
+
+# The CI jobs: fixed, named groups of units, one GitHub Actions job each, named "e2e (<label>)" (.github/workflows/e2e.yml
+# reads `shard.py matrix`). Group k is shard k of N = len(GROUPS): `run.sh k/N`, `--bc-shard k/N`, the artefact
+# e2e-shard-<k> and ci/out/<k>/ keep the index. A label is lower-case words of letters and digits separated by single
+# spaces or '-', at most 25 characters (the rule of .github/test-shards.txt), and says what the group tests. Each role's
+# job-UI units stay together, so a red job also tells whose screens broke. `shard.py check` (and `matrix`, which the
+# workflow's plan job reads) fails when a unit is in no group or in two, when a group holds two `last` units or a name
+# that is no unit, or when a label is not valid; it prints the weight per group and the heaviest group against an automatic split of the
+# same weights, so the balance stays visible. A new unit: add it to UNITS and to the group whose label it fits.
+# Weight sums when the groups were drawn (2026-10-09, minutes; the setup adds 3.4 to each): 29.8, 28.5, 29.0, 30.0,
+# 29.1; the longest-processing-time split of the same weights into 5 that these groups replace had 29.6 at most.
+GROUPS = [
+    ("crawl and ui checks", [  # the crawls of five roles (admin's is in the next group), the e2e-12/14 targeted checks
+        "crawl-requester", "crawl-reqonly", "crawl-approver-1", "crawl-manager", "crawl-nobc",
+        "def07", "actions", "misc", "targeted", "round3", "r21-reject-color"]),
+    ("admin and role strategy", [  # admin's crawl and job UI, then the role-strategy profile and its crawl (last)
+        "crawl-admin", "jobui-new-admin", "jobui-classic-admin", "role"]),
+    ("job ui params and restart", [  # requester's job UI, the multibranch job pages, typed parameters, reruns, the
+        "jobui-new-requester", "jobui-classic-requester", "multibranch",  # prefilled form, a restart (last)
+        "r16-params", "r16-rerun", "r16-d60", "r16-durable"]),
+    ("job ui windows and disk", [  # reqonly's job UI, permission windows on items and renames, item kinds, items
+        "jobui-new-reqonly", "jobui-classic-reqonly",  # removed on disk with reload and restart (last)
+        "r16-items", "r16-rename", "r16-follow", "r16-names", "r17-s39", "r19-kinds", "r17-disk"]),
+    ("job ui runs and switches", [  # approver-1/manager/nobc's job UI, the run gate, triggers, other plugins, the
+        "jobui-new-others", "jobui-classic-others",  # request lifecycle, then the global switches and strategy (last)
+        "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
+]
+LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
+LABEL_MAX = 25
 
 # Steps (as "<unit>:<step>") that are retried once when they fail (pytest: @pytest.mark.flaky(reruns=1) through
 # pytest-rerunfailures; `shard.py run`: the same single retry). A step belongs here only with evidence of an intermittent
@@ -238,32 +269,122 @@ def parse_shard(s):
     return int(m.group(1)), int(m.group(2))
 
 
-def split(n):
-    """Deterministic LPT: heaviest unit first onto the least loaded shard (ties: lower shard index)."""
-    if n > len(UNITS):
-        raise SystemExit(f"at most {len(UNITS)} shards (one unit each)")
-    bins = [[] for _ in range(n)]
-    load = [SETUP_WEIGHT] * n
-    for u in sorted(UNITS, key=lambda u: (-u.weight, ORDER[u.name])):
-        candidates = [i for i in range(n) if not (u.last and any(x.last for x in bins[i]))]
-        i = min(candidates, key=lambda i: (load[i], i))
-        bins[i].append(u)
-        load[i] += u.weight
-    for b in bins:
-        b.sort(key=lambda u: (u.last, ORDER[u.name]))
-    # shard 1 is the one holding the first unit in canonical order, and so on: stable numbering
-    order = sorted(range(n), key=lambda i: min(ORDER[u.name] for u in bins[i]) if bins[i] else 99)
-    return [bins[i] for i in order], [load[i] for i in order]
+def group_errors(groups=None):
+    """Everything wrong with GROUPS (an empty list when every unit is in exactly one group, ...)."""
+    groups = GROUPS if groups is None else groups
+    errors = [] if groups else ["GROUPS defines no group"]
+    labels, where = {}, {}
+    for i, (label, names) in enumerate(groups, 1):
+        if not isinstance(label, str) or len(label) > LABEL_MAX or not LABEL_SYNTAX.match(label):
+            errors.append(f"group {i}: label {label!r} must be lower-case words of letters and digits separated by "
+                          f"single spaces or '-', at most {LABEL_MAX} characters")
+        elif label in labels:
+            errors.append(f"group {i}: label {label!r} is already the label of group {labels[label]}")
+        else:
+            labels[label] = i
+        if not names:
+            errors.append(f"group {i} ({label}) has no units")
+        for name in names:
+            if name not in BY_NAME:
+                errors.append(f"group {i} ({label}): {name!r} is not a unit (shard.py units lists them)")
+            where.setdefault(name, []).append(i)
+        lasts = [name for name in names if name in BY_NAME and BY_NAME[name].last]
+        if len(lasts) > 1:
+            errors.append(f"group {i} ({label}) holds {len(lasts)} `last` units ({', '.join(lasts)}): at most one per "
+                          f"group, because each replaces the strategy or restarts Jenkins and must run last")
+    for u in UNITS:
+        gs = where.get(u.name, [])
+        if not gs:
+            errors.append(f"unit {u.name} is in no group (add it to the GROUPS entry whose label it fits)")
+        elif len(gs) > 1:
+            twice = len(set(gs)) == 1
+            errors.append(f"unit {u.name} is listed {len(gs)} times in group {gs[0]}" if twice else
+                          f"unit {u.name} is in more than one group: {', '.join(map(str, gs))}")
+    return errors
+
+
+def checked_groups():
+    errors = group_errors()
+    if errors:
+        raise SystemExit("ci/shard.py GROUPS is inconsistent (shard.py check):\n  " + "\n  ".join(errors))
+    return GROUPS
+
+
+def group_for(k, n):
+    groups = checked_groups()
+    if n != len(groups):
+        raise SystemExit(f"shard {k}/{n}: N must be the number of groups, {len(groups)}, so <k>/{len(groups)} with "
+                         f"1 <= k <= {len(groups)} (shard.py check lists them)")
+    return groups[k - 1]
+
+
+def group_units(names):
+    return sorted((BY_NAME[x] for x in names), key=lambda u: (u.last, ORDER[u.name]))
+
+
+def bc_units():
+    names = [x.strip() for x in os.environ.get("BC_UNITS", "").split(",") if x.strip()]
+    unknown = [x for x in names if x not in BY_NAME]
+    if unknown:
+        raise SystemExit(f"unknown units {unknown}; known: {list(BY_NAME)}")
+    return names
 
 
 def units_for(k, n):
-    if os.environ.get("BC_UNITS"):
-        names = [x.strip() for x in os.environ["BC_UNITS"].split(",") if x.strip()]
-        unknown = [x for x in names if x not in BY_NAME]
-        if unknown:
-            raise SystemExit(f"unknown units {unknown}; known: {list(BY_NAME)}")
-        return sorted((BY_NAME[x] for x in names), key=lambda u: (u.last, ORDER[u.name]))
-    return split(n)[0][k - 1]
+    _, names = group_for(k, n)
+    return group_units(bc_units() or names)
+
+
+def label_for(k, n):
+    label, _ = group_for(k, n)
+    return f"BC_UNITS {','.join(bc_units())}" if bc_units() else label
+
+
+def weight(names):
+    return sum(BY_NAME[x].weight for x in names)
+
+
+def lpt_loads(n):
+    """The automatic split the groups replaced (deterministic longest-processing-time over the weights, at most one
+    `last` unit per shard), kept only to compare the balance in `shard.py check`: its shard loads without the setup."""
+    load = [0.0] * n
+    lasts = [0] * n
+    for u in sorted(UNITS, key=lambda u: (-u.weight, ORDER[u.name])):
+        i = min((i for i in range(n) if not (u.last and lasts[i])), key=lambda i: (load[i], i))
+        load[i] += u.weight
+        lasts[i] += u.last
+    return load
+
+
+def matrix():
+    groups = checked_groups()
+    return {"include": [{"shard": i, "of": len(groups), "label": label} for i, (label, _) in enumerate(groups, 1)]}
+
+
+def check():
+    errors = group_errors()
+    for e in errors:
+        print(f"::error::{e}")
+    if errors:
+        return 1
+    loads = [weight(names) for _, names in GROUPS]
+    lpt = max(lpt_loads(len(GROUPS)))
+    lines = ["| Shard | Job label | Minutes | `last` unit | Units |", "|---:|---|---:|---|---|"]
+    for i, (label, names) in enumerate(GROUPS, 1):
+        last = next((x for x in names if BY_NAME[x].last), "")
+        lines.append(f"| {i}/{len(GROUPS)} | {label} | {loads[i - 1]:.1f} | {last} | "
+                     f"{', '.join(u.name for u in group_units(names))} |")
+    lines.append(f"| | total | {sum(loads):.1f} | | {len(UNITS)} units |")
+    note = (f"heaviest group {max(loads):.1f} min of units (+{SETUP_WEIGHT} setup); an automatic split of the same "
+            f"weights into {len(GROUPS)} would have {lpt:.1f} at most")
+    print("\n".join(lines))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write("### e2e groups\n\n" + "\n".join(lines) + f"\n\n{note[0].upper() + note[1:]}.\n")
+    print(f"OK: {len(UNITS)} units, each in exactly one of {len(GROUPS)} groups, at most one `last` unit per group; "
+          f"{note}")
+    return 0
 
 
 def steps_for(units):
@@ -399,6 +520,7 @@ class Runner:
         self.logs = self.outdir / "logs"
         self.logs.mkdir(parents=True, exist_ok=True)
         self.units = units_for(k, n)
+        self.label = label_for(k, n)
         self.steps = steps_for(self.units)
         self.pyexe = os.environ.get("PY", sys.executable)
         self.timeout = int(os.environ.get("BC_STEP_TIMEOUT", "2700"))
@@ -411,7 +533,7 @@ class Runner:
         self.t_all = time.time()
 
     def plan_line(self):
-        return f"shard {self.k}/{self.n}: units {[u.name for u in self.units]} ({len(self.steps)} steps)"
+        return f"shard {self.k}/{self.n} ({self.label}): units {[u.name for u in self.units]} ({len(self.steps)} steps)"
 
     def run_step(self, idx, name, spec):
         attempt = self.attempts.get(idx, 0) + 1
@@ -477,7 +599,8 @@ class Runner:
         shutil.rmtree(self.auth_dir, ignore_errors=True)
         results = [self.results[i] for i in sorted(self.results)]
         total = round(time.time() - self.t_all, 1)
-        summary = {"shard": f"{self.k}/{self.n}", "units": [u.name for u in self.units], "seconds": total,
+        summary = {"shard": f"{self.k}/{self.n}", "label": self.label, "units": [u.name for u in self.units],
+                   "seconds": total,
                    "steps": results, "observations": observations(),
                    "failed": [r["step"] for r in results if r["verdict"] != "PASS"],
                    "retried": [r["step"] for r in results if r.get("attempt", 1) > 1],
@@ -502,7 +625,7 @@ def run(k, n, outdir):
 
 
 def markdown(s):
-    out = [f"### e2e shard {s['shard']}: {'FAIL' if s['failed'] else 'PASS'}", "",
+    out = [f"### e2e ({s.get('label', '')}), shard {s['shard']}: {'FAIL' if s['failed'] else 'PASS'}", "",
            f"Units: {', '.join(s['units'])}. Steps: {len(s['steps'])}, failed: {len(s['failed'])}, "
            f"retried: {len(s.get('retried', []))}, driver time {s['seconds'] / 60:.1f} min, "
            f"logins {s.get('logins', 0)} (reused sessions {s.get('logins_reused', 0)}), steps traced "
@@ -530,36 +653,52 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("units")
+    sub.add_parser("check")
+    sub.add_parser("matrix")
+    p = sub.add_parser("label")
+    p.add_argument("shard")
     p = sub.add_parser("plan")
     p.add_argument("shard")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("plan-all")
-    p.add_argument("n", type=int)
+    p.add_argument("n", type=int, nargs="?")
     p = sub.add_parser("run")
     p.add_argument("shard")
     p.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.cmd == "units":
+        group_of = {x: label for label, names in GROUPS for x in names}
         print(f"setup ({SETUP_WEIGHT} min, every shard): " + ", ".join(n for n, _ in SETUP))
         for u in UNITS:
-            print(f"{u.name:16} {u.weight:5.1f} min{' (last)' if u.last else ''}  {u.doc}")
+            print(f"{u.name:16} {u.weight:5.1f} min{' (last)' if u.last else ''}  [{group_of.get(u.name, 'no group')}]  "
+                  f"{u.doc}")
             for name, spec in u.steps:
                 print(f"    {name:26} {' '.join(spec['argv'])}{'  ' + str(spec['env']) if spec.get('env') else ''}")
+    elif a.cmd == "check":
+        sys.exit(check())
+    elif a.cmd == "matrix":
+        print(json.dumps(matrix(), separators=(",", ":")))
+    elif a.cmd == "label":
+        k, n = parse_shard(a.shard)
+        print(label_for(k, n))
     elif a.cmd == "plan":
         k, n = parse_shard(a.shard)
         units = units_for(k, n)
         steps = steps_for(units)
         if a.json:
-            print(json.dumps({"shard": a.shard, "units": [u.name for u in units],
+            print(json.dumps({"shard": a.shard, "label": label_for(k, n), "units": [u.name for u in units],
                               "steps": [{"step": s, "argv": spec["argv"]} for s, spec in steps]}, indent=1))
         else:
-            print(f"shard {k}/{n}: {[u.name for u in units]}")
+            print(f"shard {k}/{n} ({label_for(k, n)}): {[u.name for u in units]}")
             for s, spec in steps:
                 print(f"  {s:34} {' '.join(spec['argv'])}")
     elif a.cmd == "plan-all":
-        bins, loads = split(a.n)
-        for i, (b, l) in enumerate(zip(bins, loads), 1):
-            print(f"shard {i}/{a.n}: ~{l:.0f} min drivers (incl. {SETUP_WEIGHT:.0f} setup): {[u.name for u in b]}")
+        n = len(checked_groups())
+        if a.n is not None and a.n != n:
+            raise SystemExit(f"plan-all {a.n}: there are {n} groups (shard.py check lists them)")
+        for i, (label, names) in enumerate(GROUPS, 1):
+            print(f"shard {i}/{n} ({label}): ~{SETUP_WEIGHT + weight(names):.0f} min drivers "
+                  f"(incl. {SETUP_WEIGHT:.0f} setup): {[u.name for u in group_units(names)]}")
     elif a.cmd == "run":
         k, n = parse_shard(a.shard)
         sys.exit(run(k, n, a.out))
