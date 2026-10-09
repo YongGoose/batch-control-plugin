@@ -78,7 +78,20 @@ jobs:
         run: |
           pip install -r e2e/ci/requirements.txt
           python -m playwright install --with-deps chromium
-      # Exit 1: a scenario failed; exit 2: the stack did not start (e2e/ci/run.sh).
+      # Layout checks (round3 "no h-scroll at 1280") must measure text as they do locally: Chromium resolves Jenkins'
+      # system-ui font through fontconfig, which is DejaVu Sans (wider) on the runner. e2e/ci/fonts.conf selects
+      # Liberation Sans (Arial metrics) for system-ui and sans-serif; fonts-liberation comes with Playwright's
+      # Chromium dependencies and is installed again here so the step does not depend on that list.
+      - name: Fix the browser fonts
+        run: |
+          sudo apt-get install -y --no-install-recommends fonts-liberation fontconfig
+          mkdir -p ~/.config/fontconfig
+          cp e2e/ci/fonts.conf ~/.config/fontconfig/fonts.conf
+          fc-cache -f >/dev/null
+          echo "system-ui -> $(fc-match system-ui)"
+          echo "sans-serif -> $(fc-match sans-serif)"
+      # pytest, one test per step (JUnit XML in e2e/ci/out/<k>/junit.xml, Playwright traces of failed steps in
+      # e2e/ci/out/<k>/traces/). Exit 1: a step failed; exit 2: the stack did not start (e2e/ci/run.sh).
       - name: Run shard ${{ matrix.shard }} of 5
         env:
           BC_BUILD: never
@@ -90,13 +103,16 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          f="e2e/ci/out/$SHARD/summary.md"
-          if [ -f "$f" ]; then
-            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          out="e2e/ci/out/$SHARD"
+          if [ -f "$out/junit.xml" ]; then
+            python e2e/ci/junit_summary.py "$out/junit.xml" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$out/summary.md" ]; then
+            cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No summary for shard $SHARD (the stack may not have started; see the shard artifact)." >> "$GITHUB_STEP_SUMMARY"
           fi
-      # Execution data, summaries, step logs, jenkins.log and screenshots.
+      # Execution data, summaries, JUnit XML, step logs, Playwright traces of failed steps, jenkins.log and screenshots.
       - name: Upload the shard output
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -178,15 +194,14 @@ jobs:
           retention-days: 14
       # Self-test of the crawl's content checks (e2e/README.md, "Content checks in the crawl"):
       # the real CONTENT_JS and content_checks() of e2e/r14/crawl.py on two synthetic pages in
-      # headless Chromium, no Jenkins, about 10 s. Last, so that a failure here does not cost the
+      # headless Chromium, no Jenkins, about 10 s, as pytest-playwright tests
+      # (e2e/ci/test_selftest_content.py). Last, so that a failure here does not cost the
       # coverage report; and it runs whatever the JaCoCo and coverage steps did (also when there
-      # is no base commit), needing only the Python packages. Exit 1 = a page did not give exactly
-      # the expected findings; its PASS/FAIL lines go to the job summary.
+      # is no base commit), needing only the Python packages. A failure = a page did not give
+      # exactly the expected findings; its PASS/FAIL lines go to the job summary.
       - name: Self-test of the content checks
         if: ${{ !cancelled() && steps.pip.outcome == 'success' }}
         shell: bash
-        env:
-          BC_BROWSER_CHANNEL: chromium
         run: |
           python -m playwright install --with-deps chromium
           {
@@ -194,6 +209,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           rc=0
-          python e2e/ci/selftest_content.py 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
+          python -m pytest e2e/ci/test_selftest_content.py --browser chromium -s -q \
+            --tracing retain-on-failure --output e2e/ci/out/selftest 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=$?
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const E2E = path.resolve(here, '..');
+export const E2E = path.resolve(here, '..', '..'); // e2e-20: moved to e2e/legacy/browser
 export const SHOTS = path.join(E2E, 'screenshots', process.env.BC_SHOTS || 'run-3');
 export const OUT = path.join(E2E, 'out');
 fs.mkdirSync(SHOTS, { recursive: true });

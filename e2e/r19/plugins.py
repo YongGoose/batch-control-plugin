@@ -51,10 +51,14 @@ def sec_N():
     rid, nb = approve_run(job, "e2e-19 naginator retry of an approved run")
     result, console = wait_build(job, nb)
     check("N", "the approved run of r19-nag fails once (armed)", result == "FAILURE" and "armed: failing once" in console, result=result)
-    time.sleep(20)  # naginator schedules its retry at once (delay 0)
+    # naginator schedules its retry at once (delay 0). e2e-20: wait for the refusal's record (was a fixed 20 s); the
+    # absence of a second build is then checked as before, after the retry was demonstrably attempted and refused
+    blocked = lambda: changes_since(mark, lambda x: x.get("type") in ("TRIGGER_BLOCKED", "MARKER_REUSE_BLOCKED")  # noqa
+                                    and x.get("target") == job)
+    lib.wait_until(blocked, 60, 1)
     check("N", "naginator's automatic retry is refused: no second build, nothing queued (SPEC 6 #36, D-47)",
           next_build(job) == nb + 1 and not queue_items(job), next_build=next_build(job), builds=build_count(job))
-    rec = changes_since(mark, lambda x: x.get("type") in ("TRIGGER_BLOCKED", "MARKER_REUSE_BLOCKED") and x.get("target") == job)
+    rec = blocked()
     check("N", "the refused retry is recorded (TRIGGER_BLOCKED, retry of an approved run)",
           any("retry" in (x.get("detail") or "").lower() for x in rec),
           records=[(x.get("type"), x.get("user"), (x.get("detail") or "")[:200]) for x in rec][:3])

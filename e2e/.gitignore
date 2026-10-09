@@ -2,9 +2,9 @@
 .env
 # Transient output of the scripts and drivers (evidence logs, CSV/JSON dumps).
 out/
-browser/node_modules
-fresh/node_modules
-extra/node_modules
+legacy/browser/node_modules
+legacy/fresh/node_modules
+legacy/extra/node_modules
 
 # Screenshots are kept on disk and never committed (owner decision 2026-09-30);
 # the reports name them.
@@ -21,4 +21,6 @@ r12/__pycache__/
 # CI runner (ci/run.sh): per-shard artefacts and the downloaded JaCoCo jars.
 ci/out/
 ci/.cache/
+# pytest-playwright output of the content-check self-test (ci/test_selftest_content.py run by hand)
+**/test-results/
 __pycache__/

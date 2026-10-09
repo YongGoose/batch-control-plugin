@@ -28,8 +28,10 @@ words is the known, deferred UX review item UX-4/UX-5 (owner: UX fixes only on r
 Text inside pre/code/textarea and hidden elements is not checked. BC_CRAWL_LOG names the log (default "crawl")."""
 import json, os, re, sys, time
 from urllib.parse import urljoin, urlparse
-from lib import Session, close, BASE, groovy
+from lib import Session, close, BASE, groovy, react, gone
 import lib
+
+MENUS = ".tippy-box, .jenkins-dropdown, [data-tippy-root]"
 
 ROLE, UI = sys.argv[1], sys.argv[2]
 ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
@@ -230,30 +232,33 @@ def classify_click(s, path, el):
     before_url = p.url
     before_html = len(p.content())
     n_console = len(s.console)
+    menus_before = p.locator(MENUS).count()
     try:
         loc.click(timeout=5000)
     except Exception as e:  # noqa
         return "click-failed", {"err": str(e)[:120]}
-    p.wait_for_timeout(1200)
-    try:
-        p.wait_for_load_state("load", timeout=10000)
-    except Exception:
-        pass
+    # e2e-20: a dialog, a navigation or a new menu ends the wait at once (it was a fixed 1.2 s); a click that does none of
+    # these is still observed for the same 1.2 s before it is classified as a DOM change or as doing nothing
+    if react(p, before_url, timeout=1200, menus=MENUS, menus_before=menus_before) == "menu":
+        try:  # the menu's entries (core's model-link menus fetch them); was covered by the fixed wait
+            p.locator(MENUS).last.locator("a, button").first.wait_for(state="visible", timeout=2000)
+        except Exception:
+            pass
     info = {"console": [c for c in s.console[n_console:] if not any(k in c for k in KNOWN_CORE_CONSOLE)][:3]}
     dlg = p.locator("dialog[open]")
     if dlg.count():
         info["dialog"] = re.sub(r"\s+", " ", dlg.first.inner_text())[:160]
         p.keyboard.press("Escape")
-        p.wait_for_timeout(500)
-        info["escape_closes"] = p.locator("dialog[open]").count() == 0
+        info["escape_closes"] = gone(p)  # e2e-20: was a fixed 0.5 s
         if not info["escape_closes"]:
             # some dialogs (preventCloseOnOutsideClick) may still close on Escape; record either way
             pass
         # reopen and use Cancel
         if info["escape_closes"]:
             try:
+                before = p.url
                 loc.click(timeout=5000)
-                p.wait_for_timeout(1200)
+                react(p, before, timeout=3000)  # e2e-20: was a fixed 1.2 s
             except Exception:
                 pass
         d2 = p.locator("dialog[open]")
@@ -262,14 +267,13 @@ def classify_click(s, path, el):
             info["cancel_button"] = c.count()
             if c.count():
                 c.first.click()
-                p.wait_for_timeout(500)
-                info["cancel_closes"] = p.locator("dialog[open]").count() == 0
+                info["cancel_closes"] = gone(p)  # e2e-20: was a fixed 0.5 s
         info["url_unchanged"] = p.url == before_url
         return "dialog", info
     if p.url != before_url:
         st = None
         return "navigated", dict(info, to=p.url.replace(BASE, ""))
-    menus = p.locator(".tippy-box, .jenkins-dropdown, [data-tippy-root]")
+    menus = p.locator(MENUS)
     if menus.count():
         info["menu"] = re.sub(r"\s+", " ", menus.first.inner_text())[:200]
         p.keyboard.press("Escape")

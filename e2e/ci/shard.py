@@ -22,8 +22,10 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -217,6 +219,17 @@ UNITS = [
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
 
+# Steps (as "<unit>:<step>") that are retried once when they fail (pytest: @pytest.mark.flaky(reruns=1) through
+# pytest-rerunfailures; `shard.py run`: the same single retry). A step belongs here only with evidence of an intermittent
+# failure (CI history or local runs, named in the comment) AND when its driver is safe to run twice on the same Jenkins
+# (read-only, or idempotent arrangement). Every retry is listed in summary.md ("retried") and the JUnit XML, the failed
+# attempt's log and traces are kept, so a retry never hides a failure silently. BC_FLAKY=a:b,c:d adds steps for one run.
+FLAKY = set(
+    # (empty: no step has failed intermittently in the e2e-17..e2e-20 runs or the CI history of e2e.yml; the one CI
+    # failure, round3 F "no h-scroll at 1280", was deterministic on the runner's fonts and is fixed in the workflow)
+)
+FLAKY |={x.strip() for x in os.environ.get("BC_FLAKY", "").split(",") if x.strip()}
+
 
 def parse_shard(s):
     m = re.fullmatch(r"(\d+)/(\d+)", s or "")
@@ -369,34 +382,62 @@ def observations():
     return obs
 
 
-def run(k, n, outdir):
-    outdir = Path(outdir)
-    logs = outdir / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    units = units_for(k, n)
-    steps = steps_for(units)
-    pyexe = os.environ.get("PY", sys.executable)
-    timeout = int(os.environ.get("BC_STEP_TIMEOUT", "2700"))
-    results = []
-    t_all = time.time()
-    setup_failed = False
-    print(f"shard {k}/{n}: units {[u.name for u in units]} ({len(steps)} steps)", flush=True)
-    for idx, (name, spec) in enumerate(steps, 1):
-        log = logs / f"{idx:02d}-{name.replace(':', '-').replace('/', '_')}.log"
-        if setup_failed:
-            results.append({"step": name, "verdict": "BLOCKED", "reasons": ["setup failed"], "seconds": 0, "log": log.name})
-            continue
-        env = dict(os.environ, PYTHONUNBUFFERED="1", **spec.get("env", {}))
+SESSIONS = re.compile(r"^SESSIONS logins=(\d+) reused=(\d+)", re.M)
+
+
+class Runner:
+    """Runs the steps of one shard one by one (ci/shard.py run, or one pytest test per step: ci/test_shard.py).
+
+    Per step: the driver as a subprocess with its log in logs/, the verdict from its exit code and output, a Playwright
+    trace per browser context in traces/<idx>-<step>/ kept only when the step did not pass (BC_TRACE=off: no traces),
+    and the login state shared by the shard's steps in a private temporary directory (BC_AUTH_DIR, never in the
+    artefacts; see r6/lib.py Session). finish() writes summary.json and summary.md."""
+
+    def __init__(self, k, n, outdir):
+        self.k, self.n = k, n
+        self.outdir = Path(outdir)
+        self.logs = self.outdir / "logs"
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.units = units_for(k, n)
+        self.steps = steps_for(self.units)
+        self.pyexe = os.environ.get("PY", sys.executable)
+        self.timeout = int(os.environ.get("BC_STEP_TIMEOUT", "2700"))
+        self.trace_mode = os.environ.get("BC_TRACE", "retain-on-failure")  # retain-on-failure | on (keep all) | off
+        self.trace = self.trace_mode != "off"
+        self.auth_dir = Path(tempfile.mkdtemp(prefix=f"bc-auth-{k}-"))
+        self.results = {}
+        self.attempts = {}
+        self.setup_failed = False
+        self.t_all = time.time()
+
+    def plan_line(self):
+        return f"shard {self.k}/{self.n}: units {[u.name for u in self.units]} ({len(self.steps)} steps)"
+
+    def run_step(self, idx, name, spec):
+        attempt = self.attempts.get(idx, 0) + 1
+        self.attempts[idx] = attempt
+        base = f"{idx:02d}-{name.replace(':', '-').replace('/', '_')}"
+        log = self.logs / (base + (f".attempt{attempt}" if attempt > 1 else "") + ".log")
+        if attempt > 1 and name.startswith("setup:"):
+            self.setup_failed = False  # the retry of the setup step that failed decides again
+        if self.setup_failed:
+            res = {"step": name, "verdict": "BLOCKED", "reasons": ["setup failed"], "seconds": 0, "log": log.name}
+            self.results[idx] = res
+            return res
+        tdir = self.outdir / "traces" / (base + (f".attempt{attempt}" if attempt > 1 else ""))
+        env = dict(os.environ, PYTHONUNBUFFERED="1", BC_AUTH_DIR=str(self.auth_dir), **spec.get("env", {}))
+        if self.trace:
+            env["BC_TRACE_DIR"] = str(tdir)
         is_r15 = spec["argv"][0] == "r15/check.py"
         r15_before = len(r15_rows(0)) if is_r15 else 0
-        argv = [pyexe] + spec["argv"]
+        argv = [self.pyexe] + spec["argv"]
         t0 = time.time()
         timed_out = False
         with open(log, "w") as fh:
             fh.write("$ " + " ".join(spec["argv"]) + "\n")
             fh.flush()
             try:
-                p = subprocess.run(argv, cwd=E2E, env=env, stdout=fh, stderr=subprocess.STDOUT, timeout=timeout)
+                p = subprocess.run(argv, cwd=E2E, env=env, stdout=fh, stderr=subprocess.STDOUT, timeout=self.timeout)
                 rc = p.returncode
             except subprocess.TimeoutExpired:
                 rc, timed_out = -1, True
@@ -409,26 +450,68 @@ def run(k, n, outdir):
             extra += [json.dumps({"page": r.get("page"), "status": r.get("status"), "expected": 404})
                       for r in r15_rows(r15_before) if "expected" in r and r.get("status") != r["expected"]]
         v, reasons, lines, passes = verdict(rc, text, timed_out, extra)
-        results.append({"step": name, "verdict": v, "reasons": reasons, "seconds": secs, "log": log.name,
-                        "pass_lines": passes, "failure_lines": lines})
-        print(f"[{time.strftime('%H:%M:%S')}] {v:4} {secs:7.1f}s {name} {'; '.join(reasons)}", flush=True)
+        traces = sorted(tdir.glob("*.zip")) if tdir.exists() else []
+        recorded = len(traces)
+        if v == "PASS" and tdir.exists() and self.trace_mode != "on":
+            shutil.rmtree(tdir, ignore_errors=True)  # retain-on-failure
+            traces = []
+        sess = [tuple(map(int, m)) for m in SESSIONS.findall(text)]
+        prev = self.results.get(idx)
+        res = {"step": name, "verdict": v, "reasons": reasons, "seconds": secs, "log": log.name,
+               "pass_lines": passes, "failure_lines": lines, "attempt": attempt,
+               "traces": [str(t.relative_to(self.outdir)) for t in traces], "traces_recorded": recorded,
+               "logins": sum(a for a, _ in sess), "logins_reused": sum(b for _, b in sess)}
+        if prev and attempt > 1:
+            res["earlier_attempts"] = prev.get("earlier_attempts", []) + [
+                {k: prev[k] for k in ("verdict", "reasons", "seconds", "log", "traces")}]
+            if v == "PASS":
+                res["reasons"] = [f"passed on attempt {attempt} (flaky step, retried)"]
+        self.results[idx] = res
+        print(f"[{time.strftime('%H:%M:%S')}] {v:4} {secs:7.1f}s {name} {'; '.join(res['reasons'])}"
+              f"{f' (traces: {len(traces)})' if traces else ''}", flush=True)
         if v != "PASS" and name.startswith("setup:"):
-            setup_failed = True
-    total = round(time.time() - t_all, 1)
-    summary = {"shard": f"{k}/{n}", "units": [u.name for u in units], "seconds": total,
-               "steps": results, "observations": observations(),
-               "failed": [r["step"] for r in results if r["verdict"] != "PASS"]}
-    (outdir / "summary.json").write_text(json.dumps(summary, indent=1))
-    (outdir / "summary.md").write_text(markdown(summary))
-    return 1 if summary["failed"] else 0
+            self.setup_failed = True
+        return res
+
+    def finish(self):
+        shutil.rmtree(self.auth_dir, ignore_errors=True)
+        results = [self.results[i] for i in sorted(self.results)]
+        total = round(time.time() - self.t_all, 1)
+        summary = {"shard": f"{self.k}/{self.n}", "units": [u.name for u in self.units], "seconds": total,
+                   "steps": results, "observations": observations(),
+                   "failed": [r["step"] for r in results if r["verdict"] != "PASS"],
+                   "retried": [r["step"] for r in results if r.get("attempt", 1) > 1],
+                   "steps_traced": sum(1 for r in results if r.get("traces_recorded")),
+                   "traces_kept": sum(len(r.get("traces", [])) + sum(len(e.get("traces", [])) for e in r.get("earlier_attempts", []))
+                                      for r in results),
+                   "logins": sum(r.get("logins", 0) for r in results),
+                   "logins_reused": sum(r.get("logins_reused", 0) for r in results)}
+        (self.outdir / "summary.json").write_text(json.dumps(summary, indent=1))
+        (self.outdir / "summary.md").write_text(markdown(summary))
+        return 1 if summary["failed"] else 0
+
+
+def run(k, n, outdir):
+    r = Runner(k, n, outdir)
+    print(r.plan_line(), flush=True)
+    for idx, (name, spec) in enumerate(r.steps, 1):
+        res = r.run_step(idx, name, spec)
+        if res["verdict"] == "FAIL" and name in FLAKY:
+            r.run_step(idx, name, spec)
+    return r.finish()
 
 
 def markdown(s):
     out = [f"### e2e shard {s['shard']}: {'FAIL' if s['failed'] else 'PASS'}", "",
            f"Units: {', '.join(s['units'])}. Steps: {len(s['steps'])}, failed: {len(s['failed'])}, "
-           f"driver time {s['seconds'] / 60:.1f} min.", "", "| Step | Result | Seconds | Notes |", "|---|---|---|---|"]
+           f"retried: {len(s.get('retried', []))}, driver time {s['seconds'] / 60:.1f} min, "
+           f"logins {s.get('logins', 0)} (reused sessions {s.get('logins_reused', 0)}), steps traced "
+           f"{s.get('steps_traced', 0)} (traces kept for failed steps: {s.get('traces_kept', 0)}).", "",
+           "| Step | Result | Seconds | Notes |", "|---|---|---|---|"]
     for r in s["steps"]:
         notes = "; ".join(r["reasons"]) or (f"{r['pass_lines']} PASS lines" if r.get("pass_lines") else "")
+        if r.get("traces"):
+            notes += f" (Playwright traces: `{Path(r['traces'][0]).parent}/`)"
         out.append(f"| `{r['step']}` | {r['verdict']} | {r['seconds']} | {notes} |")
     fails = [r for r in s["steps"] if r.get("failure_lines")]
     if fails:

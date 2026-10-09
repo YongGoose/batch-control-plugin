@@ -14,13 +14,23 @@ G revoke on the window's detail page (R4-12): holder sees no Revoke, manager rev
 H request dialogs from the job page (new: requester, classic: classic) and the folder page (prod); UUID landing
 I UUID ids (D-68): new ids are UUIDs, unknown ids 404"""
 import json, re, sys
-from lib import Session, close, api, groovy, BASE, clean
+from lib import Session, close, api, groovy, BASE, clean, gone, opened, submit_and_wait
 import lib
 
 WANT = sys.argv[1] if len(sys.argv) > 1 else "ABCDEFGHI"
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 J = lambda full: "".join(f"/job/{p}" for p in full.split("/"))  # noqa
 KNOWN = ("MIME type ('text/html')", "Jumplist request failed: TypeError: Failed to fetch")
+# e2e-20: "no h-scroll at 1280" compares the document's scroll width with its client width (the 1280 px viewport less any
+# vertical scroll bar) and allows this many pixels for sub-pixel rounding of text widths. It does not absorb a real
+# overflow: on the GitHub runner's default fonts (DejaVu Sans, wider than the macOS system font) admin's grants list was
+# 1295 px wide (CI runs of 2026-10-06/08); the workflow now installs and selects a fixed metric-compatible font set
+# (fonts-liberation, .github/workflows/e2e.yml) so that local and CI layouts measure alike.
+SCROLL_TOLERANCE_PX = 2
+
+
+def no_hscroll(lay):
+    return lay["scrollW"] <= lay["clientW"] + SCROLL_TOLERANCE_PX
 N = {"pass": 0, "fail": 0}
 _init = Session.__init__
 
@@ -55,6 +65,7 @@ def console_ok(sec, s, what, expected=()):
             and not (u1 and "reading 'replace'" in c)]
     check(sec, f"{what}: no console error, no HTTP>=400" + (" (besides the provoked responses)" if expected else ""), not cons and not bad,
           console=cons[:4], bad=bad[:4], provoked=[b for b in s.bad if b not in bad][:2], known_core=u1[:1])
+
 
 
 def tick(d, name, value):
@@ -127,11 +138,12 @@ return ops.items*.name""")
     tick(d, "approvers", "approver-1")
     s.shot("dialog[open]", "R3-A-01-folder-dialog")
     # D-71: Delete applies only to a job, so the submission is refused next to the actions, input kept
-    d.get_by_role("button", name="Request Grant").click()
-    s.page.wait_for_timeout(2500)
+    submit_and_wait(s.page, d.get_by_role("button", name="Request Grant").click)  # e2e-20: was a fixed 2.5 s
     d = s.page.locator("dialog[open]").first
     refusal = {"dialog_open": d.count(), "url": s.page.url.replace(BASE, ""),
-               "errors": [t.strip()[:200] for t in s.page.locator("dialog[open] .error, dialog[open] .jenkins-alert-danger").all_inner_texts() if t.strip()][:3]}
+               "errors": [t.strip()[:200] for t in s.page.locator(
+                   "dialog[open] [data-batch-control-field-error], dialog[open] [data-batch-control-form-error], "
+                   "dialog[open] .error, dialog[open] .jenkins-alert-danger").all_inner_texts() if t.strip()][:3]}
     if d.count():
         refusal["kept"] = (d.locator("input[name=scopeFullName]").input_value(),
                            [b.get_attribute("value") for b in d.locator("input[name=actions]").all() if b.is_checked()])
@@ -212,7 +224,7 @@ return ops.items*.name""")
     info = {"delete_entry": dl.count()}
     if dl.count():
         dl.first.click()
-        b.page.wait_for_timeout(800)
+        opened(b.page)  # e2e-20: was a fixed 0.8 s
         dd = b.page.locator("dialog[open]")
         info["confirm"] = re.sub(r"\s+", " ", dd.first.inner_text())[:160] if dd.count() else None
         if dd.count():
@@ -304,7 +316,8 @@ def sec_B():
 CS = """sel => { const n = document.querySelector(sel); if (!n) return null;
   const cur = n.querySelector('[aria-current=page], [aria-selected=true], .active') || [...n.querySelectorAll('a.jenkins-button')].find(a => !a.classList.contains('jenkins-button--tertiary')); const other = [...n.querySelectorAll('a')].find(a => a !== cur);
   const cs = e => { const c = getComputedStyle(e); const b = getComputedStyle(e, '::before'); return {bg: c.backgroundColor, color: c.color, radius: c.borderRadius, h: Math.round(e.getBoundingClientRect().height), pad: c.padding, font: c.fontSize + '/' + c.fontWeight, beforeBg: b.backgroundColor}; };
-  return {cls: n.className, items: [...n.querySelectorAll('a')].map(a => a.innerText.trim()), current: cur && cur.innerText.trim(), curStyle: cur && cs(cur), otherStyle: other && cs(other), navH: Math.round(n.getBoundingClientRect().height), scrollW: document.documentElement.scrollWidth}; }"""
+  return {cls: n.className, items: [...n.querySelectorAll('a')].map(a => a.innerText.trim()), current: cur && cur.innerText.trim(), curStyle: cur && cs(cur), otherStyle: other && cs(other), navH: Math.round(n.getBoundingClientRect().height), scrollW: document.documentElement.scrollWidth,
+  clientW: document.documentElement.clientWidth}; }"""
 
 
 def sec_C():
@@ -327,7 +340,7 @@ def sec_C():
     other = core and ours and core["otherStyle"] and all(core["otherStyle"][k] == ours["otherStyle"][k] for k in ("radius", "h", "beforeBg"))
     check("C", "current and other tabs look like core's new build page tabs (radius, height, font, colour, ::before); "
           "inline padding 12px vs core's 16px is the documented tabs.jelly tweak (DEF-05 fix, one row at 1280)",
-          same and other and ours["current"] == "History" and ours["navH"] <= 40 and ours["scrollW"] <= 1280, core=core, ours=ours)
+          same and other and ours["current"] == "History" and ours["navH"] <= 40 and no_hscroll(ours), core=core, ours=ours)
     s.go("/user/admin/experiments/")
     s.page.locator("tr", has_text="new-build-page.flag").locator("select").select_option(index=0)
     s.page.click("button[name=Submit]"); s.page.wait_for_load_state("load")
@@ -336,11 +349,19 @@ def sec_C():
 
 # ---------------------------------------------------------------- D, E
 def chevron_menu(s, link):
-    link.hover(); s.page.wait_for_timeout(700)
+    link.hover()
+    try:  # e2e-20: core shows the chevron on hover; wait for it (was a fixed 0.7 s)
+        s.page.locator(".jenkins-menu-dropdown-chevron").locator("visible=true").first.wait_for(state="visible", timeout=3000)
+    except Exception:
+        pass
     chev = [c for c in s.page.locator(".jenkins-menu-dropdown-chevron").all() if c.is_visible()]
     if not chev:
         return None
-    chev[0].click(); s.page.wait_for_timeout(1200)
+    chev[0].click()
+    try:  # the model-link menu fetches its entries; wait for them (was a fixed 1.2 s)
+        s.page.locator(".tippy-box").first.locator("a, button").first.wait_for(state="visible", timeout=5000)
+    except Exception:
+        pass
     m = [t.strip()[:160] for t in s.page.locator(".tippy-box").all_inner_texts()][:1]
     s.page.keyboard.press("Escape")
     return m
@@ -392,13 +413,28 @@ def sec_E():
 
 # ---------------------------------------------------------------- F
 LAYOUT = """() => { const mp = document.querySelector('#main-panel');
-  const heads = [...mp.querySelectorAll('h2')].map(h => h.innerText.trim());
   const firstH2 = mp.querySelector('h2');
   const formsBefore = [...mp.querySelectorAll('form')].filter(f => firstH2 && (f.compareDocumentPosition(firstH2) & Node.DOCUMENT_POSITION_FOLLOWING)).length;
   const footers = [...new Set([...mp.querySelectorAll('*')].filter(e => e.childElementCount < 4 && /^Page \\d+ \\(/.test((e.innerText || '').trim())).map(e => e.innerText.trim()))];
-  const tables = [...mp.querySelectorAll('table')].map(t => ({rows: t.tBodies[0] ? t.tBodies[0].rows.length : 0,
-     idLinks: t.tBodies[0] ? [...t.tBodies[0].rows].slice(0, 3).map(r => { const a = r.cells[0] && r.cells[0].querySelector('a'); return a ? a.getAttribute('href') : null; }) : []}));
-  return {heads, formsBefore, footers, tables, scrollW: document.documentElement.scrollWidth}; }"""
+  return {formsBefore, footers, scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth}; }"""
+LIST_ORDER = ["pending", "active", "ended"]
+
+
+def layout(s):
+    """e2e-20: headings by role, the lists by the plugin's data-batch-control-list and their ID cells by
+    data-batch-control-id (was: every h2, every table, the first cell's first link)."""
+    mp = s.page.locator("#main-panel")
+    lay = s.page.evaluate(LAYOUT)
+    lay["heads"] = [h.strip() for h in mp.get_by_role("heading", level=2).all_inner_texts()]
+    lay["tables"] = []
+    for t in mp.locator("table[data-batch-control-list]").all():
+        rows = t.locator("tbody tr")
+        ids = []
+        for r in rows.all()[:3]:
+            a = r.locator("td").first.locator("a[data-batch-control-id]")
+            ids.append(a.first.get_attribute("href") if a.count() else None)
+        lay["tables"].append({"list": t.get_attribute("data-batch-control-list"), "rows": rows.count(), "idLinks": ids})
+    return lay
 
 
 def sec_F():
@@ -409,7 +445,7 @@ def sec_F():
             if r.status != 200:
                 check("F", f"{user} {sec}: refused as expected", (user, sec) in (("fonly", "requests"),), status=r.status)
                 continue
-            lay = s.page.evaluate(LAYOUT)
+            lay = layout(s)
             if not lay["tables"] and not lay["heads"]:
                 empty = re.sub(r"\s+", " ", s.text())
                 check("F", f"{user} {sec}: nothing to list, the page says so and how to file one", "No " in empty and "To file one" in empty,
@@ -418,9 +454,11 @@ def sec_F():
             s.page.screenshot(path=str(lib.SHOTS / f"R3-F-{user}-{sec}.png"), full_page=True)
             order_ok = [h for h in lay["heads"] if h in ("Pending Requests", "Active", "Approved", "Ended")]
             ids_ok = all(h is None or re.search(UUID + "/$", h) for t in lay["tables"] for h in t["idLinks"])
+            lists = [t["list"] for t in lay["tables"]]
+            lists_ok = all(x in LIST_ORDER for x in lists) and lists == sorted(lists, key=LIST_ORDER.index)
             check("F", f"{user} {sec}: H2 Pending -> Active -> Ended, no form above, ID links to UUID detail, no h-scroll at 1280",
                   len(order_ok) >= 3 and order_ok[0] == "Pending Requests" and order_ok[-1] == "Ended" and lay["formsBefore"] == 0
-                  and ids_ok and lay["scrollW"] <= 1280, **lay)
+                  and ids_ok and lists_ok and no_hscroll(lay), lists=lists, **lay)
         console_ok("F", s, f"{user} lists", expected=(("403 GET " + BASE + "/batch-control/requests/"),) if user == "fonly" else ())
         s.done()
 
@@ -442,13 +480,13 @@ def sec_G():
     rv = m.page.locator("#main-panel a, #main-panel button", has_text=re.compile(r"^\s*Revoke\s*$"))
     info = {"holder_buttons": hb, "manager_revoke": rv.count(), "before": before}
     if rv.count():
-        rv.first.click(); m.page.wait_for_timeout(700)
+        rv.first.click(); opened(m.page)  # e2e-20: fixed 0.7 s / 0.5 s waits replaced by the dialog's state
         d = m.page.locator("dialog[open]")
         info["confirm"] = re.sub(r"\s+", " ", d.first.inner_text())[:200] if d.count() else None
         m.shot("dialog[open]", "R3-G-02-confirm")
-        d.first.locator("button", has_text="Cancel").click(); m.page.wait_for_timeout(500)
+        d.first.get_by_role("button", name="Cancel").click(); gone(m.page)
         info["after_cancel"] = api("requester", "/job/prod/job/ok-move/configure").status_code
-        rv.first.click(); m.page.wait_for_timeout(700)
+        rv.first.click(); opened(m.page)
         with m.page.expect_navigation():
             m.page.locator("dialog[open]").first.locator("button[data-id=ok], button.jenkins-button--primary, button.jenkins-button--destructive").first.click()
         info["state_text"] = re.search(r"State (.{0,40})", re.sub(r"\s+", " ", m.text())).group(0)
@@ -469,8 +507,7 @@ def run_dialog(s, where, tag):
     s.page.wait_for_selector("dialog[open] textarea[name=reason]")
     url_open = s.page.url
     d = s.page.locator("dialog[open]").first
-    d.get_by_role("button", name="Submit Request").click()
-    s.page.wait_for_timeout(1500)
+    submit_and_wait(s.page, d.get_by_role("button", name="Submit Request").click)  # e2e-20: was a fixed 1.5 s
     stays = s.page.locator("dialog[open]").count() == 1
     errs = [t.strip() for t in s.page.locator("dialog[open] .error, dialog[open] .jenkins-alert").all_inner_texts() if t.strip()][:3]
     d = s.page.locator("dialog[open]").first
@@ -510,10 +547,13 @@ def sec_H():
           u.endswith("/job/batch-daily/") and stays and errs and re.search(UUID, landing) and st == 200, url_open=u.replace(BASE, ""), errors=errs,
           landing=landing.replace(BASE, ""), server=st)
     s.go("/job/batch-pipeline/")
-    ov = s.page.locator("[data-testid=app-bar-overflow-button], button[aria-label='More actions'], button:has-text('More actions')")
+    # the app bar's overflow by its test id: a role locator "More actions" resolves to the header's own menu button first
+    # (title="More actions"; found from the e2e-20 trace of this step)
+    ov = s.page.get_by_test_id("app-bar-overflow-button")
     info = {"overflow": ov.count()}
     if ov.count():
-        ov.first.click(); s.page.wait_for_timeout(1000)
+        ov.first.click()
+        s.page.locator(".tippy-box a, .tippy-box button, .jenkins-dropdown a, .jenkins-dropdown button").first.wait_for(state="visible")
         u, pre, landing = grant_dialog(s, ".tippy-box a, .tippy-box button, .jenkins-dropdown a, .jenkins-dropdown button", "new")
         info.update(url_open=u.replace(BASE, ""), prefill=pre, landing=landing.replace(BASE, ""))
     check("H", "new job page: More actions -> Request Change Permission dialog pre-filled batch-pipeline, kind Pipeline with icon, lands on UUID grant",
