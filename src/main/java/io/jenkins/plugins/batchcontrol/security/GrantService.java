@@ -6,6 +6,7 @@ import hudson.init.Initializer;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -102,6 +103,40 @@ public final class GrantService {
     private List<Grant> cache;
 
     /**
+     * R3-04: the D-35c records of the grants that were neither revoked nor expired when the cache
+     * last changed, by the full name of the item recorded as created; {@code null} while the cache
+     * is not loaded. An immutable snapshot, replaced as a whole under this monitor after every change
+     * of the cache ({@link #reindexCreating}) and read without it: the Item/Read, Item/Discover and
+     * Item/Configure checks ({@link #findCreatingGrant}) never wait for this monitor (which is held
+     * across store reads and writes) and never iterate the retained, ended grants. Whether a record
+     * applies (active at the check time, the same user, the item directly inside the grant's scope
+     * folder) is still decided at query time, exactly as before.
+     */
+    private volatile java.util.Map<String, List<CreatingRecord>> creatingIndex;
+
+    /** R3-04: one D-35c record of {@link #creatingIndex}, with the grant's fields it is matched on. */
+    private static final class CreatingRecord {
+        private final Grant grant;
+        private final String user;
+        private final GrantScope scope;
+        private final Instant grantedAt;
+        private final Instant expiresAt;
+
+        CreatingRecord(Grant grant) {
+            this.grant = grant;
+            this.user = grant.getUser();
+            this.scope = grant.getScope();
+            this.grantedAt = grant.getGrantedAt();
+            this.expiresAt = grant.getExpiresAt();
+        }
+
+        /** As {@link Grant#isActiveAt} (a revoked grant is never indexed). */
+        boolean isActiveAt(Instant at) {
+            return !at.isBefore(grantedAt) && at.isBefore(expiresAt);
+        }
+    }
+
+    /**
      * D-74: windows that have ended (in memory, and in a {@code GRANT_REVOKE} record when that could
      * be appended) but whose file still says they are open, by id; guarded by {@code this}. Cleared
      * with the cache at startup, where the records stand in for them.
@@ -151,6 +186,7 @@ public final class GrantService {
 
     private synchronized void clearCache() {
         cache = null;
+        creatingIndex = null;
         // Belongs to the Jenkins session that is gone (a test harness may start the next one, with
         // another home, in the same JVM); the GRANT_REVOKE records replace it (applyRecordedEnds).
         unsavedEnds.clear();
@@ -169,6 +205,7 @@ public final class GrantService {
     public synchronized void forgetDeleted(java.util.Collection<String> grantIds) {
         if (cache != null && !grantIds.isEmpty()) {
             cache.removeIf(grant -> grantIds.contains(grant.getId()));
+            reindexCreating();
         }
     }
 
@@ -177,7 +214,8 @@ public final class GrantService {
     /*
      * A window confers something only on the item whose full name its scope names exactly (D-71);
      * item events keep that name right (D-74). The lookups take a copy of the matching grants under
-     * this monitor, so nothing below runs while the monitor is held.
+     * this monitor, so nothing below runs while the monitor is held. The D-35c lookup, which every
+     * Item/Read check makes, does not take the monitor at all (R3-04, creatingIndex).
      *
      * The lookups that take only a full name resolve the item currently at that name as the caller
      * sees it (no SYSTEM switch; an item the caller cannot read gets nothing). They are for callers
@@ -385,23 +423,78 @@ public final class GrantService {
         return null;
     }
 
-    /** Active grants of {@code user} recording {@code itemFullName} as created directly inside their scope (a copy). */
-    private synchronized List<Grant> creatingCandidates(String user, @CheckForNull String itemFullName) {
+    /**
+     * Active grants of {@code user} (under the realm's user id strategy) recording
+     * {@code itemFullName} as created directly inside their scope (a copy), in cache order.
+     *
+     * <p>R3-04: read from {@link #creatingIndex} without this monitor, so a permission check never
+     * waits for a grant write or a store read, and only the records of {@code itemFullName} are
+     * looked at. Only before the cache is first loaded in a Jenkins session (it is loaded at startup,
+     * when all items are loaded, {@code WindowItemListener#onLoaded}) does this load it, under the
+     * monitor.
+     */
+    private List<Grant> creatingCandidates(String user, @CheckForNull String itemFullName) {
         List<Grant> found = new ArrayList<>();
         if (user == null || itemFullName == null) {
             return found;
         }
+        java.util.Map<String, List<CreatingRecord>> index = creatingIndex;
+        if (index == null) {
+            index = loadCreatingIndex();
+        }
+        List<CreatingRecord> records = index.get(itemFullName);
+        if (records == null) {
+            return found;
+        }
         Instant now = BatchClock.now();
-        for (Grant grant : grants()) {
-            if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
-                    && grant.getScope() != null
-                    && grant.getScope().isParentOf(itemFullName)
-                    && grant.hasCreated(itemFullName)) {
-                found.add(grant);
+        for (CreatingRecord record : records) {
+            if (record.isActiveAt(now)
+                    && Approvers.sameUser(user, record.user)
+                    && record.scope.isParentOf(itemFullName)) {
+                found.add(record.grant);
             }
         }
         return found;
+    }
+
+    /** {@link #creatingIndex}, loading the cache first (see {@link #creatingCandidates}). */
+    private synchronized java.util.Map<String, List<CreatingRecord>> loadCreatingIndex() {
+        grants();
+        java.util.Map<String, List<CreatingRecord>> index = creatingIndex;
+        return index != null ? index : java.util.Map.of(); // no Jenkins: nothing loaded, nothing confers
+    }
+
+    /**
+     * R3-04: rebuilds {@link #creatingIndex} from the cache. Called under this monitor after every
+     * change of the cache (load, add, replace, removal, and the one change of a cached grant in
+     * place, {@link #rewriteCreatedItems}), before any store write that follows it, so a revocation
+     * or a dropped record is in effect for the permission checks as soon as it is in the cache.
+     * Revoked grants and grants already expired are left out: they never confer again.
+     */
+    private synchronized void reindexCreating() {
+        if (cache == null) {
+            creatingIndex = null;
+            return;
+        }
+        Instant now = BatchClock.now();
+        java.util.Map<String, List<CreatingRecord>> building = new java.util.HashMap<>();
+        for (Grant grant : cache) {
+            if (grant.getRevokedAt() != null || !now.isBefore(grant.getExpiresAt())
+                    || grant.getScope() == null || grant.getUser() == null) {
+                continue;
+            }
+            List<String> created = grant.getCreatedItems();
+            if (created.isEmpty()) {
+                continue;
+            }
+            CreatingRecord record = new CreatingRecord(grant);
+            for (String name : created) {
+                building.computeIfAbsent(name, key -> new ArrayList<>(1)).add(record);
+            }
+        }
+        java.util.Map<String, List<CreatingRecord>> index = new java.util.HashMap<>();
+        building.forEach((name, records) -> index.put(name, List.copyOf(records)));
+        creatingIndex = java.util.Collections.unmodifiableMap(index);
     }
 
     /**
@@ -429,7 +522,7 @@ public final class GrantService {
         Instant now = BatchClock.now();
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
+                    && Approvers.sameUser(user, grant.getUser())
                     && grant.getScope() != null
                     && grant.getScope().includes(itemFullName)
                     && (action == null || grant.getActions().contains(action))) {
@@ -1099,6 +1192,7 @@ public final class GrantService {
         List<Grant> grants = grants();
         grants.removeIf(existing -> existing.getId().equals(grant.getId()));
         grants.add(grant);
+        reindexCreating();
         return true;
     }
 
@@ -1216,7 +1310,7 @@ public final class GrantService {
     @CheckForNull
     private synchronized Grant recordCreatedItemIn(String grantId, String user, String itemFullName) {
         Grant grant = load(grantId);
-        if (grant == null || !grant.isActiveAt(BatchClock.now()) || !user.equals(grant.getUser())
+        if (grant == null || !grant.isActiveAt(BatchClock.now()) || !Approvers.sameUser(user, grant.getUser())
                 || !grant.getScope().isParentOf(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
             return null;
         }
@@ -1332,7 +1426,7 @@ public final class GrantService {
             try {
                 Grant grant = load(cached.getId());
                 if (grant == null) {
-                    grants().removeIf(existing -> existing.getId().equals(cached.getId())); // no file: confers nothing
+                    dropFromCache(cached.getId()); // no file: confers nothing
                     continue;
                 }
                 if (grant.getRevokedAt() != null) {
@@ -1431,7 +1525,7 @@ public final class GrantService {
                 grant = cached;
             }
             if (grant == null) {
-                grants().removeIf(existing -> existing.getId().equals(cached.getId())); // no file: confers nothing
+                dropFromCache(cached.getId()); // no file: confers nothing
             } else if (grant.getRevokedAt() != null) {
                 replaceInCache(grant);
             } else {
@@ -1511,6 +1605,7 @@ public final class GrantService {
             grant = load(cached.getId());
             if (grant == null) {
                 cached.setCreatedItems(update.apply(cached.getCreatedItems())); // nothing on disk to write
+                reindexCreating();
                 return;
             }
         } catch (RuntimeException e) {
@@ -1615,7 +1710,7 @@ public final class GrantService {
                 LOGGER.warning(() -> "Grant " + cached.getId() + " is active in memory but has no "
                         + "file in the store, so it cannot be revoked as part of switching change "
                         + "control off; dropping it from the cache instead.");
-                grants().removeIf(existing -> existing.getId().equals(cached.getId()));
+                dropFromCache(cached.getId());
                 continue;
             }
             if (grant.getRevokedAt() != null) {
@@ -1955,8 +2050,15 @@ public final class GrantService {
             // The ends found in the records (or ended because they could not be ruled out, S-39-03)
             // are written now; whatever still fails is retried like any other unwritten end.
             retryUnsavedWrites();
+            reindexCreating();
         }
         return cache;
+    }
+
+    /** Drops grant {@code id} from the cache (it has no file: it confers nothing). */
+    private synchronized void dropFromCache(String id) {
+        grants().removeIf(existing -> existing.getId().equals(id));
+        reindexCreating();
     }
 
     /** Puts {@code grant} in the cache in place of the copy with the same id. */
@@ -1974,5 +2076,6 @@ public final class GrantService {
         if (!replaced) {
             grants.add(grant);
         }
+        reindexCreating();
     }
 }
