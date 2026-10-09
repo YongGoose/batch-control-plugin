@@ -29,7 +29,7 @@ Jenkins: `http://localhost:${BC_PORT:-8080}/`. Mail sink UI and API (mailpit):
 
 The scripted part of the e2e passes (the e2e-11 round-3 checks as `r14/round3.py`, the e2e-12 crawl with its dialog
 cycles and targeted checks, the e2e-13 role-strategy profile as `r14/role/`, the e2e-14 DEF-07 recheck and the e2e-15
-multibranch checks, the e2e-16..21 drivers) as five independent shards, each a fixed, named group of units ("Units
+multibranch checks, the e2e-16..21 drivers) as seven independent shards, each a fixed, named group of units ("Units
 and groups" below; the GitHub Actions jobs are named after the groups, `e2e (crawl and ui checks)` and so on). Each
 shard runs on a fresh Jenkins with the JaCoCo agent in its JVM, so the run also records which plugin code it executed;
 `ci/coverage-diff.py` then lists the lines a branch changed that no scenario executed. Made for GitHub Actions (one
@@ -41,10 +41,10 @@ shard per runner); it runs the same way locally.
 mvn -ntp clean package -DskipTests                     # target/batch-control.hpi and target/classes, one build
 python3 -m venv venv && venv/bin/pip install -r e2e/ci/requirements.txt    # Python >= 3.10
 venv/bin/python -m playwright install chromium         # or BC_BROWSER_CHANNEL=chrome for the installed Chrome
-PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5              # shard 1 of 5 = group 1; artefacts in e2e/ci/out/1/ (then 2/5 ... 5/5)
+PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7              # shard 1 of 7 = group 1; artefacts in e2e/ci/out/1/ (then 2/7 ... 7/7)
 python3 e2e/ci/shard.py check                          # the groups: labels, units, minutes; fails on a bad GROUPS
-python3 e2e/ci/shard.py plan 3/5                       # the steps shard 3 runs (setup, then its units)
-BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5     # the setup plus just these units
+python3 e2e/ci/shard.py plan 3/7                       # the steps shard 3 runs (setup, then its units)
+BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7     # the setup plus just these units
 venv/bin/python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base main   # -> e2e/ci/out/coverage/summary.md
 venv/bin/python -m pytest e2e/ci/test_selftest_content.py --browser chromium   # the crawl's content checks on synthetic pages (no Jenkins)
 venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.zip    # the trace of a failed step
@@ -52,7 +52,7 @@ venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.z
 
 Against a stack that is already up (its setup done), one step or unit at a time:
 `BC_BASE=http://localhost:18080/jenkins BC_UNITS=round3 BC_SKIP_SETUP=1 venv/bin/python -m pytest e2e/ci/test_shard.py
---bc-shard 1/5 --bc-out /tmp/out -s` (add `-k round3` to select steps by name; `<k>/<N>` must name a group, `N` = 5,
+--bc-shard 1/7 --bc-out /tmp/out -s` (add `-k round3` to select steps by name; `<k>/<N>` must name a group, `N` = 7,
 also with `BC_UNITS`, which then replaces that group's units).
 
 `run.sh` uses its own compose project (`bc-cov-<k>`), its own container names and ports 18080/18025, so it can run
@@ -144,26 +144,38 @@ in between). `role` (replaces the authorization strategy), `r16-durable` (restar
 (switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
 
 The units are split into fixed, named groups (`GROUPS` in `ci/shard.py`), one CI job each, named `e2e (<label>)`.
-Shard k of N is group k, and N must be the number of groups (`run.sh 1/4` and `--bc-shard 1/4` stop with an error
+Shard k of N is group k, and N must be the number of groups (`run.sh 1/5` and `--bc-shard 1/5` stop with an error
 before anything starts). A label is lower-case words of letters and digits separated by single spaces or `-`, at most
 25 characters (the rule of `.github/test-shards.txt`), and says what the group tests. Each role's job-UI units stay in
-one group, so a red job also tells whose screens broke. Minutes are the unit weights (the setup adds 3.4 to each):
+one group, so a red job also tells whose screens broke. Minutes are the unit weights, minutes on the GitHub Actions
+runner; job minutes add the setup (`SETUP_WEIGHT`, 3.4) and the runner's own steps (`JOB_OVERHEAD`, 3.2: checkout,
+Python packages and Chromium, Jenkins' start, coverage dump and upload):
 
-| Shard | Job label | Units (in run order) | Minutes | `last` unit |
-|---|---|---|---:|---|
-| 1/5 | crawl and ui checks | `def07`, `crawl-requester`, `crawl-reqonly`, `crawl-approver-1`, `crawl-manager`, `crawl-nobc`, `actions`, `misc`, `targeted`, `round3`, `r21-reject-color` | 29.8 | none |
-| 2/5 | admin and role strategy | `crawl-admin`, `jobui-new-admin`, `jobui-classic-admin`, `role` | 28.5 | `role` |
-| 3/5 | job ui params and restart | `jobui-new-requester`, `jobui-classic-requester`, `r16-params`, `r16-rerun`, `r16-d60`, `multibranch`, `r16-durable` | 29.0 | `r16-durable` |
-| 4/5 | job ui windows and disk | `jobui-new-reqonly`, `jobui-classic-reqonly`, `r16-items`, `r16-rename`, `r16-follow`, `r16-names`, `r17-s39`, `r19-kinds`, `r17-disk` | 30.0 | `r17-disk` |
-| 5/5 | job ui runs and switches | `jobui-new-others` (approver-1, manager, nobc), `jobui-classic-others`, `r19-gate`, `r19-plugins`, `r19-triggers`, `r19-lifecycle`, `r18-final` | 29.1 | `r18-final` |
+| Shard | Job label | Units (in run order) | Minutes | Job minutes | `last` unit |
+|---|---|---|---:|---:|---|
+| 1/7 | crawl and ui checks | `def07`, `crawl-requester`, `crawl-manager`, `actions`, `misc`, `targeted`, `round3`, `r21-reject-color` | 15.6 | 22.2 | none |
+| 2/7 | crawls and multibranch | `crawl-admin`, `crawl-reqonly`, `crawl-approver-1`, `crawl-nobc`, `multibranch` | 13.1 | 19.7 | none |
+| 3/7 | admin and role strategy | `jobui-new-admin`, `jobui-classic-admin`, `role` | 15.2 | 21.8 | `role` |
+| 4/7 | job ui params and restart | `jobui-new-requester`, `jobui-classic-requester`, `r16-params`, `r16-durable` | 16.7 | 23.3 | `r16-durable` |
+| 5/7 | job ui windows and disk | `jobui-new-reqonly`, `jobui-classic-reqonly`, `r16-items`, `r16-rename`, `r16-follow`, `r16-names`, `r17-s39`, `r19-kinds`, `r17-disk` | 13.9 | 20.5 | `r17-disk` |
+| 6/7 | job ui other roles | `jobui-new-others` (approver-1, manager, nobc), `jobui-classic-others` | 16.6 | 23.2 | none |
+| 7/7 | runs and switches | `r16-rerun`, `r16-d60`, `r19-gate`, `r19-plugins`, `r19-triggers`, `r19-lifecycle`, `r18-final` | 13.7 | 20.3 | `r18-final` |
 
-The groups replaced (2026-10-09) a longest-processing-time split over the same weights, whose heaviest of five shards
-had 29.6 minutes of units; the heaviest group has 30.0.
+The seven groups replaced (2026-10-09) five, which took 26.9, 26.8, 26.8, 19.8 and 35.0 minutes per job in run
+37883661045 (E2E wall clock 36.7 min). The floor is group 6: approver-1, manager and nobc's job UI on both pages is
+16.6 minutes and stays in one group; the others are kept close to it. An automatic (longest-processing-time) split of
+the same weights into seven would have 15.1 minutes at most, but splits the roles' job UIs.
+
+The weights were calibrated against that run at the same time: the step seconds in each shard's `summary.json`, summed
+per unit. Where the CI minutes differed from the weight by more than 0.3 min and more than 10%, the weight became the
+CI minutes; `ci/shard.py` names those units (most of them: the local weights were off by factors from 0.17 to 3.2, in
+both directions). With the new weights the five old groups would have been estimated at 27.2, 27.1, 27.0, 20.5 and
+36.0 job minutes, against the measured 26.9, 26.8, 26.8, 19.8 and 35.0.
 
 - `shard.py check` prints that table with the sums and fails (`::error::` lines, exit 1) when a unit is in no group or
   in two (or twice in one), when a group holds two `last` units, a name that is not a unit or no unit at all, or when
   a label is not valid or repeated. `shard.py matrix` (after the same check) prints the GitHub Actions matrix, one
-  entry per group: `{"include":[{"shard":1,"of":5,"label":"crawl and ui checks"},...]}`; `shard.py label <k>/<N>`
+  entry per group: `{"include":[{"shard":1,"of":7,"label":"crawl and ui checks"},...]}`; `shard.py label <k>/<N>`
   prints one label (`run.sh` uses it to fail early and names the JUnit suite after it).
 - A new unit: add it to `UNITS` and to the group whose label it fits, then run `shard.py check`; it prints the heaviest
   group next to what an automatic split of the same weights would give, so the balance stays visible. If no label
@@ -173,8 +185,8 @@ The table below is the earlier automatic split, measured with the weights of tha
 
 Measured 2026-10-06 (e2e-17: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards and one
 supplementary run at a time on one machine; the image was cached, so no build time is included). Every shard: about
-2.1 min until Jenkins is ready, 3.5 min setup (including `ci/preconditions.py`). The unit weights in `ci/shard.py` are
-still the e2e-16 ones (pessimistic on this run; the r16/r17 drivers ran in well under their weights).
+2.1 min until Jenkins is ready, 3.5 min setup (including `ci/preconditions.py`). The unit weights in `ci/shard.py` were
+then still the e2e-16 ones (pessimistic on this run; the r16/r17 drivers ran in well under their weights).
 
 | Shard of 5 | Units | Steps | Driver minutes (incl. setup) | Wall minutes |
 |---|---|---:|---:|---:|
@@ -316,10 +328,11 @@ pending).
   plugins of `e2e/plugins.txt` from the Jenkins update centre) and pulling `axllent/mailpit`. Network needed:
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN.
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
-- Durations: per shard 24-33 min measured locally (2026-10-06, e2e-17) ("Units and groups" above: 2 min start, 3.5 min setup, the units);
-  on a runner add the image build (the base image and the plugins of `plugins.txt`, a few minutes without a cache),
-  the Playwright install (about 1 min) and the artifact upload. Expect 35-45 min per shard, the five in parallel, and
-  2-3 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT` (default 2700 s) bounds one step.
+- Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
+  the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
+  groups are estimated at 19.7-23.3 min per job ("Job minutes" above, `shard.py check`), the seven in parallel after
+  `e2e build` (under 1 min), then about 1 min for `coverage`. `timeout-minutes: 90` leaves room; `BC_STEP_TIMEOUT`
+  (default 2700 s) bounds one step.
 - Independence from the request form: `run.sh` and `shard.py` only start Jenkins, run the listed drivers and judge
   their output. The drivers that fill the grant form (`round3.py`, `actions.py`, `jobui.py`, the crawl's dialog
   cycles) post the D-71 form (one item name, no scope type field); `ci/seed_markup.py` goes on with the run request
@@ -592,7 +605,7 @@ a probe inserted next to it with `style="color: var(--destructive-color)"` (the 
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
 button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
 the three requests. Light theme only. Alone:
-`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5` (about 6 minutes, most of it the shared setup).
+`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/7` (about 6 minutes, most of it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 
@@ -698,7 +711,7 @@ inheritance (administrators only) and the top-level jobs the disk scenarios remo
 
 `compose.ci-fs.yml` puts `JENKINS_HOME/batch-control` on a host directory (`BC_CI_FS_DIR`, empty at the start), which on
 macOS with Docker Desktop is case-insensitive, for the S-39-01 premise:
-`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/5`.
+`BC_CI_FS_DIR=<empty dir> BC_COMPOSE_EXTRA=$PWD/e2e/compose.ci-fs.yml BC_UNITS=r17-s39 e2e/ci/run.sh 1/7`.
 
 ## e2e-15 driver (`r15/`)
 

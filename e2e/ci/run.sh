@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI e2e runner: one shard of the scripted e2e pass on a fresh Jenkins with JaCoCo coverage.
 #
-#   e2e/ci/run.sh <k>/<N>          e.g. e2e/ci/run.sh 2/5
+#   e2e/ci/run.sh <k>/<N>          e.g. e2e/ci/run.sh 2/7
 #
 # Shard k is group k of ci/shard.py GROUPS (`ci/shard.py check` lists them); N must be the number of groups, checked
 # before anything starts (exit 64 otherwise).
