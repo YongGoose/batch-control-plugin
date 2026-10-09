@@ -116,8 +116,8 @@ public final class ActivationService {
      * is {@link #mayRunUnattended(Job)}, which asks its computed-folder ancestor (D-46c).
      *
      * <p>Fails closed: a state that cannot be read, one bound to another directory than the
-     * item's current one (a re-created item under an old name, S-13-09), or one bound to a directory
-     * whose marker cannot be read now, counts as not activated.
+     * item's current one (a re-created item under an old name, S-13-09), or one whose directory
+     * marker is missing or cannot be read now (D-80), counts as not activated.
      */
     public boolean isActivated(Item item) {
         Objects.requireNonNull(item, "item");
@@ -142,20 +142,22 @@ public final class ActivationService {
         if (!cached.activated()) {
             return false;
         }
-        if (cached.identity() != null) {
-            String current = ItemIdentity.of(item.getRootDir());
-            if (current == null) {
-                // SPEC 6a "fails closed": without the directory's marker the state cannot be shown to
-                // be this item's own, so it does not count.
-                LOGGER.warning(() -> "The directory of '" + fullName + "' cannot be read, so its activation cannot "
-                        + "be confirmed as its own; treating the item as not activated");
-                return false;
-            }
-            if (!current.equals(cached.identity())) {
-                LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
-                        + "treating the item as not activated");
-                return false;
-            }
+        // D-80: the state counts only for the directory whose marker id it stores. A state stored
+        // without one (the marker could not be written) or with a pre-D-80 file key (not converted,
+        // D-69) cannot be shown to be this item's own.
+        String current = ItemIdentity.of(item.getRootDir());
+        if (current == null) {
+            // SPEC 6a "fails closed": without the directory's marker the state cannot be shown to
+            // be this item's own, so it does not count.
+            LOGGER.warning(() -> "The activation marker in the directory of '" + fullName + "' is missing or "
+                    + "cannot be read, so its activation cannot be confirmed as its own; treating the item as "
+                    + "not activated");
+            return false;
+        }
+        if (!current.equals(cached.identity())) {
+            LOGGER.fine(() -> "The activation stored for '" + fullName + "' belongs to another directory; "
+                    + "treating the item as not activated");
+            return false;
         }
         return true;
     }
@@ -454,6 +456,15 @@ public final class ActivationService {
                 throw new IllegalStateException("Job '" + request.getJobFullName()
                         + "' no longer exists; activation request " + id + " is now INVALIDATED.");
             }
+            // D-80: the state is bound to the marker in the item's directory, written now if there is
+            // none. An activation without it would never count, so an ACTIVATE is not approved then:
+            // the request stays PENDING and can be approved once the directory is writable.
+            String identity = ItemIdentity.ensure(subject.getRootDir());
+            if (identity == null && request.getAction() == ActivationRequest.Action.ACTIVATE) {
+                throw new IllegalStateException("The activation marker of '" + request.getJobFullName()
+                        + "' cannot be written in its directory, so activation request " + id
+                        + " cannot be approved now; it stays PENDING.");
+            }
             String decider = Jenkins.getAuthentication2().getName();
             request.setStatus(RequestStatus.APPROVED);
             request.setDecidedAt(now);
@@ -461,7 +472,7 @@ public final class ActivationService {
             request.setDecisionComment(comment);
             request.setSelfApproved(selfApproval);
             store.saveActivationRequest(request);
-            applyApproved(request, decider, now, selfApproval, ItemIdentity.of(subject.getRootDir()));
+            applyApproved(request, decider, now, selfApproval, identity);
             // S-13-07: the other pending requests of the item were asked against the state before
             // this decision; a stale ACTIVATE must not be able to undo this HOLD (or the reverse).
             invalidatePending(request.getJobFullName(), false, "Superseded by the approval of activation request "
@@ -706,7 +717,7 @@ public final class ActivationService {
             ActivationState existing = store.loadActivationState(fullName);
             boolean wasActivated = existing != null && existing.isActivated();
             ActivationState state = existing == null
-                    ? ActivationState.notActivated(fullName, ItemIdentity.of(item.getRootDir())).heldBy(mover, now, null)
+                    ? ActivationState.notActivated(fullName, ItemIdentity.ensure(item.getRootDir())).heldBy(mover, now, null)
                     : existing.heldBy(mover, now, null);
             saveState(state);
             store.appendChangeRecord(ChangeRecord.create(ChangeType.HELD, fullName, mover,
@@ -780,7 +791,9 @@ public final class ActivationService {
                 }
                 return;
             }
-            String identity = ItemIdentity.of(item.getRootDir());
+            // D-80: a new item's directory has no marker (Jenkins' copy copies only config.xml), so
+            // this writes one with a new id; nothing stored for an earlier item of the name matches it.
+            String identity = ItemIdentity.ensure(item.getRootDir());
             if (BatchControlGlobalConfiguration.get().isRunControlEnabled()) {
                 saveState(ActivationState.notActivated(fullName, identity));
                 return;
@@ -839,7 +852,7 @@ public final class ActivationService {
                     continue;
                 }
                 saveState(ActivationState.activated(fullName, ActivationState.UPGRADE, now, null,
-                        ItemIdentity.of(item.getRootDir())));
+                        ItemIdentity.ensure(item.getRootDir())));
                 store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                         ActivationState.UPGRADE, "Activated by upgrade: the job existed when activation "
                                 + "approval was installed, so its schedule keeps running"));
