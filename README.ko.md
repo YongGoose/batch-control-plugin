@@ -55,9 +55,9 @@ CI 서버가 아니라 **배치 실행 관리 도구**로 운영되는 Jenkins �
 
 ![잡 또는 폴더 이름, CREATE·CONFIGURE·DELETE 동작, 기간, 사유를 입력하는 권한 창 요청 양식](docs/images/permission-window.png)
 
-실행 기록이 쌓인 Batch Control 대시보드.
+**History**(이력) 화면의 Requests 보기: 실행 요청과 결재자, 결정한 사람, 상태.
 
-![최근 빌드를 원인, 사용자, 파라미터, 결과, 소요 시간과 함께 나열하는 Batch Control 실행 대시보드](docs/images/dashboard.png)
+![실행 요청 8건을 잡, 요청자, 결재자, 결정한 사람, 상태(PENDING, EXECUTED, REJECTED, CANCELLED), 생성 시각, 결정 시각과 함께 나열하는 Batch Control History 화면의 Requests 보기](docs/images/dashboard.png)
 
 전역 설정의 Batch Control 섹션.
 

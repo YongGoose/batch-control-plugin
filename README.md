@@ -66,9 +66,9 @@ The permission window request form.
 
 ![Permission window request form with the job or folder name, the CREATE, CONFIGURE and DELETE actions, a duration and a reason](docs/images/permission-window.png)
 
-The Batch Control dashboard with recorded runs.
+The **History** page, Requests view: run requests with their approvers, who decided and the status.
 
-![Batch Control run dashboard listing recent builds with their cause, user, parameters, result and duration](docs/images/dashboard.png)
+![Batch Control History page in its Requests view, listing eight run requests with their job, requester, approvers, who decided, status (PENDING, EXECUTED, REJECTED, CANCELLED), and created and decided times](docs/images/dashboard.png)
 
 The Batch Control section of the global configuration.
 
