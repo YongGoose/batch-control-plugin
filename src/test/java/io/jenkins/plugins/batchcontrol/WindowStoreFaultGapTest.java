@@ -398,6 +398,7 @@ public class WindowStoreFaultGapTest {
             step.run();
             return;
         }
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> original = Files.getPosixFilePermissions(file);
         try {
             Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));

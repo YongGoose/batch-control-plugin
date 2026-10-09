@@ -133,6 +133,7 @@ public class RequestExpiryGapTest {
     /** Runs {@code step} while {@code dir} is unwritable (r-x); returns what it threw, or null. */
     private static Throwable withUnwritable(Path dir, Step step) throws Exception {
         assertTrue(Files.isDirectory(dir), "fixture: " + dir + " exists");
+        PlatformFixtures.assumeCanMakeUnwritable();
         Set<PosixFilePermission> original;
         try {
             original = Files.getPosixFilePermissions(dir);

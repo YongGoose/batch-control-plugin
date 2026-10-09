@@ -136,6 +136,7 @@ public class FailClosedGapTest {
         // the directory needs search permission on its parent, so the parent (JENKINS_HOME/jobs) is made unsearchable.
         Path dir = job.getRootDir().toPath().getParent();
         Path jobDir = job.getRootDir().toPath();
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> original;
         try {
             original = Files.getPosixFilePermissions(dir);

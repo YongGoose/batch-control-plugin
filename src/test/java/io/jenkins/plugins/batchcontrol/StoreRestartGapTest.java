@@ -141,6 +141,7 @@ public class StoreRestartGapTest {
             saveAs(r, "u2", gk, "edited by u2");
             Path grants = home.resolve("batch-control/grants");
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(grants.toFile().setWritable(false, false), "fixture: grants/ made read-only");
                 Assumptions.assumeTrue(writesRefused(grants), "the file system does not refuse writes to a read-only directory for this process");
                 saveAs(r, "u1", gj, "edited by u1");
@@ -183,6 +184,7 @@ public class StoreRestartGapTest {
             assertTrue(WindowStoreFaultGapTest.monitorItems(r).contains("gr"), "premise: gr is listed as changed");
             Path grants = home.resolve("batch-control/grants");
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(grants.toFile().setWritable(false, false), "fixture: grants/ made read-only");
                 try (Stream<Path> files = Files.list(grants)) {
                     files.forEach(p -> p.toFile().setWritable(false, false));
@@ -231,6 +233,7 @@ public class StoreRestartGapTest {
         });
         List<Path> months = monthFiles();
         try {
+            PlatformFixtures.assumeCanMakeUnreadable();
             for (Path month : months) {
                 assertTrue(month.toFile().setReadable(false, false), "fixture: " + month + " made unreadable");
             }
@@ -403,6 +406,7 @@ public class StoreRestartGapTest {
             assertNotNull(r.jenkins.getQueue().getItem(job), "premise: the approved run waits in the queue");
             Path dir = home.resolve("batch-control/requests/run");
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(dir.toFile().setWritable(false, false), "fixture: requests/run/ made read-only");
                 Assumptions.assumeTrue(writesRefused(dir), "the file system does not refuse writes to a read-only directory for this process");
                 try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {

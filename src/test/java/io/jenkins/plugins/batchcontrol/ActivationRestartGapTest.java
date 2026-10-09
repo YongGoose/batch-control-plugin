@@ -98,6 +98,7 @@ public class ActivationRestartGapTest {
             r.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
         });
         Path file = stateFile.get();
+        PlatformFixtures.assumeCanMakeUnreadable();
         Set<PosixFilePermission> original = posix(file);
         assumeTrue(original != null, "POSIX permissions are needed to make the state file unreadable");
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));

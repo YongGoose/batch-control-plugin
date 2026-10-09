@@ -103,6 +103,7 @@ public class WindowEndRestartTest {
             home = r.jenkins.getRootDir().toPath();
             Path dir = grantsDir();
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(grantFile(onA).setWritable(false, false), "fixture: the stored window on a made read-only");
                 assertTrue(dir.toFile().setWritable(false, false), "fixture: the grants directory made read-only");
                 enforced = writesRefused(dir) && !Files.isWritable(grantFile(onA).toPath());
@@ -166,6 +167,7 @@ public class WindowEndRestartTest {
         List<Path> months = monthFiles();
         assertFalse(months.isEmpty(), "premise (ARCHITECTURE 5): change records are stored under " + home.resolve("batch-control/changes"));
         try {
+            PlatformFixtures.assumeCanMakeUnreadable();
             for (Path month : months) {
                 assertTrue(month.toFile().setReadable(false, false), "fixture: " + month + " made unreadable");
             }

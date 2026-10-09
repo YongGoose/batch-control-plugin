@@ -374,6 +374,7 @@ public class ItemScopeRestartTest {
             java.io.File dirFile = dir.toFile();
             java.io.File storedFile = stored.toFile();
             try {
+                PlatformFixtures.assumeCanMakeUnwritable();
                 assertTrue(storedFile.setWritable(false, false), "fixture: the stored grant made read-only");
                 assertTrue(dirFile.setWritable(false, false), "fixture: the grants directory made read-only");
                 boolean enforced;

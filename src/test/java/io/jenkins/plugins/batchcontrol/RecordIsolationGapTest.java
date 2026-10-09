@@ -189,6 +189,7 @@ public class RecordIsolationGapTest {
         Path dir = store().resolve("incidents");
         Path file = dir.resolve(incident.getId() + ".xml");
         assertTrue(Files.isRegularFile(file), "fixture: the incident is stored at " + file);
+        PlatformFixtures.assumeCanMakeUnwritable();
         Set<PosixFilePermission> dirPerms = posix(dir);
         Set<PosixFilePermission> filePerms = posix(file);
         assumeTrue(dirPerms != null && filePerms != null, "POSIX permissions are needed to make the incident unwritable");

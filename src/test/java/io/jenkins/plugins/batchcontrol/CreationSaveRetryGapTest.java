@@ -263,6 +263,7 @@ public class CreationSaveRetryGapTest {
         String copied = src.getConfigFile().asString();
         assertTrue(copied.contains(":alice</permission>"), "fixture: the source's config.xml carries alice's entry: " + copied);
         KEPT.set(copied); // core copies the source's config.xml verbatim before saving the copy
+        PlatformFixtures.assumeCanMakeUnwritable();
         BREAK_SAVE.set("dest/copy-f");
         Page answer = createItemPage("bob", "job/dest/", "name=copy-f&mode=copy&from=/src-f", null);
         String outcome = "HTTP " + answer.getWebResponse().getStatusCode();

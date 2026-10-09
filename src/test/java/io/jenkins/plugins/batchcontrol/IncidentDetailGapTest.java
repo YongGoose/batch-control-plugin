@@ -191,6 +191,7 @@ public class IncidentDetailGapTest {
         Path dir = incidentFile(incident.getId()).getParent();
         RunRequest rerun;
         try {
+            PlatformFixtures.assumeCanMakeUnwritable();
             assertTrue(dir.toFile().setWritable(false, false), "fixture: incidents/ made read-only");
             incidentFile(incident.getId()).toFile().setWritable(false, false);
             Assumptions.assumeTrue(writesRefused(dir), "the file system does not refuse writes to a read-only directory for this process");
