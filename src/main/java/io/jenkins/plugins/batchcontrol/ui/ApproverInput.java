@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -20,6 +19,10 @@ import org.kohsuke.stapler.StaplerRequest2;
  * old {@code approver} field is still read and merged in. When a form arrives only as a
  * {@code json} blob (as {@code getSubmittedForm} reads it), {@code approvers} may be a string or
  * an array of strings there.
+ *
+ * <p>A {@code multipart/form-data} body (the Request Run form, D-72) keeps only the last part of
+ * a repeated field in Stapler, so there the {@code json} blob the form posts with it is read as
+ * well ({@link RepeatedField}): the rendered checkboxes put the checked ids into it in order.
  *
  * <p>Validation here is shape only: entries are trimmed, blanks dropped, duplicates collapsed,
  * and the count and length are bounded so a request cannot carry unbounded input. Eligibility
@@ -46,17 +49,25 @@ public final class ApproverInput {
     /**
      * @param req the current request
      * @param formData the parsed {@code json} blob when the form carried one, otherwise {@code null}
+     *        (for a multipart request the blob is then read from the request when it carries one)
      * @return the trimmed, de-duplicated approver ids in submission order, possibly empty (the
      *         service then refuses the request with its own message)
      * @throws Failure when the input exceeds the count or length bounds
      */
     public static List<String> read(StaplerRequest2 req, @CheckForNull JSONObject formData) {
         List<String> raw = new ArrayList<>();
+        if (RepeatedField.isMultipart(req)) {
+            // D-37: Stapler keeps only the last of the repeated multipart parts, so the blob's ids
+            // come first (all of them, in order), then the raw part (one of them for the form).
+            raw.addAll(RepeatedField.values(req, formData, FIELD));
+            raw.addAll(RepeatedField.values(req, formData, LEGACY_FIELD));
+            return normalize(raw);
+        }
         addAll(raw, req.getParameterValues(FIELD));
         addAll(raw, req.getParameterValues(LEGACY_FIELD));
         if (raw.isEmpty() && formData != null) {
-            addJson(raw, formData.opt(FIELD));
-            addJson(raw, formData.opt(LEGACY_FIELD));
+            RepeatedField.addJson(raw, formData.opt(FIELD));
+            RepeatedField.addJson(raw, formData.opt(LEGACY_FIELD));
         }
         return normalize(raw);
     }
@@ -89,19 +100,5 @@ public final class ApproverInput {
                 out.add(value);
             }
         }
-    }
-
-    private static void addJson(List<String> out, @CheckForNull Object value) {
-        if (value instanceof String) {
-            out.add((String) value);
-        } else if (value instanceof JSONArray) {
-            for (Object element : (JSONArray) value) {
-                if (element instanceof String) {
-                    out.add((String) element);
-                }
-            }
-        }
-        // Booleans (an unnamed-value checkbox serialised by the form tree) and objects carry no
-        // user id and are ignored.
     }
 }

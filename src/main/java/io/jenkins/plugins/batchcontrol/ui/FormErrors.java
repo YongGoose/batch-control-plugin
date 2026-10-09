@@ -7,7 +7,6 @@ import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -193,14 +192,17 @@ public final class FormErrors {
         return out.append(text, from, text.length()).toString();
     }
 
-    /** Whether {@code value} was among the submitted values of the repeated {@code field}. */
+    /**
+     * Whether {@code value} was among the submitted values of the repeated {@code field}. D-37: on
+     * a multipart body Stapler keeps only the last part of the field, so the form's {@code json}
+     * blob is read as well ({@link RepeatedField}).
+     */
     public boolean checked(String field, String value) {
         if (!isInputKept()) {
             return false;
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        String[] values = req == null ? null : req.getParameterValues(field);
-        return values != null && Arrays.asList(values).contains(value);
+        return req != null && RepeatedField.values(req, null, field).contains(value);
     }
 
     /**
