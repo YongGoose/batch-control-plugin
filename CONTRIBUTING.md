@@ -373,10 +373,17 @@ behind any of them.
   `mvn -ntp clean verify` yourself before opening the PR. Every pull request and
   every push to `main` runs the same command in GitHub Actions
   (`.github/workflows/build.yml`, Linux). Each JDK the hosting checker accepts
-  has its own checks — `build (jdk 21)`, `build (jdk 25)`, `test (jdk 21, shard 1)`,
-  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` succeeds
-  only when all of them do. ci.jenkins.io also builds Linux on JDK 21 and 25 and
-  Windows on JDK 21 from the `Jenkinsfile` and reports the check `Jenkins`.
+  has its own checks — `build (jdk 21)`, `build (jdk 25)` and one test job per
+  feature group of test classes, such as `test (jdk 21, run approval and mail)`
+  or `test (jdk 25, parameters and ui)` — and the aggregating job `build`
+  succeeds only when all of them do. The groups are listed, by class-name prefix
+  or class name, in `.github/test-shards.txt`, and the `shard safeguard` job
+  fails when a test class matches no group or two, or a listed name matches no
+  class. A new class whose prefix a group already lists (`Grant*Test`,
+  `Window*Test`) needs nothing; otherwise add its prefix or its name to the
+  group of the feature it tests, and take a renamed or deleted class's name out.
+  ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
+  the `Jenkinsfile` and reports the check `Jenkins`.
 - **Merging into `main`** needs two required status checks, `build` and
   ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
   (update it when GitHub says it is behind), and one approving review, from the
