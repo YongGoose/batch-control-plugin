@@ -60,7 +60,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  * the same form ({@link #rerunQuery}): the recoverable non-sensitive values travel as
  * {@value #PREFIX}{@code <name>} under the same caps, and {@value #FROM_RERUN}{@code =<incident id>}
  * tells the form to say which values must be provided again. File parameters are never carried
- * ({@link #isFileDefinition}); carrying them from a refused build is issue #115.
+ * ({@link #isFileDefinition}); carrying them from a refused build is issue #10.
  */
 @Restricted(NoExternalUse.class)
 public final class RequestRunPrefill {

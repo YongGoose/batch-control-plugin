@@ -22,7 +22,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       {@code BatchControl/RequestGrant} and the user does not already hold
  *       {@code Item/Configure} here.</li>
  *   <li>{@link JobTriggerLockAction} — no sidebar entry and no URL; its {@code jobMain.jelly}
- *       shows the blocked-trigger notice of #21 on the job page when a switch is on.</li>
+ *       shows the blocked-trigger notice on the job page when a switch is on.</li>
  *   <li>{@link JobActivationNoticeAction} — no sidebar entry and no URL; its
  *       {@code jobMain.jelly} shows whether the job is activated (SPEC item 6a).</li>
  * </ul>

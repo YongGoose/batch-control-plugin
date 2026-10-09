@@ -3,7 +3,7 @@
      Batch Control screen, instead of a side panel. The entries and badges come from
      ui.SectionTabs, the same list as the breadcrumb dropdown of BatchControlRootAction, so a tab
      is shown only when its section can be opened. Labels and badge texts are constants or
-     numbers; everything is escaped by default. Backlog #86: a tab whose page title differs
+     numbers; everything is escaped by default. A tab whose page title differs
      ("Changes" opens "Change Records") carries the title as tooltip.
      Hosting review round 3 (R4-7): the same look as core's other tab bars. Core's l:tabs (used by
      the new build page, run-subpage.jelly) is documented "experimental, internal", so its markup

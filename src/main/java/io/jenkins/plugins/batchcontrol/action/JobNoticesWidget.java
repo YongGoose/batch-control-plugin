@@ -12,7 +12,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * #72: the job page notices (trigger lock, approval, activation) as a card of core's new job
+ * The job page notices (trigger lock, approval, activation) as a card of core's new job
  * page. That page's Overview renders the job's widgets ({@link Job#getWidgets()}) as cards and
  * puts everything a classic page contributes ({@code jobMain.jelly}) into a card titled
  * "Legacy"; this widget lets the notices sit next to core's own cards instead.

@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<!-- Backlog #86 (D-58b (3)): the confirmation after "Mark as reviewed" on the strategy monitor,
+<!-- D-58b (3): the confirmation after "Mark as reviewed" on the strategy monitor,
      GET /batch-control/reviewed?item=<full name> (BatchControlStrategyMonitor#doMarkReviewed redirects here, so the
      breadcrumb reads Batch Control > Marked as reviewed rather than the monitor's name, e2e-09
      DEF-03). The layout asks for Administer, as the monitor does. The item parameter is

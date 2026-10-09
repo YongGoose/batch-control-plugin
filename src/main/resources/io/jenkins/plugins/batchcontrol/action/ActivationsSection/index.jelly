@@ -17,7 +17,7 @@
 
       <j:choose>
         <j:when test="${it.total == 0}">
-          <!-- D-38c (backlog #87): the section opens for everyone admitted to the root, so the
+          <!-- D-38c: the section opens for everyone admitted to the root, so the
                empty state says which requests are listed and where one is filed. -->
           <div class="jenkins-alert jenkins-alert-info" role="status" data-batch-control-empty="activations">
             No activation requests you may see. This list shows the activation and hold requests

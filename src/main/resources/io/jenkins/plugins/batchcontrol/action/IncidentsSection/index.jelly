@@ -29,7 +29,7 @@
           the file that holds them.
         </div>
       </j:if>
-      <!-- #13: the read stops at a record cap; the count is then a lower bound. -->
+      <!-- The read stops at a record cap; the count is then a lower bound. -->
       <j:if test="${it.truncated}">
         <div class="jenkins-alert jenkins-alert-warning" style="margin-bottom: 1rem;">
           This period holds more records than one screen can scan (the newest 50,000 were read),

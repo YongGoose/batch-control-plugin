@@ -119,7 +119,7 @@
             <j:choose>
               <j:when test="${changedItem != null}">
                 <a href="${rootURL}/${changedItem.url}configure"><code>${name}</code></a>
-                <!-- Backlog #86: name the window that recorded the change (Administer-only page). -->
+                <!-- Name the window that recorded the change (Administer-only page). -->
                 <j:set var="changedBy" value="${bcRoot.changedUnderGrant(name)}"/>
                 <j:if test="${changedBy != null}">
                   <span class="jenkins-!-margin-left-1" data-batch-control-changed-by="${changedBy.grantId}">

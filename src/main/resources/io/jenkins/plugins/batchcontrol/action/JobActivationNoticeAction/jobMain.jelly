@@ -1,6 +1,6 @@
 <?jelly escape-by-default='true'?>
 <!-- Classic job page: the notices (notices.jelly) below the job's main panel. On core's new job
-     page they are a card of the Overview instead (#72, JobNoticesWidget), so nothing is
+     page they are a card of the Overview instead (JobNoticesWidget), so nothing is
      rendered here and they do not also appear in the Overview's "Legacy" card. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
   <l:userExperimentalFlag var="newJobPage" flagClassName="jenkins.model.experimentalflags.NewJobPageUserExperimentalFlag"/>

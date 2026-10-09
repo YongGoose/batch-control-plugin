@@ -8,7 +8,7 @@ import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest2;
 
 /**
- * Paging arithmetic shared by every list screen (#22, D-44). Each section keeps its own
+ * Paging arithmetic shared by every list screen (D-44). Each section keeps its own
  * Jelly-facing names ({@code getPage}, {@code getPageItems}, {@code getTotal},
  * {@code isHasPrevious}, {@code isHasNext}) and delegates the arithmetic here, so the screens
  * cannot drift apart again.

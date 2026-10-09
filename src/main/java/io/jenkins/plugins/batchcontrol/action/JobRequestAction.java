@@ -66,7 +66,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  *
  * <p>The sidebar link is only visible when run control is on, the job requires approval and the
  * user holds {@code BatchControl/Request}. Without {@code BatchControl/Request} the action is
- * absent altogether ({@link #getUrlName()} returns {@code null}, SPEC item 2, #31, S-07): the
+ * absent altogether ({@link #getUrlName()} returns {@code null}, SPEC item 2, S-07): the
  * form exposes the eligible approver user-id list, which is not for plain {@code Item/Read}
  * holders, so {@code /job/<name>/batch-control/} and every URL beneath it answer 404.
  */
@@ -285,7 +285,7 @@ public class JobRequestAction implements Action {
      * The names of the job's parameters whose values the form never fills in, so the user provides
      * them again (D-72, D-60): file parameters ({@link RequestRunPrefill#isFileDefinition}) and
      * password parameters. Shown on a refused submission, on a refused direct build (D-60; files
-     * are not carried, issue #115) and on a rerun that continues here.
+     * are not carried, issue #10) and on a rerun that continues here.
      */
     public List<String> getReenterParameterNames() {
         List<String> names = new ArrayList<>();

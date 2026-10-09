@@ -12,7 +12,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Backlog #86: what the strategy monitor says about an item in the "changed under a grant" state
+ * What the strategy monitor says about an item in the "changed under a grant" state
  * (D-58a/b): which permission window recorded the change, and after "Mark as reviewed" what still
  * guards the item. Read-only; for the Administer-only monitor pages, reached through
  * {@code BatchControlRootAction} ({@code j:invokeStatic} cannot load plugin classes).
