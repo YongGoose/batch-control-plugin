@@ -1,0 +1,131 @@
+# Windows test run, for diagnosis only.
+#
+# Why: ci.jenkins.io builds Windows on JDK 21 (Jenkinsfile, "Jenkins" check), but its test
+# report needs a login and its GitHub check text names only the first one or two failing
+# tests. This workflow runs the same test groups as build.yml (.github/test-shards.txt,
+# through .github/scripts/test-shards.py) on windows-latest with JDK 21, lets every group
+# finish (-Dmaven.test.failure.ignore=true, fail-fast off), and the "windows test summary"
+# job lists every failing test, every class with no report and the per-group totals in its
+# job summary. The raw reports are in the windows-surefire-<group-id> artifacts.
+#
+# When it runs: on demand, and on a pull request only when the pull request changes this
+# file or its summary script. It never runs on other pull requests or on pushes, so it
+# never slows them down. It is not a required status check, and must not become one: a red
+# summary is information about Windows, not a merge gate. Keep its job names away from
+# build.yml's ("build", "test (jdk ..., ...)").
+#
+# How to run it on a branch:
+#   gh workflow run windows-tests.yml --ref <branch>
+#   gh run watch "$(gh run list --workflow windows-tests.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+---
+name: Windows tests
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/windows-tests.yml
+      - .github/scripts/surefire-summary.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: windows test plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.shards.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: List the test groups (JDK 21 only)
+        id: shards
+        env:
+          JDKS: '21'
+        run: python3 .github/scripts/test-shards.py check
+
+  test:
+    name: windows test (jdk ${{ matrix.jdk }}, ${{ matrix.label }})
+    needs: plan
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        # Git Bash. Inside double quotes the '*' of the -Dtest patterns is not globbed, and
+        # PowerShell would split the dotted -D property names.
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.jdk }}
+          cache: maven
+      # To compare with ci.jenkins.io's agent when a failure looks environmental.
+      - name: Show the environment
+        run: |
+          mvn -B -v
+          echo "core.autocrlf=$(git config --get core.autocrlf || echo unset)"
+          echo "TEMP=$TEMP"
+          echo "NUMBER_OF_PROCESSORS=$NUMBER_OF_PROCESSORS"
+      # Same command as build.yml's test job, plus failure.ignore so that a failing test
+      # does not stop the group: the summary job decides. The step timeout is shorter than
+      # the job's so that the reports of a slow group are still uploaded.
+      - name: Test
+        timeout-minutes: 75
+        env:
+          GROUP_TESTS: ${{ matrix.tests }}
+        run: >-
+          mvn -B -ntp clean test
+          -Dtest="$GROUP_TESTS"
+          -Daccess-modifier-checker.skip=true
+          -Dmaven.test.failure.ignore=true
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-surefire-${{ matrix.group }}
+          path: target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  summary:
+    name: windows test summary
+    needs: [plan, test]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Without merge-multiple: one directory per group, reports/windows-surefire-<group-id>/.
+      - name: Download the surefire reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: windows-surefire-*
+          path: reports/
+      # Red when a test failed or errored, a class has no report or a test job did not
+      # succeed (build error, timeout). Informational: this is not a required check.
+      - name: Summarize the failures
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          status=0
+          python3 .github/scripts/surefire-summary.py reports/ || status=1
+          if [ "$TEST_RESULT" != "success" ]; then
+            echo "::error::at least one Windows test job did not succeed ($TEST_RESULT): see its log"
+            status=1
+          fi
+          exit "$status"
