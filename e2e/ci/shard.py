@@ -67,8 +67,8 @@ JOB_OVERHEAD = 3.2
 
 
 class Unit:
-    def __init__(self, name, weight, steps, last=False, doc=""):
-        self.name, self.weight, self.steps, self.last, self.doc = name, weight, steps, last, doc
+    def __init__(self, name, weight, steps, last=False, doc="", group=None):
+        self.name, self.weight, self.steps, self.last, self.doc, self.group = name, weight, steps, last, doc, group
 
 
 def crawl_unit(role, weight):
@@ -187,6 +187,11 @@ UNITS = [
     Unit("r19-plugins", 0.6, [("r19-arrange", py("r19/arrange.py")), ("r19-plugins", py("r19/plugins.py"))],
          doc="e2e-19: naginator retry refused and recorded, customize-build-now keeps Request Run, lockable-resources and "
              "authorize-project with an approved run, jobConfigHistory one CONFIGURE record (SPEC 6 #34/#36, SPEC 9)"),
+    # e2e-23 R2-03 (bug-hunt batch A, D-80). r23/home_copy.py arranges its own item (r23-cron), copies its directory
+    # in the container and disables the job at its end; it waits for one timer minute.
+    Unit("r23-home-copy", 1.6, [("r23-home-copy", py("r23/home_copy.py"))], group="crawls and multibranch",
+         doc="e2e-23 R2-03: a cron job's activation survives a cp -a copy of its directory (new inode) and a reload: the "
+             "page still says activated, the next timer run starts, no TRIGGER_BLOCKED record"),
     Unit("r19-triggers", 6.0, [("r19-arrange", py("r19/arrange.py")), ("r19-triggers", py("r19/triggers.py"))],
          doc="e2e-19: a real cron schedule (blockTimer, TRIGGER_BLOCKED coalescing, activation, hold) and a real "
              "parameterized-trigger upstream (blockUpstream, allow list) (SPEC 6, 6a)"),
@@ -263,6 +268,11 @@ GROUPS = [
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
+# A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
+# group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`
+# reports). The e2e-23 units use it, so that each of their PRs adds lines of its own to this file and none edits the
+# group lists above, which other open PRs edit (git cannot merge two edits of neighbouring lines).
+GROUPS = [(label, names + [u.name for u in UNITS if u.group == label]) for label, names in GROUPS]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
 
