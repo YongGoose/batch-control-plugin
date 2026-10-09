@@ -25,6 +25,12 @@ public final class RunRecord {
     private Map<String, String> parameters = new LinkedHashMap<>();
     private String abortedBy;
     private String runRequestId;
+    /**
+     * D-81: when the record was appended to its month file, or {@code null} for a line written
+     * before D-81. Not exported (the CSV keeps its columns); it only tells a date-filtered
+     * newest-first scan where it may stop.
+     */
+    private Instant appendedAt;
 
     public RunRecord(String runId, String jobFullName, int number, CauseType causeType,
                      String result, Instant startedAt, long durationMs) {
@@ -95,5 +101,14 @@ public final class RunRecord {
 
     public void setRunRequestId(String runRequestId) {
         this.runRequestId = runRequestId;
+    }
+
+    /** D-81: when the record was appended, or {@code null} for a line written before D-81. */
+    public Instant getAppendedAt() {
+        return appendedAt;
+    }
+
+    public void setAppendedAt(Instant appendedAt) {
+        this.appendedAt = appendedAt;
     }
 }
