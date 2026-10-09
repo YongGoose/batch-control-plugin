@@ -198,14 +198,16 @@ public final class ActivationService {
     }
 
     /**
-     * The item whose activation governs {@code item} (D-46c): the item itself, or for a computed
-     * child its nearest computed-folder ancestor, resolved again while that folder is itself a
-     * computed child (a repository project of an organization folder is carried by the
-     * organization folder, which is the item that was created and can be requested on).
+     * The item whose activation governs {@code item} (D-46c, D-82): the item itself, or for a
+     * computed child its nearest computed-folder ancestor, or for a job's sub-item (a matrix
+     * configuration, a Maven module) its parent job, resolved again while the item reached is
+     * itself such a child (a repository project of an organization folder is carried by the
+     * organization folder, which is the item that was created and can be requested on; a
+     * configuration of a matrix project inside a multibranch project by that project).
      */
     public static Item activationSubject(Item item) {
         Item subject = item;
-        while (subject.getParent() instanceof ComputedFolder) {
+        while (subject.getParent() instanceof ComputedFolder || isSubItem(subject)) {
             subject = (Item) subject.getParent();
         }
         return subject;
@@ -213,10 +215,32 @@ public final class ActivationService {
 
     /**
      * Whether the item carries an activation of its own: a job or a computed folder that is not
-     * itself a computed child (D-46).
+     * itself a computed child (D-46) nor a job's sub-item (D-82).
      */
     public static boolean isSubject(Item item) {
-        return (item instanceof Job || item instanceof ComputedFolder) && !isComputedChild(item);
+        return (item instanceof Job || item instanceof ComputedFolder) && !isComputedChild(item)
+                && !isSubItem(item);
+    }
+
+    /**
+     * D-82: whether {@code item} is a sub-item of a job (a multi-configuration project's
+     * configuration, a Maven module): its parent is itself a job. It has no activation or approval
+     * state of its own; the queue gate applies its parent job's ({@link #governingJob}).
+     */
+    public static boolean isSubItem(Item item) {
+        return item.getParent() instanceof Job;
+    }
+
+    /**
+     * D-82: the job whose approval property governs {@code job} at the queue gate: the job itself,
+     * or for a sub-item the topmost job among its parents (a configuration's matrix project).
+     */
+    public static Job<?, ?> governingJob(Job<?, ?> job) {
+        Job<?, ?> governing = job;
+        while (governing.getParent() instanceof Job) {
+            governing = (Job<?, ?>) governing.getParent();
+        }
+        return governing;
     }
 
     /** The stored activation state of an item, or {@code null} if none is stored. */
@@ -688,8 +712,9 @@ public final class ActivationService {
      * without Overall/Administer, while run control and change control were on. It starts over
      * like a newly created item: it is no longer activated, and a {@link ChangeType#HELD} record
      * naming the move and the mover is written. Called after the move completed (the state has
-     * already followed the item through {@link #relocate}). A computed child carries no activation
-     * of its own (D-46) and is skipped; a computed folder, which carries its children's, is held.
+     * already followed the item through {@link #relocate}). A computed child or a job's sub-item
+     * carries no activation of its own (D-46, D-82) and is skipped; a computed folder, which
+     * carries its children's, is held.
      * The D-34 configuration lock is applied by the caller. The caller checks the switches.
      *
      * @return whether the item was handled (a job or computed folder that is not a computed child)
@@ -765,7 +790,8 @@ public final class ActivationService {
      *       with an {@link ChangeType#ACTIVATED} record (S-13-10), so turning run control on later
      *       never stops a schedule created in between.</li>
      * </ul>
-     * A computed child carries no state of its own; anything stored under its name is discarded.
+     * A computed child or a job's sub-item (D-82) carries no state of its own; anything stored
+     * under its name is discarded.
      * The state is bound to the item's directory marker (S-13-09).
      */
     public void onItemCreated(Item item) {

@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.DeletionAttribution;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import io.jenkins.plugins.batchcontrol.store.Store;
@@ -216,6 +217,13 @@ public class ItemChangeListener extends ItemListener {
             LOGGER.fine(() -> "Job '" + fullName + "' is a computed child of '"
                     + job.getParent().getFullName() + "'; the activation lock does "
                     + "not apply to it. Its runs are still recorded.");
+            return;
+        }
+        if (ActivationService.isSubItem(job)) {
+            // D-82: a sub-item (a matrix configuration, a Maven module) follows its parent job's
+            // property; a lock of its own would be state the queue gate never reads.
+            LOGGER.fine(() -> "Job '" + fullName + "' is a sub-item of '" + job.getParent().getFullName()
+                    + "'; it follows that job's run control, so the activation lock does not apply to it.");
             return;
         }
         BatchControlJobProperty existing = job.getProperty(BatchControlJobProperty.class);
