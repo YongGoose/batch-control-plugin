@@ -2,12 +2,14 @@ package io.jenkins.plugins.batchcontrol.listener;
 
 import hudson.model.AbstractItem;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.model.queue.ItemDeletion;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -56,7 +58,22 @@ public final class UnsavedItemWrites {
     /**
      * Saves every listed item again (called by the periodic work, which runs as SYSTEM). An item
      * whose save succeeds leaves the list; one that is no longer in Jenkins (deleted) is dropped;
-     * one whose save fails again stays for the next run. Never throws.
+     * one that is being deleted, or whose directory is gone, is not written and stays for the next
+     * run (which drops it once the deletion has removed it from its parent); one whose save fails
+     * again stays for the next run. Never throws.
+     *
+     * <p>Note 284 (c), LIMITATIONS 13: the periodic work runs on the Jenkins timer, so a retry can
+     * meet a deletion of the same item. Core's {@code AbstractItem.delete()} registers the item with
+     * {@link ItemDeletion}, runs {@code performDelete()} (which removes the item's directory) under
+     * the item's monitor, deregisters it, and only then removes the item from its parent. A
+     * registration check alone therefore still passes after the directory is gone, and the save that
+     * follows ({@code XmlFile.write} creates missing directories) wrote {@code config.xml} back into
+     * the deleted job's directory. The deletion checks and the save are therefore made under the
+     * item's monitor, the one {@code AbstractItem.save()} and {@code performDelete()} hold: either
+     * the save completes before {@code performDelete()} starts (which then removes what it wrote),
+     * or the retry sees the deletion registered or the directory gone and writes nothing. Only the
+     * item's own monitor is held (no lock of this plugin), and under it only {@link ItemDeletion}'s
+     * read lock is taken, which core never holds while waiting for an item's monitor.
      */
     public static void retry() {
         Map<AbstractItem, String> items;
@@ -81,12 +98,35 @@ public final class UnsavedItemWrites {
                     LOGGER.info(() -> "'" + fullName + "' is no longer in Jenkins; " + what + " is not saved again");
                     continue;
                 }
-                item.save();
+                if (!saveUnlessDeleting(item)) {
+                    LOGGER.fine(() -> "'" + fullName + "' is being deleted or its directory is gone; " + what
+                            + " is not saved now (dropped by a later run once the item is gone)");
+                    continue;
+                }
                 remove(item, what);
                 LOGGER.info(() -> "Saved " + what + " of '" + fullName + "', which was in effect but not saved until now");
             } catch (IOException | RuntimeException e) {
                 LOGGER.log(Level.FINE, e, () -> "Still cannot save " + what + " of '" + fullName + "'; retried later");
             }
+        }
+    }
+
+    /**
+     * Saves {@code item} unless it is being deleted (it or a folder above it is registered with
+     * {@link ItemDeletion}) or its directory is confirmed absent ({@code performDelete()} has run,
+     * the item may still be in its parent). Checked and saved under the item's monitor, see
+     * {@link #retry()}. An item whose directory cannot be checked (an unreadable parent directory)
+     * is saved as before: if that save fails too, the item stays listed.
+     *
+     * @return whether the item was saved
+     */
+    private static boolean saveUnlessDeleting(AbstractItem item) throws IOException {
+        synchronized (item) {
+            if (ItemDeletion.contains(item) || Files.notExists(item.getRootDir().toPath())) {
+                return false;
+            }
+            item.save();
+            return true;
         }
     }
 
