@@ -44,11 +44,11 @@
          POM defines, i.e. false: a fresh JVM per test class); this only widens how many
          of those per-class forks run concurrently. Each fork starts a Jenkins, so 1C
          can run out of memory on a many-core machine or in a memory-limited container;
-         run with -DforkCount=4 there (CONTRIBUTING.md, "Commands", #91). 1C stays the
+         run with -DforkCount=4 there (CONTRIBUTING.md, "Commands"). 1C stays the
          default because the CI runners are small (4 cores on ubuntu-latest). -->
     <forkCount>1C</forkCount>
     <!-- D-35g: 927 is the minimum supported role-strategy (see the dependency below).
-         A property only so that the scheduled role-strategy-latest workflow (#77) can
+         A property only so that the scheduled role-strategy-latest workflow can
          test against the newest release with -Drole-strategy.version=...; keep the
          default at the minimum. -->
     <role-strategy.version>927.v9cf5527c4085</role-strategy.version>
@@ -75,7 +75,7 @@
       <!-- Not BOM-managed. mailer 534.v1b_36f5864073 pulls in io.jenkins.plugins:jakarta-mail-api
            (jakarta.mail-api 2.1.5), so mock-javamail must be a Jakarta Mail (2.x) release, not the
            legacy javax.mail 1.x line. 2.2 is the latest published to repo.jenkins-ci.org and depends
-           on jakarta.mail-api 2.1.3, which resolves cleanly alongside 2.1.5 on the classpath (#32).
+           on jakarta.mail-api 2.1.3, which resolves cleanly alongside 2.1.5 on the classpath.
            Declared FIRST: Maven orders the test classpath by declaration, and Jakarta Mail keeps the
            first META-INF/javamail.providers entry per protocol, so this must precede angus-mail
            (pulled in via workflow-basic-steps / mailer -> jakarta-mail-api) or SMTP goes to localhost:25. -->
@@ -116,7 +116,7 @@
     </dependency>
     <dependency>
       <!-- BOM-managed (io.jenkins.tools.bom:bom-2.568.x). Optional: notification mail is
-           only sent when the Mailer plugin is installed alongside batch-control (#32). -->
+           only sent when the Mailer plugin is installed alongside batch-control. -->
       <groupId>org.jenkins-ci.plugins</groupId>
       <artifactId>mailer</artifactId>
       <optional>true</optional>
@@ -167,7 +167,7 @@
       <artifactId>caffeine-api</artifactId>
     </dependency>
 
-    <!-- Test-only dependencies for plugin interaction tests (#36). -->
+    <!-- Test-only dependencies for plugin interaction tests. -->
     <!-- BOM-managed (versions supplied by io.jenkins.tools.bom:bom-2.568.x via bom-weekly). -->
     <dependency>
       <!-- Optional compile dependency (not test-only): RebuildValidator (policy) needs the
@@ -244,7 +244,7 @@
   <build>
     <plugins>
       <plugin>
-        <!-- T-02-122 (#78, D-35g): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898,
+        <!-- T-02-122 (D-35g): RoleStrategyTooOldRealJenkinsTest installs role-strategy 898,
              older than the 927 minimum, next to batch-control and expects the refusal. The old hpi is copied as a plain
              file into the test output directory (old-plugins/role-strategy.hpi); it is not a
              dependency, so it is not on the test classpath, not in the hpi's manifest and not

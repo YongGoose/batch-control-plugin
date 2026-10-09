@@ -2,7 +2,8 @@
 
 Thanks for looking at this plugin. This file is for people who want to build it,
 change it, or understand why its documents look the way they do. If you only want
-to *use* the plugin, `README.md` is the right place.
+to *use* the plugin, `README.md` and the user guide (`docs/USER-GUIDE.md`) are
+the right place.
 
 Read this file once before your first change — a few of the conventions here are
 unusual, and two of them (how tests are derived, and how the matrix row IDs work)
@@ -16,8 +17,8 @@ are what makes the rest of the repository readable.
 
 | | |
 |---|---|
-| JDK | **21** (Temurin). 17 also compiles, but 21 is what every green run and both `Jenkinsfile` configurations use. |
-| Maven | **3.9.16** or newer. |
+| JDK | **21 or 25** (Temurin). JDK 17 cannot build against Jenkins 2.568.x, whose core needs Java 21. The `Jenkinsfile` builds Linux on 21 and 25 and Windows on 21, and the GitHub Actions build runs on 21 and 25. |
+| Maven | **3.9.6** or newer (the parent POM enforces it). |
 | Docker | Only for the end-to-end environment (§5). Not needed for `mvn verify`. |
 
 Pinned in `pom.xml`: parent `org.jenkins-ci.plugins:plugin:6.2236.v12dd4c483242`,
@@ -54,8 +55,8 @@ On Windows, Git Bash with an explicit environment is what the project has been
 built with:
 
 ```sh
-export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotspot"
-export PATH="$JAVA_HOME/bin:$HOME/tools/apache-maven-3.9.16/bin:$PATH"
+export JAVA_HOME="/c/Program Files/Eclipse Adoptium/<jdk-21-or-25-directory>"
+export PATH="$JAVA_HOME/bin:<maven-directory>/bin:$PATH"
 ```
 
 ### What a healthy run looks like
@@ -94,7 +95,7 @@ src/main/java/io/jenkins/plugins/batchcontrol/
   model/      requests, grants, records, incidents, state enums
   store/      on-disk persistence (append-only; format is in ARCHITECTURE.md)
   policy/     the decisions: who may approve, what is blocked, when
-  security/   the delegating AuthorizationStrategy that grants are built on
+  security/   the Batch Control matrix and role-strategy variants (subclasses) that grants are built on
   queue/      the queue gate that refuses an unapproved run
   listener/   run and configuration listeners that produce audit records
   config/     global configuration and the per-job JobProperty
@@ -128,9 +129,9 @@ entry you can look up.
 | `docs/SPEC.md` | the functional contract, with a testable "acceptance criteria" list per item | maintainer |
 | `docs/DECISIONS.md` | every design decision, with the alternatives that were rejected | maintainer |
 | `docs/ARCHITECTURE.md` | extension points used, package layout, storage format, state machines, known constraints (§7) | maintainer |
-| `docs/TEST-MATRIX.md` | every test row: given/when/then, priority, layer, owning test class — plus a long `비고` (notes) section recording the traps found while writing them | test author |
+| `docs/TEST-MATRIX.md` | every test row: given/when/then, priority, layer, owning test class — plus a long notes section (headed `비고`, Korean for "notes") recording the traps found while writing them | test author |
 | `docs/STATUS.md` | progress log, newest entry on top — read the top entry to see where the project stands | maintainer |
-| `docs/HOSTING-READINESS.md`, `docs/HOSTING-CHECKLIST.md` | the jenkinsci hosting requirements and the current verdict per requirement | maintainer |
+| `docs/HOSTING-READINESS.md`, `docs/HOSTING-CHECKLIST.md` | historical: the jenkinsci hosting requirements and the verdict per requirement during the hosting review, not kept up to date since | maintainer |
 | `docs/WORKFLOW.md` | the phase plan the project was built along | maintainer |
 
 **`docs/SPEC.md` is the arbiter.** If the code and the spec disagree, the code is
@@ -144,25 +145,30 @@ same change as the code.
 
 | you will see | it means | look it up in |
 |---|---|---|
-| `D-01` … `D-33` | a **settled** design decision — rationale plus the rejected alternatives | `docs/DECISIONS.md`, settled section |
-| `P-01` … `P-13` | a **proposal awaiting a human ruling**. Some are already implemented as defaults; none of them is settled. Do not cite a `P-nn` as if it were decided | `docs/DECISIONS.md`, proposals section |
+| `D-nn` (e.g. `D-37`, `D-35e`) | a **settled** design decision — rationale plus the rejected alternatives; a letter suffix marks an amendment | `docs/DECISIONS.md`, settled section |
+| `P-nn` | a **proposal awaiting a human ruling**. Some are already implemented as defaults; none of them is settled. Do not cite a `P-nn` as if it were decided | `docs/DECISIONS.md`, proposals section |
 | `T-05-02` | a test matrix row derived from SPEC item 5 (`T-<spec item>-<serial>`) | `docs/TEST-MATRIX.md` |
 | `T-CFG-01` | a row about global configuration (SPEC §5) | same |
 | `T-SEC-07` | a security row — non-functional security (SPEC §6) or cross-cutting | same |
 | `T-RT-14` | a row that came out of a red-team scenario rather than the spec | same, and `docs/reports/red-team-01.md` |
 | `T-OS-01` | an **owner scenario** row: an operational scenario the owner described directly (S-1…S-6), not derived from a spec sentence | same, note 32 |
 | `T-UI-06` | a **screen contract** row: behaviour the implementation defined, with no spec acceptance criterion behind it. These rows are dropped with the feature if the contract is rejected | same, notes 40 and 43 |
-| `T-E2E-03` | a browser/REST row that can only be checked against a real Jenkins (§5) | same, and `docs/reports/e2e-01.md`, `e2e-02.md` |
-| `RT-01` … `RT-20` | a red-team attack scenario | `docs/reports/red-team-01.md` |
-| `S-01` … `S-13` | a security review finding | `docs/reports/security-01.md`, `security-02.md` |
+| `T-E2E-03` | a browser/REST row that can only be checked against a real Jenkins (§5) | same, and the `docs/reports/e2e-NN.md` reports |
+| `RT-nn` | a red-team attack scenario | `docs/reports/red-team-01.md` |
+| `S-nn`, `S-nn-nn` | a security review finding (`S-12-01` is finding 1 of review 12) | the `docs/reports/security-NN.md` reports |
 | S1 … S4 | the four implementation slices: foundation, run control, change control, operations | `docs/WORKFLOW.md` Phase 3 |
 | "falsifiability guard" | an assertion whose only job is to fail if the feature is absent, paired with a positive row (§4) | `docs/TEST-MATRIX.md` notes |
 
 So "P-03 blocks T-SEC-07" reads as: a pending human decision about password
 parameters is why one security row has not been written.
 
-Current matrix size: **208 rows** — P0 144 / P1 56 / P2 8; unit 8 /
-integration 191 / e2e 9. P0 means release-blocking.
+The matrix grows with every change, so this guide does not quote its size. Each
+row has a priority; P0 means release-blocking.
+
+Issue and pull request numbers written before 2026-10-08 (in tests, `e2e/`,
+`docs/TEST-MATRIX.md` and the reports) refer to the former repository
+YongGoose/batch-control-plugin, which no longer exists; they do not match the
+numbers of this repository.
 
 ### Language
 
@@ -254,33 +260,31 @@ Concretely, that means:
 ## 5. The end-to-end environment
 
 Everything a browser sees lives in `e2e/`: a real Jenkins in Docker with the
-built `.hpi` installed, three accounts (`admin`, `approver`, `requester`) with
-deliberately different permissions, and sample jobs (a parameterised Freestyle
-job, a Pipeline job, an uncontrolled cron job). The authorization strategy is the
-plugin's own delegating strategy wrapping matrix-auth, because that is what makes
-just-in-time change control observable at all.
+built `.hpi` installed, a set of accounts with deliberately different
+permissions, sample jobs and folders, and a mail sink. The authorization
+strategy is the plugin's own Batch Control project-matrix variant (a subclass of
+matrix-auth's strategy), with a role-strategy profile beside it, because a
+Batch Control strategy variant is what makes just-in-time change control
+observable at all.
 
 ```sh
 mvn -ntp clean package -DskipTests   # from the project root: target/batch-control.hpi
 cd e2e
-cp .env.example .env                 # set the three passwords
+cp .env.example .env                 # set the passwords
 scripts/up.sh                        # build image, start Jenkins, wait for /login
 scripts/down.sh                      # stop, keep JENKINS_HOME
 scripts/reset.sh                     # stop and wipe JENKINS_HOME
 ```
 
-`e2e/scripts/` holds one script per scenario (`rest-run-request.sh`,
-`rest-grant-configure.sh`, `rest-csv-export.sh`, …), each mapped to the matrix
-rows it covers, printing the HTTP status and the relevant part of every response
-and saving raw responses under `e2e/out/`. `lib.sh` holds the shared curl
-helpers — cookie-jar login and a CSRF crumb on every POST — plus `bc_script`,
-which runs Groovy on the script console. The script console is used only to read
-or arrange state that has no HTTP surface, never to perform the behaviour under
-test. Helpers like `grant-setup.sh`, `approvers-clear.sh` and `executors.sh`
-arrange the awkward preconditions (an active grant, an empty approver list, an
-approved run that cannot start because there are no executors).
+`e2e/README.md` is the reference: the accounts and what each of them may do,
+the sample jobs and how they are activated, the configuration profiles, and the
+drivers. The scenarios are scripted with Playwright, in Python and Node.js, and
+the CI runner in `e2e/ci/` runs them as shards on fresh Jenkins instances and
+reports which changed lines no scenario executed (§7). The older
+`e2e/scripts/rest-*.sh` curl scripts from the first passes are still there. The
+script console is used only to read or arrange state that has no HTTP surface,
+never to perform the behaviour under test.
 
-`e2e/README.md` is the full reference, including the two traps in the seed data.
 Results go to `docs/reports/e2e-NN.md`, PASS/FAIL per row with screenshot links,
 and — separately — a UX section for things that work but are awkward. Keeping
 those apart matters: a defect gets routed and re-run, an awkwardness is a
@@ -292,7 +296,7 @@ judgement call for the maintainer.
 
 Collected here so nobody rediscovers them — this list is the canonical one. Each
 trap that came out of a specific repair is also written up at length in the notes
-(`비고`) section of `docs/TEST-MATRIX.md`, which is where to go for the full story
+section (headed `비고`) of `docs/TEST-MATRIX.md`, which is where to go for the full story
 behind any of them.
 
 - **Never run two Maven builds against this checkout at once.** They share
@@ -403,6 +407,24 @@ behind any of them.
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins
   security process described at the end of `README.md`.
 
+### Releases
+
+Releases are made by continuous delivery (JEP-229). The maintainer runs the CD
+workflow (`.github/workflows/cd.yaml`) by hand on `main`, and it publishes a
+version of the form `<commit depth>.v<commit hash>`, for example
+`123.vabcdef456789`. The release notes are drafted by release-drafter from the
+titles and labels of the pull requests merged since the previous release, so:
+
+- **The pull request title is the changelog line.** Write it for a user reading
+  the release notes, not for a reviewer.
+- **Labels decide whether there is anything to release, and where each change
+  is listed.** A release needs at least one merged pull request with a label of
+  interest to users, such as `enhancement`, `bug` or `breaking`, or `developer`
+  for a change aimed at other plugin developers. Pull requests labelled only
+  `chore`, `dependencies` or the like are listed but do not by themselves make a
+  release. The maintainer sets the labels; suggest one in the pull request if
+  you like.
+
 ---
 
 ## 8. A note on how this repository was developed
@@ -421,8 +443,9 @@ That is context, not a requirement: **you do not need to work that way to
 contribute here.** It is worth a paragraph only because the process left visible
 marks on the repository, and they are easier to read once you know where they
 came from — the ownership tables, the phase and gate language in `STATUS.md` and
-`WORKFLOW.md`, the "request" lines in the reports (`요청:` in the older Korean
-ones) where one role needed a change in another's files, and above all the
+`WORKFLOW.md`, the `Request:` lines in the reports (written `요청:`, Korean for
+"request", in the older ones) where one role needed a change in another's files,
+and above all the
 separation in §4 between the
 people who wrote the tests and the people who wrote the code. The two
 conventions that are genuinely load-bearing — the spec is the arbiter, and tests

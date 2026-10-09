@@ -1,8 +1,8 @@
 # Known limitations
 
-This is the complete list. [`README.md`](../README.md) carries the subset that
-changes an administrator's decisions; everything else is here, because each of
-these will otherwise be discovered in production.
+This is the complete list. The [user guide](USER-GUIDE.md#limitations) carries
+the subset that changes an administrator's decisions; everything else is here,
+because each of these will otherwise be discovered in production.
 
 The numbering is stable so that issues, reviews and tests can cite an item: a new
 item takes the next free number and goes in the section it belongs to, so the
@@ -10,6 +10,12 @@ numbers within a section are not always consecutive (item 46 is under "The
 authorization strategy"). The authority for behaviour is [`SPEC.md`](SPEC.md);
 the reasoning behind the deliberate choices is in [`DECISIONS.md`](DECISIONS.md)
 and section 7 of [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+The items cite internal identifiers in parentheses, such as decisions (`D-37`),
+review findings (`security-08 S-04`, `e2e-03 DD-07`) and SPEC items, so that the
+maintainer can trace each one; you do not need them to use the plugin. `SPEC.md`,
+`DECISIONS.md` and `ARCHITECTURE.md` are written largely in Korean, with the
+newer sections in English.
 
 ## Scope of control
 
@@ -375,7 +381,7 @@ from scripts.
     a non-administrator gets (item 44).
 
     **A refused timer, upstream or Replay submission is recorded and shown, not
-    silent (#21).** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
+    silent.** Each quiet queue refusal writes a `TRIGGER_BLOCKED` change
     record naming the job, the cause kind (`TIMER`, `UPSTREAM`, `REPLAY`, ...) and
     what blocked it (`blockTimer`, `blockUpstream`, `approvalRequired`, or
     `activation` for a job that is not activated),
@@ -518,22 +524,23 @@ from scripts.
     read-only auditor account can also close incidents. Requesting a rerun
     correctly needs `Request`.
 21. **Request visibility follows the job's own read boundary.** A run request is
-    visible to `Manage` holders, its requester, its designated approver, and
+    visible to `Manage` holders, its requester, its designated approvers, and
     anyone with `Item/Read` on the target job. In an instance where `Item/Read`
     is granted broadly, reasons and parameter values are broadly visible.
 22. **Holding `Approve` does not by itself add visibility.** An `Approve` holder
-    who is not the designated approver of a request, and who does not otherwise
-    qualify under item 21 (not `Manage`, not the requester, not `Item/Read` on
-    the target job), sees nothing of it; the permission to decide requests in
+    who is not one of the designated approvers of a request, and who does not
+    otherwise qualify under item 21 (not `Manage`, not the requester, not
+    `Item/Read` on the target job), sees nothing of it; the permission to decide requests in
     general is not the same as being able to see this one. It is not an
     exception to item 21: the same holder does see the request, as anyone
     would, if they separately hold `Item/Read` on the job. Only the designated
-    approver can decide it either way. Approver absence is handled by the
-    requester changing the approver before a decision is made; there is no
-    delegation or deputy chain. (e2e-03 DD-07)
+    approvers can decide it either way, and the first decision closes it.
+    Approver absence is handled by the requester changing the designated
+    approvers before a decision is made; there is no delegation or deputy
+    chain. (e2e-03 DD-07)
 23. **A grant request's approver set can be changed while it is pending**, from
     the **Change Approvers** action on the grant request's own detail screen,
-    the same as a run request (item 3, D-37): the requester edits the
+    the same as a run request (SPEC item 3, D-37): the requester edits the
     designated set at any time before a decision is made, and the change is
     recorded (previous set, new set, changed by, time). (e2e-03 DD-08)
 24. **Active grants are visible only to their own holder** and to `Manage`
@@ -554,6 +561,18 @@ from scripts.
     re-designated), but not when the requester's permissions change, so after an
     administrator grants the requester `Job/Build` the notice can keep showing
     for up to five minutes (D-38a).
+
+<!-- Item 56 was added after 55 and sits here by topic. The comment ends the list so that it renders as 56, not 50. -->
+
+56. **An API client that posts a run request as `multipart/form-data` must send
+    the `json` field to designate more than one approver.** Jenkins' web
+    framework (Stapler) keeps only the last value of a repeated multipart
+    field, so a multipart submission that repeats the `approvers` field stores
+    only the last approver. A client that designates several approvers must
+    therefore also send the form's `json` field with an `approvers` array, or
+    post the request url-encoded instead. The Request Run page in a browser is
+    not affected, because its form always sends the `json` field (SPEC item 3,
+    D-37).
 
 ## Records and screens
 
@@ -1105,8 +1124,8 @@ code does on purpose.
 38. **A notification e-mail includes a link back to the request only when the
     Jenkins URL is configured.** Set it under Manage Jenkins → System
     (Jenkins Location). Without it, a `REQUEST_CREATED`, `APPROVERS_CHANGED`,
-    `APPROVED`, `REJECTED`, `CANCELLED`, `EXPIRED`, `INVALIDATED` or
-    `GRANT_EXPIRING` message still carries its
+    `APPROVED`, `REJECTED`, `EXPIRING`, `CANCELLED`, `EXPIRED`, `INVALIDATED`
+    or `GRANT_EXPIRING` message still carries its
     subject and reason text but no link, rather than guessing one from the
     request that triggered it (security-08 S-04, D-36).
 
@@ -1190,14 +1209,16 @@ code does on purpose.
     the job is the approval notice on the job page and its **Request Run**
     link.
 
-## Records from earlier releases and strategy changes
+## Records from development builds and strategy changes
 
-42. **Approved runs recorded by an earlier release have no user.** A run
-    record written before this release for a build started by an approved
-    request carries no user, so the user filter on History does not find it;
-    it can still be found by job or period. From this release on, such a run
-    carries the requester as its user, and the request id is kept as before.
-    Existing records are not rewritten.
+42. **Approved runs recorded by an older development build have no user.** A
+    run record that a development build of the plugin wrote, before approved
+    runs carried their requester, for a build started by an approved request
+    carries no user, so the user filter on History does not find it; it can
+    still be found by job or period. Such a run now carries the requester as
+    its user, and the request id is kept as before. Existing records are not
+    rewritten. No released version of the plugin ever wrote such records, so
+    only development and test instances can be affected.
 43. **Only Batch Control's own strategy actions write a `STRATEGY_CHANGE`
     record.** Installing a Batch Control authorization strategy with the
     administrative monitor's button, or reverting it with **Revert to the
@@ -1217,10 +1238,12 @@ code does on purpose.
     because the plugin that provides that parameter type was removed or
     downgraded while the request was open, or whose values file
     (`requests/run/<id>.values.xml`, item 32) is missing or cannot be read
-    at all (D-72b, D-74). A request file written before typed values were
-    introduced holds only the masked display values. It is not converted, as
-    earlier grant files are not (D-69), and if it has parameters it cannot be
-    approved; a request without parameters is unaffected. A refused approval
+    at all (D-72b, D-74). A request file that a development build wrote
+    before typed values were introduced holds only the masked display values.
+    It is not converted, as older grant files are not (D-69), and if it has
+    parameters it cannot be approved; a request without parameters is
+    unaffected. No released version of the plugin ever wrote such files, so
+    only development and test instances can be affected. A refused approval
     leaves the request `PENDING` with the reason shown above the form, and the
     approver can still reject it. An approved request whose values fail this
     check when it is submitted, for example on recovery after a restart, is
@@ -1313,7 +1336,9 @@ code does on purpose.
     while a later, shorter one may still fit. The form always opens; a field
     whose value was not carried starts at its default and has to be entered
     again. Files are not carried either: a file submitted with the refused
-    build does not reach the Request Run form (issue #115), and the form names
+    build does not reach the Request Run form
+    ([issue #10](https://github.com/jenkinsci/batch-control-plugin/issues/10)),
+    and the form names
     each file parameter and says to select the file again. The same URL
     mechanism and caps apply when an incident rerun continues on the Request
     Run form (item 16).

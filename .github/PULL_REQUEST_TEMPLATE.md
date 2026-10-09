@@ -10,9 +10,21 @@
 - **Contract:** the SPEC item, decision or matrix row this implements —
   e.g. `SPEC §8`, `D-31`, `T-06-11`. Reviewers start from "which contract is
   this?", so a change with no anchor is hard to review here.
+- **Related pull requests:** upstream or downstream changes this depends on, if any.
+
+## Testing done
+
+<!-- How was this change tested? At minimum, show that a computer has executed the
+     changed lines: name the test that covers them, or explain why there is none and
+     describe the scenario you ran by hand. For a screen change, add screenshots of the
+     page before and after (from `mvn hpi:run` or `e2e/`). For a refactoring, show that
+     the behaviour is the same before and after. -->
 
 ## Checks
 
+- [ ] The pull request **title represents the desired changelog entry**: it becomes
+      the line in the release notes (CONTRIBUTING §7, *Releases*).
+- [ ] Opened from a topic branch, not from the `main` branch of your fork.
 - [ ] `mvn clean verify` passed locally: **0 failures**, SpotBugs
       **`BugInstance size is 0`**.
 - [ ] **Behaviour change?** `docs/SPEC.md` says so — the spec is the arbiter, and
@@ -28,3 +40,8 @@
 - [ ] This PR does **not** disclose a security vulnerability. Those go privately
       to the Jenkins **SECURITY** project, never to a public issue or PR — see
       *Reporting security vulnerabilities* in `README.md`.
+
+<!-- Labels: the maintainer labels each pull request, and the label decides whether it
+     leads to a release and where it is listed in the release notes. `enhancement`,
+     `bug`, `breaking` and `developer` lead to a release; `chore` and `dependencies`
+     alone do not. Suggest a label in the description if you like. -->

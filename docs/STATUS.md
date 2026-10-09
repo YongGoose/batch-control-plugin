@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-10-09 (later) — plugin page docs, old issue numbers, ci.jenkins.io, multi-approver defect
+- Merged: #14 (required checks, e2e path filter, feature-named test jobs), #13 (CD on manual dispatch only), #12 into #11's branch (its base was `e2e/gap-audit`; #11 now carries both).
+- Delegated: release-manager ← README shortened to 220 lines for plugins.jenkins.io, with the detail moved verbatim to the new `docs/USER-GUIDE.md`; the review findings M2–M11 and L1–L12 fixed (CONTRIBUTING, PR template with Testing done and a Releases section, LIMITATIONS); README.ko.md re-translated from the new README. e2e-tester ← five screenshots in `docs/images/` and `e2e/readme-screenshots/capture.py` to regenerate them. Main session ← CLAUDE.md brought up to date, with owners for `docs/USER-GUIDE.md` (release-manager) and `docs/images/**` (e2e-tester), approved by the owner.
+- Old issue numbers (the owner chose new numbers where re-filed, otherwise none): #17 removes 161 citations from `src/main` comments (old #115 → #10). Tests, e2e, TEST-MATRIX and the reports keep the historical numbers, and CONTRIBUTING notes that they refer to the former repository.
+- ci.jenkins.io is red on main and every PR: buildPlugin's 60-minute default cut linux-21 off after ~500–700 of ~1,300 tests, and failFast aborted the rest; windows-21 fails 16 tests. #16 raises the timeout to 180 and turns failFast off. test-author ← the CLI test helper exceeds the Windows command-line limit (CreateProcess error=206). The other Windows failures wait for #16's full report. The owner merges with the admin bypass while `Jenkins` is red, after `build` is green.
+- Defect found by the screenshot pass, confirmed in the Stapler bytecode: the Request Run form posts multipart (D-72), Stapler keeps one value per multipart field name, so only the last ticked approver is stored (D-37). T-03-07 posts urlencoded and did not catch it. Delegated: test-author ← red test for the multipart form and the browser form; ui-dev ← fix.
+- UI polish noticed by the screenshot pass: issue #18 (owner: record only).
+- Waiting: owner decision on `EXPIRING` for approved requests (SPEC.md:228 vs the code, which notifies pending requests only); e2e job names by feature and `.github` old numbers after these PRs; the CONTRIBUTING sentence on the ci.jenkins.io timeout.
+
 ## 2026-10-09 — main protected by rulesets; CI cleanup after the move to jenkinsci
 - Repository: jenkinsci/batch-control-plugin was created fresh on 2026-10-08, not transferred. Issues and PRs restart at #1, so old `#n` references in docs and code comments are dead (follow-up).
 - Rulesets on `main` (owner decision; D1 of CI-PROPOSAL): `main: CI and history` (no deletion, no force push, PR required, required checks `build` (GitHub Actions) and `Jenkins` (ci.jenkins.io), branch up to date; Repository admin may bypass, for the owner's force push) and `main: one approval` (one approving review; admin may bypass on PRs, since the sole maintainer cannot approve their own PRs).
