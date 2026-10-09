@@ -542,6 +542,20 @@ page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State
 entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
 `helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
 
+## e2e-21 driver (`r21/`): Reject button colour
+
+CI unit `r21-reject-color` (weight 0.3, the lightest and listed last, so adding it left every other unit in its shard).
+`r21/lib.py` loads `r16/lib.py` (screenshots in `screenshots/run-21/`, rows in `r21/out/`). `arrange.py` (idempotent)
+creates the job `r21-reject` and asserts both switches on, an enabled `batch-daily`, `requester` may request and
+`approver-1` may approve. `reject_color.py [RGA]`: the requester files over REST a pending run request (`batch-daily`),
+permission window request and activation request (`r21-reject`), each naming `approver-1`. `approver-1` opens each detail
+page in its own context, and the browser's computed styles are compared: the Reject button's `color` must equal that of
+a probe inserted next to it with `style="color: var(--destructive-color)"` (the theme's red, not a hard-coded RGB). The
+guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
+button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
+the three requests. Light theme only. Alone:
+`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1` (about 6 minutes, most of it the shared setup).
+
 ## e2e-16 driver (`r16/`)
 
 Hosting review round 6 (D-71..D-74, 2026-10-05/06). `r16/lib.py` loads `r6/lib.py` (screenshots in

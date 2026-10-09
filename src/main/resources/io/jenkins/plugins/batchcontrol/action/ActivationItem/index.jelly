@@ -124,7 +124,7 @@
             <bc:fieldError errors="${rejectErrors}" field="comment"/>
           </f:entry>
           <f:bottomButtonBar>
-            <button type="submit" class="jenkins-button jenkins-button--destructive">Reject</button>
+            <button type="submit" class="jenkins-button jenkins-!-destructive-color">Reject</button>
           </f:bottomButtonBar>
         </f:form>
       </j:if>
