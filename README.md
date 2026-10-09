@@ -36,9 +36,10 @@ turns them on.
   `CONFIGURE` or `DELETE` on one job or folder for a limited time. The window
   closes by itself and can be revoked early. While change control is on,
   deleting a job needs a `DELETE` window from everyone but administrators.
-- **Audit history independent of builds.** Runs, requests, decisions,
-  configuration changes with diffs, and failures are written append-only under
-  `$JENKINS_HOME/batch-control/`, with a configurable retention period.
+- **Audit history independent of builds.** While either control is on, runs,
+  requests, decisions, configuration changes with diffs, and failures are
+  written append-only under `$JENKINS_HOME/batch-control/`, with a configurable
+  retention period.
 - **Incidents.** Failed and unstable runs (configurable) open an incident with
   the last 100 console lines, to acknowledge, resolve, comment on and rerun
   through a request.
@@ -107,9 +108,9 @@ Plugins → Available plugins** offers the needed upgrade along with it. Uploadi
 ## Installation
 
 Install from **Manage Jenkins → Plugins → Available plugins**, searching for
-*Batch Control*. To install a build of your own, upload the `.hpi` under
-**Manage Jenkins → Plugins → Advanced settings → Deploy Plugin**. Building from
-source needs Maven and JDK 21 or 25:
+*Batch Control*, or upload a build of your own under **Manage Jenkins → Plugins
+→ Advanced settings → Deploy Plugin**. Building from source needs Maven and JDK
+21 or 25:
 
 ```sh
 mvn clean package   # produces target/batch-control.hpi
@@ -129,8 +130,9 @@ in the [user guide](docs/USER-GUIDE.md#configuration).
 2. **Select the Batch Control strategy (change control only).** With change
    control on, a monitor on **Manage Jenkins** offers **Install the Batch Control
    variant**, which converts your matrix-auth or role-strategy configuration
-   with every entry kept. Without a Batch Control strategy, approved windows
-   confer nothing. Run control does not need it.
+   with every entry kept (coming from the global matrix strategy,
+   [read this first](docs/USER-GUIDE.md#2-select-a-batch-control-authorization-strategy)).
+   Without it, approved windows confer nothing; run control does not need it.
 3. **Assign the permissions.** Give the requester `Overall/Read`, `Item/Read`
    and `BatchControl/Request` (plus `BatchControl/RequestGrant` for windows).
    Give the approver `Overall/Read`, `Item/Read`, `BatchControl/Approve` and
@@ -152,10 +154,9 @@ in the [user guide](docs/USER-GUIDE.md#configuration).
    with **Request activation** on the job's page and have an approver approve
    it. Approved manual runs, as in steps 5 and 6, do not need activation.
 
-With change control on, a user who lacks `Item/Configure` on a job finds
-**Request Change Permission** in the job's sidebar; once an approver approves
-the window on the **Grants** screen, that user can change the job until the
-window expires.
+With change control on, a user without `Item/Configure` on a job finds **Request
+Change Permission** in its sidebar; once an approver approves the window on the
+**Grants** screen, that user can change the job until the window expires.
 
 ## Permissions
 
@@ -168,11 +169,10 @@ window expires.
 | `BatchControl/Manage` | Manage the global configuration and revoke windows |
 
 `Manage` is implied by `Overall/Administer` and implies the other four. On jobs
-that require approval, grant `Request` instead of `Item/Build`: while run
-control is on, every direct build path is refused there. `ViewHistory` is an
+that require approval, grant `Request` instead of `Item/Build`: while run control
+is on, every direct build path is refused there. `ViewHistory` is an
 instance-wide audit read with no `Item/Read` check. Administrators are recorded,
-not stopped. See [Assign the permissions](docs/USER-GUIDE.md#3-assign-the-permissions)
-for the full rules.
+not stopped. [The full rules](docs/USER-GUIDE.md#3-assign-the-permissions).
 
 ## Documentation
 
