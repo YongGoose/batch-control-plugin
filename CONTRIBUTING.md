@@ -390,7 +390,10 @@ behind any of them.
   the `Jenkinsfile` and reports the check `Jenkins`. It runs the whole suite on
   one agent for each of those three platforms, with buildPlugin's 180-minute
   limit and `failFast` off, so every platform reports its results; GitHub
-  Actions splits the suite into feature-named jobs for faster feedback.
+  Actions splits the suite into feature-named jobs for faster feedback. For the
+  full list of Windows test failures, which the `Jenkins` check text cuts short,
+  run the manual, not required `Windows tests` workflow
+  (`gh workflow run windows-tests.yml --ref <branch>`) and read its summary.
 - **Merging into `main`** needs two required status checks, `build` and
   ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
   (update it when GitHub says it is behind), and one approving review, from the
