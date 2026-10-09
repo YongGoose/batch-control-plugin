@@ -1,0 +1,53 @@
+# e2e-19 G-27 (SPEC 8 line 172, T-08-168). Applied by r19/naming.py inside the `role` unit, which re-applies
+# profile-role.yaml afterwards. profile-role.yaml plus the regular folder nf: requester and g27 may read it; requester
+# holds Create on nf/teamA-.* (what RoleBasedProjectNamingStrategy admits for requester inside nf; with that naming
+# strategy installed role-strategy then grants requester Create on every folder, nf included); g27 has no Create role,
+# so Create on nf comes only from a CREATE window and the naming strategy admits no name for g27.
+jenkins:
+  authorizationStrategy:
+    batchControlRoleBased:
+      roles:
+        global:
+          - name: admin
+            permissions:
+              - Overall/Administer
+            entries:
+              - user: admin
+          - name: bc-requester
+            permissions:
+              - Overall/Read
+              - BatchControl/Request
+              - BatchControl/RequestGrant
+            entries:
+              - user: requester
+              - user: g27
+          - name: bc-approver
+            permissions:
+              - Overall/Read
+              - Job/Read
+              - BatchControl/Approve
+              - BatchControl/ViewHistory
+            entries:
+              - user: approver-1
+        items:
+          - name: team-all
+            pattern: "team(/.*)?"
+            permissions:
+              - Job/Read
+              - Job/Build
+            entries:
+              - user: requester
+          - name: nf-read
+            pattern: "nf"
+            permissions:
+              - Job/Read
+            entries:
+              - user: requester
+              - user: g27
+          - name: teamA-create
+            pattern: "nf/teamA-.*"
+            permissions:
+              - Job/Read
+              - Job/Create
+            entries:
+              - user: requester

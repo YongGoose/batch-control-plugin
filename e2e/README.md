@@ -10,8 +10,9 @@ used for the end-to-end passes (`docs/reports/e2e-*.md`).
 2. The artifact: from the project root, `mvn -ntp clean package -DskipTests`
    leaves `target/batch-control.hpi`, which `docker-compose.yml` mounts.
 3. `cp .env.example .env` and set the four passwords.
-4. For the browser driver: Node.js and Google Chrome; `cd browser && npm install`
-   (Playwright drives the installed Chrome, no browser download).
+4. For the drivers: Python >= 3.10 with `ci/requirements.txt` (Playwright for Python, pytest); Google Chrome
+   (`BC_BROWSER_CHANNEL=chrome`) or Playwright's Chromium. The Node.js drivers of e2e-01..05 moved to `legacy/`
+   (e2e-20; no CI shard runs them): `cd legacy/browser && npm install` if one is needed again.
 
 ## Lifecycle
 
@@ -42,8 +43,13 @@ PY=$PWD/venv/bin/python e2e/ci/run.sh 1/5              # shard 1 of 5; artefacts
 venv/bin/python e2e/ci/shard.py plan-all 5             # which units each shard runs, estimated minutes
 BC_UNITS=round3,role PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1     # the setup plus just these units
 venv/bin/python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base main   # -> e2e/ci/out/coverage/summary.md
-venv/bin/python e2e/ci/selftest_content.py             # the crawl's content checks on synthetic pages (no Jenkins)
+venv/bin/python -m pytest e2e/ci/test_selftest_content.py --browser chromium   # the crawl's content checks on synthetic pages (no Jenkins)
+venv/bin/python -m playwright show-trace e2e/ci/out/1/traces/<step>/<n>-<user>.zip    # the trace of a failed step
 ```
+
+Against a stack that is already up (its setup done), one step or unit at a time:
+`BC_BASE=http://localhost:18080/jenkins BC_UNITS=round3 BC_SKIP_SETUP=1 venv/bin/python -m pytest e2e/ci/test_shard.py
+--bc-shard 1/1 --bc-out /tmp/out -s` (add `-k round3` to select steps by name).
 
 `run.sh` uses its own compose project (`bc-cov-<k>`), its own container names and ports 18080/18025, so it can run
 next to the regular stack; it never touches the `batch-control-e2e` volume and removes its own containers and volume
@@ -61,10 +67,14 @@ moved to `ci/out/_previous/` first). For shards in parallel on one machine, use 
    against the pinned sha256 (a mismatch is fatal), cached in `ci/.cache/jacoco/`.
 4. `docker compose -p bc-cov-<k> -f docker-compose.yml -f compose.prefix.yml -f compose.coverage.yml up -d --build`
    from an empty JENKINS_HOME, then waits for the login page, the admin API and `batch-control` active.
-5. `ci/shard.py run <k>/<N>`: the setup (`r7/arrange.py`, `r8/arrange.py`, `r8/arrange_side.py`, `r12/arrange.py`,
-   `r14/arrange_fast.py`, `ci/arrange_ci.py`, `r14/seed_fast.py`, `r14/seed.py`, `r14/seed_paging.py`,
-   `ci/seed_markup.py`: the e2e-14 arrangement; then `ci/preconditions.py`, the fixture checks), then the shard's units in the e2e-14 order. One log per step in
-   `logs/`, `summary.md` / `summary.json` with the verdicts and durations.
+5. `python -m pytest ci/test_shard.py --bc-shard <k>/<N>` (e2e-20; `BC_RUNNER=legacy` runs `ci/shard.py run <k>/<N>`
+   instead, with the same verdicts and summaries): one test per step, the setup (`r7/arrange.py`, `r8/arrange.py`,
+   `r8/arrange_side.py`, `r12/arrange.py`, `r14/arrange_fast.py`, `ci/arrange_ci.py`, `r14/seed_fast.py`, `r14/seed.py`,
+   `r14/seed_paging.py`, `ci/seed_markup.py`: the e2e-14 arrangement; then `ci/preconditions.py`, the fixture checks),
+   then the shard's units in the e2e-14 order. One log per step in `logs/`, `summary.md` / `summary.json` with the
+   verdicts and durations, `junit.xml` (one testcase per step with its seconds, log and traces as properties; a step
+   after a failed setup step is skipped as BLOCKED), and `traces/<nn>-<step>/` with a Playwright trace per browser
+   context, kept only for a step that did not pass (see "Traces, login reuse and waits" below).
 6. Always, also after a failure: a coverage dump through the script console (`snapshot-before-stop.exec`), a graceful
    `docker compose stop -t 180` (JaCoCo writes the exec file when the JVM exits), the final `jacoco-<k>.exec`, the
    container log (`jenkins.log`, SEVERE count in `build-info.txt`), the drivers' logs and screenshots (`driver/`), then
@@ -87,13 +97,48 @@ Isolation between units: the admin crawl clicks every control it may, including 
 check failing for that reason alone). The `crawl-admin` unit therefore ends with `ci/arrange_ci.py monitors`, which
 re-enables the plugin's monitors.
 
+### Traces, login reuse, waits, fonts and retries (e2e-20)
+
+Every CI driver gets its browser through `r6/lib.py`, so these apply to all of them without touching their assertions:
+
+- **Traces.** With `BC_TRACE_DIR` set (the runner sets `traces/<nn>-<step>/` per step), every browser context records a
+  Playwright trace (screenshots and DOM snapshots), started after the login so the typed password is not in it, and
+  written when the context closes (`done()`, `close()`, or at interpreter exit after an exception). The runner deletes
+  the directory when the step passed (retain-on-failure), so the artefact holds traces of failed steps only; open one
+  with `python -m playwright show-trace <zip>` or https://trace.playwright.dev. `BC_TRACE=off` records none. Traces
+  hold the pages and the session cookies of a throw-away Jenkins with random passwords (the stack is deleted after the
+  shard); they never hold a password.
+- **Login reuse.** The first browser context of an account in a shard logs in through the real login form and saves its
+  `storage_state` to a private temporary directory (`BC_AUTH_DIR`, outside the artefacts, removed at the end); later
+  contexts of that account, in any step of the shard, start from that state and confirm with `/whoAmI/api/json` that it
+  still authenticates that account. A restart (the `last` units), a logout or a re-created account ends the session:
+  the context then logs in again and saves the new state. Each `Session` is still its own browser context.
+  `Session(user, fresh=True)` or `BC_LOGIN_REUSE=0` always logs in. `summary.md` shows logins vs reused sessions.
+- **Condition waits.** `r6/lib.py` has `react()` (after a click: a dialog, a navigation or a new menu ends the wait,
+  else it is observed for the same time as before and classified as before), `gone()` (a closed dialog has left the
+  DOM), `submit_and_wait()` (a dialog form submitted: navigation, the form replaced by the server's re-rendered one,
+  or closed) and `poll()` (server state through REST or the script console, with a timeout). e2e-20 replaced the
+  fixed sleeps of the slowest drivers with them (`docs/reports/e2e-20.md` lists which and which remain: the
+  negative windows such as "nothing was queued within 3 s", real cron ticks, and the one-minute expiry and D-73
+  windows, where the plugin's `BatchClock.setForTest` cannot be used because `FileStore` tolerates only 60 s of
+  out-of-order appends).
+- **Fonts.** `.github/workflows/e2e.yml` installs `fonts-liberation` and copies `ci/fonts.conf` to
+  `~/.config/fontconfig/` so that Chromium's `system-ui`/`sans-serif` is Liberation Sans (Arial metrics) instead of the
+  runner's wider default; `r14/round3.py` compares the scroll width with the client width with a documented 2 px
+  tolerance for sub-pixel rounding (`SCROLL_TOLERANCE_PX`). The one CI-only failure (round3 F "no h-scroll at 1280",
+  admin's grants list 1295 px wide on 2026-10-06 and 08) came from the font.
+- **Retries.** Only the steps in `ci/shard.py` `FLAKY` are retried, once (`pytest-rerunfailures`; `shard.py run` does the
+  same). A step needs recorded evidence of an intermittent failure and a driver that is safe to run twice to be listed;
+  the set is empty at e2e-20. A retry is listed in `summary.md` and keeps the failed attempt's log and traces.
+
 ### Units and shards
 
 `ci/shard.py units` lists the units with their steps. A unit is a group of driver invocations that must run in order on
 one Jenkins (for example the crawl of one role on both job UIs, with the new job page flag set per account in between).
 Units are assigned with a deterministic longest-processing-time split over the measured minutes, so the same N always
-gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins) and `r17-disk`
-(reloads and restarts Jenkins) are `last` units: each runs last in its shard, and never two in one shard.
+gives the same shards; `role` (replaces the authorization strategy), `r16-durable` (restarts Jenkins; e2e-19 added
+`r19/restart.py` to it rather than a fifth `last` unit, which would need N >= 5), `r17-disk` (reloads and restarts
+Jenkins) and `r18-final` (switches the switches and the strategy) are `last` units: each runs last in its shard, and never two in one shard.
 
 Measured 2026-10-06 (e2e-17: MacBook, Docker Desktop with 8 GB, Playwright Chromium headless, four shards and one
 supplementary run at a time on one machine; the image was cached, so no build time is included). Every shard: about
@@ -258,9 +303,9 @@ requests work with the default read-only token.
 - `r14/crawl.py`: the content checks above, and `BC_CRAWL_LOG` names the log (`crawl-role` for the crawl under the
   role profile).
 - Base URL, passwords and ports were already configurable (`BC_BASE`, `e2e/.env`, `BC_PORT`). The `mails()` helpers
-  of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers in
-  `browser/` are not part of the CI set (`browser/explore.mjs` writes to a fixed local scratch path; it is an ad-hoc
-  orientation script, not evidence).
+  of the lib files still read mailpit on 8025; no driver of the CI set calls them. The Node drivers (now in
+  `legacy/browser/`, `legacy/extra/`, `legacy/fresh/`) are not part of the CI set (`legacy/browser/explore.mjs` writes
+  to a fixed local scratch path; it is an ad-hoc orientation script, not evidence).
 
 ## How it is configured
 
@@ -320,7 +365,7 @@ approves); the pre-flight does this for `batch-cron` (checklist E-10).
 The Section E jobs (`batch-cbn`, `batch-rebuild`, `batch-nag`, `batch-token`,
 `batch-lock`, `batch-throttle`, `batch-authz`, `batch-jch`, `batch-up-target`,
 `batch-pt-source`) are created empty; each plugin is configured on them in the
-browser by `browser/section-e.mjs`, as an administrator would.
+browser by `legacy/browser/section-e.mjs`, as an administrator would.
 
 ## Screenshots are local only
 
@@ -330,7 +375,16 @@ Screenshots are kept on the machine that ran the pass and are **never committed*
 (for example `run-3-verify/B5-01-refusal-page.png`) so that it can be looked up on that machine.
 The e2e-01/02 images that were committed earlier are no longer tracked.
 
-## Browser driver (`browser/`)
+## Legacy Node.js drivers (`legacy/`)
+
+e2e-20 moved the Node.js drivers of e2e-01..05 (`browser/`, `extra/`, `fresh/`) to `legacy/`: no CI shard runs them
+(`ci/shard.py` runs only the Python drivers; nothing outside `legacy/` imports or calls them), and the Python drivers
+`r6/` onwards replaced them (`r6/lib.py` is the port of `extra/lib.mjs`). They are kept as the evidence the reports
+e2e-01..05 name, under their old file names below `legacy/`; the reports still give the old paths (`browser/...` is now
+`legacy/browser/...`). Their `lib.mjs` files find `e2e/.env` and `e2e/screenshots/` from the new place; scripts that use
+paths relative to the working directory expect to be started from their own directory, as before.
+
+### Browser driver (`legacy/browser/`)
 
 `lib.mjs` opens a fresh context per account (real login form), outlines the
 relevant element in red and saves a clipped screenshot to
@@ -339,7 +393,7 @@ relevant element in red and saves a clipped screenshot to
 files: `preflight.mjs`, `section-a.mjs`, `section-e.mjs`. Evidence logs go to
 `out/` (git-ignored).
 
-## Extra checks driver (`extra/`)
+### Extra checks driver (`legacy/extra/`)
 
 e2e-05 (dark theme, LDAP realm, Back button and two tabs). `extra/lib.mjs` is
 `fresh/lib.mjs` with screenshots going to `screenshots/run-5/` and the LDAP accounts'
@@ -352,11 +406,11 @@ POSTs from a browser session), `x1b.mjs`/`x1c.mjs` (stale change-approvers form)
 `down-request`), `ldap-down-check.mjs`, `ldap-down-approve.mjs` and
 `ldap-designate.mjs`; the LDAP-down steps log in first and then stop
 `batch-control-e2e-ldap` themselves, because a new login needs the directory.
-`cd extra && npm install` once.
+`cd legacy/extra && npm install` once.
 
 ## e2e-06 driver (`r6/`, Python)
 
-For a machine without Node.js: `r6/lib.py` is `extra/lib.mjs` ported to Python Playwright
+For a machine without Node.js: `r6/lib.py` is `legacy/extra/lib.mjs` ported to Python Playwright
 (`python3 -m venv venv && venv/bin/pip install playwright requests`; it drives the installed
 Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
 `screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
@@ -434,13 +488,13 @@ create state and are not idempotent: run them once on a fresh JENKINS_HOME, in t
 from e2e-01/e2e-02; `lib.sh` knows every account above. `scripts/cli.sh <user>
 <command>` runs jenkins-cli inside the container (it needs Java 21).
 
-`browser/audit-shots.mjs` lists screenshots that break the rule (no red box or a
-full-viewport capture); `browser/fix-shots.mjs` re-crops such a capture to its
+`legacy/browser/audit-shots.mjs` lists screenshots that break the rule (no red box or a
+full-viewport capture); `legacy/browser/fix-shots.mjs` re-crops such a capture to its
 content and boxes it.
 
-## Re-audit driver (`browser/audit/`)
+## Re-audit driver (`legacy/browser/audit/`)
 
-The five-criterion re-audit of run 3 (checklist 0a) lives in `browser/audit/`:
+The five-criterion re-audit of run 3 (checklist 0a) lives in `legacy/browser/audit/`:
 one script per section (`e1.mjs`, `e10.mjs`, `sa-read.mjs`, `a02.mjs` ... `b15.mjs`),
 `rec.mjs` appends one JSON line per row (`V G R C E`, verdict, defect) to
 `out/audit.jsonl` (copied to `reaudit/results.jsonl` at each commit; the last line
@@ -488,19 +542,19 @@ page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State
 entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
 `helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
 
-## e2e-19 driver (`r19/`): Reject button colour
+## e2e-21 driver (`r21/`): Reject button colour
 
-CI unit `r19-reject-color` (weight 0.3, the lightest and listed last, so adding it left every other unit in its shard).
-`r19/lib.py` loads `r16/lib.py` (screenshots in `screenshots/run-19/`, rows in `r19/out/`). `arrange.py` (idempotent)
-creates the job `r19-reject` and asserts both switches on, an enabled `batch-daily`, `requester` may request and
+CI unit `r21-reject-color` (weight 0.3, the lightest and listed last, so adding it left every other unit in its shard).
+`r21/lib.py` loads `r16/lib.py` (screenshots in `screenshots/run-21/`, rows in `r21/out/`). `arrange.py` (idempotent)
+creates the job `r21-reject` and asserts both switches on, an enabled `batch-daily`, `requester` may request and
 `approver-1` may approve. `reject_color.py [RGA]`: the requester files over REST a pending run request (`batch-daily`),
-permission window request and activation request (`r19-reject`), each naming `approver-1`. `approver-1` opens each detail
+permission window request and activation request (`r21-reject`), each naming `approver-1`. `approver-1` opens each detail
 page in its own context, and the browser's computed styles are compared: the Reject button's `color` must equal that of
 a probe inserted next to it with `style="color: var(--destructive-color)"` (the theme's red, not a hard-coded RGB). The
 guards are: the probe differs from the surrounding text, the Reject button exists (missing is a FAIL) and the Approve
-button exists and is not the probe colour. One screenshot per page (`R19-<R|G|A>-buttons.png`); the requester then cancels
+button exists and is not the probe colour. One screenshot per page (`R21-<R|G|A>-buttons.png`); the requester then cancels
 the three requests. Light theme only. Alone:
-`BC_UNITS=r19-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1` (about 6 minutes, most of it the shared setup).
+`BC_UNITS=r21-reject-color PY=$PWD/venv/bin/python e2e/ci/run.sh 1/1` (about 6 minutes, most of it the shared setup).
 
 ## e2e-16 driver (`r16/`)
 
@@ -538,6 +592,41 @@ that fail once when armed), and ends with the fixture preconditions above. Drive
 
 Against any running stack: `BC_BASE=http://localhost:<port>/jenkins BC_BROWSER_CHANNEL=chromium python r16/arrange.py`,
 then the drivers (the setup of `ci/shard.py` must have run on that Jenkins for the seeded accounts and jobs).
+
+## e2e-19 driver (`r19/`)
+
+Gap audit (2026-10-08, docs/reports/e2e-19.md): SPEC acceptance lines that no CI step checked before. `r19/lib.py` loads
+`r16/lib.py` (screenshots in `screenshots/run-19/`, rows in `r19/out/<driver>.jsonl`, the same PASS/FAIL/NOTE lines) and
+adds the CLI (inside the Jenkins container), the mailpit sink (`BC_MAIL_PORT`), queue and change-record helpers.
+`arrange.py` (idempotent, ends with its fixture check) creates the `r19-*` jobs (every one under run control, so each
+starts with the D-31/D-34 lock and not activated), a username/password credential `r19-cred-id`, the lockable resource
+`r19-res`, a multi-configuration project `r19-mx` and an organization folder `r19-org`. Accounts are JCasC's.
+
+- `gate.py [BPARXM]` (unit `r19-gate`): the job page offers Request Run and the approval notice (link only for those who
+  may request); REST `build`/`buildWithParameters`, the CLI `build`, the build token on core's endpoint and on
+  build-token-root, a Pipeline Replay and the rebuild plugin's Rebuild are refused, nothing is queued, the refusals are
+  recorded; an approved request runs exactly once with exactly its values, the build page names request, requester and
+  approver, the request links the build; a consumed approval marker presented again is MARKER_REUSE_BLOCKED (Changes,
+  `changes.csv`).
+- `plugins.py [NCLZHI]` (unit `r19-plugins`): naginator's retry of an approved run refused and recorded;
+  customize-build-now keeps Request Run; lockable-resources and authorize-project ("Run as Specific User" admin; the
+  project default authenticator is added and removed again) with an approved run; jobConfigHistory and the CLI
+  `update-job` each give exactly one CONFIGURE record.
+- `triggers.py [TU]` (unit `r19-triggers`, about 6 minutes: it waits for real cron ticks): blockTimer, the trigger-lock
+  notice, one TRIGGER_BLOCKED record per hour, clearing blockTimer is not activation, ACTIVATE and HOLD approved in the
+  browser; parameterized-trigger upstream with blockUpstream, the allow list and activation.
+- `lifecycle.py [VDCSEXBF]` (unit `r19-lifecycle`): form validation, the decision rules (non-designated approver, empty
+  rejection comment), approver change, cancel through the confirmation dialog, admin self-approval, approved-run expiry
+  (a queued approved run is not expired by design; the job is disabled to cancel its queue item), the disabled-job
+  decision form, the missing-Build notice, `requests.csv` formula prefix and columns, and the mails of each step.
+- `kinds.py [KMCRFT]` and `guard.py [XF]` (unit `r19-kinds`): kinds and windows of the matrix project and the
+  organization folder, credentials and run parameters through an approved run, the rerun of a deleted build, the log tail
+  masking; the self-grant guard's 403 (config.xml and matrix-auth's real form).
+- `restart.py` (a step of the `last` unit `r16-durable`: restarts Jenkins): a pending and a queued approved request with
+  a core file and a password survive a restart; the queued one runs exactly once with its own bytes and secret.
+- `naming.py` (G-27, step `role-naming` of the `role` unit): applies `casc/profile-role-naming-window.yaml` and
+  role-strategy's `RoleBasedProjectNamingStrategy`; a CREATE window (with and without a name restriction) does not get
+  past the naming strategy, and the restriction still refuses and records; restores `profile-role.yaml` at its end.
 
 ## e2e-17 driver (`r17/`)
 

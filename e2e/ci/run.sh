@@ -10,7 +10,8 @@
 # 4. starts docker-compose.yml + compose.prefix.yml + compose.coverage.yml (+ $BC_COMPOSE_EXTRA) under its own compose
 #    project (default bc-cov-<k>) on BC_PORT/BC_MAIL_PORT (default 18080/18025), from an empty JENKINS_HOME;
 # 5. waits for Jenkins (login page, admin API, plugin active);
-# 6. runs the shard's steps (ci/shard.py run <k>/<N>);
+# 6. runs the shard's steps through pytest (ci/test_shard.py: one test per step, JUnit XML in junit.xml, Playwright
+#    traces of a failed step in traces/, one login per account and shard; BC_RUNNER=legacy: ci/shard.py run <k>/<N>);
 # 7. always (also on failure): dumps the coverage through the script console, copies that snapshot, stops the stack
 #    gracefully (JaCoCo writes on JVM exit), copies the final exec, the container log, the driver logs and the
 #    screenshots to e2e/ci/out/<k>/, then removes the containers and the volume (BC_KEEP=1 keeps them);
@@ -19,7 +20,8 @@
 # Environment: PY (python with ci/requirements.txt, default python3), BC_PORT, BC_MAIL_PORT, BC_PROJECT,
 # BC_BROWSER_CHANNEL (chrome | chromium, default chromium here), BC_COMPOSE_EXTRA (space-separated extra -f files),
 # BC_UNITS (run only these units), BC_KEEP=1, BC_BUILD=never, BC_OUT (output directory), TZ (default Asia/Seoul, the
-# zone docker-compose.yml gives the JVM).
+# zone docker-compose.yml gives the JVM), BC_RUNNER (pytest | legacy), BC_TRACE=off (no Playwright traces),
+# BC_LOGIN_REUSE=0 (log in for every browser context), BC_FLAKY (extra steps to retry once, see ci/shard.py FLAKY).
 set -euo pipefail
 
 SHARD="${1:-}"
@@ -95,7 +97,7 @@ ADMIN_PW="$(sed -n 's/^BC_ADMIN_PASSWORD=//p' "$E2E/.env")"
 "$E2E/ci/fetch-jacoco.sh"
 
 # Transient driver output from an earlier run is moved aside, so the shard's artefacts are its own.
-DRIVER_OUT=(r14/out r15/out r16/out r17/out r18/out r19/out r12/out r7/out r8/out screenshots)
+DRIVER_OUT=(r14/out r15/out r16/out r17/out r18/out r19/out r21/out r12/out r7/out r8/out screenshots)
 prev="$E2E/ci/out/_previous/$(date +%Y%m%d-%H%M%S)-$K"
 for d in "${DRIVER_OUT[@]}"; do
   if [ -d "$E2E/$d" ] && [ -n "$(ls -A "$E2E/$d" 2>/dev/null)" ]; then mkdir -p "$prev/$(dirname "$d")"; mv "$E2E/$d" "$prev/$d"; fi
@@ -168,8 +170,18 @@ echo "ready_seconds=$(( $(date +%s) - T0 ))" >> "$OUT/build-info.txt"
 log "Jenkins ready after $(( $(date +%s) - T0 ))s"
 
 # ---------------------------------------------------------------- 6. steps
+# pytest (ci/test_shard.py, one test per step, JUnit XML in junit.xml); BC_RUNNER=legacy runs `shard.py run` instead.
+# Both judge the steps with the same code (ci/shard.py Runner) and write the same summary.json/summary.md.
 set +e
-"$PY" "$E2E/ci/shard.py" run "$K/$N" --out "$OUT"
-RC=$?
+if [ "${BC_RUNNER:-pytest}" = legacy ]; then
+  "$PY" "$E2E/ci/shard.py" run "$K/$N" --out "$OUT"
+  RC=$?
+else
+  "$PY" -m pytest "$E2E/ci/test_shard.py" -s -p no:playwright --bc-shard "$K/$N" --bc-out "$OUT" \
+    --junitxml "$OUT/junit.xml" -o junit_suite_name="e2e shard $K of $N"
+  RC=$?
+  [ "$RC" -le 1 ] || log "pytest exited $RC (not a step verdict: usage or internal error)"
+  [ "$RC" = 0 ] || RC=1
+fi
 set -e
 exit $RC
