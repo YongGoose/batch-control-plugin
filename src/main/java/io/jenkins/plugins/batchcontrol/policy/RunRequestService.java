@@ -859,10 +859,17 @@ public final class RunRequestService {
      */
     private void recordMarkerReuseBlocked(String requestId, String jobFullName, String reason) {
         String actor = Jenkins.getAuthentication2().getName();
-        BlockedAttemptAudit.get().record(ChangeType.MARKER_REUSE_BLOCKED,
-                requestId + " on " + jobFullName, jobFullName, actor,
-                "Blocked re-use of the approved-run marker of request " + requestId
-                        + " on job '" + jobFullName + "' - " + reason);
+        try {
+            BlockedAttemptAudit.get().record(ChangeType.MARKER_REUSE_BLOCKED,
+                    requestId + " on " + jobFullName, jobFullName, actor,
+                    "Blocked re-use of the approved-run marker of request " + requestId
+                            + " on job '" + jobFullName + "' - " + reason);
+        } catch (RuntimeException e) {
+            // R3-01 rule: the refusal stands whatever happens to its record; it never becomes an
+            // exception out of the queue gate. The refusal itself is already logged by the caller.
+            LOGGER.log(java.util.logging.Level.SEVERE, e, () -> "Could not record the blocked re-use of the approved-run marker of"
+                    + " request " + requestId + " on job '" + jobFullName + "'");
+        }
     }
 
     /**

@@ -513,7 +513,11 @@ public final class ActivationService {
         return request;
     }
 
-    /** Writes the state and the change record of an approved request; under {@link #lock}. */
+    /**
+     * Writes the state and the change record of an approved request; under {@link #lock}. A change
+     * record that cannot be written does not fail the approval ({@link #appendRecord}): the caller
+     * still invalidates the other pending requests (S-13-07) and sends the approval notification.
+     */
     private void applyApproved(ActivationRequest request, String decider, Instant now, boolean selfApproval,
                                String identity) {
         String fullName = request.getJobFullName();
@@ -531,7 +535,7 @@ public final class ActivationService {
         String detail = (activate ? "Activated" : "Put on hold") + " by approval of activation request "
                 + request.getId() + " (" + request.getAction() + ", requested by " + request.getRequester()
                 + (selfApproval ? ", self-approved" : "") + ")";
-        store.appendChangeRecord(ChangeRecord.create(activate ? ChangeType.ACTIVATED : ChangeType.HELD,
+        appendRecord(ChangeRecord.create(activate ? ChangeType.ACTIVATED : ChangeType.HELD,
                 fullName, decider, detail));
         LOGGER.info(() -> "Job '" + fullName + "' " + (activate ? "activated" : "put on hold")
                 + " by '" + decider + "' (activation request " + request.getId() + ")");
@@ -751,7 +755,9 @@ public final class ActivationService {
                     ? ActivationState.notActivated(fullName, ItemIdentity.ensure(item.getRootDir())).heldBy(mover, now, null)
                     : existing.heldBy(mover, now, null);
             saveState(state);
-            store.appendChangeRecord(ChangeRecord.create(ChangeType.HELD, fullName, mover,
+            // The hold is applied: a record that cannot be written does not keep the caller from
+            // the D-34 lock (appendRecord).
+            appendRecord(ChangeRecord.create(ChangeType.HELD, fullName, mover,
                     moveHoldDetail(oldFullName, fullName, mover, wasActivated, item instanceof Job)));
             LOGGER.info(() -> "Job '" + fullName + "' moved from '" + oldFullName + "' by '" + mover
                     + "' under change control: no longer activated (D-59a)");
@@ -832,7 +838,7 @@ public final class ActivationService {
             }
             saveState(ActivationState.activated(fullName, ActivationState.UNCONTROLLED, BatchClock.now(), null,
                     identity));
-            store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
+            appendRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                     ActivationState.UNCONTROLLED, "Activated at creation: '" + fullName + "' was created while "
                             + "run control was off, so it counts as in service"));
         } finally {
@@ -885,7 +891,9 @@ public final class ActivationService {
                 }
                 saveState(ActivationState.activated(fullName, ActivationState.UPGRADE, now, null,
                         ItemIdentity.ensure(item.getRootDir())));
-                store.appendChangeRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
+                // A record that cannot be written does not stop the seeding before the schema marker
+                // (markActivationSchema below).
+                appendRecord(ChangeRecord.create(ChangeType.ACTIVATED, fullName,
                         ActivationState.UPGRADE, "Activated by upgrade: the job existed when activation "
                                 + "approval was installed, so its schedule keeps running"));
                 seeded++;
@@ -945,6 +953,21 @@ public final class ActivationService {
         synchronized (cacheMonitor) {
             generation.incrementAndGet();
             cache().put(fullName, value);
+        }
+    }
+
+    /**
+     * Appends the change record of an activation change that is already applied (its state is
+     * saved). A record that cannot be written is logged at SEVERE and never stops, reverses or
+     * half-applies the change it reports (the R3-01 rule): the state is what decides, the record
+     * only reports it.
+     */
+    private void appendRecord(ChangeRecord record) {
+        try {
+            store.appendChangeRecord(record);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, e, () -> "Could not record " + record.getType() + " of '" + record.getTarget()
+                    + "' by '" + record.getUser() + "'; the change is in effect all the same: " + record.getDetail());
         }
     }
 
