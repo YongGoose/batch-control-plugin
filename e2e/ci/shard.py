@@ -208,6 +208,12 @@ UNITS = [
     ] + [(f"role-crawl-{r}", dict(py("r14/crawl.py", r, "new"), env={"BC_CRAWL_LOG": "crawl-role"})) for r in ROLE_CRAWL],
         last=True, doc="e2e-13/14 RS: role-strategy 927 profile, e2e-19 G-27 (RoleBasedProjectNamingStrategy with a CREATE "
             "window), then a crawl under it (replaces the strategy: last)"),
+    # e2e-22 R2-04 (bug-hunt batch B). r22/rename_queue.py saves the authorization strategy, applies a Batch Control
+    # role-based profile through JCasC for its own items (r22-team-a-*), and restores the strategy, the change-control
+    # switch and the built-in node's labels exactly at its end (so it needs no `last`).
+    Unit("r22-rename-queue", 0.8, [("r22-rename-queue", py("r22/rename_queue.py"))],
+         doc="e2e-22 R2-04: a rename by a user who loses Item/Read on the new name still invalidates the approved request "
+             "and drops its queued run, which never builds once a node has the label; control: the administrator's rename"),
     Unit("r16-durable", 2.2, [("r16-arrange", py("r16/arrange.py")), ("r16-durable", py("r16/durable.py")),
                               ("r19-arrange", py("r19/arrange.py")), ("r19-restart", py("r19/restart.py"))],
          last=True, doc="e2e-16: a window's end survives a failed grant write and a restart (6325e85); e2e-19: pending and "
@@ -251,7 +257,7 @@ GROUPS = [
     ("crawls and multibranch", [  # the crawls of admin, reqonly, approver-1 and nobc, the multibranch job pages
         "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch"]),
     ("admin and role strategy", [  # admin's job UI, then the role-strategy profile and its crawl (last)
-        "jobui-new-admin", "jobui-classic-admin", "role"]),
+        "jobui-new-admin", "jobui-classic-admin", "r22-rename-queue", "role"]),
     ("job ui params and restart", [  # requester's job UI, typed parameters, requests with typed values across a
         "jobui-new-requester", "jobui-classic-requester", "r16-params", "r16-durable"]),  # restart (last)
     ("job ui windows and disk", [  # reqonly's job UI, permission windows on items and renames, item kinds, items
