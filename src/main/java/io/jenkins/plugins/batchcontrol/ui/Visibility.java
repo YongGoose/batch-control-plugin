@@ -159,7 +159,7 @@ public final class Visibility {
             return true;
         }
         String me = Jenkins.getAuthentication2().getName();
-        if (me.equals(request.getRequester()) || request.isDesignatedApprover(me)) {
+        if (Approvers.sameUser(me, request.getRequester()) || request.isDesignatedApprover(me)) {
             return true;
         }
         Job<?, ?> job = findVisibleJob(request.getJobFullName());
@@ -175,7 +175,7 @@ public final class Visibility {
             return true;
         }
         String me = Jenkins.getAuthentication2().getName();
-        return me.equals(request.getRequester()) || request.isDesignatedApprover(me);
+        return Approvers.sameUser(me, request.getRequester()) || request.isDesignatedApprover(me);
     }
 
     /**
@@ -194,7 +194,7 @@ public final class Visibility {
 
     /** An active grant is visible iff the caller has Manage, or the grant is their own. */
     public static boolean canSeeGrant(Grant grant) {
-        return isManager() || Jenkins.getAuthentication2().getName().equals(grant.getUser());
+        return isManager() || Approvers.sameUser(Jenkins.getAuthentication2().getName(), grant.getUser());
     }
 
     /** Manage (Overall/Administer implies it, but check both to match P-09 verbatim). */
