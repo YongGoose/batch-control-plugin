@@ -158,8 +158,11 @@ public class ActivationRestartGapTest {
         Object keyBefore = fileKey(dir);
         Path copy = Files.createTempDirectory("gap-replaced-copy").resolve("job");
         copyTree(dir, copy);
+        // Built beside the old directory (both exist at once) so the new directory cannot reuse the freed inode.
+        Path replacement = dir.resolveSibling(dir.getFileName() + ".replacement");
+        copyTree(copy, replacement);
         deleteTree(dir);
-        copyTree(copy, dir);
+        Files.move(replacement, dir);
         deleteTree(copy);
         assertTrue(Files.isRegularFile(dir.resolve("config.xml")), "fixture: the replaced directory holds the job configuration");
         Object keyAfter = fileKey(dir);
