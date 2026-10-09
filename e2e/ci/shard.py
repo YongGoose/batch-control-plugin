@@ -181,6 +181,11 @@ UNITS = [
                           ("r17-visibility", py("r17/s39.py", "H"))],
          doc="e2e-17: 404 for malformed and aliased record ids (S-39-01); a window follows two renames and the page shows "
              "the current name; delete + re-create ends it (S-39-02); followed name hidden from non-readers (D-75 (1), own step)"),
+    # e2e-22 R4-03 (bug-hunt batch B). r22/nonascii_reason.py arranges its own item (r22-reason) and cancels the requests
+    # it files.
+    Unit("r22-nonascii-reason", 0.5, [("r22-nonascii-reason", py("r22/nonascii_reason.py"))],
+         doc="e2e-22 R4-03: a non-ASCII reason survives the refusal of the multipart Request Run form and is stored as "
+             "typed; a multipart client without the json field stores reason and DATE as sent; url-encoded guard"),
     # e2e-19 (gap audit, docs/reports/e2e-19.md): SPEC acceptance lines no CI step checked before. r19/arrange.py is
     # idempotent and self-contained (items r19-*, accounts from JCasC). Each driver exits non-zero and prints FAIL lines,
     # and restores what it changes globally (executors, authorize-project's authenticator). Weights: minutes measured on
@@ -265,7 +270,7 @@ GROUPS = [
     ("job ui params and restart", [  # requester's job UI, typed parameters, requests with typed values across a
         "jobui-new-requester", "jobui-classic-requester", "r16-params", "r16-durable"]),  # restart (last)
     ("job ui windows and disk", [  # reqonly's job UI, permission windows on items and renames, item kinds, items
-        "jobui-new-reqonly", "jobui-classic-reqonly",  # removed on disk with reload and restart (last)
+        "jobui-new-reqonly", "jobui-classic-reqonly", "r22-nonascii-reason",  # removed on disk with reload and restart (last)
         "r16-items", "r16-rename", "r16-follow", "r16-names", "r17-s39", "r19-kinds", "r17-disk"]),
     ("job ui other roles", [  # the job UI of approver-1, manager and nobc
         "jobui-new-others", "jobui-classic-others"]),
