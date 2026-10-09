@@ -6,6 +6,7 @@ import hudson.init.Initializer;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.security.Permission;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.ChangeRecord;
 import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -394,7 +395,7 @@ public final class GrantService {
         Instant now = BatchClock.now();
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
+                    && Approvers.sameUser(user, grant.getUser())
                     && grant.getScope() != null
                     && grant.getScope().isParentOf(itemFullName)
                     && grant.hasCreated(itemFullName)) {
@@ -429,7 +430,7 @@ public final class GrantService {
         Instant now = BatchClock.now();
         for (Grant grant : grants()) {
             if (grant.isActiveAt(now)
-                    && user.equals(grant.getUser())
+                    && Approvers.sameUser(user, grant.getUser())
                     && grant.getScope() != null
                     && grant.getScope().includes(itemFullName)
                     && (action == null || grant.getActions().contains(action))) {
@@ -1201,7 +1202,7 @@ public final class GrantService {
     @CheckForNull
     private synchronized Grant recordCreatedItemIn(String grantId, String user, String itemFullName) {
         Grant grant = load(grantId);
-        if (grant == null || !grant.isActiveAt(BatchClock.now()) || !user.equals(grant.getUser())
+        if (grant == null || !grant.isActiveAt(BatchClock.now()) || !Approvers.sameUser(user, grant.getUser())
                 || !grant.getScope().isParentOf(itemFullName) || !grant.getActions().contains(GrantAction.CREATE)) {
             return null;
         }
