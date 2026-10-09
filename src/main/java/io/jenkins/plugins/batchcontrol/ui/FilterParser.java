@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
@@ -287,9 +288,9 @@ public final class FilterParser {
                     && jobFullName.toLowerCase(Locale.ROOT).contains(job.toLowerCase(Locale.ROOT));
         }
 
-        /** Exact match on the user id. */
+        /** R4-01: the same user under the realm's user id strategy ({@link Approvers#sameUser}). */
         public boolean matchesUser(@CheckForNull String userId) {
-            return user == null || user.equals(userId);
+            return user == null || Approvers.sameUser(user, userId);
         }
 
         /** Case-insensitive match on the result token (build result / incident result). */
