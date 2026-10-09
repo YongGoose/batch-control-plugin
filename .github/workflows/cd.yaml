@@ -17,13 +17,9 @@ on:
         # Note: Change this default to true,
         #       if the checkbox should be checked by default.
         default: false
-  # If you don't want any automatic trigger in general, then
-  # the following check_run trigger lines should all be commented.
-  # Note: Consider the use case #2 config for 'validate_only' below
-  #       as an alternative option!
-  check_run:
-    types:
-      - completed
+  # Releases are manual only: a maintainer clicks "Run workflow" on the cd workflow
+  # after ci.jenkins.io reports a passing build of main. The automatic check_run
+  # trigger of the template is removed on purpose.
 
 permissions:
   checks: read
