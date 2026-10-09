@@ -1478,12 +1478,15 @@ public final class FileStore implements Store {
         }
     }
 
-    /** Deletes one file under its own lock stripe; {@code true} if it existed. */
+    /**
+     * Deletes one file under its own lock stripe; {@code true} if it existed. A delete Windows refuses
+     * while another handle has the file open is retried for about two seconds ({@link SharingRetry}).
+     */
     private boolean deleteFile(Path file, String what) {
         ReentrantLock lock = lockFor(file);
         lock.lock();
         try {
-            return Files.deleteIfExists(file);
+            return SharingRetry.run(file, () -> Files.deleteIfExists(file));
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to delete " + what, e);
         } finally {
@@ -1504,12 +1507,23 @@ public final class FileStore implements Store {
         }
     }
 
+    /**
+     * Moves the temporary file {@code tmp} over {@code target} (every atomic write commits here).
+     * Windows refuses to replace a file while another handle has it open (a page, the queue gate or
+     * a listener reading it at that moment, a virus scanner); that refusal is transient, so it is
+     * retried for about two seconds ({@link SharingRetry}) before the write fails. A refused attempt
+     * changes nothing: {@code tmp} stays in place for the next one, and the target keeps its
+     * previous content.
+     */
     private static void moveAtomically(Path tmp, Path target) throws IOException {
-        try {
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException | FileAlreadyExistsException e) {
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
-        }
+        SharingRetry.run(target, () -> {
+            try {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException | FileAlreadyExistsException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            return null;
+        });
     }
 
     /**

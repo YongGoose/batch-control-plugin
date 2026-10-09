@@ -62,6 +62,8 @@ public class ExpiryPeriodicWork extends PeriodicWork {
         }
         // T-GAP-384: and for the cancelled queue items of approved runs whose request file could not be written.
         RunRequestService.get().retryUnsavedQueueCancels();
+        // Likewise for the starts of approved runs whose EXECUTED state could not be written.
+        RunRequestService.get().retryUnsavedExecutions();
         // T-GAP-205: copies that stopped half-way outside an HTTP request (a script, the CLI over WebSocket).
         try {
             io.jenkins.plugins.batchcontrol.listener.GrantViolationGuard.Baseline.finishStaleCopies();

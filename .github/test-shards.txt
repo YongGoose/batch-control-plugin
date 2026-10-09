@@ -18,7 +18,7 @@
 # (forkCount 1C on the runner's four cores) and adds ~50 s of compilation and job setup.
 # On these runs the model came within 25 s of every measured Maven run of the six earlier
 # groups.
-#   run requests               29 classes  ~2,360 s  11.9 / 12.5 min
+#   run requests               31 classes  ~2,420 s  12.1 / 12.7 min
 #   run approval and mail      25 classes  ~2,120 s  10.8 / 11.4 min
 #   activation and new jobs    24 classes  ~2,220 s  10.8 / 12.2 min
 #   incidents refusals reruns  19 classes  ~1,910 s  10.2 / 11.2 min
@@ -26,7 +26,7 @@
 #   items and moves            18 classes  ~2,280 s  10.9 / 11.5 min
 #   authorization and links    23 classes  ~2,180 s  11.1 / 12.5 min
 #   permissions and plugins    39 classes  ~2,030 s  10.3 / 11.2 min
-#   audit history and storage  44 classes  ~2,530 s  12.2 / 13.1 min
+#   audit history and storage  45 classes  ~2,540 s  12.2 / 13.1 min
 #   parameters and ui          27 classes  ~2,340 s  12.2 / 13.6 min
 # ItemIdentityBindingTest (~540 s, items and moves) and AuthorizationEntryGuardTest (~530 s,
 # authorization and links) are the two slowest classes; each sorts among the first four
@@ -45,7 +45,7 @@
 [run requests]
 Request*Test
 RunRequest*Test
-JobRunSidebarEntryTest
+JobRunSidebarEntryTest UnsavedExecutionRecoveryTest
 
 [run approval and mail]
 Approv*Test
@@ -114,7 +114,7 @@ Snapshot*Test
 # the file store
 BoundedReadTest FileStoreFailSoftTest LegacySnapshotPlantTest MonthFileGapTest
 OversizedLineTest RecordIsolationGapTest RecordLookupPathTest RestartRecoveryTest
-UnreadableOpenRequestGapTest
+SharingRetryTest UnreadableOpenRequestGapTest
 PathCodec*Test
 Retention*Test
 Store*Test
