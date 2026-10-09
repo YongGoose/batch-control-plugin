@@ -74,7 +74,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * not the requester is refused with 403; the endpoint refuses GET (405); and a decided request
  * may no longer be changed.
  *
- * <p>T-03-28 .. T-03-31 (D-37, D-72; matrix note 287) repeat T-03-07 in the encoding the real
+ * <p>T-03-28 .. T-03-31 (D-37, D-72; matrix note 289) repeat T-03-07 in the encoding the real
  * Request Run form uses. That form posts {@code multipart/form-data} (D-72 lets it upload file
  * parameters), and T-03-07's url-encoded POST did not cover that body: a multipart {@code submit}
  * (T-03-28 without parameters, T-03-29 with a core file parameter) and the job's
@@ -500,7 +500,7 @@ public class MultiApproverTest {
                 "a change after the decision must not be recorded");
     }
 
-    // ------------------------------------------------------------------ multipart (note 287)
+    // ------------------------------------------------------------------ multipart (note 289)
 
     /**
      * T-03-28: a {@code multipart/form-data} POST to {@code submit} with {@code approvers}=a1 and

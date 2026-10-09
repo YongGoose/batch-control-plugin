@@ -13,6 +13,7 @@ _l.SHOTS.mkdir(parents=True, exist_ok=True)
 _l.OUT.mkdir(parents=True, exist_ok=True)
 Session, close, api, groovy, log, ENV, BASE, pw = _l.Session, _l.close, _l.api, _l.groovy, _l.log, _l.ENV, _l.BASE, _l.pw
 shot = _l.shot
+react, gone, opened, until, submit_and_wait, poll = _l.react, _l.gone, _l.opened, _l.until, _l.submit_and_wait, _l.poll  # e2e-20 condition waits
 SHOTS = _l.SHOTS
 import re  # noqa: E402
 

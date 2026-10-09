@@ -4,7 +4,7 @@ URL-less item clicked (Permalinks must open its submenu, Request Change Permissi
 Usage: menu.py [tag]   -> out/menu.jsonl, run-15/M-<tag>-<user>-<page>.png"""
 import json, sys
 from urllib.parse import urljoin
-from lib import Session, close, log, groovy
+from lib import Session, close, log, groovy, gone, react, until
 TAG = sys.argv[1] if len(sys.argv) > 1 else "a"
 JOBS = ["/job/team-mb/job/main/", "/job/team-mb/job/feature-1/", "/job/batch-pipeline/", "/job/batch-daily/"]
 ITEMS = """() => [...document.querySelectorAll('.tippy-box .jenkins-dropdown__item')].map(i => ({text: i.innerText.trim(),
@@ -16,7 +16,7 @@ u.addProperty(new UserExperimentalFlagsProperty(m)); u.save() }; return 'ok'""")
 
 def open_menu(s):
     p = s.page
-    btn = p.locator('[data-testid="app-bar-overflow-button"]')
+    btn = p.get_by_test_id("app-bar-overflow-button")
     try:
         btn.first.wait_for(state="visible", timeout=10000)
     except Exception:  # noqa: BLE001
@@ -27,7 +27,6 @@ def open_menu(s):
         p.wait_for_selector(".tippy-box .jenkins-dropdown__item", timeout=6000)
     except Exception:  # noqa: BLE001
         return []
-    p.wait_for_timeout(300)
     return p.evaluate(ITEMS)
 
 
@@ -36,7 +35,7 @@ for user in ("requester", "admin"):
     for job in JOBS:
         for page in (job, job + "batch-control-activation/"):
             s.console.clear(); s.bad.clear()
-            s.go(page); s.page.wait_for_timeout(600)
+            s.go(page)  # e2e-20: open_menu() waits for the button and the network (a fixed 0.6 s was here)
             items = open_menu(s)
             row = {"user": user, "page": page, "items": items}
             if items:
@@ -50,14 +49,14 @@ for user in ("requester", "admin"):
                 s.shot(".tippy-box", f"M-{TAG}-{user}-{page.strip('/').replace('job/', '').replace('/', '_')}")
                 row["clicks"] = {}
                 for t in [i["text"] for i in items if not i["href"]]:
-                    s.page.keyboard.press("Escape"); s.page.wait_for_timeout(300)
+                    s.page.keyboard.press("Escape"); gone(s.page, ".tippy-box")
                     s.go(page)
                     again = open_menu(s)
                     before_boxes = s.page.locator(".tippy-box").count()
                     hover = None
                     try:
                         s.page.locator(".tippy-box .jenkins-dropdown__item").filter(has_text=t).first.hover(timeout=5000)
-                        s.page.wait_for_timeout(1000)
+                        until(s.page, lambda: s.page.locator(".tippy-box").count() > before_boxes, 1000)  # a submenu, if any
                         hover = {"boxes": s.page.locator(".tippy-box").count(),
                                  "items": s.page.evaluate(ITEMS)[len(items):]}
                     except Exception:  # noqa: BLE001
@@ -67,7 +66,7 @@ for user in ("requester", "admin"):
                     except Exception:  # noqa: BLE001
                         row["clicks"][t] = {"not_found_on_reopen": [i["text"] for i in (again or [])]}
                         continue
-                    s.page.wait_for_timeout(1200)
+                    react(s.page, timeout=1200, menus=".tippy-box", menus_before=before_boxes)
                     row["clicks"][t] = {"dialog": s.page.locator("dialog[open]").count(), "boxes_before": before_boxes,
                                         "boxes_after": s.page.locator(".tippy-box").count(),
                                         "submenu_items": s.page.locator(".tippy-box .jenkins-dropdown__item").count() - len(items),

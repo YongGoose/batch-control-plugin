@@ -1,8 +1,8 @@
-"""e2e-19: the Reject buttons render in core's destructive colour (71d267b, T-UI-52b in a real browser).
+"""e2e-21: the Reject buttons render in core's destructive colour (71d267b, T-UI-52b in a real browser).
 
-usage: python reject_color.py [RGA]     rows: out/reject_color.jsonl, shots: screenshots/run-19/R19-<R|G|A>-buttons.png
+usage: python reject_color.py [RGA]     rows: out/reject_color.jsonl, shots: screenshots/run-21/R21-<R|G|A>-buttons.png
 The requester files, over REST and naming approver-1, a pending run request (batch-daily), a pending permission window
-request (CONFIGURE on r19-reject) and a pending activation request (ACTIVATE r19-reject); the server lists each as
+request (CONFIGURE on r21-reject) and a pending activation request (ACTIVATE r21-reject); the server lists each as
 pending (admin GET of its detail URL). Then approver-1 opens each detail page in a new browser context, and the page's
 own computed styles decide:
   - expected red: the computed `color` of a probe element inserted next to the Reject button with
@@ -25,7 +25,7 @@ from lib import Session, api, check, note, run_sections, J, JOB  # noqa: E402
 lib.LOGNAME[0] = "reject_color"
 WANT = sys.argv[1] if len(sys.argv) > 1 else "RGA"
 APPROVER = "approver-1"
-REASON = "e2e-19 Reject colour"
+REASON = "e2e-21 Reject colour"
 
 MEASURE = r"""() => {
   const pick = (form, re) => {
@@ -61,7 +61,7 @@ def file_request(kind):
     if kind == "R":
         r = api("requester", J("batch-daily") + "/batch-control/submit", "POST",
                 data=[("reason", REASON + " (run)"), ("approvers", APPROVER), ("DATE", "2026-10-08"), ("MODE", "full"),
-                      ("SECRET", "r19-not-shown")])
+                      ("SECRET", "r21-not-shown")])
         return "requests", lib.loc_id(r), r.status_code
     if kind == "G":
         r, gid = lib.grant_req("requester", JOB, ["CONFIGURE"], 15, REASON + " (window)", approvers=(APPROVER,))
@@ -88,7 +88,7 @@ def page(kind, label):
     # core's sticky bottom button bars, and a red box around a red button would only confuse the reader.
     p.evaluate("() => window.scrollTo(0, document.documentElement.scrollHeight)")
     p.wait_for_timeout(300)
-    shot = f"R19-{kind}-buttons.png"
+    shot = f"R21-{kind}-buttons.png"
     p.screenshot(path=str(lib.SHOTS / shot))
     rej, app, probe = m["reject"], m["approve"], m["probe"]
     colours = {"reject": rej and rej["color"], "approve": app and app["color"], "probe": probe}
@@ -109,7 +109,7 @@ def page(kind, label):
 
 
 def cleanup():
-    out = {path: lib.decide("requester", path, rid, "cancel", "e2e-19 clean-up") for path, rid in CREATED.items()}
+    out = {path: lib.decide("requester", path, rid, "cancel", "e2e-21 clean-up") for path, rid in CREATED.items()}
     note("cleanup", "the requester cancels the requests this driver filed", statuses=out)
 
 

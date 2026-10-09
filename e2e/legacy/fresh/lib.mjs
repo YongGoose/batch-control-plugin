@@ -1,4 +1,4 @@
-// e2e-05 extra-checks driver (dark theme, LDAP, back button / two tabs). Based on ../fresh/lib.mjs.
+// Fresh-eyes e2e driver (e2e-04). Independent of the older run-3 drivers.
 //
 // Rules: one new browser context per account (real login form), a clipped,
 // red-boxed screenshot per step, server state read separately with basic auth.
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const SHOTS = path.join(here, '..', 'screenshots', 'run-5', process.env.BC_SHOTS || '');
+export const SHOTS = path.join(here, 'screenshots', process.env.BC_SHOTS || '');
 export const OUT = path.join(here, 'out');
 fs.mkdirSync(SHOTS, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -16,13 +16,11 @@ export const BASE = 'http://localhost:8080';
 export const MAIL = 'http://localhost:8025';
 
 // Passwords come from e2e/.env (never committed), as in ../browser/lib.mjs.
-const ENV = Object.fromEntries(fs.readFileSync(path.join(here, '..', '.env'), 'utf8').split('\n')
+const ENV = Object.fromEntries(fs.readFileSync(path.join(here, '..', '..', '.env'), 'utf8').split('\n')
   .filter((l) => /^[A-Z_]+=/.test(l)).map((l) => [l.split('=')[0], l.slice(l.indexOf('=') + 1)]));
 const PW = {
   admin: ENV.BC_ADMIN_PASSWORD, requester: ENV.BC_REQUESTER_PASSWORD,
   'approver-1': ENV.BC_APPROVER_PASSWORD, 'approver-2': ENV.BC_APPROVER_PASSWORD,
-  // LDAP accounts of ../ldap/bootstrap.ldif.template (e2e-05 check 2)
-  lrequester: ENV.BC_REQUESTER_PASSWORD, 'lapprover-1': ENV.BC_APPROVER_PASSWORD, 'lapprover-2': ENV.BC_APPROVER_PASSWORD,
 };
 export const pw = (u) => PW[u] || ENV.BC_OTHER_PASSWORD;
 
