@@ -775,10 +775,25 @@ public final class GrantService {
                     : "";
             String skipped = kept.isEmpty() ? "" : " Not cleared, because the reviewer may not review them: "
                     + String.join(", ", kept) + ".";
-            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
+            appendReviewRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, auth.getName(),
                     "Marked as reviewed by '" + auth.getName() + "': " + cleared + " changed-under-a-permission-window"
                             + " entr" + (cleared == 1 ? "y" : "ies") + " at or below this item cleared." + skipped + still));
             LOGGER.info(() -> "'" + fullName + "' marked as reviewed by '" + auth.getName() + "'");
+        }
+    }
+
+    /**
+     * R3-01: appends the {@code GUARD_REVIEWED} record of a review that is already applied. A record
+     * that cannot be written is logged at SEVERE and does not fail the review (no HTTP 500): the
+     * entries have left the state in memory and their grant files are written again later, as for
+     * any other end ({@link #revokeOne}).
+     */
+    private void appendReviewRecord(ChangeRecord record) {
+        try {
+            store.appendChangeRecord(record);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.SEVERE, "Could not record the review of '" + record.getTarget()
+                    + "' by '" + record.getUser() + "'; the review is in effect all the same", e);
         }
     }
 
@@ -791,7 +806,7 @@ public final class GrantService {
         int cleared = removeChanged(java.util.Set.of(fullName));
         if (cleared > 0) {
             String user = Jenkins.getAuthentication2().getName();
-            store.appendChangeRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, user,
+            appendReviewRecord(ChangeRecord.create(ChangeType.GUARD_REVIEWED, fullName, user,
                     "Marked as reviewed by '" + user + "': the entry named an item that no longer exists."));
         }
     }
