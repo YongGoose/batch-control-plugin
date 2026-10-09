@@ -220,6 +220,11 @@ UNITS = [
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
              "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
+    # e2e-23 R2-02 and R2-01 (bug-hunt batch A, D-82). r23/matrix_children.py arranges its own item (r23-mx).
+    Unit("r23-matrix-children", 0.8, [("r23-matrix-children", py("r23/matrix_children.py"))],
+         group="job ui windows and disk",
+         doc="e2e-23 R2-02/R2-01: an approved run of an activated matrix project runs its configurations; a configuration "
+             "has no activation or request UI of its own and points to its parent; its direct build is refused"),
     Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
