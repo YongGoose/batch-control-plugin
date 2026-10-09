@@ -161,14 +161,16 @@ public final class FormErrors {
 
     /**
      * What the user submitted in {@code field}; empty when nothing is being refused. D-72b: each
-     * character XML cannot hold is given back as U+FFFD ({@link #displayable}).
+     * character XML cannot hold is given back as U+FFFD ({@link #displayable}). R4-03: on a
+     * multipart body the text is read as typed ({@link RepeatedField#text}: the {@code json}
+     * blob's value, else the part as UTF-8), not as Stapler's ISO-8859-1 reading of the part.
      */
     public String value(String field) {
         if (!isInputKept()) {
             return "";
         }
         StaplerRequest2 req = Stapler.getCurrentRequest2();
-        return req == null ? "" : displayable(Util.fixNull(req.getParameter(field)));
+        return req == null ? "" : displayable(Util.fixNull(RepeatedField.text(req, field)));
     }
 
     /**
