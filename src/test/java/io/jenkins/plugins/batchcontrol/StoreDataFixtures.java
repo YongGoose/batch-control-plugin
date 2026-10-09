@@ -37,6 +37,9 @@ final class StoreDataFixtures {
     private static final int SENTINEL_NUMBER = 424242;
     /** A month no row uses, so the sentinel's file can be removed again. */
     private static final Instant SENTINEL_AT = Instant.parse("2001-01-15T12:00:00Z");
+    private static final long SENTINEL_DURATION_MS = 777L;
+    /** The {@code appendedAt} field of a run line (D-81): group 1 is its name and separator, the epoch millis follow. */
+    static final java.util.regex.Pattern APPENDED_AT = java.util.regex.Pattern.compile("(\"appendedAt\"\\s*:\\s*)\\d+");
 
     private StoreDataFixtures() {
     }
@@ -64,19 +67,28 @@ final class StoreDataFixtures {
             this.isoTime = isoTime;
         }
 
+        /**
+         * The template with the sentinel values substituted. A line written since D-81 also carries
+         * {@code appendedAt} (epoch millis of the append, TEST-MATRIX note 304). The sentinel's value is
+         * the plugin clock at the time the template was made, which says nothing about a generated
+         * record, so it is replaced by the generated record's own end ({@code startedAt} plus the
+         * sentinel's 777 ms): the instant a record whose finalization did not
+         * lag is appended. A template without the field (a line written before D-81) is unchanged.
+         */
         String render(String runId, String job, int number, Instant startedAt) {
-            return template
+            String line = template
                     .replace(SENTINEL_RUN_ID, runId)
                     .replace(SENTINEL_JOB, job)
                     .replace(String.valueOf(SENTINEL_NUMBER), String.valueOf(number))
                     .replace(isoTime ? SENTINEL_AT.toString() : String.valueOf(SENTINEL_AT.toEpochMilli()),
                             isoTime ? startedAt.toString() : String.valueOf(startedAt.toEpochMilli()));
+            return APPENDED_AT.matcher(line).replaceFirst("$1" + (startedAt.toEpochMilli() + SENTINEL_DURATION_MS));
         }
     }
 
     static RunLine runLineTemplate() throws IOException {
         FileStore.get().appendRunRecord(new RunRecord(SENTINEL_RUN_ID, SENTINEL_JOB, SENTINEL_NUMBER,
-                CauseType.USER, "SUCCESS", SENTINEL_AT, 777L));
+                CauseType.USER, "SUCCESS", SENTINEL_AT, SENTINEL_DURATION_MS));
         YearMonth month = YearMonth.of(2001, 1);
         Path file = runsFile(month);
         assertTrue(Files.isRegularFile(file), "fixture: the store must write run records to " + file);

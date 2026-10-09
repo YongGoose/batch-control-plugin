@@ -687,7 +687,13 @@ public final class FileStore implements Store {
     @Override
     public void appendRunRecord(RunRecord record) {
         Objects.requireNonNull(record, "record");
-        appendLine(runsDir(), monthOf(record.getStartedAt()), runRecordToJson(record));
+        JSONObject json = runRecordToJson(record);
+        if (record.getAppendedAt() == null) {
+            // D-81: every new line carries appendedAt; a caller that did not set it gets the plugin
+            // clock's instant of this append.
+            json.element("appendedAt", BatchClock.now().toEpochMilli());
+        }
+        appendLine(runsDir(), monthOf(record.getStartedAt()), json);
     }
 
     @Override
@@ -701,11 +707,18 @@ public final class FileStore implements Store {
                                                 int offset, int limit, int maxScanned) {
         Comparator<RunRecord> newestFirst = Comparator.comparing(RunRecord::getStartedAt)
                 .thenComparing(RunRecord::getRunId).reversed();
-        // A run is appended when it completes: start + duration orders the file.
+        // D-81: a line's own appendedAt says when it was appended. A run is appended when it is
+        // finalized, never before start + duration, so the later of the two is used (a clock set
+        // back between start and append cannot make the scan stop early). A line without it,
+        // written before D-81, falls back to the start + duration estimate, which a finalization
+        // that lagged (a slow listener or publisher) makes too early.
         ToLongFunction<JsonLineScanner> appendedAt = line -> {
             long started = line.optLong(K_STARTED);
             long duration = line.optLong(K_DURATION);
-            return started == Long.MIN_VALUE || duration == Long.MIN_VALUE ? Long.MAX_VALUE : started + duration;
+            long estimate = started == Long.MIN_VALUE || duration == Long.MIN_VALUE
+                    ? Long.MAX_VALUE : started + duration;
+            long appended = optAppendedAt(line);
+            return appended == Long.MIN_VALUE ? estimate : Math.max(appended, estimate);
         };
         return page(runsDir(), months, period, K_STARTED, appendedAt, FileStore::runRecordFromScanner,
                 FileStore::runRecordFromJson, RunRecord::getStartedAt, filter, newestFirst,
@@ -1962,6 +1975,9 @@ public final class FileStore implements Store {
         json.element("parameters", record.getParameters());
         putIfNotNull(json, "abortedBy", record.getAbortedBy());
         putIfNotNull(json, "runRequestId", record.getRunRequestId());
+        if (record.getAppendedAt() != null) {
+            json.element("appendedAt", record.getAppendedAt().toEpochMilli()); // D-81
+        }
         return json;
     }
 
@@ -1981,6 +1997,16 @@ public final class FileStore implements Store {
     private static final byte[] K_PARAMETERS = key("parameters");
     private static final byte[] K_ABORTED_BY = key("abortedBy");
     private static final byte[] K_REQUEST_ID = key("runRequestId");
+    private static final byte[] K_APPENDED_AT = key("appendedAt");
+
+    /**
+     * D-81: a run line's {@code appendedAt}, or {@link Long#MIN_VALUE} when it has none (a line
+     * written before D-81) or it is not a number. Absence is checked first: the scanner reports a
+     * missing number by an exception, too costly once per line of a page query.
+     */
+    private static long optAppendedAt(JsonLineScanner line) {
+        return line.find(K_APPENDED_AT) < 0 ? Long.MIN_VALUE : line.optLong(K_APPENDED_AT);
+    }
     private static final byte[] K_TYPE = key("type");
     private static final byte[] K_TARGET = key("target");
     private static final byte[] K_AT = key("at");
@@ -2005,6 +2031,9 @@ public final class FileStore implements Store {
         }
         record.setAbortedBy(line.optString(K_ABORTED_BY, true));
         record.setRunRequestId(line.optString(K_REQUEST_ID, false));
+        // D-81: optional; absent in lines written before it, and a malformed value is ignored.
+        long appendedAt = optAppendedAt(line);
+        record.setAppendedAt(appendedAt == Long.MIN_VALUE ? null : Instant.ofEpochMilli(appendedAt));
         return record;
     }
 
@@ -2042,6 +2071,11 @@ public final class FileStore implements Store {
         }
         record.setAbortedBy(optString(json, "abortedBy"));
         record.setRunRequestId(optString(json, "runRequestId"));
+        // D-81: optional, as in runRecordFromScanner; a value that is not a whole number is ignored.
+        Object appendedAt = json.opt("appendedAt");
+        if (appendedAt instanceof Integer || appendedAt instanceof Long) {
+            record.setAppendedAt(Instant.ofEpochMilli(((Number) appendedAt).longValue()));
+        }
         return record;
     }
 

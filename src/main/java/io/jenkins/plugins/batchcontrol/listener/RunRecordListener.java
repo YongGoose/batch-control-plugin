@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
+import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
 import java.time.Instant;
 import java.util.List;
@@ -48,7 +49,11 @@ public class RunRecordListener extends RunListener<Run<?, ?>> {
         }
         // The three concerns are isolated: a failure in one must not lose the others.
         try {
-            Store.get().appendRunRecord(buildRecord(run));
+            RunRecord record = buildRecord(run);
+            // D-81: the time of the append, after every earlier onFinalized/onCompleted listener and
+            // publisher; a date-filtered listing stops on it, not on start + duration.
+            record.setAppendedAt(BatchClock.now());
+            Store.get().appendRunRecord(record);
         } catch (RuntimeException e) {
             LOGGER.log(Level.WARNING, e, () -> "Failed to append the run record of "
                     + run.getFullDisplayName());
