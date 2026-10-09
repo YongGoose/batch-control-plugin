@@ -22,6 +22,10 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * <p>{@code onLocationChanged} fires for renames and moves, and recursively for the children of a
  * renamed or moved folder, so every job's state follows it.
+ *
+ * <p>D-82: a job's sub-item (a matrix configuration, a Maven module) carries no state of its own:
+ * {@link ActivationService#onItemCreated} stores none for it (and drops one left under its name),
+ * seeding and the D-59a start-over skip it, and a relocation only moves what was already stored.
  */
 @Extension
 @Restricted(NoExternalUse.class)

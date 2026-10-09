@@ -94,11 +94,17 @@ public class JobActivationForm implements Action {
      * {@code null} without {@code BatchControl/Request}: the form exposes the approver list, so
      * its URL space is absent (404) rather than refused, the same rule as before D-64 (on a job
      * {@code BatchControl/Request}; on a computed folder the service's predicate, Request and
-     * {@code Item/Read}). {@link #doSubmit} re-checks the permissions.
+     * {@code Item/Read}). {@link #doSubmit} re-checks the permissions. Always {@code null} on a
+     * job's sub-item (a matrix configuration, a Maven module), which has no activation of its own
+     * (D-82): its notice links the parent job instead.
      */
     @Override
     @CheckForNull
     public String getUrlName() {
+        if (ActivationService.isSubItem(item)) {
+            // D-82: a job's sub-item carries no activation; requests are made on its parent job.
+            return null;
+        }
         boolean visible = item instanceof ComputedFolder
                 ? ActivationService.get().canRequest(item)
                 : item.hasPermission(BatchControlPermissions.REQUEST);
