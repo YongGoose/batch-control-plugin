@@ -41,6 +41,7 @@
             <td>
               ${it.request.status}
               <j:if test="${it.awaitingExecution and it.jobDisabled}"> (waiting: the job is disabled)</j:if>
+              <j:if test="${it.queueCancelled}"> (queued run cancelled: it will not start)</j:if>
             </td>
           </tr>
           <tr>
@@ -281,6 +282,27 @@
               status change to EXECUTED and the build number appear.
             </j:otherwise>
           </j:choose>
+        </div>
+      </j:if>
+
+      <!-- R2-05: the queue item of the approved run was cancelled before a build started, from the
+           queue or by disabling the job (which cancels its queued items, D-55). The service never
+           submits that run again and the approved-run timeout ends the request, so this replaces
+           the notice above (awaitingExecution is false then). Its own id is a stable hook for
+           tests, distinct from batch-control-approved-notice. -->
+      <j:if test="${it.queueCancelled}">
+        <div id="batch-control-queue-cancelled-notice" class="jenkins-alert jenkins-alert-warning"
+             style="margin-top: 1rem;">
+          This request is approved, but its queued run was cancelled and will not start.
+          <j:choose>
+            <j:when test="${it.jobDisabled}">
+              The job is disabled: enable it first, then submit a new run request to run it.
+            </j:when>
+            <j:otherwise>
+              To run the job, submit a new run request.
+            </j:otherwise>
+          </j:choose>
+          The approval expires ${it.approvedRunTimeoutMinutes} minute(s) after it was given.
         </div>
       </j:if>
 
