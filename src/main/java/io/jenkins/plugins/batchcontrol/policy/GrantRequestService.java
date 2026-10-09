@@ -85,7 +85,7 @@ public final class GrantRequestService {
     }
 
     /**
-     * D-61 / #76: the PENDING grant requests that concern {@code auth}, read from the open-request index only
+     * D-61: the PENDING grant requests that concern {@code auth}, read from the open-request index only
      * (no history scan): those awaiting their decision as a designated approver holding
      * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
      * to {@code auth} under P-09. The single source for the tab badge and the section.

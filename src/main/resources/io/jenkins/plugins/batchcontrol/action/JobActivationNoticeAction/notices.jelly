@@ -9,7 +9,7 @@
 
      Wording contract: an activated job's notice must not contain the phrases used for the other
      two states, so "Request a hold" rather than any phrase with "on hold" in it. -->
-<!-- #72: shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
+<!-- Shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
      JobNoticesWidget/index.jelly (new job page card, no extra class). D-74: core's utility
      classes instead of inline styles. -->
 <j:jelly xmlns:j="jelly:core">

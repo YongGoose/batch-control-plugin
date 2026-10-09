@@ -4,7 +4,7 @@
  * caches it: <st:adjunct includes="io.jenkins.plugins.batchcontrol.ui.batch-control"/>.
  */
 
-/* Backlog #89: a short table cell, a header row, or one part of a cell (the kind or the name in
+/* A short table cell, a header row, or one part of a cell (the kind or the name in
    tags/scopeItem.jelly) that does not wrap at 1280 px. */
 .batch-control-nowrap {
   white-space: nowrap;

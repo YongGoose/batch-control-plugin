@@ -48,7 +48,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  *   <li>job not approval-required: a human submission (user, CLI, Replay, approved request)
  *       passes; anything else continues at the timer step (D-46a);</li>
  *   <li>approval marker present → validate and consume it (D-23), pass or refuse quietly;</li>
- *   <li>Pipeline Replay → refuse and record it (#21); a person on the Replay page gets the
+ *   <li>Pipeline Replay → refuse and record it; a person on the Replay page gets the
  *       refusal page and the CLI a one-line error (e2e-03 DEF-16, DEF-14), anything else is
  *       refused quietly;</li>
  *   <li>remote (build-token) cause → refuse and record the attempt (S-14); inside an HTTP
@@ -57,13 +57,13 @@ import org.kohsuke.stapler.StaplerRequest2;
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
  *   <li>automatic retry → judged by the retried build's causes; a retry of an approved or
- *       manual run is refused quietly (#36);</li>
+ *       manual run is refused quietly;</li>
  *   <li>timer cause → pass unless {@code blockTimer}, refused quietly (unattended) and
- *       recorded (#21); what the setting lets through must also be activated (SPEC item 6a);</li>
+ *       recorded; what the setting lets through must also be activated (SPEC item 6a);</li>
  *   <li>upstream cause → D-16 policy: pass unless {@code blockUpstream}; with
  *       {@code blockUpstream} only allow-listed upstream jobs pass, an empty/unset list
  *       blocks all; refused quietly (unattended, the upstream build surfaces the failure) and
- *       recorded (#21); what the setting lets through must also be activated (SPEC item 6a);</li>
+ *       recorded; what the setting lets through must also be activated (SPEC item 6a);</li>
  *   <li>SCM causes and anything unknown/empty → pass only if activated (D-46b).</li>
  * </ol>
  *
@@ -74,7 +74,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  * <p>A quiet refusal of a timer, upstream, SCM, unclassified or Replay submission writes a
  * {@link ChangeType#TRIGGER_BLOCKED} record, coalesced per job and cause kind to one per
  * {@link #TRIGGER_AUDIT_INTERVAL} through {@link BlockedAttemptAudit}. The append is the only
- * store I/O on this path and it touches one file under that file's own lock stripe (#18), so it
+ * store I/O on this path and it touches one file under that file's own lock stripe, so it
  * never waits behind retention or any other bulk work.
  *
  * <p>D-72: a refused submission never reaches the queue, so no queue listener deletes the
@@ -94,13 +94,13 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     private static final String REPLAY_CAUSE_CLASS =
             "org.jenkinsci.plugins.workflow.cps.replay.ReplayCause";
 
-    /** naginator is not a dependency; its retry cause is matched by name (#36). */
+    /** naginator is not a dependency; its retry cause is matched by name. */
     private static final String NAGINATOR_CAUSE_CLASS = "com.chikli.hudson.plugin.naginator.NaginatorCause";
 
     /** An INFO line per job and kind is written at most this often; the rest go to FINE. */
     static final long INFO_INTERVAL_MILLIS = 60L * 60L * 1000L;
 
-    /** At most one {@link ChangeType#TRIGGER_BLOCKED} record per job and cause kind this often (#21). */
+    /** At most one {@link ChangeType#TRIGGER_BLOCKED} record per job and cause kind this often. */
     static final Duration TRIGGER_AUDIT_INTERVAL = Duration.ofHours(1);
 
     /** Cause kinds of a {@link ChangeType#TRIGGER_BLOCKED} record. */
@@ -524,7 +524,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                         // its refusal page does not pre-fill the request form.
                         RuntimeException refused = refusal(job, causes, own == null ? submittedValues(actions) : null);
                         // D-72: the person's own submission is never queued, so the temporary
-                        // files of its values go now (the refusal carries no file, #115). Built
+                        // files of its values go now (the refusal carries no file, #10). Built
                         // first: the refusal has taken what it carries from the values.
                         disposeOwnValues(job, causes, actions);
                         throw refused;
@@ -532,7 +532,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 }
             }
 
-            // 5. Automatic retry (#36): judged by the causes of the build it retries. naginator copies
+            // 5. Automatic retry: judged by the causes of the build it retries. naginator copies
             // those next to its own cause, which is dropped here, so a retry of a timer or upstream run
             // meets the timer and upstream rules below. A retry of an approved or manual run is a
             // re-use of that run's approval and is refused quietly: the retry is unattended, and the
@@ -767,7 +767,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
     }
 
     /**
-     * Writes the coalesced {@link ChangeType#TRIGGER_BLOCKED} record of a quiet refusal (#21). The
+     * Writes the coalesced {@link ChangeType#TRIGGER_BLOCKED} record of a quiet refusal. The
      * detail starts with the cause kind and the blocking switch so the history and
      * {@code changes.csv} can be filtered on them. A store failure is logged and does not turn the
      * refusal into an exception: the queue gate must keep refusing even when the audit write
@@ -889,7 +889,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
 
     /**
      * The causes a submission is judged by: a naginator retry cause is dropped, which leaves the
-     * retried build's causes that naginator copies into every retry (#36). naginator is not a
+     * retried build's causes that naginator copies into every retry. naginator is not a
      * dependency, so its cause is matched by class name. An upstream cause naming the job itself
      * is not a retry: a job may legitimately trigger itself, so it keeps the upstream policy
      * (D-16, security-07 S-01).

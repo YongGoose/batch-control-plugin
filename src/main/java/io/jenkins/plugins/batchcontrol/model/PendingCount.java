@@ -4,7 +4,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * How many PENDING requests of one kind concern a viewer (D-61, #76): the requests awaiting
+ * How many PENDING requests of one kind concern a viewer (D-61): the requests awaiting
  * their decision as a designated approver holding {@code BatchControl/Approve}, and their own
  * requests on which they are not a designated approver. Produced only by the
  * {@code countPendingFor(Authentication)} methods of the policy services, so the tab badges and

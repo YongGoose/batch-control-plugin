@@ -1,10 +1,10 @@
 <?jelly escape-by-default='true'?>
-<!-- #21: blocked unattended triggers are refused with nobody to tell, so the job page says so.
+<!-- Blocked unattended triggers are refused with nobody to tell, so the job page says so.
      Rendered by the job main page for every action; nothing is shown unless a switch is on, run
      control is on and the viewer holds Item/Read (JobTriggerLockAction#getBlockingSwitches),
      whether or not the job requires approval for manual runs (DEF-15).
      Only constant text and switch names are rendered; no script. -->
-<!-- #72: shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
+<!-- Shared by jobMain.jelly (classic job page, noticeClass = a top margin) and
      JobNoticesWidget/index.jelly (new job page card, no extra class). D-74: core's utility
      classes instead of inline styles. -->
 <j:jelly xmlns:j="jelly:core">

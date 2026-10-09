@@ -5,7 +5,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Reduces an item's {@code config.xml} to its user-editable content before it is compared and
- * diffed (SPEC item 9, #20).
+ * diffed (SPEC item 9).
  *
  * <p>Three things are removed, and nothing else:
  * <ul>

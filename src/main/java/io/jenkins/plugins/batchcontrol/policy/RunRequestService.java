@@ -82,7 +82,7 @@ public final class RunRequestService {
 
     private final ReentrantLock lock = new ReentrantLock();
     /**
-     * security-33 S-33-09 (#75): {@link #requesterLacksBuild} impersonates the requester, which
+     * security-33 S-33-09: {@link #requesterLacksBuild} impersonates the requester, which
      * reaches the security realm; its answer is cached per request id, job and requester for a
      * short time so page views and notifications do not hit the realm each time.
      */
@@ -150,7 +150,7 @@ public final class RunRequestService {
     }
 
     /**
-     * D-61 / #76: the PENDING run requests that concern {@code auth}, read from the open-request index only
+     * D-61: the PENDING run requests that concern {@code auth}, read from the open-request index only
      * (no history scan): those awaiting their decision as a designated approver holding
      * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
      * to {@code auth} under P-09. The single source for the tab badge and the section.
@@ -271,7 +271,7 @@ public final class RunRequestService {
 
     /**
      * Persists {@code request} and drops its cached {@link #requesterLacksBuild} answer, so a
-     * decided, cancelled, executed or otherwise changed request is evaluated afresh (#75).
+     * decided, cancelled, executed or otherwise changed request is evaluated afresh.
      */
     private void persist(RunRequest request) {
         store.saveRunRequest(request);
@@ -690,7 +690,7 @@ public final class RunRequestService {
                 throw new IllegalStateException("Request " + id + " is "
                         + request.getStatus() + "; the approvers can only be changed while PENDING.");
             }
-            // #23: resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
+            // Resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
             Job<?, ?> job = ApprovalPolicy.jobForPolicy(request.getJobFullName());
             List<String> designated = ApprovalPolicy.checkDesignation(request.getRequester(), newApprovers, job);
             List<String> previous = request.getApprovers();
@@ -1282,7 +1282,7 @@ public final class RunRequestService {
      * claim is released ({@link #releaseRefusedClaim}), so the request counts as never queued:
      * startup recovery may still submit it, and when it ends its files are disposed of.
      *
-     * <p>#26: the job lookup is inside the SYSTEM2 block as well. Whether an approver may decide
+     * <p>The job lookup is inside the SYSTEM2 block as well. Whether an approver may decide
      * is the approval policy's call alone; an approver holding only Item/Discover (lookup throws
      * AccessDeniedException) or no job permission at all (lookup returns null) must not turn a
      * committed approval into a 403 or a silently dropped run.

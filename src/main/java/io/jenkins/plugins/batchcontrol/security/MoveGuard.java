@@ -112,7 +112,7 @@ final class MoveGuard {
                     + "the name '" + item.getName() + "' is outside the name restriction '"
                     + restricting.getCreateNamePattern() + "' of grant " + restricting.getId();
         }
-        // #84 (e2e-08 UX-4): the record names every active window on either side, so its grant
+        // e2e-08 UX-4: the record names every active window on either side, so its grant
         // column does not read "no grant" while a window existed.
         // The windows naming the item and the destination folder respectively.
         Grant deleteWindow = GrantService.get().findActiveDeleteGrant(user, item);
@@ -307,7 +307,7 @@ final class MoveGuard {
         try {
             group = jenkins.getItemByFullName(destination.substring(1)); // as the user: Read applies
         } catch (AccessDeniedException e) {
-            // Discover without Read (security-33 S-33-05, #74): step aside exactly as for an
+            // Discover without Read (security-33 S-33-05): step aside exactly as for an
             // unknown destination, so the folders plugin answers and nothing is recorded; a 403
             // must not escape from inside a permission check.
             return null;

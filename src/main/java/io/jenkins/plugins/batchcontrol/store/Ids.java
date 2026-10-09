@@ -21,7 +21,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 public final class Ids {
 
     /**
-     * ASCII digits whatever the controller's default locale (#17): ids become file names, and
+     * ASCII digits whatever the controller's default locale: ids become file names, and
      * retention recovers a record's month from the id prefix.
      */
     private static final DateTimeFormatter FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)

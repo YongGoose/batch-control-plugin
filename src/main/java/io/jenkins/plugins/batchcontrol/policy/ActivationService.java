@@ -307,7 +307,7 @@ public final class ActivationService {
     }
 
     /**
-     * D-61 / #76: the PENDING activation and hold requests that concern {@code auth}, read from the open-request index only
+     * D-61: the PENDING activation and hold requests that concern {@code auth}, read from the open-request index only
      * (no history scan): those awaiting their decision as a designated approver holding
      * Jenkins-level {@code BatchControl/Approve}, else their own. Every counted request is visible
      * to {@code auth} under P-09. The single source for the tab badge and the section.
@@ -353,7 +353,7 @@ public final class ActivationService {
      * authentication and needs {@code BatchControl/Request} plus {@code Item/Read} on the job
      * (D-39). Validation as for run requests: a reason of at most {@value #MAX_REASON_LENGTH}
      * characters and a designated approver set that passes the SPEC item 3 rules, including the
-     * job's own approver list (D-37, #23).
+     * job's own approver list (D-37).
      *
      * <p>{@code ACTIVATE} is refused for a job that is already activated and {@code HOLD} for a job
      * that is not, since neither could change anything. A computed child (D-32) is not controlled
@@ -443,7 +443,7 @@ public final class ActivationService {
                         + " passed its pending timeout and is now EXPIRED.");
             }
             // The decision checks are complete; jobForPolicy looks the job up as SYSTEM so an
-            // approver without Item/Read on the job can still decide (#26 rule for run requests).
+            // approver without Item/Read on the job can still decide (the same rule as for run requests).
             Item subject = ApprovalPolicy.itemForPolicy(request.getJobFullName());
             if (subject == null || !isSubject(subject)) {
                 request.setStatus(RequestStatus.INVALIDATED);
@@ -569,7 +569,7 @@ public final class ActivationService {
                 throw new IllegalStateException("Activation request " + id + " is "
                         + request.getStatus() + "; the approvers can only be changed while PENDING.");
             }
-            // #23: resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
+            // Resolved as SYSTEM after the requester check above (ApprovalPolicy.jobForPolicy).
             Job<?, ?> job = ApprovalPolicy.jobForPolicy(request.getJobFullName());
             List<String> designated = ApprovalPolicy.checkDesignation(request.getRequester(), newApprovers, job);
             request.addApproverChange(new ActivationRequest.ApproverChange(

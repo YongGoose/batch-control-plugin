@@ -13,7 +13,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * Links to the new grant request form on the Grants screen, prefilled for one item and one
  * action (U-01 convention: {@code new?scopeFullName=&actions=}, D-66; D-71: a window names exactly
  * one item, so there is no scope type). Used by refusal pages (a change or a move that needs a
- * permission window, backlog #83).
+ * permission window).
  *
  * <p>Read-only. The item is resolved as the viewer, so an item the viewer cannot see yields no
  * link, and the Grants screen resolves the name again before it prefills anything. No link is

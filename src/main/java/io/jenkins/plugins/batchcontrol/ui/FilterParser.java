@@ -26,7 +26,7 @@ import org.kohsuke.stapler.StaplerRequest2;
  * <p>All parsing is forgiving: garbage values fall back to the default instead of failing, so a
  * hand-edited URL can never produce a stack trace.
  *
- * <p>Bounds (#13, SPEC item 4): a query span is capped by records, not by files — the store's
+ * <p>Bounds (SPEC item 4): a query span is capped by records, not by files — the store's
  * page queries stop after {@code Store.MAX_SCANNED_RECORDS} and the screen asks the user to
  * narrow the filter. There is no month cap on the span. Dates themselves are validated: only
  * plain {@code yyyy-MM-dd} with a year in {@value #MIN_YEAR}..{@value #MAX_YEAR} is accepted,

@@ -23,7 +23,7 @@ import org.springframework.security.core.Authentication;
  * permission sets of the section gates.
  *
  * <p>Badges count the open items the viewer can act on, from each service's
- * {@code countPendingFor} (#76: the one count the sections also use, read from the open-request
+ * {@code countPendingFor} (the one count the sections also use, read from the open-request
  * indexes, never from the full history):
  * <ul>
  *   <li>a holder of {@code BatchControl/Approve}: PENDING requests on which they are a designated
@@ -36,7 +36,7 @@ import org.springframework.security.core.Authentication;
 @Restricted(NoExternalUse.class)
 public final class SectionTabs {
 
-    /** Backlog #86: the page title of the Changes section, its tab's tooltip. */
+    /** The page title of the Changes section, its tab's tooltip. */
     public static final String CHANGES_TITLE = "Change Records";
 
     /** One tab: a section of {@code /batch-control/}. */
@@ -74,7 +74,7 @@ public final class SectionTabs {
         }
 
         /**
-         * Backlog #86: the section's page title, the tab's tooltip when it differs from the short
+         * The section's page title, the tab's tooltip when it differs from the short
          * label ("Changes" opens "Change Records"), or {@code null} when it is the label.
          */
         @CheckForNull

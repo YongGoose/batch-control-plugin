@@ -71,7 +71,7 @@
                  help="/plugin/batch-control/help/grant-actions.html">
           <!-- Posted as repeated "actions" fields (CREATE / CONFIGURE / DELETE), which
                GrantsSection#doCreate reads with getParameterValues("actions"). -->
-          <!-- #107: Create controls an optional block, f:optionalBlock's markup written out
+          <!-- Create controls an optional block, f:optionalBlock's markup written out
                because that tag cannot post Create as one of the repeated "actions" values: core's
                optional-block behaviour shows the name restriction only while Create is ticked,
                also on a refused submission and on a prefill (Request again) that ticks Create.

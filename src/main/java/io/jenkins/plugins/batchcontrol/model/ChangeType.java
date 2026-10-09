@@ -74,7 +74,7 @@ public enum ChangeType {
     GRANT_VIOLATION,
     /**
      * An unattended run submission (timer, upstream) or a Pipeline Replay refused quietly by the
-     * queue gate (#21, SPEC item 6). The refusal has no error channel, so this record is where it
+     * queue gate (SPEC item 6). The refusal has no error channel, so this record is where it
      * becomes visible; without it a locked job (D-34) looks exactly like a job whose cron never
      * fires.
      *

@@ -123,7 +123,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
         return page().getMatched();
     }
 
-    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    /** Whether the per-request record cap stopped the read: ask to narrow the filter. */
     public boolean isTruncated() {
         return page().isTruncated();
     }
@@ -137,7 +137,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * The complete CSV export of what this screen lists (S-03), relative to this section.
      * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
      * Only ISO dates and constant names go into it, so no encoding is needed.
      */
@@ -180,7 +180,7 @@ public class ChangesSection implements ModelObject, StaplerProxy {
 
     private RecordPage<ChangeRecord> page() {
         if (page == null) {
-            // Bounded read (#13): only this page's window is held and only its diffs are read.
+            // Bounded read: only this page's window is held and only its diffs are read.
             page = Store.get().pageChangeRecords(List.of(getMonth()), monthPeriod(), c -> true,
                     Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }

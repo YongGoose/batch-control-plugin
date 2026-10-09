@@ -162,7 +162,7 @@ public final class GrantService {
     }
 
     /**
-     * Drops grants that retention has deleted from the store (#13). They ended before the
+     * Drops grants that retention has deleted from the store. They ended before the
      * retention cut-off, so none of them can be active; this only keeps the cache from holding
      * them until the next restart.
      */
@@ -1609,7 +1609,7 @@ public final class GrantService {
                 continue;
             }
             closed++;
-            // #85: the record and the grant say why, not just who.
+            // The record and the grant say why, not just who.
             revokeOne(grant, caller, Grant.REVOKED_CHANGE_CONTROL_OFF, REVOKED_SWITCH_OFF
                     + " by '" + caller + "' (" + closed + " of " + total + " active permission windows closed)");
         }

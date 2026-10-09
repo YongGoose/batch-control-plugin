@@ -24,7 +24,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 @Restricted(NoExternalUse.class)
 public final class Grant {
 
-    /** #85 (P-15): the revocation reason of the windows closed by turning change control off. */
+    /** P-15: the revocation reason of the windows closed by turning change control off. */
     public static final String REVOKED_CHANGE_CONTROL_OFF = "change control turned off";
 
     /** D-74: the revocation reason of a window whose item was deleted (or no longer exists). */
@@ -60,9 +60,9 @@ public final class Grant {
     private Long revokedAtMillis;
     private String revokedBy;
     /**
-     * #85: why the grant was revoked when it was not an individual revocation, for example
+     * Why the grant was revoked when it was not an individual revocation, for example
      * {@link #REVOKED_CHANGE_CONTROL_OFF}; {@code null} for an individual revocation by a Manage
-     * holder and in grant files written before #85 (an optional field, no new file format).
+     * holder and in older grant files (an optional field, no new file format).
      */
     private String revokedReason;
     /**
@@ -199,7 +199,7 @@ public final class Grant {
         return revokedBy;
     }
 
-    /** The revocation reason of a mass revocation (#85), or {@code null}; see {@link #REVOKED_CHANGE_CONTROL_OFF}. */
+    /** The revocation reason of a mass revocation, or {@code null}; see {@link #REVOKED_CHANGE_CONTROL_OFF}. */
     public String getRevokedReason() {
         return revokedReason;
     }
@@ -251,7 +251,7 @@ public final class Grant {
 
     /**
      * Marks the grant revoked by {@code revokedBy}, recording why ({@code null}: an individual
-     * revocation, #85). Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC
+     * revocation). Only {@code security.GrantService} may revoke a grant (Manage holders, SPEC
      * item 8).
      */
     public void markRevoked(Instant revokedAt, String revokedBy, String reason) {

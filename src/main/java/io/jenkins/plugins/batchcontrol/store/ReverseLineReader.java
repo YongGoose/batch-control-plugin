@@ -11,7 +11,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Reads a UTF-8 text file line by line from its end towards its start (#13). JSONL buckets are
+ * Reads a UTF-8 text file line by line from its end towards its start. JSONL buckets are
  * appended in time order, so the newest records come first and a page query can stop after a
  * bounded number of lines without reading the rest of the month.
  *

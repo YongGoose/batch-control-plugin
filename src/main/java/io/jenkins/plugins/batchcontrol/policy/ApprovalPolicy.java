@@ -48,7 +48,7 @@ public final class ApprovalPolicy {
     }
 
     /**
-     * Resolves the job a request targets, for applying its approver policy (#23, security-08
+     * Resolves the job a request targets, for applying its approver policy (security-08
      * S-11). Callers must have finished their own permission checks first (requester identity for
      * a designation change, designated membership plus Approve for a decision).
      *
@@ -170,7 +170,7 @@ public final class ApprovalPolicy {
     /**
      * The decision check of a request whose subject is one job (run and activation requests,
      * SPEC items 3 and 6a): {@link #checkDecision(String, String, List)} plus the job's own
-     * approver list in force at decision time (#23).
+     * approver list in force at decision time.
      *
      * @return {@code true} when this decision is a self-approval (requester == decider)
      * @throws AccessDeniedException if the caller may not decide the request
@@ -178,7 +178,7 @@ public final class ApprovalPolicy {
     public static boolean checkJobDecision(String requestId, String requester, List<String> designatedApprovers,
                                            String jobFullName) {
         boolean selfApproval = checkDecision(requestId, requester, designatedApprovers);
-        // #23: the job's approver list in force at decision time binds the deciding approver.
+        // The job's approver list in force at decision time binds the deciding approver.
         // Resolved after the caller checks above (designated member, Approve, listed).
         List<String> restriction = jobApproverRestriction(jobForPolicy(jobFullName));
         String caller = Jenkins.getAuthentication2().getName();

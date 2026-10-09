@@ -5,12 +5,12 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * What one retention pass over the XML entities deleted (#13).
+ * What one retention pass over the XML entities deleted.
  *
  * @param runRequests   closed run requests deleted
  * @param grantRequests closed grant requests deleted
  * @param grantIds      ids of the ended grants deleted
- * @param activationRequests closed activation requests deleted (#15)
+ * @param activationRequests closed activation requests deleted
  */
 @Restricted(NoExternalUse.class)
 public record RetentionResult(int runRequests, int grantRequests, List<String> grantIds,

@@ -200,7 +200,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     /*
-     * CSV exports (#13) stay complete for the requested span (only months that exist in the
+     * CSV exports stay complete for the requested span (only months that exist in the
      * store are opened) but are written month by month, newest month first, so at most one
      * month's records are held at a time rather than every row of the span. The store has no
      * row-streaming read yet; see the ui-dev report.
@@ -281,7 +281,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
         // D-37: the existing approver column holds the designated set joined by ';', and
         // decidedBy is appended last so column positions of existing consumers do not move.
         // Every cell still goes through CsvWriter's formula escaping. Filtering runs on the
-        // in-memory summaries (#13); each matching request's XML is loaded only to write its row.
+        // in-memory summaries; each matching request's XML is loaded only to write its row.
         for (RequestSummary summary : matchingRequestSummaries()) {
             RunRequest q = RunRequestService.get().load(summary.id());
             if (q == null) {
@@ -294,7 +294,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
         }
     }
 
-    /** The store's existing month buckets inside the filter range (no month cap, #13). */
+    /** The store's existing month buckets inside the filter range (no month cap). */
     private List<YearMonth> storedMonths() {
         if (storedMonths == null) {
             storedMonths = getFilter().months(Store.get().listStoredMonths());
@@ -342,7 +342,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * The complete CSV export of what this screen lists (S-03), relative to this section.
      * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
      * Only ISO dates and constant names go into it, so no encoding is needed.
      */
@@ -397,7 +397,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
                 && f.matchesUser(c.getUser());
     }
 
-    /** Request summaries matching the filter (by creation time), newest first (#13). */
+    /** Request summaries matching the filter (by creation time), newest first. */
     private List<RequestSummary> matchingRequestSummaries() {
         FilterParser.Filter f = getFilter();
         List<RequestSummary> matched = new ArrayList<>();
@@ -421,7 +421,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * attempt would otherwise be invisible; the index view renders these rows as an alert above
      * the selected table on every tab. The period, job and user filters are the Changes tab's,
      * so the alert describes the same window as that tab (which is what makes {@code ?user=u2}
-     * a query for "what did this account attempt"). The read is bounded like every page (#13).
+     * a query for "what did this account attempt"). The read is bounded like every page.
      */
     public List<ChangeRecord> getMarkerReuseItems() {
         return markerReusePage().getItems();
@@ -457,7 +457,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return Math.max(0, getMarkerReuseCount() - REUSE_ALERT_LIMIT);
     }
 
-    /** One page of the selected kind (#13): rows, match count, and whether the read was capped. */
+    /** One page of the selected kind: rows, match count, and whether the read was capped. */
     private record Listing(List<?> items, int total, boolean hasNext, boolean truncated,
             int oversized) {
         static Listing of(RecordPage<?> page) {
@@ -514,7 +514,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
         return listing().total();
     }
 
-    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    /** Whether the per-request record cap stopped the read: ask to narrow the filter. */
     public boolean isTruncated() {
         return listing().truncated();
     }
@@ -553,7 +553,7 @@ public class HistorySection implements ModelObject, StaplerProxy {
      * counts as approved when its decision was an approval (status APPROVED or later EXECUTED).
      */
     private Map<String, Long> summarize(YearMonth month) {
-        // Run counters are maintained incrementally by the store (#13).
+        // Run counters are maintained incrementally by the store.
         RunMonthStats stats = Store.get().runMonthStats(month);
         long incidentsOpen = 0;
         long incidentsResolved = 0;

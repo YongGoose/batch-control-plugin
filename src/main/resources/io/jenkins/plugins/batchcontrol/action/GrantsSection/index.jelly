@@ -2,7 +2,7 @@
 <!-- D-66 (R4-8): the Grants screen lists pending requests, then active and ended permission
      windows, one row per request, each linking to its detail page. The request form opens in
      core's dialog from the app bar; the old prefill links of this page (?scopeFullName=, ?from=)
-     are redirected to the form page (GrantsSection#getLegacyFormQuery). Backlog #89: short cells
+     are redirected to the form page (GrantsSection#getLegacyFormQuery). Short cells
      do not wrap at 1280 px, only free text does; the Scope, Actions and Approvers cells wrap
      between the kind and the name, or after a ", ", so each table fits the content width. D-71: the Scope column shows the one item a
      request or window names, with its kind (tags/scopeItem.jelly). D-74: a row with a window names

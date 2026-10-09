@@ -178,9 +178,9 @@
 
       <j:if test="${it.canRerun}">
         <h2>Request Rerun</h2>
-        <!-- e2e-04 DD-06: the rerun's parameters are fixed and its reason is generated, as the
-             README says; UX-19: the ordinary run request form is linked for this viewer, who may
-             use it (isCanRerun is the same Request + Item/Read test, D-38a). -->
+        <!-- e2e-04 DD-06: the rerun's parameters are fixed and its reason is generated, as
+             docs/USER-GUIDE.md (Incidents) says; UX-19: the ordinary run request form is linked
+             for this viewer, who may use it (isCanRerun is the same Request + Item/Read test, D-38a). -->
         <!-- D-72 (SPEC item 11): the rerun carries the failed run's own values, passwords and
              recoverable files included; when one cannot be recovered, IncidentItem#doRerun
              continues on the job's run request form instead of creating the request, and the

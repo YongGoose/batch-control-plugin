@@ -44,7 +44,7 @@ public final class Dates {
         if (instant == null) {
             return "";
         }
-        // Display string (#17): the zone is the plugin clock's, read per call so a test clock or
+        // Display string: the zone is the plugin clock's, read per call so a test clock or
         // a zone change applies immediately; the zone name follows the viewer's locale, but the
         // digits stay ASCII (DecimalStyle.STANDARD) so the value reads the same everywhere.
         return DateTimeFormatter.ofPattern(PATTERN, displayLocale())

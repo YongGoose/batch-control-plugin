@@ -12,7 +12,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * The job-page notice for blocked unattended triggers (SPEC item 6, #21). A job whose
+ * The job-page notice for blocked unattended triggers (SPEC item 6). A job whose
  * {@code blockTimer} or {@code blockUpstream} switch is on refuses those runs with nobody to tell,
  * so its main page ({@code jobMain.jelly}, included for every action by both the Freestyle and the
  * Pipeline job page) names the switch and says it is cleared in the job configuration, which is
@@ -69,7 +69,7 @@ public class JobTriggerLockAction implements Action {
         if (!job.hasPermission(Item.READ)) {
             return List.of();
         }
-        // e2e-03 DEF-15 (SPEC item 6 #21, D-46a): the switches refuse unattended runs whatever
+        // e2e-03 DEF-15 (SPEC item 6, D-46a): the switches refuse unattended runs whatever
         // approvalRequired says, and getBlockingSwitches() follows the switches alone.
         BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
         return property == null ? List.of() : property.getBlockingSwitches();

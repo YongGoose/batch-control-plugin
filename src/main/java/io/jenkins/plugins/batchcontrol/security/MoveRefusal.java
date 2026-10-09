@@ -50,7 +50,7 @@ public class MoveRefusal extends Failure {
 
     /**
      * Full name of the group the item was to be moved into, or the empty string for the Jenkins
-     * root (which no permission window can cover). Backlog #83: the refusal page links the Create
+     * root (which no permission window can cover). The refusal page links the Create
      * window request for it.
      */
     public String getDestinationFullName() {

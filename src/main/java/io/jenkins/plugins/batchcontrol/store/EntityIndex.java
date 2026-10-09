@@ -14,7 +14,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * In-memory index of the XML entities (#13): which run and grant requests are still open, what
+ * In-memory index of the XML entities: which run and grant requests are still open, what
  * listings filter on, and when each request or grant was last active (for retention). Derived
  * data, never persisted: {@link FileStore} rebuilds it from the entity files once per Jenkins
  * session and updates it on every save and deletion, so the per-minute expiry work loads only
@@ -43,7 +43,7 @@ final class EntityIndex {
     final Map<String, RunEntry> runRequests = new ConcurrentHashMap<>();
     final Map<String, GrantRequestEntry> grantRequests = new ConcurrentHashMap<>();
     final Map<String, GrantEntry> grants = new ConcurrentHashMap<>();
-    /** Activation requests (#15) share the grant request entry shape: status and last activity. */
+    /** Activation requests share the grant request entry shape: status and last activity. */
     final Map<String, GrantRequestEntry> activationRequests = new ConcurrentHashMap<>();
 
     EntityIndex(Path root) {

@@ -88,7 +88,7 @@ public class ActivationsSection implements ModelObject, StaplerProxy {
 
     /**
      * Whether the viewer is a designated approver of this pending request (the Activations tab
-     * badge's predicate, #76), so its row says "awaiting your decision". D-66: the former inbox
+     * badge's predicate), so its row says "awaiting your decision". D-66: the former inbox
      * table repeated these rows; they are now marked in the Pending list instead.
      */
     public boolean isAwaitingMyDecision(ActivationRequest request) {
