@@ -1,10 +1,15 @@
 # Scripted e2e pass on a real Jenkins, in five shards, with JaCoCo coverage of the changed lines.
 # Contract: e2e/README.md, "CI contract (for .github/workflows)".
 #
+# The shards are the fixed, named groups of e2e/ci/shard.py (GROUPS). The "e2e groups" job checks
+# them (every unit in exactly one group, at most one `last` unit per group, valid labels) and turns
+# them into the matrix; each shard job is named after its group's label, "e2e (<label>)". The
+# artifacts and e2e/ci/out/<k>/ keep the shard index.
+#
 # Non-blocking: no job of this workflow is a required status check. The required checks on
 # main are "build" (build.yml) and ci.jenkins.io's "Jenkins"; the job names here ("e2e build",
-# "e2e (shard k)", "e2e coverage") are kept distinct from them, because a required check is
-# matched by name.
+# "e2e groups", "e2e (<label>)", "e2e coverage") are kept distinct from them, because a required
+# check is matched by name.
 #
 # Runs only when an input of the suite changes (the same "paths" list on push and pull_request:
 # the plugin's sources and Maven build, e2e/, this file); workflow_dispatch runs it on any ref.
@@ -69,15 +74,33 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # No needs: runs alongside build. shard.py uses the standard library only, so the runner's python3 is enough.
+  # check fails the run on an inconsistent GROUPS (::error:: lines) and writes the group table to the job summary.
+  groups:
+    name: e2e groups
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the groups and build the matrix
+        id: groups
+        run: |
+          python3 e2e/ci/shard.py check
+          matrix="$(python3 e2e/ci/shard.py matrix)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   e2e:
-    name: e2e (shard ${{ matrix.shard }})
-    needs: build
+    name: e2e (${{ matrix.label }})
+    needs: [build, groups]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5]
+      matrix: ${{ fromJSON(needs.groups.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,12 +133,13 @@ jobs:
           echo "sans-serif -> $(fc-match sans-serif)"
       # pytest, one test per step (JUnit XML in e2e/ci/out/<k>/junit.xml, Playwright traces of failed steps in
       # e2e/ci/out/<k>/traces/). Exit 1: a step failed; exit 2: the stack did not start (e2e/ci/run.sh).
-      - name: Run shard ${{ matrix.shard }} of 5
+      - name: Run shard ${{ matrix.shard }} of ${{ matrix.of }} (${{ matrix.label }})
         env:
           BC_BUILD: never
           PY: python
           SHARD: ${{ matrix.shard }}
-        run: e2e/ci/run.sh "$SHARD/5"
+          OF: ${{ matrix.of }}
+        run: e2e/ci/run.sh "$SHARD/$OF"
       - name: Shard summary
         if: always()
         env:
