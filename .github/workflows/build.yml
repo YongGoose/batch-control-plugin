@@ -4,7 +4,9 @@
 # The Surefire run is split into parallel shards (issue #54). Shard patterns live in
 # .github/test-shards.txt; .github/scripts/test-shards.py fails the run when a test class
 # matches no shard or two shards. The static checks run once, in the "checks" job. The
-# final "build" job aggregates every job and is the single required status.
+# final "build" job aggregates every job. It is one of the two required status checks on
+# main, with ci.jenkins.io's "Jenkins" (CONTRIBUTING.md §7): keep its name, and give this
+# workflow no path filter, since a skipped workflow leaves a required check pending.
 #
 # Every JDK the jenkinsci hosting checker accepts (21 and 25, R4-3) gets its own static
 # checks job ("build (jdk 21)") and its own test shards ("test (jdk 25, shard 1)"). The

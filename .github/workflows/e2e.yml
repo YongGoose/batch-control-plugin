@@ -1,9 +1,10 @@
 # Scripted e2e pass on a real Jenkins, in five shards, with JaCoCo coverage of the changed lines.
 # Contract: e2e/README.md, "CI contract (for .github/workflows)".
 #
-# Non-blocking: no job of this workflow is a required status check. The job names
-# ("e2e build", "e2e (shard k)", "e2e coverage") are kept distinct from the jobs of build.yml,
-# because a required check is matched by name and "build" is the required status there.
+# Non-blocking: no job of this workflow is a required status check. The required checks on
+# main are "build" (build.yml) and ci.jenkins.io's "Jenkins"; the job names here ("e2e build",
+# "e2e (shard k)", "e2e coverage") are kept distinct from them, because a required check is
+# matched by name.
 #
 # Runs with the default read-only token and no secrets, so fork pull requests work too: the
 # coverage report goes to the job summary, annotations and an artifact, never to a PR comment

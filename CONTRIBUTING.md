@@ -374,10 +374,13 @@ behind any of them.
   every push to `main` runs the same command in GitHub Actions
   (`.github/workflows/build.yml`, Linux). Each JDK the hosting checker accepts
   has its own checks — `build (jdk 21)`, `build (jdk 25)`, `test (jdk 21, shard 1)`,
-  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` is the
-  single required status check for merging. After the move to jenkinsci,
-  ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
-  the `Jenkinsfile`.
+  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` succeeds
+  only when all of them do. ci.jenkins.io also builds Linux on JDK 21 and 25 and
+  Windows on JDK 21 from the `Jenkinsfile` and reports the check `Jenkins`.
+- **Merging into `main`** needs two required status checks, `build` and
+  ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
+  (update it when GitHub says it is behind), and one approving review, from the
+  maintainer.
 - The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e (shard 1)`
   … `e2e (shard 5)`, `e2e coverage`) runs on the same events against a real
   Jenkins in Docker and reports the JaCoCo coverage of the lines your change
