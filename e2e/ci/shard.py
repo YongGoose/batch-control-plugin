@@ -67,8 +67,8 @@ JOB_OVERHEAD = 3.2
 
 
 class Unit:
-    def __init__(self, name, weight, steps, last=False, doc=""):
-        self.name, self.weight, self.steps, self.last, self.doc = name, weight, steps, last, doc
+    def __init__(self, name, weight, steps, last=False, doc="", group=None):
+        self.name, self.weight, self.steps, self.last, self.doc, self.group = name, weight, steps, last, doc, group
 
 
 def crawl_unit(role, weight):
@@ -197,6 +197,11 @@ UNITS = [
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
              "run, rerun of a deleted build; the self-grant guard's 403 page with matrix-auth's form (SPEC 8, 5, 11, 2)"),
+    # e2e-23 R2-02 and R2-01 (bug-hunt batch A, D-82). r23/matrix_children.py arranges its own item (r23-mx).
+    Unit("r23-matrix-children", 0.8, [("r23-matrix-children", py("r23/matrix_children.py"))],
+         group="job ui windows and disk",
+         doc="e2e-23 R2-02/R2-01: an approved run of an activated matrix project runs its configurations; a configuration "
+             "has no activation or request UI of its own and points to its parent; its direct build is refused"),
     Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
@@ -263,6 +268,11 @@ GROUPS = [
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
+# A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
+# group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`
+# reports). The e2e-23 units use it, so that each of their PRs adds lines of its own to this file and none edits the
+# group lists above, which other open PRs edit (git cannot merge two edits of neighbouring lines).
+GROUPS = [(label, names + [u.name for u in UNITS if u.group == label]) for label, names in GROUPS]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
 
