@@ -164,6 +164,13 @@ UNITS = [
     Unit("r23-kill-switch", 0.6, [("r23-kill-switch", py("r23/kill_switch.py"))], group="admin and role strategy",
          doc="e2e-23 R3-01: with the change log unwritable, change control turned off on the form and by the setter "
              "completes (no 500, off on disk, open windows revoked, 403 after it is back on); the JCasC boot path: T-01-19"),
+    # e2e-23 R3-01 follow-up (record-write guards). r23/record_writes.py deletes and re-creates its own items (r23-rw-*),
+    # makes batch-control/changes/ unwritable around each action with `docker exec -u root` and restores its exact modes;
+    # it turns change control off and on again (which revokes every open window) and leaves no pending request.
+    Unit("r23-record-writes", 0.8, [("r23-record-writes", py("r23/record_writes.py"))], group="crawls and multibranch",
+         doc="e2e-23 R3-01 follow-up: with the change log unwritable, an approved ACTIVATE/HOLD is applied (no 500, others "
+             "INVALIDATED, mail), a non-admin's move is held and locked, a grant request while change control is off gets "
+             "the 4xx refusal, a createItem payload or copy answers the D-48 403"),
     Unit("multibranch", 2.8, [
         ("mb-arrange", py("r15/arrange.py")),
         ("mb-check-crawl", py("r15/check.py", "crawl")),
