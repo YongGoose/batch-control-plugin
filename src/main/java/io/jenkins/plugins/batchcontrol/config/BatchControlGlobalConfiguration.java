@@ -307,6 +307,12 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * Toggle records and side effects of a switch change (on the form path only after the
      * new state is on disk; D-42: on a direct setter call before the best-effort write). The toggle record is written before the revocations, so the audit
      * history reads in causal order: the switch went off, and then these windows were closed.
+     *
+     * <p>R3-01: never throws. The switch is already applied when this runs; a toggle record that
+     * cannot be written is logged ({@link #recordToggle}) and the revocation still runs, and so do
+     * the form's CONFIG_CHANGE record and the setter's persistence after it. A revocation that
+     * fails as a whole is logged at SEVERE: the windows confer nothing while change control is off
+     * ({@code GrantAwareACL}), and the switch change stands.
      */
     private void afterSwitchesChanged(boolean previousRun, boolean previousChange) {
         if (previousRun != this.runControlEnabled) {
@@ -318,7 +324,13 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
             // the fresh state on the next admin page render, not after the TTL.
             io.jenkins.plugins.batchcontrol.ops.ConfigureWithoutGrantMonitor.invalidateCache();
             if (!this.changeControlEnabled) {
-                io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
+                try {
+                    io.jenkins.plugins.batchcontrol.security.GrantService.get().revokeAllActive();
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.SEVERE, "Change control was turned off, but revoking the active permission"
+                            + " windows failed; they confer nothing while change control is off, and an administrator"
+                            + " must revoke them before turning it on again", e);
+                }
             }
         }
     }
@@ -386,10 +398,21 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         }
     }
 
+    /**
+     * The CONFIG_TOGGLE record of a switch change. R3-01: a record that cannot be written (the
+     * change log unwritable, for one) is logged at SEVERE and never stops or reverses the switch
+     * change, its revocations or the save that follow: the switch is what protects, the record only
+     * reports it.
+     */
     private static void recordToggle(String key, boolean previous, boolean current) {
         String user = Jenkins.getAuthentication2().getName();
-        Store.get().appendChangeRecord(
-                ChangeRecord.create(ChangeType.CONFIG_TOGGLE, key, user, previous + " -> " + current));
+        try {
+            Store.get().appendChangeRecord(
+                    ChangeRecord.create(ChangeType.CONFIG_TOGGLE, key, user, previous + " -> " + current));
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.SEVERE, "Could not record the switch change " + key + ": " + previous + " -> " + current
+                    + " by '" + user + "'; the change is in effect all the same", e);
+        }
     }
 
     // ---------------------------------------------------------------- approvers
