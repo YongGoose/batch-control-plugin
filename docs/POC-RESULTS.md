@@ -192,3 +192,126 @@ In the product this becomes a `@RequirePOST` + Overall/Administer "Enable Batch 
 - Request: `docs/LIMITATIONS.md` (release-manager), add the role-strategy Manage Roles limitation (row 6) and, until D-35b is implemented, the self-grant limitation (row 14).
 - Request: `pom.xml` (release-manager), role-strategy and configuration-as-code become optional (non-test) dependencies and matrix-auth a regular one, if D-35a is accepted.
 - Note: `mvn verify` in `poc/` fails SpotBugs on two **pre-existing** Phase 1 fields (`PocDeleteVetoListener.vetoEnabled`, `PocQueueDecisionHandler.throwFailure`, `PA_PUBLIC_PRIMITIVE_ATTRIBUTE`). They were not changed here. The PoC-5 code is clean.
+
+## PoC-6 multipart repeated fields (D-37, LIMITATIONS 56)
+
+Question from the maintainer: Stapler keeps only the last value of a repeated `multipart/form-data`
+field, so an API client that repeats `approvers` without the `json` field designates one approver
+(LIMITATIONS 56; the browser path was fixed by PR #21). Could a servlet filter fix this on the server?
+
+- Environment: Jenkins 2.568.3, Stapler 2088.2093.vd7c3e58008a_6, commons-fileupload2 2.0.0-M5 (core's own copy,
+  `org.apache.commons.fileupload2.jakarta.servlet5`), the Jetty 12 of JenkinsRule (container request `org.eclipse.jetty.ee9.nested.Request`), Java 25.0.4.
+  winstone itself was not exercised.
+- Command: in `poc/`, `mvn test -Dtest=Poc6MultipartFilterTest`: **17 tests, all pass**. The full PoC suite (`mvn test`) passes too: 69 run, 0 failed, 1 skipped (the existing `InjectedTest` skip).
+  `mvn verify` adds no SpotBugs finding. It still fails only on the two Phase 1 fields noted under PoC-5. The access-modifier-checker passes, so no `@Restricted` API is used.
+- Code: `poc/src/main/java/io/jenkins/plugins/batchcontrol/poc/multipart/`
+  - `PocMultipartAction` is a stand-in for `JobRequestAction#doSubmit` at `/job/<name>/poc-multipart/submit`. It reads `getParameterValues("approvers")`, `getFileItem2("file0")` and the `json` blob, and applies the D-72 stage-1 `Content-Length` check (413). It does not use the plugin's main code.
+  - `PocRepeatedFieldsFilter` is registered with `PluginServletFilter.addFilter` from an `@Initializer(after = PLUGINS_STARTED)`, as production would do it.
+  - Tests are in `poc/src/test/java/io/jenkins/plugins/batchcontrol/poc/multipart/`. They send raw bodies through `java.net.http`, built the way a browser builds them (no charset in the part headers), with chunked mode when a test needs it.
+- How the filter works:
+  - **Scope.** It acts only on a POST whose `Content-Type` starts with `multipart/` (the same test as Stapler's `RequestImpl#isMultipart`) and whose path contains `/job/` and ends with `/<action>/submit[/]`.
+  - **Body over the cap.** If the declared length is over the cap, the request passes through unread.
+  - **Body within the cap.** The filter copies at most cap + 1 bytes. Up to 256 KiB stay in memory; beyond that the copy goes to an owner-only temp file.
+  - **Parsing.** It parses the copy with fileupload2's streaming iterator and keeps only the `approvers`/`approver` plain parts. These are exposed as the request attribute `Map<String, List<String>>`.
+  - **Replay.** Stapler then reads a replay of the same bytes. The temp file is deleted when the chain returns.
+
+### Verdicts
+
+| # | Question | Verdict | Tests (`Poc6MultipartFilterTest`) |
+|---|---|---|---|
+| 1 | Filter runs before Stapler parses, for a POST under a job | **Yes** | `q1_baselineWithoutFilter_repeatedApproversCollapseToLast` (LIMITATIONS 56 reproduced: `[bob]`), `q1_filterSeesTheUnreadBodyBeforeStaplerParsesIt` (filter reads all `Content-Length` bytes from the socket, `Stapler.getCurrentRequest2()` is null, filter sequence number < action's) |
+| 2 | Read, collect, expose, replay with the file intact | **Yes, through a request attribute only** | `q2_fileAndRepeatedApprovers_actionSeesAllInOrder_fileUnchanged` (`[alice, bob, carol]` with parts before and after the file; file name, size and SHA-256 unchanged), `q2_bodyWithoutRepeatedFields_actionSeesExactlyWhatItSeesWithoutFilter` (plain body and browser shape with `json`: the action sees the same thing with and without the filter), `q2_overridingGetParameterValuesInstead_duplicatesTheLastValue`, `q2_nonAsciiValue_filterDecodesUtf8_staplerPlainFieldDoesNot` |
+| 3 | Size cap kept, bounded resources | **Yes**. The upload is on disk twice during the request | `q3_declaredLengthOverCap_passesThroughUnread_actionStillAnswers413`, `q3_streamedBodyOverCap_copiedOnlyUpToCap_thenHandedOnUnparsed`, `q3_largeBody_ownerOnlyTempFile_uploadHeldTwice_copyDeletedAfterRequest` |
+| 4 | CSRF, scope, malformed bodies, other URLs | **Yes, no regression found** | `q4_crumbsOn_securedInstance_multipartWithCrumbAccepted_filterRunsAfterAuthentication`, `q4_crumbsOn_noCrumb_refusedWith403_beforeTheFilterBuffersAnything`, `q4_crumbOnlyInsideTheMultipartBody_sameOutcomeWithAndWithoutFilter`, `q4_scope_otherMethodsContentTypesAndUrlsAreNotTouched`, `q4_malformedMultipart_noAttribute_sameResponseAsWithoutFilter`, `q4_clientAbortsMidUpload_filterLeavesNoTempFile` |
+| 5 | Cheaper alternatives | **Neither works** | `q5_containerGetParts_withoutMultipartConfig` (`IllegalStateException: No multipart config for servlet`; the body is not consumed, so Stapler is unaffected), `q5_rawInputStream_isAlreadyConsumedWhenTheActionRuns` (0 bytes left: Stapler parsed the body during dispatch) |
+
+### Findings
+
+- **Q2, exposure.** Overriding `getParameterValues` in an `HttpServletRequestWrapper` gives wrong results.
+  - The cause: `RequestImpl#getParameterValues` for a multipart request returns `super.getParameterValues(name)` (our wrapper) plus its own last part.
+  - Two values come back as `[alice, bob, bob]`, and one value as `[alice, alice]`.
+  - Core's `SimpleParameterDefinition#createValue(StaplerRequest2)` refuses `length != 1`. Applied to parameter fields, the override would break the raw submission channel.
+  - The request attribute has none of these problems, and a client cannot set one.
+- **Q2, charset (pre-existing, side finding).** Stapler decodes the two kinds of part differently:
+  - A plain multipart part without a charset is decoded as **ISO-8859-1** (`DiskFileItem#getString`). `山田` arrives as `å±±ç°`.
+  - The `json` part is decoded with the request charset (UTF-8).
+  - The filter decodes like the `json` part, so the attribute holds `[jürgen, 山田]`.
+  - Today a non-ASCII approver id sent through the raw multipart channel is garbled. Only the `json` path is correct.
+  - **Suspected, not verified on the real action:** this may also affect the browser form. `RepeatedField.values` adds the raw part after the `json` values (PR #21), and `ApproverInput.normalize` de-duplicates by string equality. For a user id such as `山田`, the designated set would then hold both `山田` and the garbled `å±±ç°`, and the second one is not an eligible user. This only matters for realms that allow non-ASCII ids (LDAP, SAML, OIDC); Jenkins' own user database allows only `[a-zA-Z0-9_-]` by default (`HudsonPrivateSecurityRealm.ID_REGEX`).
+- **Q3, cap.** The cap holds for both kinds of body:
+  - **Declared length over the cap:** the filter copies 0 bytes and the action answers 413 as before.
+  - **Chunked body over the cap:** the filter copies exactly cap + 1 bytes, stops, and hands on "copied prefix + unread rest of the socket" without parsing it. Stapler receives the file intact, and in the product the D-74 stage-2 kept-size check then refuses it.
+  - So the filter never buffers or parses more than cap + 1 bytes.
+- **Q3, cost (measured).** Bodies up to 256 KiB stay on the heap. Above that:
+  - The copy goes to `Files.createTempFile` (`rw-------`) in `java.io.tmpdir`.
+  - While the action runs, the filter's copy **and** Stapler's `jenkins-stapler-uploads*/upload_*.tmp` both exist. The upload is on disk twice, and its bytes are written twice and read twice.
+  - The filter's copy is deleted when the request ends, and also when the client aborts mid-upload (test `q4_clientAbortsMidUpload...`).
+  - Local SSD timing for an 8 MiB file: 59 ms without the filter, 71–75 ms with it (warm runs), about +13 ms or +20%.
+  - Worst case is cap × concurrent submissions of extra temp disk: 100 MiB each by default.
+  - Keeping everything in memory instead would put up to 100 MiB per request on the heap, which is not acceptable.
+- **Q4, order.**
+  - `CrumbFilter` and authentication both run before the plugin filter chain: a crumbless POST is refused with 403 and the filter never runs, and the filter sees `alice` as the authentication.
+  - A crumb in the query or in the header works with the filter in front.
+  - A crumb sent only as a multipart part is refused with 403 **with and without** the filter. `CrumbFilter` reads the container's parameters, which do not include multipart parts.
+  - The filter does not check job permissions: it buffers before the action's `Item/Read` and Request checks. Stapler already parses every multipart POST under a job during dispatch (D-72a (1)), so no new exposure class appears, but the I/O doubles.
+- **Q4, scope.** These requests are not touched: a GET, a url-encoded POST (the container already returns every value), a multipart POST to `/poc-multipart/other`, `/job/x/build` or `/manage/submit`.
+  - A view-prefixed URL (`/view/all/job/x/...`) is in scope.
+  - `/job/x/poc-multipart/submit/extra` is routed by Stapler to `doSubmit` but not matched by the filter. That is an under-match, and it fails safe: the old last-value behaviour.
+  - An over-match is also harmless: the filter only adds the true content of the body and makes no access decision.
+- **Q4, malformed bodies.** For a truncated body, a body without a boundary and garbage bytes, the response and what the action sees are identical with and without the filter.
+  - The filter logs at FINE and sets no attribute. For garbage, fileupload2 finds no parts and the attribute is `{}`.
+  - Stapler itself logs SEVERE with a stack trace for these bodies. That is pre-existing and unchanged.
+
+### Recommendation
+
+**Do not implement now.** All five questions came out "feasible", but the cost is out of proportion to the problem.
+
+- **The affected case is narrow and has two working workarounds.** It is an API client that posts multipart (only needed for file parameters), designates several approvers and omits `json`. That client can send `json` or post url-encoded (LIMITATIONS 56).
+- **It reverses an owner decision.** D-72a (1) rejected an endpoint-specific servlet filter because it "adds an extension point ARCHITECTURE does not list". D-33 explains why hosting reviewers object to plugins that use `PluginServletFilter`. This filter is narrowly scoped, but it is still a global filter that sees every request.
+- **Every Request Run submission with a file pays the doubled disk I/O,** browser submissions included. The browser already sends `json`, but the filter cannot know that before it parses.
+- **It links against fileupload2's streaming API, a milestone (`2.0.0-M5`) that core bundles.** That API is not part of the Jenkins plugin contract, and earlier milestones renamed methods (`setSizeMax` → `setMaxSize`). A core upgrade can break the plugin at runtime.
+- **The proper fix belongs upstream.** In Stapler, `RequestImpl#parseMultipartFormData` would keep a `Map<String, List<String>>` and `getParameterValues` would return every part. That fixes it for core and every plugin, with no second copy. I recommend opening an issue or PR at jenkinsci/stapler, and removing LIMITATIONS 56 once the plugin's baseline includes the fix.
+
+**If the owner decides to implement it anyway, the conditions are:**
+1. Expose the values through a request attribute only, never by overriding `getParameterValues`.
+2. When the attribute is present, it replaces the raw last-part channel in `RepeatedField.values` (`json` values first, as today). It must not be merged with the raw part, because the raw part may hold the ISO-8859-1-garbled duplicate.
+3. Collect only the `approvers`/`approver` fields, with bounds on parts (1000), value length and value count.
+4. Use the same cap as `RequestBodyLimit.maxRequestBodyBytes()`. Pass a declared over-cap body through unread, and pass a chunked over-cap body through as prefix + rest without parsing it.
+5. Copy to an owner-only temp file, deleted in `finally` and on client abort. Keep only a small heap threshold.
+6. Use the same multipart test as Stapler (`startsWith("multipart/")`) and a path test that fails safe.
+7. On a parse error, set no attribute and log at FINE, and Stapler sees the identical bytes.
+8. A DECISIONS entry amending D-72a (1) and an ARCHITECTURE section 2 entry for the filter.
+
+**Estimated production change:**
+- One new class in `ui/` (the filter, with bounded copy, replay wrapper and parser), about 200–230 lines with javadoc.
+- `ui/RepeatedField.java`, about +15 lines. This one change covers `ApproverInput` and `FormErrors`.
+- `policy/RequestBodyLimit` reused unchanged.
+- Tests about 300 lines, ported from q1–q4.
+- Docs: DECISIONS, ARCHITECTURE section 2, and a rewrite of LIMITATIONS 56. What would remain there: `/submit/<extra>` URLs, and bodies over the filter's part and value bounds.
+- In total, 2 main files and about 250 main lines.
+
+**What a security review would need to see:**
+- the filter's scope predicate and evidence that it fails safe both ways (q4 scope);
+- that `CrumbFilter` and authentication run first (q4 crumb tests);
+- the cap behaviour for declared and chunked bodies (q3);
+- temp file permissions and deletion on success, error and client abort (q3, q4 abort);
+- that a malformed body reaches Stapler byte for byte (q4 malformed);
+- that the filter makes no access decision and the attribute cannot be client-supplied;
+- the disk and I/O amplification figure (2× per upload, cap × concurrency), and whether an anonymous or low-privilege user can trigger it. Today they already trigger 1× through Stapler.
+
+### Not verified
+
+- Production winstone. The tests ran on JenkinsRule's Jetty 12 (ee9 nested), so the `getParts()` result and the filter order there are inferred, not observed.
+- Concurrent uploads, and heap and disk usage under load. Only the single-request cost was measured.
+- Interaction with other plugins' `PluginServletFilter`s that also wrap or read the input stream.
+- Reverse proxies that buffer or re-chunk bodies.
+- Async servlet reads: the replay stream refuses `setReadListener`, and Stapler does not use async I/O.
+- The real `JobRequestAction` path. The PoC action mirrors only its field reads and the stage-1 cap.
+
+### Requests
+
+- Request: `src/test/**` (test-author). Add a browser-shaped multipart Request Run submission (raw `approvers` parts plus the `json` blob, no part charset) that designates a non-ASCII user id, and check the stored approver set. This is the suspected pre-existing defect in the q2 charset finding.
+- Request: `src/main/java/io/jenkins/plugins/batchcontrol/ui/RepeatedField.java` (ui-dev). Only if that test fails: for a multipart request that carries a `json` blob, either do not add the raw part, or decode it as UTF-8 and not as Stapler's ISO-8859-1.
+- Request: `docs/LIMITATIONS.md` item 56 (release-manager). Add that an API client sending a non-ASCII approver id as a plain multipart part gets it garbled (decoded as ISO-8859-1), so it needs the `json` field or a url-encoded body for that too.
+- Request: `docs/DECISIONS.md` (humans). Only if the filter is wanted: amend D-72a (1) and record the conditions above.
+- Request: upstream (maintainer). Open a jenkinsci/stapler issue: "`RequestImpl` drops all but the last value of a repeated multipart form field", with this PoC's q1 baseline as the reproducer.
