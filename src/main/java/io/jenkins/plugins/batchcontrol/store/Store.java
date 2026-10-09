@@ -235,7 +235,11 @@ public interface Store {
     /** Removes the config snapshot of a job (after deletion, rename or move). */
     void deleteConfigSnapshot(String jobFullName);
 
-    /** Appends one run record to the monthly JSONL bucket derived from its start time. */
+    /**
+     * Appends one run record to the monthly JSONL bucket derived from its start time. The line
+     * carries {@code appendedAt} (D-81): the record's own {@link RunRecord#getAppendedAt()} when the
+     * caller set it, else the plugin clock's instant of this append.
+     */
     void appendRunRecord(RunRecord record);
 
     /** Reads every run record of the given month (empty list if the month file is absent). */

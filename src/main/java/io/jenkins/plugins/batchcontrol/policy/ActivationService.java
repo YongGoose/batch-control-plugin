@@ -18,6 +18,7 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.ItemIdentity;
 import io.jenkins.plugins.batchcontrol.store.BatchClock;
 import io.jenkins.plugins.batchcontrol.store.Store;
+import io.jenkins.plugins.batchcontrol.store.XmlChars;
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
@@ -399,6 +400,8 @@ public final class ActivationService {
             throw new IllegalArgumentException("The reason must not exceed "
                     + MAX_REASON_LENGTH + " characters.");
         }
+        // R1-01: the reason is written into the request file, which XML 1.0 must be able to read back.
+        XmlChars.requireStorable(reason, "reason");
         if (!isSubject(job)) {
             Item carrier = activationSubject(job);
             throw new IllegalArgumentException("'" + job.getFullName() + "' does not carry an activation of "
@@ -439,6 +442,8 @@ public final class ActivationService {
      * longer exists is invalidated.
      */
     public ActivationRequest approve(String id, String comment) {
+        // R1-01: refused before anything changes, as for run requests (D-72b (2)).
+        XmlChars.requireStorable(comment, "comment");
         ActivationRequest request;
         lock.lock();
         try {
@@ -526,6 +531,7 @@ public final class ActivationService {
         if (comment == null || comment.trim().isEmpty()) {
             throw new IllegalArgumentException("A comment is required to reject an activation request.");
         }
+        XmlChars.requireStorable(comment, "comment"); // R1-01
         ActivationRequest request;
         lock.lock();
         try {
