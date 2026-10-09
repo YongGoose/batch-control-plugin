@@ -92,7 +92,7 @@ $JENKINS_HOME/batch-control/
 ├── requests/run/<id>.values.xml  RunRequestValues: the typed ParameterValues, written once at submission (D-74)
 ├── requests/grant/<id>.xml       GrantRequest
 ├── grants/<id>.xml               Grant
-├── runs/YYYY-MM.jsonl            RunRecord, 월별 append-only
+├── runs/YYYY-MM.jsonl            RunRecord, 월별 append-only; each line carries `appendedAt` (D-81)
 ├── incidents/<id>.xml            Incident (상태 전이가 있으므로 XML)
 ├── incidents/index/YYYY-MM.jsonl 월별 인덱스 (id, runId, jobFullName, result, createdAt)
 ├── changes/YYYY-MM.jsonl         ChangeRecord, 월별 append-only. diff는 changes/diff/<id>.patch
@@ -102,7 +102,7 @@ $JENKINS_HOME/batch-control/
 - ID: `yyyyMMdd-HHmmss-<6자리 랜덤>` (파일명 안전, 시간순 정렬 가능).
 - 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush. An append first ends a torn last line (a file that does not end with a line end, or whose last byte cannot be read, gets one; at worst a blank line, which readers skip), so a damaged line never swallows the next record.
 - Unreadable entity files (an XML file that cannot be read or parsed) are skipped with a warning in listings and in the grant cache; a skipped grant confers nothing. Open-request listings skip a request that became unreadable after startup (it keeps its index entry and is picked up once readable); a D-21 invalidation missed because of it is remembered in memory and applied once readable.
-- Reads (#13): list screens page newest-first by streaming month files from the end and stop after the page window or at most 50,000 scanned records (`RecordPage.truncated`, and the screen asks the user to narrow the filter). Diffs are read only for the rows shown. Month counters for summaries are kept in memory and updated from what was appended since the last read. An in-memory index of requests and grants is built once per session at startup; the expiry, recovery and invalidation scans load only open requests. All of this is derived state, never persisted, and rebuilt on restart.
+- Reads (#13, D-81): list screens page newest-first by streaming month files from the end (a run line's own `appendedAt` decides where a date-filtered scan may stop; older lines fall back to start + duration) and stop after the page window or at most 50,000 scanned records (`RecordPage.truncated`, and the screen asks the user to narrow the filter). Diffs are read only for the rows shown. Month counters for summaries are kept in memory and updated from what was appended since the last read. An in-memory index of requests and grants is built once per session at startup; the expiry, recovery and invalidation scans load only open requests. All of this is derived state, never persisted, and rebuilt on restart.
 - Locks (#18): one lock per file stripe (64 stripes by path hash) instead of a single store lock. Retention deletes one file at a time under that file's lock, so the queue gate and build completion wait behind at most one write.
 - Names (#17, #25): month bucket names and ids use `Locale.ROOT` ASCII digits and the plugin clock's zone. A shortened item file name is `prefix~sha256`; `encode` writes `~` as `%7E`, so a shortened name never equals a plain encoding. Pre-release file names (the old shortened form, non-ASCII month digits) are neither read nor migrated (D-43).
 - Retention also deletes closed requests and ended grants older than the first kept month.
@@ -128,6 +128,7 @@ $JENKINS_HOME/batch-control/
 ```
 
 - A job whose directory marker (identity) cannot be read counts as not activated (fail closed, SPEC 6a).
+- Identity (D-80): the state stores the id held by the marker file `.batch-control-activation-id` (one random UUID, written when the state is first stored, seeded or approved) in the job's directory, not the directory's file key, so a copied or restored JENKINS_HOME keeps its activations and a job re-created under a deleted name (or copied by Jenkins) has no marker and starts not activated.
 - `policy.ActivationService#isActivated(Job)` is the single read the queue gate uses for timer and upstream causes; it is ANDed with `blockTimer`/`blockUpstream`.
 - Activation state is written only by an approved ACTIVATION request (or the one-time seeding), never by job configuration, so no config write path can activate a job.
 - Rename/move relocates the state file; deletion removes it. The file name uses `PathCodec` like snapshots.
