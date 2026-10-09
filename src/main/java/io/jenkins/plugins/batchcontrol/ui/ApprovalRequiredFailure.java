@@ -10,8 +10,11 @@ import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -52,6 +55,13 @@ import org.kohsuke.stapler.StaplerResponse2;
  * <p>Any other viewer gets this page. Its content sits inside a {@code <form>} with no action and
  * no controls, never submitted, only so that the new job page's dialog shows the refusal in
  * place (it renders the first form of a response) instead of re-opening the classic form.
+ *
+ * <h2>R4-02: a script gets the plain message, never the redirect</h2>
+ * A script ({@link #isScriptCaller}) that posts to {@code buildWithParameters} or {@code build}
+ * with an API token must see the refusal as a failure: {@code curl -fL} followed the 303 to the
+ * HTML form, got 200 and exited 0 although nothing was queued. A script therefore gets HTTP 400
+ * with {@link #getMessage()} as {@code text/plain}, before any redirect or page; the message is
+ * the gate's existing wording. Browsers keep the D-60 redirect and the page above.
  */
 @Restricted(NoExternalUse.class)
 public class ApprovalRequiredFailure extends Failure {
@@ -109,6 +119,17 @@ public class ApprovalRequiredFailure extends Failure {
     public void generateResponse(StaplerRequest2 req, StaplerResponse2 rsp, Object node,
                                  @CheckForNull Throwable throwable)
             throws IOException, ServletException {
+        if (isScriptCaller(req)) {
+            // R4-02: a 4xx a script can detect, carrying the plain message; no redirect, no page.
+            rsp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            rsp.setContentType("text/plain;charset=UTF-8");
+            rsp.setCharacterEncoding(StandardCharsets.UTF_8.name());
+            rsp.setHeader("X-Content-Type-Options", "nosniff");
+            PrintWriter writer = rsp.getWriter();
+            writer.println(getMessage());
+            writer.flush();
+            return;
+        }
         Job<?, ?> job = getJob();
         if (job != null && isCanRequest() && isBuildSubmission(req, job)) {
             // D-60: to the request form, with the submitted values; never to core's build form.
@@ -124,6 +145,30 @@ public class ApprovalRequiredFailure extends Failure {
         }
         rsp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
         view.forward(req, rsp);
+    }
+
+    /**
+     * R4-02: whether the refused submission comes from a script rather than a browser.
+     *
+     * <p>A request whose {@code Accept} names {@code text/html} is a browser (a page navigation
+     * or form post). Any other request is a script unless it both accepts anything ({@code *}{@code /*})
+     * and carries no {@code Authorization} header: that combination is a page script of a
+     * signed-in browser session, above all the parameters dialog of the new job page, whose
+     * {@code fetch} sends {@code Accept: *}{@code /*} with the session cookie and must keep its
+     * D-60 redirect, and a browser driven through its request API. A script presents its
+     * credentials (an API token, {@code curl -u}, {@code requests auth=}) with every request,
+     * or names a non-HTML type, or sends no {@code Accept} at all.
+     */
+    static boolean isScriptCaller(StaplerRequest2 req) {
+        String accept = req.getHeader("Accept");
+        if (accept == null) {
+            return true;
+        }
+        String lower = accept.toLowerCase(Locale.ROOT);
+        if (lower.contains("text/html")) {
+            return false;
+        }
+        return !lower.contains("*/*") || req.getHeader("Authorization") != null;
     }
 
     /**
