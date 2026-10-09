@@ -242,7 +242,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 
 - Acceptance: a save of the Batch Control configuration that changes anything besides the two switches writes one `CONFIG_CHANGE` record naming the user and each changed field with old and new values; installing or reverting a Batch Control strategy writes one `STRATEGY_CHANGE` record; a save that changes nothing writes nothing. (D-52)
 - Acceptance: an approver id that names no existing user and that the security realm does not resolve is refused with a message next to the field naming it; the input is kept and nothing is saved. If the realm cannot be asked the id is accepted with a warning. An empty approver list is refused while either switch is on. (D-53)
-- Acceptance: while the target job is disabled, the run request decision form says so and Approve is refused with a message; Reject stays possible. A request approved before the job was disabled shows that it waits because the job is disabled. (D-55)
+- Acceptance: while the target job is disabled, the run request decision form says so and Approve is refused with a message; Reject stays possible. A request approved before the job was disabled shows that its queued run was cancelled and will not start, and that the job must be enabled and a new run request submitted. (D-55, D-83)
 
 ## 3. 데이터 모델 (MVP)
 
