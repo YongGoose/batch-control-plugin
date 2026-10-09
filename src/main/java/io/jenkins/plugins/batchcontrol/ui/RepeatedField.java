@@ -20,10 +20,19 @@ import org.kohsuke.stapler.StaplerRequest2;
  * {@code getParameterValues} nor {@code getFileItem2} can return the others, and the body
  * stream has already been consumed by then (core may have parsed it during dispatch, before any
  * plugin code). So for a multipart request the {@code json} blob is read as well. {@code f:form}
- * posts that blob with every submission, and Stapler parses it from the same body. The blob's
- * values come first, in their order, then the raw part. For the rendered form the raw part is
- * one of the blob's values, so it adds nothing. For a urlencoded request this is
- * {@code getParameterValues} and nothing else, as before.
+ * posts that blob with every submission, and Stapler parses it from the same body.
+ *
+ * <p>The rule (D-37):
+ * <ul>
+ * <li>multipart, and the blob holds string values for the field: those values, in their order,
+ *     and nothing else. The raw part is not added: it is one of the blob's values for the rendered
+ *     form, and Stapler decodes a part without a charset as ISO-8859-1, so a non-ASCII value would
+ *     come back garbled (UTF-8 {@code 山田} read as {@code å±±ç°}) next to the blob's intact copy.
+ *     The raw part is never re-decoded.</li>
+ * <li>multipart without a blob, or a blob without string values for the field (for example the
+ *     boolean array of checkboxes without {@code json}): the raw part, as before.</li>
+ * <li>urlencoded: {@code getParameterValues} and nothing else, as before.</li>
+ * </ul>
  *
  * <p>Nothing here parses a body that the caller has not let be parsed already. The blob is read
  * only when the request is multipart and carries a non-empty {@code json} field, and only after
@@ -57,6 +66,12 @@ public final class RepeatedField {
             JSONObject json = formData != null ? formData : submittedJson(req);
             if (json != null) {
                 addJson(out, json.opt(field));
+                if (hasValue(out)) {
+                    // D-37: the blob's values are the whole set; the raw part is one of them,
+                    // possibly decoded with the wrong charset, so it must not add a copy.
+                    return out;
+                }
+                out.clear();
             }
         }
         if (raw != null) {
@@ -67,6 +82,16 @@ public final class RepeatedField {
             }
         }
         return out;
+    }
+
+    /** Whether {@code values} holds at least one non-blank value (a value the caller can use). */
+    private static boolean hasValue(List<String> values) {
+        for (String value : values) {
+            if (!value.trim().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

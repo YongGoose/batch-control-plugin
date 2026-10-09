@@ -22,7 +22,9 @@ import org.kohsuke.stapler.StaplerRequest2;
  *
  * <p>A {@code multipart/form-data} body (the Request Run form, D-72) keeps only the last part of
  * a repeated field in Stapler, so there the {@code json} blob the form posts with it is read as
- * well ({@link RepeatedField}): the rendered checkboxes put the checked ids into it in order.
+ * instead ({@link RepeatedField}): the rendered checkboxes put the checked ids into it in order,
+ * and when it holds ids they are the whole set (the raw part, which Stapler decodes as ISO-8859-1
+ * without a part charset, is then not read). Without ids in the blob the raw part is used.
  *
  * <p>Validation here is shape only: entries are trimmed, blanks dropped, duplicates collapsed,
  * and the count and length are bounded so a request cannot carry unbounded input. Eligibility
@@ -57,8 +59,8 @@ public final class ApproverInput {
     public static List<String> read(StaplerRequest2 req, @CheckForNull JSONObject formData) {
         List<String> raw = new ArrayList<>();
         if (RepeatedField.isMultipart(req)) {
-            // D-37: Stapler keeps only the last of the repeated multipart parts, so the blob's ids
-            // come first (all of them, in order), then the raw part (one of them for the form).
+            // D-37: Stapler keeps only the last of the repeated multipart parts and decodes it as
+            // ISO-8859-1, so the blob's ids are the set when it holds any; else the raw part.
             raw.addAll(RepeatedField.values(req, formData, FIELD));
             raw.addAll(RepeatedField.values(req, formData, LEGACY_FIELD));
             return normalize(raw);
