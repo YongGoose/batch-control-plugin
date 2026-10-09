@@ -27,6 +27,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
+import net.sf.json.JSONArray;
+import net.sf.json.JSONObject;
 import org.htmlunit.Page;
 import org.htmlunit.WebResponse;
 import org.htmlunit.html.HtmlForm;
@@ -77,7 +79,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>T-03-28 .. T-03-31 (D-37, D-72; matrix note 289) repeat T-03-07 in the encoding the real
  * Request Run form uses. That form posts {@code multipart/form-data} (D-72 lets it upload file
  * parameters), and T-03-07's url-encoded POST did not cover that body: a multipart {@code submit}
- * (T-03-28 without parameters, T-03-29 with a core file parameter) and the job's
+ * shaped as the form posts it, raw parts plus core's {@code json} field (T-03-28 without
+ * parameters, T-03-29 with a core file parameter), and the job's
  * {@code batch-control/} page driven in a browser with two approvers ticked (T-03-30 without
  * parameters, T-03-31 with a file chosen) must store the whole set, in submission (page) order.
  *
@@ -503,16 +506,18 @@ public class MultiApproverTest {
     // ------------------------------------------------------------------ multipart (note 289)
 
     /**
-     * T-03-28: a {@code multipart/form-data} POST to {@code submit} with {@code approvers}=a1 and
-     * {@code approvers}=a2 (the body the Request Run form sends, D-72) stores both, in submission
+     * T-03-28: a {@code multipart/form-data} POST to {@code submit} shaped as the Request Run form
+     * posts it (D-72): the raw parts {@code approvers}=a1 and {@code approvers}=a2 plus core's
+     * {@code json} field with {@code "approvers": ["a1","a2"]}. It stores both, in submission
      * order, exactly as the url-encoded POST of T-03-07 does. A second submission in the other
      * order ([a3, a1]) keeps that order. Guards: a3, who was not sent, cannot decide the first
      * request; a1, the first value of the repeated field, approves it (EXECUTED, decidedBy a1,
-     * one build).
+     * one build). (A multipart body without the {@code json} field keeps only the last repeated
+     * value, a documented limitation that no row asserts; note 289.)
      */
     @Test
     public void t_03_28_multipartSubmitStoresEveryApprover() throws Exception {
-        String id = submitRunMultipartOk(j, "u1", job, "month-end batch", List.of(), "a1", "a2");
+        String id = submitRunMultipartOk(j, "u1", job, "month-end batch", List.of(), null, "a1", "a2");
 
         RunRequest request = RunRequestService.get().load(id);
         assertEquals(RequestStatus.PENDING, request.getStatus());
@@ -520,7 +525,7 @@ public class MultiApproverTest {
                 "a multipart submission must store every approvers value, in submission order (as T-03-07 url-encoded)");
         assertNull(request.getDecidedBy(), "nobody has decided a PENDING request");
 
-        String reversed = submitRunMultipartOk(j, "u1", job, "month-end batch, second run", List.of(), "a3", "a1");
+        String reversed = submitRunMultipartOk(j, "u1", job, "month-end batch, second run", List.of(), null, "a3", "a1");
         assertEquals(Arrays.asList("a3", "a1"), RunRequestService.get().load(reversed).getApprovers(),
                 "the multipart set must keep the submission order, not sort it");
 
@@ -535,20 +540,29 @@ public class MultiApproverTest {
     }
 
     /**
-     * T-03-29: the same multipart POST to a job with a core file parameter UPLOAD (and a string
-     * DATE), carrying the file part, stores [a1, a2]. Guards: a3 cannot decide; a2 approves, the
-     * request is EXECUTED with decidedBy a2 and the one build received the uploaded file.
+     * T-03-29: the same multipart POST, as the Request Run form posts it, to a job with a core file
+     * parameter UPLOAD (and a string DATE): core's parameter parts ({@code name}=UPLOAD, the file
+     * renamed {@code file0}, {@code name}=DATE, {@code value}) and the {@code json} field naming
+     * them ({@code "parameter": [{"name":"UPLOAD","file":"file0"}, {"name":"DATE","value":...}]})
+     * next to the repeated {@code approvers} parts and {@code "approvers": ["a1","a2"]}. It stores
+     * [a1, a2]. Guards: a3 cannot decide; a2 approves, the request is EXECUTED with decidedBy a2
+     * and the one build received the uploaded file.
      */
     @Test
     public void t_03_29_multipartSubmitWithFileParameterStoresEveryApprover() throws Exception {
         FreeStyleProject fileJob = fileJob("batch-file");
-        List<NameValuePair> fields = new ArrayList<>();
-        fields.add(new NameValuePair("DATE", "2026-10-01"));
-        fields.add(new KeyDataPair("UPLOAD", TypedParameterFixtures.uploadFile("data.csv",
+        List<NameValuePair> parts = new ArrayList<>();
+        parts.add(new NameValuePair("name", "UPLOAD"));
+        parts.add(new KeyDataPair("file0", TypedParameterFixtures.uploadFile("data.csv",
                 TypedParameterFixtures.payload("multi-approver-multipart-Qm28", 2048)), "data.csv",
                 "application/octet-stream", StandardCharsets.UTF_8));
+        parts.add(new NameValuePair("name", "DATE"));
+        parts.add(new NameValuePair("value", "2026-10-01"));
+        JSONArray parameters = new JSONArray();
+        parameters.add(new JSONObject().element("name", "UPLOAD").element("file", "file0"));
+        parameters.add(new JSONObject().element("name", "DATE").element("value", "2026-10-01"));
 
-        String id = submitRunMultipartOk(j, "u1", fileJob, "month-end batch with a file", fields, "a1", "a2");
+        String id = submitRunMultipartOk(j, "u1", fileJob, "month-end batch with a file", parts, parameters, "a1", "a2");
 
         RunRequest request = RunRequestService.get().load(id);
         assertEquals(RequestStatus.PENDING, request.getStatus());

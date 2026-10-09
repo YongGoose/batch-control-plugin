@@ -17,6 +17,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.sf.json.JSONArray;
+import net.sf.json.JSONObject;
 import org.htmlunit.FormEncodingType;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
@@ -34,7 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * <ul>
  *   <li>{@code POST job/<name>/batch-control/submit} with {@code reason} and the repeated
  *       field {@code approvers} (one user id per value), url-encoded or, as the Request Run form
- *       posts it (D-72), {@code multipart/form-data};</li>
+ *       posts it (D-72), {@code multipart/form-data} with the raw parts plus core's structured
+ *       {@code json} field;</li>
  *   <li>{@code POST batch-control/requests/<id>/approve|reject} with {@code comment};</li>
  *   <li>{@code POST batch-control/requests/<id>/changeApprover} with repeated {@code approvers};</li>
  *   <li>{@code POST batch-control/grants/create} with {@code scopeFullName}, repeated
@@ -107,23 +110,36 @@ final class ApproverFormFixtures {
     }
 
     /**
-     * {@code submit} as {@code multipart/form-data}: {@code reason}, then {@code fields} (parameter
-     * values and file parts), then one {@code approvers} part per user id, in the given order.
+     * {@code submit} as {@code multipart/form-data}, shaped as the Request Run form posts it in a
+     * browser (core's form script): the raw parts {@code reason}, one {@code approvers} part per
+     * user id in the given order, then {@code parameterParts} (core's {@code name}/{@code value}
+     * pairs and the renamed file parts such as {@code file0}), and last the structured {@code json}
+     * field carrying {@code reason}, {@code "approvers": [<the same ids, same order>]} and, when
+     * {@code parameterJson} is not null, {@code "parameter": parameterJson}.
      */
     static WebResponse submitRunMultipart(JenkinsRule j, String userId, Job<?, ?> job, String reason,
-                                          List<NameValuePair> fields, String... approvers) throws Exception {
+                                          List<NameValuePair> parameterParts, JSONArray parameterJson,
+                                          String... approvers) throws Exception {
         List<NameValuePair> params = new ArrayList<>();
         params.add(new NameValuePair("reason", reason));
-        params.addAll(fields);
         params.addAll(approverPairs(approvers));
+        params.addAll(parameterParts);
+        JSONObject json = new JSONObject();
+        json.put("reason", reason);
+        json.put("approvers", JSONArray.fromObject(approvers));
+        if (parameterJson != null) {
+            json.put("parameter", parameterJson);
+        }
+        params.add(new NameValuePair("json", json.toString()));
         return postMultipart(j, userId, job.getUrl() + "batch-control/submit", params);
     }
 
     /** {@link #submitRunMultipart}, returning the id of the single request it created (asserted). */
     static String submitRunMultipartOk(JenkinsRule j, String userId, Job<?, ?> job, String reason,
-                                       List<NameValuePair> fields, String... approvers) throws Exception {
+                                       List<NameValuePair> parameterParts, JSONArray parameterJson,
+                                       String... approvers) throws Exception {
         Set<String> before = runRequestIds();
-        WebResponse response = submitRunMultipart(j, userId, job, reason, fields, approvers);
+        WebResponse response = submitRunMultipart(j, userId, job, reason, parameterParts, parameterJson, approvers);
         assertSuccess(response, "fixture: the multipart run request submission by " + userId);
         Set<String> after = runRequestIds();
         after.removeAll(before);
