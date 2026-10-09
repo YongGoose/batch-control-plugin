@@ -132,8 +132,8 @@ public class FailClosedGapTest {
         int nextBefore = job.getNextBuildNumber();
         assertEquals(1, buildsBefore, "premise: one timer build of J");
 
-        // The job directory's identity is its file key (D-71b, ARCHITECTURE 5 "directory marker (identity)"); a stat of
-        // the directory needs search permission on its parent, so the parent (JENKINS_HOME/jobs) is made unsearchable.
+        // The job's activation identity is the marker file kept in its directory (D-80, ARCHITECTURE 5); reading it needs
+        // search permission on the directory's parent, so the parent (JENKINS_HOME/jobs) is made unsearchable.
         Path dir = job.getRootDir().toPath().getParent();
         Path jobDir = job.getRootDir().toPath();
         PlatformFixtures.assumeCanMakeUnreadable();

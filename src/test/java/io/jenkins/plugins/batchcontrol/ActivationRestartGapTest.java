@@ -55,7 +55,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Coverage lane 1, scenario L1-04 (F), the restart cases: activation state fails closed after a
- * disk fault between two sessions. Matrix rows T-GAP-112 .. T-GAP-114 (note 276).
+ * disk fault between two sessions. Matrix rows T-GAP-112 .. T-GAP-114 (note 276; T-GAP-113 inverted by
+ * D-80, note 303).
  *
  * <p>Basis: SPEC 6a "activation state is truthful and fails closed: a job re-created under a
  * deleted job's name, a job whose state file could not be deleted ... starts not activated";
@@ -131,39 +132,52 @@ public class ActivationRestartGapTest {
     }
 
     /**
-     * T-GAP-113 (L1-04 case 2; SPEC 6a "a job re-created under a deleted job's name ... starts not
-     * activated"): K is activated; while Jenkins is stopped K's job directory is replaced by a copy
-     * of itself (copy, delete the original, rename the copy), so it is a new directory with the
-     * same content. After the restart K is not activated and its timer is refused. Guard (session
-     * 1): K's timer runs. See the ambiguity in note 276: SPEC 1 puts detecting direct disk edits out
-     * of scope, so this row reads the replaced directory as a job deleted and re-created outside
-     * Jenkins.
+     * T-GAP-113 (L1-04 case 2; inverted by D-80, note 303): K is activated and its timer runs; while Jenkins
+     * is stopped K's job directory is replaced by a copy of itself (copied to a temporary directory, the
+     * original deleted, the copy copied back), so it is a new directory (a new file key where the platform has
+     * one) with the same content, as a backup restore or a move of JENKINS_HOME to another volume leaves it.
+     * After the restart K is still activated: its timer and an upstream run of the activated job U succeed,
+     * and its page does not say "not activated". Before D-80 this row asserted the opposite, reading the
+     * replaced directory as a job re-created outside Jenkins; the owner ruled (D-80) that the activation
+     * identity is the marker kept in the job's directory, so a copy that keeps the marker keeps the
+     * activation. The copy without the marker is T-06a-65.
      */
     @Test
-    public void t_gap_113_replacedJobDirectoryStartsNotActivated() throws Throwable {
+    public void t_gap_113_replacedJobDirectoryKeepsItsActivation() throws Throwable {
         AtomicReference<File> jobDir = new AtomicReference<>();
         session.then(r -> {
             secure(r);
             FreeStyleProject job = cleared(r.createFreeStyleProject("gap-replaced"));
+            FreeStyleProject up = cleared(r.createFreeStyleProject("gap-replaced-up"));
             activate(job, "u1", "a1");
+            activate(up, "u1", "a1");
             r.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
             jobDir.set(job.getRootDir());
         });
         Path dir = jobDir.get().toPath();
-        Path copy = dir.resolveSibling(dir.getFileName() + ".copy");
+        Object keyBefore = fileKey(dir);
+        Path copy = Files.createTempDirectory("gap-replaced-copy").resolve("job");
         copyTree(dir, copy);
         deleteTree(dir);
-        Files.move(copy, dir);
+        copyTree(copy, dir);
+        deleteTree(copy);
         assertTrue(Files.isRegularFile(dir.resolve("config.xml")), "fixture: the replaced directory holds the job configuration");
+        Object keyAfter = fileKey(dir);
+        if (keyBefore != null && keyAfter != null) {
+            assertFalse(keyBefore.equals(keyAfter), "premise: the replaced directory is a new directory (new file key)");
+        }
         session.then(r -> {
             secure(r);
             FreeStyleProject job = r.jenkins.getItemByFullName("gap-replaced", FreeStyleProject.class);
             assertNotNull(job, "the job loads from the replaced directory");
-            assertFalse(isActivated(job), "a job whose directory was replaced starts not activated");
-            int next = job.getNextBuildNumber();
-            int builds = job.getBuilds().size();
-            assertNull(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()), "its timer is refused");
-            assertBlocked(r, job, next, builds);
+            assertTrue(isActivated(job), "D-80 (a): a job whose directory was replaced by a copy of itself (marker included) stays activated");
+            r.assertBuildStatusSuccess(job.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+            FreeStyleProject up = r.jenkins.getItemByFullName("gap-replaced-up", FreeStyleProject.class);
+            assertNotNull(up, "premise: U survived the restart");
+            hudson.model.FreeStyleBuild upstream = r.assertBuildStatusSuccess(up.scheduleBuild2(0, new TimerTrigger.TimerTriggerCause()));
+            r.assertBuildStatusSuccess(job.scheduleBuild2(0, new hudson.model.Cause.UpstreamCause(upstream)));
+            String lower = get(r, "u1", job.getUrl()).getContentAsString().toLowerCase(Locale.ROOT);
+            assertFalse(lower.contains("not activated"), "D-80 (a): the restored job's page does not say it is not activated");
         });
     }
 
@@ -240,6 +254,10 @@ public class ActivationRestartGapTest {
             }
         }
         return out;
+    }
+
+    private static Object fileKey(Path dir) throws IOException {
+        return Files.readAttributes(dir, java.nio.file.attribute.BasicFileAttributes.class).fileKey();
     }
 
     private static Set<PosixFilePermission> posix(Path file) {
