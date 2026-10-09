@@ -215,11 +215,11 @@ public class GrantRequestItem implements ModelObject {
 
     /**
      * How a window ended, in words: "Expired", "Revoked by admin", or for a revocation by the
-     * change control switch "Revoked (change control turned off) by admin" (#85).
+     * change control switch "Revoked (change control turned off) by admin".
      */
     public static String endedLabel(Grant grant) {
         if (grant.getRevokedAt() != null) {
-            // #85 (D-63): a mass revocation by the change control switch says so.
+            // D-63: a mass revocation by the change control switch says so.
             String why = grant.getRevokedReason() == null ? "" : " (" + grant.getRevokedReason() + ")";
             return grant.getRevokedBy() == null ? "Revoked" + why : "Revoked" + why + " by " + grant.getRevokedBy();
         }

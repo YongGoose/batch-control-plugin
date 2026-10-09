@@ -132,7 +132,7 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
         return page().getMatched();
     }
 
-    /** Whether the per-request record cap stopped the read (#13): ask to narrow the filter. */
+    /** Whether the per-request record cap stopped the read: ask to narrow the filter. */
     public boolean isTruncated() {
         return page().isTruncated();
     }
@@ -146,7 +146,7 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * The complete CSV export of what this screen lists (#13, S-03), relative to this section.
+     * The complete CSV export of what this screen lists (S-03), relative to this section.
      * Pointed to by the truncation notice: the export is not bound by the per-screen record cap.
      * Only ISO dates and constant names go into it, so no encoding is needed.
      */
@@ -202,7 +202,7 @@ public class IncidentsSection implements ModelObject, StaplerProxy {
 
     private RecordPage<Incident> page() {
         if (page == null) {
-            // Bounded read (#13): the monthly index is walked newest first up to the record cap.
+            // Bounded read: the monthly index is walked newest first up to the record cap.
             page = Store.get().pageIncidents(List.of(getMonth()), monthPeriod(), s -> true, i -> true,
                     Paging.offset(getPage()), PAGE_SIZE, Store.MAX_SCANNED_RECORDS);
         }

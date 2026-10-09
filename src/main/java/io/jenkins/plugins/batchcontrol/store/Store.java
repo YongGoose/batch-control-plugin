@@ -96,7 +96,7 @@ public interface Store {
 
     /**
      * Loads the PENDING and APPROVED run requests only, sorted by
-     * creation time (#13). Served from the in-memory entity index, so closed requests are never
+     * creation time. Served from the in-memory entity index, so closed requests are never
      * read; this is what the per-minute expiry work, startup recovery and rename invalidation
      * iterate.
      *
@@ -117,7 +117,7 @@ public interface Store {
     List<RunRequest> listOpenRunRequests(Consumer<String> unreadable);
 
     /**
-     * The listing fields of every stored run request, sorted by id, from memory (#13). A listing
+     * The listing fields of every stored run request, sorted by id, from memory. A listing
      * filters and pages on these and loads only the XML of the rows it renders.
      */
     List<RequestSummary> listRunRequestSummaries();
@@ -138,7 +138,7 @@ public interface Store {
     List<GrantRequest> listGrantRequests();
 
     /**
-     * Loads the PENDING grant requests only, sorted by id, via the entity index (#13). An open request
+     * Loads the PENDING grant requests only, sorted by id, via the entity index. An open request
      * whose file cannot be read is left out with a warning and its index entry kept, as for
      * {@link #listOpenRunRequests()}.
      */
@@ -157,7 +157,7 @@ public interface Store {
      */
     List<Grant> listGrants();
 
-    // ---------------------------------------------------------------- activation (#15, D-39)
+    // ---------------------------------------------------------------- activation (D-39)
 
     /** Writes (or rewrites, on a status transition) the activation request XML atomically. */
     void saveActivationRequest(ActivationRequest request);
@@ -169,7 +169,7 @@ public interface Store {
     List<ActivationRequest> listActivationRequests();
 
     /**
-     * Loads the PENDING activation requests only, sorted by id, via the entity index (#13). An open
+     * Loads the PENDING activation requests only, sorted by id, via the entity index. An open
      * request whose file cannot be read is left out with a warning and its index entry kept, as for
      * {@link #listOpenRunRequests()}.
      */
@@ -244,7 +244,7 @@ public interface Store {
     /**
      * One page of the run records of {@code months} that match {@code filter}, newest first
      * (start time, then run id). Reads newest first and stops after {@code maxScanned} records,
-     * so the cost of a page load is bounded whatever a month holds (#13); only records whose start
+     * so the cost of a page load is bounded whatever a month holds; only records whose start
      * time lies inside {@code period} count toward {@code maxScanned} (security-10 S-03).
      *
      * @param offset     matches to skip (page index times page size)
@@ -255,7 +255,7 @@ public interface Store {
                                          Predicate<? super RunRecord> filter,
                                          int offset, int limit, int maxScanned);
 
-    /** Run counters of one month, maintained incrementally from the bucket (#13). */
+    /** Run counters of one month, maintained incrementally from the bucket. */
     RunMonthStats runMonthStats(YearMonth month);
 
     /** Appends one change record to the monthly JSONL bucket derived from its timestamp. */
@@ -340,14 +340,14 @@ public interface Store {
     boolean deleteMonth(YearMonth month);
 
     /**
-     * Retention of the XML entities (#13): deletes closed run requests (not PENDING or APPROVED)
+     * Retention of the XML entities: deletes closed run requests (not PENDING or APPROVED)
      * and closed grant requests (not PENDING) whose last activity lies before {@code cutoff}, and
      * grants that stopped conferring anything (expiry or revocation) before it. A grant request
      * is kept while a grant issued from it is kept. Each file is deleted under its own lock, so
-     * no store lock is held for longer than one deletion (#18).
+     * no store lock is held for longer than one deletion.
      */
     RetentionResult deleteClosedEntitiesBefore(Instant cutoff);
 
-    /** Default {@code maxScanned} of the page queries: the per-request record cap (#13). */
+    /** Default {@code maxScanned} of the page queries: the per-request record cap. */
     int MAX_SCANNED_RECORDS = 50_000;
 }

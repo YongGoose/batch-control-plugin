@@ -12,7 +12,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * A small, bounded, time-limited cache of {@link RunRequestService#requesterLacksBuild} answers
- * (security-33 S-33-09, #75), keyed by request id: an id is unique, so an answer is never shared
+ * (security-33 S-33-09), keyed by request id: an id is unique, so an answer is never shared
  * between requests. Backed by Caffeine (R4-2); its ticker reads {@link BatchClock}, so expiry
  * follows the plugin clock that tests install, and no timer is involved.
  */

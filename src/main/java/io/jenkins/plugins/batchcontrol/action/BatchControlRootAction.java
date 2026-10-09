@@ -40,7 +40,7 @@ import org.kohsuke.stapler.StaplerResponse2;
  * </ul>
  *
  * <p>The action is <em>absent</em> for a user who holds none of the Batch Control permissions
- * (SPEC item 2, #31): {@link #getIconFileName()} and {@link #getUrlName()} both return
+ * (SPEC item 2): {@link #getIconFileName()} and {@link #getUrlName()} both return
  * {@code null}, so it is not listed and {@code /batch-control/} and every URL beneath it answer
  * 404. A user who holds some Batch Control permission but not the one a section needs gets 403
  * from that section's gate.
@@ -184,7 +184,7 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     }
 
     /**
-     * Backlog #83, for refusal pages outside this action (reached through
+     * For refusal pages outside this action (reached through
      * {@code app.getExtensionList}, since {@code j:invokeStatic} cannot load plugin classes):
      * whether the viewer may open the Grants screen and submit a grant request. Not a Stapler
      * route (an {@code is} getter of a boolean is never dispatched to).
@@ -194,7 +194,7 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     }
 
     /**
-     * Backlog #83: root-relative URL of the new grant request form prefilled for the item and the
+     * Root-relative URL of the new grant request form prefilled for the item and the
      * action, or {@code null} when the viewer cannot see the item or it cannot carry a window.
      * Not a Stapler route (no {@code get}/{@code do} prefix).
      */
@@ -204,7 +204,7 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     }
 
     /**
-     * Backlog #86, for the batch-control-strategy monitor's view: the permission window that
+     * For the batch-control-strategy monitor's view: the permission window that
      * recorded a change to the item (or a folder above it), or {@code null}. Not a Stapler route.
      */
     @CheckForNull
@@ -213,7 +213,7 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     }
 
     /**
-     * Backlog #86, for the monitor's {@code reviewed} view: what still guards the item after it
+     * For the monitor's {@code reviewed} view: what still guards the item after it
      * was marked as reviewed, or {@code null} when that is not true now. Not a Stapler route.
      */
     @CheckForNull

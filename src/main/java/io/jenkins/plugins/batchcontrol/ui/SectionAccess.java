@@ -14,8 +14,8 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * The permissions each Batch Control screen requires, in one place (SPEC item 2, hosting review
- * #31).
+ * The permissions each Batch Control screen requires, in one place (SPEC item 2, hosting
+ * review).
  *
  * <p>The same arrays feed three things, so they cannot drift apart:
  * <ul>

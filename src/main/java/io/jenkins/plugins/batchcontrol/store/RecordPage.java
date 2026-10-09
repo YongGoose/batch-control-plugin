@@ -6,7 +6,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * One page of a bounded record query (#13): the rows to render plus what the pager needs.
+ * One page of a bounded record query: the rows to render plus what the pager needs.
  *
  * <p>A query reads the requested months newest first and stops once it has read the query's scan
  * cap of records. {@link #getMatched()} counts the matches among the records that were read;

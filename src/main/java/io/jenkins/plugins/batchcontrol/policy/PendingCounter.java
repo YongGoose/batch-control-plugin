@@ -14,7 +14,7 @@ import org.springframework.security.core.Authentication;
 
 /**
  * The single D-61 counting rule behind the {@code countPendingFor(Authentication)} methods of
- * {@link RunRequestService}, {@link GrantRequestService} and {@link ActivationService} (#76).
+ * {@link RunRequestService}, {@link GrantRequestService} and {@link ActivationService}.
  * Callers pass the open-request index of the store only, never the history.
  *
  * <p>A PENDING request counts as awaiting the viewer's decision when the viewer holds

@@ -14,11 +14,13 @@ import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -347,17 +349,22 @@ public class WindowCreateCliGapTest {
      * Runs the real Jenkins CLI client ({@code hudson.cli.CLI}) in a child JVM against {@code j} over
      * HTTP ({@code -http}), authenticated as {@code user} with a fresh API token, feeding {@code stdin}
      * (or nothing).
+     *
+     * <p>The child JVM gets the test classpath through a Java launcher argument file ({@code java @file},
+     * see {@link #classpathArgFile()}), not on the command line: the whole classpath is longer than the
+     * 32,767-character limit of Windows {@code CreateProcess} (error=206).
      */
     static CliResult cli(JenkinsRule j, String user, String stdin, String... args) throws Exception {
         String token = RawHttpFixtures.apiToken(user);
-        List<String> command = new ArrayList<>(Arrays.asList(
-                System.getProperty("java.home") + File.separator + "bin" + File.separator + "java",
-                "-cp", System.getProperty("java.class.path"), "hudson.cli.CLI",
-                "-s", j.getURL().toExternalForm(), "-http", "-auth", user + ":" + token));
-        command.addAll(Arrays.asList(args));
+        File argFile = classpathArgFile();
         File out = File.createTempFile("cli-out", ".txt");
         File err = File.createTempFile("cli-err", ".txt");
         try {
+            List<String> command = new ArrayList<>(Arrays.asList(
+                    System.getProperty("java.home") + File.separator + "bin" + File.separator + "java",
+                    "@" + argFile.getAbsolutePath(), "hudson.cli.CLI",
+                    "-s", j.getURL().toExternalForm(), "-http", "-auth", user + ":" + token));
+            command.addAll(Arrays.asList(args));
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectOutput(out);
             pb.redirectError(err);
@@ -376,7 +383,37 @@ public class WindowCreateCliGapTest {
         } finally {
             out.delete();
             err.delete();
+            argFile.delete();
         }
+    }
+
+    /**
+     * Writes {@code -cp <test classpath>} to a temporary Java launcher argument file (JDK 9+). Moving the
+     * classpath into the CLASSPATH environment variable is no way out, because the Windows environment
+     * block has the same 32,767-character limit as the command line.
+     *
+     * <p>Argument-file syntax: the value is wrapped in double quotes so that spaces in paths survive, and
+     * inside quotes a backslash is an escape character, so every backslash (the Windows separator) is
+     * doubled and a double quote is escaped. The launcher reads the file as raw bytes and decodes them
+     * like a command line, so the file is written in the platform encoding for file names.
+     */
+    static File classpathArgFile() throws IOException {
+        String classpath = System.getProperty("java.class.path");
+        String quoted = '"' + classpath.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
+        File argFile = File.createTempFile("cli-classpath", ".args");
+        Files.writeString(argFile.toPath(), "-cp\n" + quoted + "\n", fileNameCharset());
+        return argFile;
+    }
+
+    /** The charset the launcher decodes file names and arguments with ({@code sun.jnu.encoding}). */
+    private static Charset fileNameCharset() {
+        for (String property : new String[] {"sun.jnu.encoding", "native.encoding"}) {
+            String name = System.getProperty(property);
+            if (name != null && Charset.isSupported(name)) {
+                return Charset.forName(name);
+            }
+        }
+        return Charset.defaultCharset();
     }
 
     /** POSTs {@code relative} as written on a plain socket with the given Authorization; returns {status, body}. */

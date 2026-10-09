@@ -21,7 +21,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * The single writer of the "an attempt was refused" audit records ({@link
  * ChangeType#MARKER_REUSE_BLOCKED}, {@link ChangeType#REMOTE_RUN_BLOCKED},
  * {@link ChangeType#TRIGGER_BLOCKED}), with a bound on how often one repeated attempt may append
- * (S-21, #21).
+ * (S-21).
  *
  * <p><b>Why a bound is needed.</b> Both callers run inside queue scheduling, and core takes the
  * global queue lock <em>before</em> it runs the {@code Queue.QueueDecisionHandler}s
@@ -223,7 +223,7 @@ public final class BlockedAttemptAudit {
     /**
      * Appends one refused-attempt record unless one was already written under the same
      * {@code type} and {@code attemptKey} inside {@code cooldown}, <em>whoever</em> made the
-     * attempt (#21). Used for refusals where the account says nothing new: a blocked timer run is
+     * attempt. Used for refusals where the account says nothing new: a blocked timer run is
      * always {@code SYSTEM}, and a blocked upstream run is whatever the upstream build ran as, so
      * a per-user key would neither shorten the history nor add information.
      *

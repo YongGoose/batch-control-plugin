@@ -8,7 +8,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Allocation-light reader of one flat JSONL record (#13), used by the page queries in place of a
+ * Allocation-light reader of one flat JSONL record, used by the page queries in place of a
  * general JSON parser: a page load reads up to {@link Store#MAX_SCANNED_RECORDS} lines, and
  * building a full JSON object tree per line made its allocation grow with the month.
  *

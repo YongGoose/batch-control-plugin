@@ -241,7 +241,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
      * client-side at {@code maxGrantMinutes} and re-checked by the service), {@code reason},
      * {@code approvers} (repeated, one user id each; D-37) and the optional
      * {@code createNamePattern} (exact name or {@code /regex/}, CREATE only; D-40). The form shows
-     * the name restriction only while Create is ticked (#107), so it is read only for a request
+     * the name restriction only while Create is ticked, so it is read only for a request
      * that includes CREATE, as core's {@code f:optionalBlock} does not count the fields of a
      * collapsed block.
      */
@@ -269,7 +269,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
         if (approvers.isEmpty()) {
             errors.field("approvers", "Check at least one approver.");
         }
-        // #107: a value left in the hidden field of an unticked Create does not count.
+        // A value left in the hidden field of an unticked Create does not count.
         String createNamePattern = actions.contains(GrantAction.CREATE)
                 ? parseCreateNamePattern(req.getParameter("createNamePattern"), errors)
                 : null;
@@ -278,7 +278,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
             try {
                 GrantRequest created = GrantRequestService.get().create(scope, actions, durationMinutes,
                         reason, approvers, createNamePattern);
-                // Backlog #89: land on the new request's detail page, like run and activation
+                // Land on the new request's detail page, like run and activation
                 // requests (the requester may always see their own request, P-09).
                 rsp.sendRedirect2(req.getContextPath() + "/batch-control/grants/"
                         + Util.rawEncode(created.getId()) + "/");
@@ -426,7 +426,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     /**
      * Blank means no restriction. Only the length is bounded here, before the text reaches the
      * regex compiler; syntax and item-name validity are the service's to refuse. Called only for a
-     * request that includes CREATE (#107); the service still refuses a restriction without it.
+     * request that includes CREATE; the service still refuses a restriction without it.
      */
     @CheckForNull
     private static String parseCreateNamePattern(@CheckForNull String raw, FormErrors errors) {
@@ -502,7 +502,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     /**
-     * e2e-09 DEF-01 (#89): a timestamp as its date and its time-with-zone, for the grant tables,
+     * e2e-09 DEF-01: a timestamp as its date and its time-with-zone, for the grant tables,
      * which render each part unbroken so that a narrow window breaks a cell only between them
      * (never inside a date) and the page does not scroll sideways at 1280 px. Empty for null.
      */
@@ -872,7 +872,7 @@ public class GrantsSection implements ModelObject, StaplerProxy {
 
     /**
      * How a grant ended, in words: "Expired", "Revoked by admin", or for a revocation by the
-     * change control switch "Revoked (change control turned off) by admin" (#85).
+     * change control switch "Revoked (change control turned off) by admin".
      */
     public String endedLabel(Grant grant) {
         return GrantRequestItem.endedLabel(grant);

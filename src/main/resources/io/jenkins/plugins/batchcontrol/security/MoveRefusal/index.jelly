@@ -3,7 +3,7 @@
      HTTP 403 after a move was refused (the message says nothing was moved). The refusal message
      and, for a viewer who may read the item (MoveRefusal#getItemUrl non-null), a link named after
      the item are rendered; both are escaped by default (item names are user input).
-     Backlog #83: for a viewer who may request permission windows (BatchControlRootAction#isCanRequestGrants),
+     For a viewer who may request permission windows (BatchControlRootAction#isCanRequestGrants),
      each missing window links to the new grant request form prefilled for it. The links are
      built by GrantRequestLinks (through BatchControlRootAction#grantRequestUrl), which resolves each name as the viewer (no link for an item the
      viewer cannot see, nor for the Jenkins root, which has no window; D-71: nor for an action

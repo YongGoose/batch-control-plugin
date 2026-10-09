@@ -129,7 +129,7 @@ public class DashboardSection implements ModelObject, StaplerProxy {
                     months.add(m);
                 }
             }
-            // Bounded read (#13, D-67): newest bucket first, stops after SCAN records.
+            // Bounded read (D-67): newest bucket first, stops after SCAN records.
             page = Store.get().pageRunRecords(months, new Period(null, now), r -> true, 0, LIMIT, SCAN);
         }
         return page;

@@ -27,8 +27,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * <p>A month is deleted when it lies strictly before {@code currentMonth - retentionMonths},
  * so the current (partial) month plus the last {@code retentionMonths} full months are always
  * kept (conservative deletion). Closed requests and ended grants last active before that month
- * are deleted too (#13). Every deletion holds only the lock of the file it deletes, so the sweep
- * never stalls the queue gate or build completion (#18).
+ * are deleted too. Every deletion holds only the lock of the file it deletes, so the sweep
+ * never stalls the queue gate or build completion.
  *
  * <p>This is a synchronous {@link PeriodicWork} (not {@code AsyncPeriodicWork}, whose
  * {@code doRun()} is {@code public final} and merely starts a background thread): the test
@@ -82,7 +82,7 @@ public class RetentionPeriodicWork extends PeriodicWork {
     }
 
     /**
-     * #13: closed run requests, closed grant requests and ended grants whose last activity lies
+     * Closed run requests, closed grant requests and ended grants whose last activity lies
      * before the first kept month go the same way as the month buckets, so {@code requests/} and
      * {@code grants/} no longer grow for the life of the installation. One RETENTION record per
      * pass that deleted anything.

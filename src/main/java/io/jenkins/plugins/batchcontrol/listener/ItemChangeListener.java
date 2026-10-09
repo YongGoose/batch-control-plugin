@@ -120,7 +120,7 @@ public class ItemChangeListener extends ItemListener {
             return;
         }
         String user = ChangeRecording.currentUser();
-        // #84 (e2e-08 UX-2): a move across folders is usually authorised by two windows, the
+        // e2e-08 UX-2: a move across folders is usually authorised by two windows, the
         // Delete window on the source item and the Create window on the destination. grantId
         // keeps one id (the Create window, else the Delete window) so the record still links to a
         // grant; the detail names every window, in the existing fields (no new format).

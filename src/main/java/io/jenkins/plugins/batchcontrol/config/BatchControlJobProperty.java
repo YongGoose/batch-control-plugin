@@ -82,7 +82,7 @@ public class BatchControlJobProperty extends JobProperty<Job<?, ?>> {
 
     /**
      * The trigger switches that are refusing unattended runs of this job right now, in the order
-     * {@code blockTimer}, {@code blockUpstream} (#21, job-page notice). Empty while run control is
+     * {@code blockTimer}, {@code blockUpstream} (job-page notice). Empty while run control is
      * off, because the queue gate then lets every cause pass and a switch that is set blocks
      * nothing. Since D-46 the switches refuse timer and upstream runs whatever
      * {@code approvalRequired} says, so the notice follows the switches alone (e2e-03 DEF-15). The

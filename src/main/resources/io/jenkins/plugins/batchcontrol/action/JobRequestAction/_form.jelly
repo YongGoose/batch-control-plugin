@@ -13,7 +13,7 @@
      action carries ?dialog=true as well as the hidden field, so a submission refused before its
      body is read (over the size cap, HTTP 413) is still answered with the dialog view. A refused
      submission never shows a password or a file again, and says which ones to provide again; so
-     do a refused direct build (D-60; files are not carried, issue #115) and a rerun that continues
+     do a refused direct build (D-60; files are not carried, issue #10) and a rerun that continues
      here because a value of the failed run could not be recovered (fromRerun). D-72a: that form
      carries the incident id back in the hidden field fromRerun (and in the action's query
      string), and the request is linked to the incident once the server has validated it again. -->
@@ -119,7 +119,7 @@
           </j:if>
           <j:forEach var="parameterDefinition" items="${it.parameterDefinitions}">
             <j:set var="escapeEntryTitleAndDescription" value="true"/> <!-- SECURITY-353 defense unless overridden -->
-            <!-- #111: the definition's value page, as core's ParametersDefinitionProperty/contents.jelly.
+            <!-- The definition's value page, as core's ParametersDefinitionProperty/contents.jelly.
                  T-06-103: core's run parameter view never selects its default, so a carried run
                  (D-60) or a refused submission's run (DEF-09) is rendered by _runParameter.jelly
                  with that run selected; bcRunId is null whenever core's view is right. -->

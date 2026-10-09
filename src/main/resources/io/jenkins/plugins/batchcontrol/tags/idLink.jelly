@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<!-- e2e-11 DEF-05 (#89 after D-68): a request or window id in a list. A UUID (36 characters) is
+<!-- e2e-11 DEF-05 (after D-68): a request or window id in a list. A UUID (36 characters) is
      shown cut to its first characters with an ellipsis, so the id column does not push a list
      past 1280 px; the element still holds the whole id (copy, find in page, assistive technology)
      and carries it as tooltip. Ids in the earlier, shorter format are shown whole. The link goes
