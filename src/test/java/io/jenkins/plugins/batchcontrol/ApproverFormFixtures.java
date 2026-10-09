@@ -9,6 +9,7 @@ import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.policy.GrantRequestService;
 import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.store.FileStore;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
@@ -71,16 +72,24 @@ final class ApproverFormFixtures {
             throws Exception {
         JenkinsRule.WebClient wc = client(j, userId);
         WebRequest request = new WebRequest(wc.createCrumbedUrl(path), HttpMethod.POST);
+        // Encode the fields as UTF-8, as a browser does for a Jenkins page (T-03-32). HtmlUnit's
+        // WebRequest defaults to ISO-8859-1 and turns every character outside it into '?'.
+        // ASCII values are the same bytes either way.
+        request.setCharset(StandardCharsets.UTF_8);
         request.setRequestParameters(new ArrayList<>(params));
         return wc.getPage(request).getWebResponse();
     }
 
-    /** As {@link #post}, but the body is {@code multipart/form-data} (the crumb in the query). */
+    /**
+     * As {@link #post}, but the body is {@code multipart/form-data} (the crumb in the query). The
+     * fields are UTF-8 bytes, and the text parts carry no charset, as a browser sends them.
+     */
     static WebResponse postMultipart(JenkinsRule j, String userId, String path, List<NameValuePair> fields)
             throws Exception {
         JenkinsRule.WebClient wc = client(j, userId);
         WebRequest request = new WebRequest(wc.createCrumbedUrl(path), HttpMethod.POST);
         request.setEncodingType(FormEncodingType.MULTIPART);
+        request.setCharset(StandardCharsets.UTF_8);
         request.setRequestParameters(new ArrayList<>(fields));
         return wc.getPage(request).getWebResponse();
     }
@@ -236,9 +245,25 @@ final class ApproverFormFixtures {
     static void assertSuccess(WebResponse response, String what) {
         int code = response.getStatusCode();
         if (code >= 400) {
-            throw new AssertionError(what + " must succeed, got HTTP " + code + ": "
-                    + excerpt(response.getContentAsString()));
+            throw new AssertionError(what + " must succeed, got HTTP " + code + alerts(response.getContentAsString())
+                    + ": " + excerpt(response.getContentAsString()));
         }
+    }
+
+    /** The texts of the page's {@code role="alert"} elements (a form refusal's reasons), for failure messages. */
+    static String alerts(String html) {
+        if (html == null) {
+            return "";
+        }
+        List<String> texts = new ArrayList<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("role=\"alert\"[^>]*>([^<]+)<").matcher(html);
+        while (matcher.find()) {
+            String text = matcher.group(1).trim();
+            if (!text.isEmpty()) {
+                texts.add(text);
+            }
+        }
+        return texts.isEmpty() ? "" : " (alerts " + texts + ")";
     }
 
     static void assertClientError(WebResponse response, String what) {
