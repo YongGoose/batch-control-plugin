@@ -12,6 +12,7 @@ import hudson.model.TopLevelItemDescriptor;
 import hudson.security.ACL;
 import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -109,7 +110,8 @@ public class GrantRequestItem implements ModelObject {
     /** Whether the current user is the requester (view gating only; the service re-checks). */
     public boolean isOwnedByCurrentUser() {
         String requester = request.getRequester();
-        return requester != null && requester.equals(Jenkins.getAuthentication2().getName());
+        // R4-01: under the realm's user id strategy, as the service compares ids.
+        return Approvers.sameUser(requester, Jenkins.getAuthentication2().getName());
     }
 
     /**
