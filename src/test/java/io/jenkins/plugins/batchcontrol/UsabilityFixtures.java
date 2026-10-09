@@ -12,8 +12,10 @@ import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlAnchor;
+import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlInput;
+import org.htmlunit.html.HtmlOption;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.html.HtmlSelect;
 import org.htmlunit.html.HtmlTextArea;
@@ -268,6 +270,52 @@ final class UsabilityFixtures {
                     }
                 } else {
                     input.setValue(approver);
+                }
+            }
+        }
+    }
+
+    /**
+     * The user ids the form's {@code approvers} control offers, in page order: the values of its
+     * checkboxes, or the options of a multiple select, as they appear in the document.
+     */
+    static List<String> approverChoices(HtmlForm form) {
+        List<String> out = new ArrayList<>();
+        for (DomElement element : form.getHtmlElementDescendants()) {
+            if (!"approvers".equals(element.getAttribute("name"))) {
+                continue;
+            }
+            if (element instanceof HtmlCheckBoxInput) {
+                out.add(((HtmlCheckBoxInput) element).getValue());
+            } else if (element instanceof HtmlSelect) {
+                for (HtmlOption option : ((HtmlSelect) element).getOptions()) {
+                    out.add(option.getValueAttribute());
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Ticks exactly {@code approvers} in the form's {@code approvers} control (every other choice
+     * is unticked), as a user does; each one must be offered (fixture assertion).
+     */
+    static void tickApprovers(HtmlForm form, String... approvers) {
+        List<String> wanted = List.of(approvers);
+        List<String> offered = approverChoices(form);
+        assertTrue(offered.containsAll(wanted), "fixture: the form must offer every approver to tick " + wanted
+                + " as a checkbox (or multiple select option) named approvers; offered " + offered + ": "
+                + excerpt(form.asXml()));
+        for (DomElement element : form.getHtmlElementDescendants()) {
+            if (!"approvers".equals(element.getAttribute("name"))) {
+                continue;
+            }
+            if (element instanceof HtmlCheckBoxInput) {
+                HtmlCheckBoxInput box = (HtmlCheckBoxInput) element;
+                box.setChecked(wanted.contains(box.getValue()));
+            } else if (element instanceof HtmlSelect) {
+                for (HtmlOption option : ((HtmlSelect) element).getOptions()) {
+                    option.setSelected(wanted.contains(option.getValueAttribute()));
                 }
             }
         }

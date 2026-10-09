@@ -1,8 +1,14 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.model.FileParameterDefinition;
+import hudson.model.FileParameterValue;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
+import hudson.model.ParameterValue;
+import hudson.model.ParametersAction;
+import hudson.model.ParametersDefinitionProperty;
+import hudson.model.StringParameterDefinition;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -13,11 +19,20 @@ import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.security.GrantService;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
+import org.htmlunit.Page;
 import org.htmlunit.WebResponse;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlFormUtil;
+import org.htmlunit.util.KeyDataPair;
+import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -36,6 +51,7 @@ import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.runRequestIds
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrant;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitGrantOk;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRun;
+import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRunMultipartOk;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRunOk;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,6 +73,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * request at all is refused with 404 (P-09), while a designated approver who can see it but is
  * not the requester is refused with 403; the endpoint refuses GET (405); and a decided request
  * may no longer be changed.
+ *
+ * <p>T-03-28 .. T-03-31 (D-37, D-72; matrix note 287) repeat T-03-07 in the encoding the real
+ * Request Run form uses. That form posts {@code multipart/form-data} (D-72 lets it upload file
+ * parameters), and T-03-07's url-encoded POST did not cover that body: a multipart {@code submit}
+ * (T-03-28 without parameters, T-03-29 with a core file parameter) and the job's
+ * {@code batch-control/} page driven in a browser with two approvers ticked (T-03-30 without
+ * parameters, T-03-31 with a file chosen) must store the whole set, in submission (page) order.
  *
  * <p>Every creation, decision and designation change goes through the frozen HTTP form
  * contract (field {@code approvers}, one user id per value; see {@link ApproverFormFixtures}).
@@ -475,5 +498,175 @@ public class MultiApproverTest {
         assertEquals(Arrays.asList("a1", "a2"), reloaded.getApprovers(), "the set must be unchanged after the decision");
         assertTrue(reloaded.getApproverChanges() == null || reloaded.getApproverChanges().isEmpty(),
                 "a change after the decision must not be recorded");
+    }
+
+    // ------------------------------------------------------------------ multipart (note 287)
+
+    /**
+     * T-03-28: a {@code multipart/form-data} POST to {@code submit} with {@code approvers}=a1 and
+     * {@code approvers}=a2 (the body the Request Run form sends, D-72) stores both, in submission
+     * order, exactly as the url-encoded POST of T-03-07 does. A second submission in the other
+     * order ([a3, a1]) keeps that order. Guards: a3, who was not sent, cannot decide the first
+     * request; a1, the first value of the repeated field, approves it (EXECUTED, decidedBy a1,
+     * one build).
+     */
+    @Test
+    public void t_03_28_multipartSubmitStoresEveryApprover() throws Exception {
+        String id = submitRunMultipartOk(j, "u1", job, "month-end batch", List.of(), "a1", "a2");
+
+        RunRequest request = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, request.getStatus());
+        assertEquals(Arrays.asList("a1", "a2"), request.getApprovers(),
+                "a multipart submission must store every approvers value, in submission order (as T-03-07 url-encoded)");
+        assertNull(request.getDecidedBy(), "nobody has decided a PENDING request");
+
+        String reversed = submitRunMultipartOk(j, "u1", job, "month-end batch, second run", List.of(), "a3", "a1");
+        assertEquals(Arrays.asList("a3", "a1"), RunRequestService.get().load(reversed).getApprovers(),
+                "the multipart set must keep the submission order, not sort it");
+
+        assertClientError(decideRun(j, "a3", id, "approve", "not designated"), "approval by a3, who was not sent");
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
+        assertSuccess(decideRun(j, "a1", id, "approve", "checked"), "approval by a1, the first approvers value");
+        j.waitUntilNoActivity();
+        RunRequest decided = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.EXECUTED, decided.getStatus());
+        assertEquals("a1", decided.getDecidedBy());
+        assertEquals(1, job.getBuilds().size(), "the approval must run the build exactly once");
+    }
+
+    /**
+     * T-03-29: the same multipart POST to a job with a core file parameter UPLOAD (and a string
+     * DATE), carrying the file part, stores [a1, a2]. Guards: a3 cannot decide; a2 approves, the
+     * request is EXECUTED with decidedBy a2 and the one build received the uploaded file.
+     */
+    @Test
+    public void t_03_29_multipartSubmitWithFileParameterStoresEveryApprover() throws Exception {
+        FreeStyleProject fileJob = fileJob("batch-file");
+        List<NameValuePair> fields = new ArrayList<>();
+        fields.add(new NameValuePair("DATE", "2026-10-01"));
+        fields.add(new KeyDataPair("UPLOAD", TypedParameterFixtures.uploadFile("data.csv",
+                TypedParameterFixtures.payload("multi-approver-multipart-Qm28", 2048)), "data.csv",
+                "application/octet-stream", StandardCharsets.UTF_8));
+
+        String id = submitRunMultipartOk(j, "u1", fileJob, "month-end batch with a file", fields, "a1", "a2");
+
+        RunRequest request = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, request.getStatus());
+        assertEquals(Arrays.asList("a1", "a2"), request.getApprovers(),
+                "a multipart submission with a file part must store every approvers value, in submission order");
+
+        assertClientError(decideRun(j, "a3", id, "approve", "not designated"), "approval by a3, who was not sent");
+        assertSuccess(decideRun(j, "a2", id, "approve", "checked"), "approval by the second member a2");
+        j.waitUntilNoActivity();
+        assertDecidedAndRanWithFile(id, fileJob, "a2");
+    }
+
+    /**
+     * T-03-30: the real Request Run form ({@code job/<name>/batch-control/}) in a browser. Guard
+     * first: ticking only a2 stores [a2], and a1 cannot decide that request. Then ticking a1 and
+     * a2 stores both, in the order the page lists them; the member listed first approves
+     * (EXECUTED, decidedBy that member, one build).
+     */
+    @Test
+    public void t_03_30_requestRunFormStoresEveryTickedApprover() throws Exception {
+        JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
+        String single = submit(wc, TypedParameterFixtures.requestRunForm(j, wc, job), "a2");
+        assertEquals(List.of("a2"), RunRequestService.get().load(single).getApprovers(),
+                "guard: one ticked approver stores only that approver");
+        assertClientError(decideRun(j, "a1", single, "approve", "not ticked"), "approval by a1, who was not ticked");
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(single).getStatus());
+
+        HtmlForm form = TypedParameterFixtures.requestRunForm(j, wc, job);
+        List<String> expected = inPageOrder(form, "a1", "a2");
+        String id = submit(wc, form, "a2", "a1");
+
+        RunRequest request = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, request.getStatus());
+        assertEquals(expected, request.getApprovers(), "every approver ticked on the Request Run form must be stored, in page order"
+                + " (form enctype " + form.getEnctypeAttribute() + ")");
+
+        assertSuccess(decideRun(j, expected.get(0), id, "approve", "checked"), "approval by " + expected.get(0));
+        j.waitUntilNoActivity();
+        RunRequest decided = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.EXECUTED, decided.getStatus());
+        assertEquals(expected.get(0), decided.getDecidedBy());
+        assertEquals(1, job.getBuilds().size(), "the approval must run the build exactly once");
+    }
+
+    /**
+     * T-03-31: the real Request Run form of a job with a core file parameter, in a browser (the
+     * form must post multipart, or no browser sends the file): a file chosen and a1 and a2 ticked
+     * stores both, in page order. Guards: a3 cannot decide; the member listed second approves,
+     * the request is EXECUTED with that decider and the one build received the chosen file.
+     */
+    @Test
+    public void t_03_31_requestRunFormWithFileParameterStoresEveryTickedApprover() throws Exception {
+        FreeStyleProject fileJob = fileJob("batch-file");
+        JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
+        HtmlForm form = TypedParameterFixtures.requestRunForm(j, wc, fileJob);
+        assertEquals("multipart/form-data", form.getEnctypeAttribute().toLowerCase(Locale.ROOT),
+                "premise: a Request Run form with a file control posts multipart/form-data");
+        TypedParameterFixtures.setFile(form, "UPLOAD", TypedParameterFixtures.uploadFile("data.csv",
+                TypedParameterFixtures.payload("multi-approver-form-Fz31", 2048)));
+        List<String> expected = inPageOrder(form, "a1", "a2");
+        String id = submit(wc, form, "a1", "a2");
+
+        RunRequest request = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, request.getStatus());
+        assertEquals(expected, request.getApprovers(),
+                "every approver ticked on the multipart Request Run form must be stored, in page order");
+
+        assertClientError(decideRun(j, "a3", id, "approve", "not ticked"), "approval by a3, who was not ticked");
+        assertSuccess(decideRun(j, expected.get(1), id, "approve", "checked"), "approval by " + expected.get(1));
+        j.waitUntilNoActivity();
+        assertDecidedAndRanWithFile(id, fileJob, expected.get(1));
+    }
+
+    /** An approval-required Freestyle job with a core file parameter UPLOAD and a string DATE. */
+    private FreeStyleProject fileJob(String name) throws Exception {
+        FreeStyleProject fileJob = j.createFreeStyleProject(name);
+        fileJob.addProperty(new ParametersDefinitionProperty(new FileParameterDefinition("UPLOAD", "input"),
+                new StringParameterDefinition("DATE", "2000-01-01")));
+        setBatchControl(fileJob, new BatchControlJobProperty(true));
+        return fileJob;
+    }
+
+    /** The ticked approvers in the order the form lists them (the order a browser sends them in). */
+    private static List<String> inPageOrder(HtmlForm form, String... ticked) {
+        List<String> wanted = List.of(ticked);
+        return UsabilityFixtures.approverChoices(form).stream().filter(wanted::contains).collect(Collectors.toList());
+    }
+
+    /**
+     * Fills in the reason, ticks exactly {@code approvers} and submits {@code form} as a browser
+     * does (core's form script, redirects followed); returns the id of the one request it created.
+     */
+    private String submit(JenkinsRule.WebClient wc, HtmlForm form, String... approvers) throws Exception {
+        Set<String> before = runRequestIds();
+        UsabilityFixtures.setField(form, "reason", "month-end batch through the Request Run form");
+        UsabilityFixtures.tickApprovers(form, approvers);
+        Page answer = HtmlFormUtil.submit(form);
+        wc.waitForBackgroundJavaScript(5000);
+        assertTrue(answer.getWebResponse().getStatusCode() < 400, "fixture: the Request Run submission with "
+                + Arrays.toString(approvers) + " ticked must succeed, got HTTP " + answer.getWebResponse().getStatusCode()
+                + ": " + UsabilityFixtures.excerpt(answer.getWebResponse().getContentAsString()));
+        Set<String> after = runRequestIds();
+        after.removeAll(before);
+        assertEquals(1, after.size(), "fixture: the submission must have created exactly one run request, got " + after);
+        return after.iterator().next();
+    }
+
+    /** Request {@code id} is EXECUTED, decided by {@code decider}, and the one build of {@code target} got data.csv as UPLOAD. */
+    private static void assertDecidedAndRanWithFile(String id, FreeStyleProject target, String decider) {
+        RunRequest decided = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.EXECUTED, decided.getStatus());
+        assertEquals(decider, decided.getDecidedBy(), "the record must name the approver who decided");
+        assertEquals(1, target.getBuilds().size(), "the approval must run the build exactly once");
+        ParametersAction parameters = target.getBuildByNumber(1).getAction(ParametersAction.class);
+        assertNotNull(parameters, "the approved build must carry its parameters");
+        ParameterValue upload = parameters.getParameter("UPLOAD");
+        assertTrue(upload instanceof FileParameterValue, "the approved build must receive the file parameter, got " + upload);
+        assertEquals("data.csv", ((FileParameterValue) upload).getOriginalFileName(),
+                "the approved build must receive the uploaded file");
     }
 }

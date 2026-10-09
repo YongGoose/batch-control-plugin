@@ -17,6 +17,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.htmlunit.FormEncodingType;
 import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
@@ -32,7 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * measure what a browser or a script actually submits:
  * <ul>
  *   <li>{@code POST job/<name>/batch-control/submit} with {@code reason} and the repeated
- *       field {@code approvers} (one user id per value);</li>
+ *       field {@code approvers} (one user id per value), url-encoded or, as the Request Run form
+ *       posts it (D-72), {@code multipart/form-data};</li>
  *   <li>{@code POST batch-control/requests/<id>/approve|reject} with {@code comment};</li>
  *   <li>{@code POST batch-control/requests/<id>/changeApprover} with repeated {@code approvers};</li>
  *   <li>{@code POST batch-control/grants/create} with {@code scopeFullName}, repeated
@@ -70,6 +72,16 @@ final class ApproverFormFixtures {
         return wc.getPage(request).getWebResponse();
     }
 
+    /** As {@link #post}, but the body is {@code multipart/form-data} (the crumb in the query). */
+    static WebResponse postMultipart(JenkinsRule j, String userId, String path, List<NameValuePair> fields)
+            throws Exception {
+        JenkinsRule.WebClient wc = client(j, userId);
+        WebRequest request = new WebRequest(wc.createCrumbedUrl(path), HttpMethod.POST);
+        request.setEncodingType(FormEncodingType.MULTIPART);
+        request.setRequestParameters(new ArrayList<>(fields));
+        return wc.getPage(request).getWebResponse();
+    }
+
     static WebResponse get(JenkinsRule j, String userId, String path) throws Exception {
         JenkinsRule.WebClient wc = client(j, userId);
         return wc.getPage(new WebRequest(new java.net.URL(j.getURL(), path), HttpMethod.GET))
@@ -92,6 +104,31 @@ final class ApproverFormFixtures {
         params.add(new NameValuePair("reason", reason));
         params.addAll(approverPairs(approvers));
         return post(j, userId, job.getUrl() + "batch-control/submit", params);
+    }
+
+    /**
+     * {@code submit} as {@code multipart/form-data}: {@code reason}, then {@code fields} (parameter
+     * values and file parts), then one {@code approvers} part per user id, in the given order.
+     */
+    static WebResponse submitRunMultipart(JenkinsRule j, String userId, Job<?, ?> job, String reason,
+                                          List<NameValuePair> fields, String... approvers) throws Exception {
+        List<NameValuePair> params = new ArrayList<>();
+        params.add(new NameValuePair("reason", reason));
+        params.addAll(fields);
+        params.addAll(approverPairs(approvers));
+        return postMultipart(j, userId, job.getUrl() + "batch-control/submit", params);
+    }
+
+    /** {@link #submitRunMultipart}, returning the id of the single request it created (asserted). */
+    static String submitRunMultipartOk(JenkinsRule j, String userId, Job<?, ?> job, String reason,
+                                       List<NameValuePair> fields, String... approvers) throws Exception {
+        Set<String> before = runRequestIds();
+        WebResponse response = submitRunMultipart(j, userId, job, reason, fields, approvers);
+        assertSuccess(response, "fixture: the multipart run request submission by " + userId);
+        Set<String> after = runRequestIds();
+        after.removeAll(before);
+        assertEquals(1, after.size(), "fixture: exactly one run request must have been created, got " + after);
+        return after.iterator().next();
     }
 
     static Set<String> runRequestIds() {
