@@ -102,6 +102,22 @@ public final class RunRequestService {
     private final Map<String, Instant> unsavedQueueCancels = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
+     * Starts of approved runs whose EXECUTED state could not be written to the request file when the
+     * build started ({@link #markExecuted}). Like {@link #unsavedQueueCancels}: every read of a
+     * request file in this service applies them ({@link #loadCurrent}), so the request is EXECUTED in
+     * this session (the expiry does not end it as never started, and the queue gate refuses its marker
+     * for any other submission); the periodic work writes them again
+     * ({@link #retryUnsavedExecutions}), and so does any later write of the request, until one
+     * succeeds. Memory only: after a restart, startup recovery finds the build that carries the
+     * request's marker, never submits the run again and writes the EXECUTED state then.
+     */
+    private final Map<String, UnsavedExecution> unsavedExecutions = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The run and the moment of an EXECUTED state that is in effect but not written yet. */
+    private record UnsavedExecution(String runId, Instant executedAt) {
+    }
+
+    /**
      * D-21 invalidations of requests whose file could not be read (or whose end could not be written)
      * when their job was renamed or moved. Such a request cannot be approved (an approval ends it
      * instead), and it is ended INVALIDATED as soon as it can be read and written
@@ -141,7 +157,21 @@ public final class RunRequestService {
                 request.setQueueCancelledAt(cancelledAt);
             }
         }
+        if (request != null && request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null) {
+            UnsavedExecution executed = unsavedExecutions.get(id);
+            if (executed != null) {
+                applyExecuted(request, executed);
+            }
+        }
         return request;
+    }
+
+    /** The APPROVED → EXECUTED transition of {@code request}, in memory (SPEC section 4). */
+    private static void applyExecuted(RunRequest request, UnsavedExecution executed) {
+        request.setStatus(RequestStatus.EXECUTED);
+        request.setExecutedRunId(executed.runId());
+        // Retention measures a request's last activity from this (security-10 S-09).
+        request.setExecutedAt(executed.executedAt());
     }
 
     /** All stored requests, in creation order. */
@@ -278,6 +308,9 @@ public final class RunRequestService {
         requesterBuildCache.invalidate(request.getId());
         if (request.getQueueCancelledAt() != null) {
             unsavedQueueCancels.remove(request.getId()); // written now (T-GAP-384)
+        }
+        if (request.getExecutedRunId() != null) {
+            unsavedExecutions.remove(request.getId()); // written now
         }
     }
 
@@ -816,6 +849,11 @@ public final class RunRequestService {
      * Marks an APPROVED request as EXECUTED once its build has started (SPEC section 4). D-72b (5):
      * the typed values file is deleted now; the build has its own copy and owns the files, and the
      * masked display map stays as the record.
+     *
+     * <p>The build has started whatever happens here, so a request file that cannot be written does
+     * not undo the transition: it stays in effect in memory ({@link #unsavedExecutions}) and is
+     * written by the periodic work as soon as the store accepts it ({@link #retryUnsavedExecutions}).
+     * Never throws for that (the caller is a run listener on the build's own thread).
      */
     public void markExecuted(String requestId, String runId) {
         lock.lock();
@@ -825,14 +863,52 @@ public final class RunRequestService {
                 return;
             }
             if (request.getStatus() == RequestStatus.APPROVED) {
-                request.setStatus(RequestStatus.EXECUTED);
-                request.setExecutedRunId(runId);
-                // Retention measures a request's last activity from this (security-10 S-09).
-                request.setExecutedAt(BatchClock.now());
-                persistEnded(request, false);
+                UnsavedExecution executed = new UnsavedExecution(runId, BatchClock.now());
+                applyExecuted(request, executed);
+                try {
+                    persistEnded(request, false);
+                } catch (RuntimeException e) {
+                    unsavedExecutions.put(requestId, executed);
+                    LOGGER.log(java.util.logging.Level.SEVERE, "Could not save that approved run request " + requestId
+                            + " started as " + runId + "; it is EXECUTED in effect (the run is not submitted again),"
+                            + " and it is written again by the periodic work until that succeeds", e);
+                }
             }
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * Writes the EXECUTED states that could not be written when their build started
+     * ({@link #markExecuted}), with the deletion of the typed values file that goes with them. One
+     * that still fails stays for the next attempt; one whose request has no file any more, or whose
+     * file is no longer an APPROVED request waiting for its run, is dropped. Called by the periodic
+     * work; never throws.
+     */
+    public void retryUnsavedExecutions() {
+        for (String id : new ArrayList<>(unsavedExecutions.keySet())) {
+            lock.lock();
+            try {
+                UnsavedExecution executed = unsavedExecutions.get(id);
+                if (executed == null) {
+                    continue; // written meanwhile by another write of the request
+                }
+                RunRequest request = store.loadRunRequest(id);
+                if (request == null || request.getStatus() != RequestStatus.APPROVED
+                        || request.getExecutedRunId() != null) {
+                    unsavedExecutions.remove(id);
+                    continue;
+                }
+                applyExecuted(request, executed);
+                persistEnded(request, false); // persist() drops the entry
+                LOGGER.info(() -> "The EXECUTED state of run request " + id + " is now written");
+            } catch (RuntimeException e) {
+                LOGGER.log(java.util.logging.Level.FINE, "The EXECUTED state of run request " + id
+                        + " still cannot be written", e);
+            } finally {
+                lock.unlock();
+            }
         }
     }
 
@@ -1149,8 +1225,13 @@ public final class RunRequestService {
                         + ": job '" + snapshot.getJobFullName() + "' no longer exists");
                 continue;
             }
-            if (hasRunFor(job, snapshot.getId())) {
-                continue; // a build for this request already exists; the run listener finishes it
+            Run<?, ?> existing = runFor(job, snapshot.getId());
+            if (existing != null) {
+                // A build for this request already exists, so it is never submitted again. Its start
+                // was not written (the request file refused the EXECUTED state, or Jenkins stopped
+                // first): write it now, so the approved-run timeout does not end it as never started.
+                markExecuted(snapshot.getId(), job.getFullName() + "#" + existing.getNumber());
+                continue;
             }
             boolean submit = false;
             RunRequest request = null;
@@ -1255,15 +1336,16 @@ public final class RunRequestService {
         return now.isAfter(base.plus(timeout));
     }
 
-    /** Whether a run for the given request id already exists on the job (recovery dedup). */
-    private static boolean hasRunFor(Job<?, ?> job, String requestId) {
+    /** The run of the job that carries the given request id's marker, or {@code null} (recovery dedup). */
+    @CheckForNull
+    private static Run<?, ?> runFor(Job<?, ?> job, String requestId) {
         for (Run<?, ?> run : job.getBuilds()) {
             ApprovedRunAction marker = run.getAction(ApprovedRunAction.class);
             if (marker != null && requestId.equals(marker.getRequestId())) {
-                return true;
+                return run;
             }
         }
-        return false;
+        return null;
     }
 
     /**
