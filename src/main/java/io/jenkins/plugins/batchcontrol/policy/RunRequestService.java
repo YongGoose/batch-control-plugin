@@ -341,6 +341,7 @@ public final class RunRequestService {
         Objects.requireNonNull(job, "job");
         Objects.requireNonNull(parameters, "parameters");
         checkCanRequest(job);
+        checkNotSubItem(job);
         checkReason(reason);
         return create(job, typedValues(job, parameters), reason, Approvers.of(approver), null);
     }
@@ -370,6 +371,10 @@ public final class RunRequestService {
      * request is refused (permission, reason, size, approvers) they are disposed of before the
      * exception propagates ({@link ParameterFiles}).
      *
+     * <p>D-82: right after the permission checks, a request for a job's sub-item (a matrix
+     * configuration, a Maven module) is refused with {@link IllegalArgumentException} naming the
+     * parent job to request instead; its files are disposed of and nothing is stored.
+     *
      * <p>D-74 (2): right after the permission checks, a request whose values would keep more than
      * the body cap ({@link RequestBodyLimit#keptSize}) is refused with
      * {@link RequestTooLargeException} (an {@link IllegalArgumentException}), its files disposed of
@@ -397,6 +402,7 @@ public final class RunRequestService {
         boolean stored = false;
         try {
             checkCanRequest(job);
+            checkNotSubItem(job);
             // D-74 (2): what the request would keep, measured on the values and the uploaded parts
             // they were created from; the declared Content-Length is an early filter only. Over the
             // cap: RequestTooLargeException, files disposed of below.
@@ -450,6 +456,20 @@ public final class RunRequestService {
     private static void checkCanRequest(Job<?, ?> job) {
         job.checkPermission(BatchControlPermissions.REQUEST);
         job.checkPermission(Item.READ);
+    }
+
+    /**
+     * D-82: a job's sub-item (a matrix configuration, a Maven module) takes no run request of its
+     * own; the queue gate applies its parent job's rules, and the parent's run starts it. Refused
+     * with {@link IllegalArgumentException} naming the job to request instead, as an activation
+     * request on a sub-item is ({@link ActivationService#create}); checked after the permission
+     * checks and before anything is stored.
+     */
+    private static void checkNotSubItem(Job<?, ?> job) {
+        if (ActivationService.isSubItem(job)) {
+            throw new IllegalArgumentException("'" + job.getFullName() + "' does not take run requests of its own;"
+                    + " request it on '" + ActivationService.governingJob(job).getFullName() + "'.");
+        }
     }
 
     private static void checkReason(String reason) {
