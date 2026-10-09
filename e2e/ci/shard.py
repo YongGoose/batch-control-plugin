@@ -67,8 +67,8 @@ JOB_OVERHEAD = 3.2
 
 
 class Unit:
-    def __init__(self, name, weight, steps, last=False, doc=""):
-        self.name, self.weight, self.steps, self.last, self.doc = name, weight, steps, last, doc
+    def __init__(self, name, weight, steps, last=False, doc="", group=None):
+        self.name, self.weight, self.steps, self.last, self.doc, self.group = name, weight, steps, last, doc, group
 
 
 def crawl_unit(role, weight):
@@ -223,6 +223,11 @@ UNITS = [
          last=True, doc="e2e-18: creation-time saves (D-76 (2)), expiry notices of moved/unreadable windows (D-75 (1)), "
                         "approval refused while change control is off, recording baselines (D-76 (1)), strategy "
                         "migrate/revert refusals; switches the switches and the authorization strategy (last)"),
+    # e2e-23 R1-02 (bug-hunt batch A, D-81). r23/history_late.py arranges its own items (r23-late-slow, r23-late-fast),
+    # shifts the plugin clock's zone and installs a holding RunListener, and restores both at its end.
+    Unit("r23-history-late", 1.6, [("r23-history-late", py("r23/history_late.py"))], group="runs and switches",
+         doc="e2e-23 R1-02: a run recorded late (held 65 s in onCompleted) does not hide the run recorded before it from "
+             "the History listing of its day, which matches runs.csv"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
@@ -263,6 +268,11 @@ GROUPS = [
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
+# A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
+# group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`
+# reports). The e2e-23 units use it, so that each of their PRs adds lines of its own to this file and none edits the
+# group lists above, which other open PRs edit (git cannot merge two edits of neighbouring lines).
+GROUPS = [(label, names + [u.name for u in UNITS if u.group == label]) for label, names in GROUPS]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
 
