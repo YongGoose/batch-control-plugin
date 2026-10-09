@@ -15,7 +15,7 @@ import re
 import sys
 from urllib.parse import urljoin, urlparse
 
-from lib import Session, close, log, api, groovy, BASE
+from lib import Session, close, log, api, groovy, BASE, opened, gone, react
 
 PAGES = ["/job/team-mb/batch-control-activation/",
          "/job/team-mb/job/main/batch-control-activation/",
@@ -127,13 +127,17 @@ def check_page(s, user, flag, path):
     for t in row.get("confirmation_links", []):
         loc = p.locator("#side-panel a.confirmation-link").filter(has_text=t)
         if loc.count():
-            loc.first.click(); p.wait_for_timeout(800)
+            loc.first.click(); opened(p)  # e2e-20: dialog waits instead of fixed 0.8 / 0.4 s
             row.setdefault("confirmation_click", {})[t] = p.locator("dialog[open]").count()
-            p.keyboard.press("Escape"); p.wait_for_timeout(400)
+            p.keyboard.press("Escape"); gone(p)
     # app-bar "More actions" dropdown (new job page): items must have a target, no duplicates, targets < 400
-    more = p.locator('[data-testid="app-bar-overflow-button"]')
+    more = p.get_by_test_id("app-bar-overflow-button")
     if more.count():
-        more.first.click(); p.wait_for_timeout(1500)
+        more.first.click()
+        try:  # e2e-20: the menu's entries (was a fixed 1.5 s)
+            p.locator(".tippy-box .jenkins-dropdown__item").first.wait_for(state="visible", timeout=5000)
+        except Exception:
+            pass
         items = p.evaluate("""() => [...document.querySelectorAll('.tippy-box .jenkins-dropdown__item')].map(i => ({text: i.innerText.trim(),
             tag: i.tagName.toLowerCase(), href: i.getAttribute('href'), post: i.dataset.post || null}))""")
         row["more_actions"] = items
@@ -151,12 +155,12 @@ def check_page(s, user, flag, path):
                     if fetched[u] >= 400:
                         problems.append({"kind": "link_status", "region": "more-actions", "text": i["text"], "url": u, "status": fetched[u]})
         s.shot(".tippy-box", f"C-{flag}-{user}-{slug(path)}-more")
-        p.keyboard.press("Escape"); p.wait_for_timeout(300)
+        p.keyboard.press("Escape"); gone(p, ".tippy-box")
     for i, pr in enumerate([x for x in problems if x["kind"] == "empty_href" and x["region"] in ("side", "appbar")]):
         loc = p.locator(f"#side-panel a, .jenkins-app-bar a").filter(has_text=pr["text"])
         before = p.url
         try:
-            loc.first.click(timeout=3000); p.wait_for_timeout(1200)
+            loc.first.click(timeout=3000); react(p, before, timeout=1200, menus=".tippy-box", menus_before=0)
             pr["click"] = {"url_changed": p.url != before, "dialog": p.locator("dialog[open]").count(), "menu": p.locator(".tippy-box").count()}
         except Exception as ex:  # noqa: BLE001
             pr["click"] = f"error {ex}"[:200]
@@ -220,16 +224,18 @@ def submit(flag, path, user):
         row["shot"] = s.shot("#main-panel", f"S-{flag}-{user}-{slug(path)}-carried")
         log("check", row); print(json.dumps(row)); s.done(); return
     # empty submit first: validation message, still on the form
-    form.locator('button[type="submit"], button[name="Submit"]').first.click()
-    p.wait_for_load_state("load"); p.wait_for_timeout(500)
+    with p.expect_navigation():  # e2e-20: the submit's navigation (was load + a fixed 0.5 s)
+        form.locator('button[type="submit"], button[name="Submit"]').first.click()
+    p.wait_for_load_state("load")
     row["empty_submit_text"] = re.findall(r"(Enter a reason[^.]*\.|Check at least one approver\.)", s.text())
     form = p.locator('form[name="batch-control-activation"]')
     form.locator('textarea[name="reason"]').fill(f"e2e-15 submit from {path} (new job page {flag})")
     form.locator('input[name="approvers"] ~ label, label.attach-previous').first.click()  # the label covers the box
     row["approver_checked"] = form.locator('input[name="approvers"]').first.is_checked()
     s.shot('form[name="batch-control-activation"]', f"S-{flag}-{user}-{slug(path)}-filled")
-    form.locator('button[type="submit"], button[name="Submit"]').first.click()
-    p.wait_for_load_state("load"); p.wait_for_timeout(800)
+    with p.expect_navigation():  # e2e-20: the submit's navigation (was load + a fixed 0.8 s)
+        form.locator('button[type="submit"], button[name="Submit"]').first.click()
+    p.wait_for_load_state("load")
     row["landed"] = p.url
     m = re.search(r"/batch-control/activations/([0-9a-f-]{36})/", p.url)
     row["uuid"] = m.group(1) if m else None

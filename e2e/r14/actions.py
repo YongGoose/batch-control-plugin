@@ -8,7 +8,7 @@ submit label, confirmation links by label), and each control is exercised on its
     then submitted; landing status/URL, error text and the State row before/after are recorded.
 A control visible to a role that answers 4xx is a defect. Rows: out/actions.jsonl."""
 import json, re, sys, time
-from lib import Session, close, api, groovy, BASE, clean
+from lib import Session, close, api, groovy, BASE, clean, gone, opened
 import lib
 
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -114,6 +114,7 @@ CONTROLS_JS = r"""
 }"""
 
 
+
 def emit(row):
     lib.log("actions", row)
     print(json.dumps(row)[:300])
@@ -130,18 +131,19 @@ def exercise(role, kindkey, control):
     try:
         if control["type"] == "confirm":
             a = p.locator("#main-panel a[data-url][data-post]", has_text=control["label"]).first
-            a.click(); p.wait_for_timeout(700)
+            # e2e-20: wait for core's confirmation dialog and for it to close instead of fixed 0.5-0.7 s
+            a.click(); opened(p)
             d = p.locator("dialog[open]")
             row["dialog_text"] = re.sub(r"\s+", " ", d.first.inner_text())[:150] if d.count() else None
             if d.count():
-                d.first.locator("button[data-id=cancel]").click(); p.wait_for_timeout(600)
-                row["cancel_closed"] = p.locator("dialog[open]").count() == 0
+                d.first.locator("button[data-id=cancel]").click()
+                row["cancel_closed"] = gone(p)
                 row["after_cancel_server"] = server_state(kind, iid)
-                a.click(); p.wait_for_timeout(700)
-                p.keyboard.press("Escape"); p.wait_for_timeout(500)
-                row["escape_closed"] = p.locator("dialog[open]").count() == 0
+                a.click(); opened(p)
+                p.keyboard.press("Escape")
+                row["escape_closed"] = gone(p)
                 row["after_escape_server"] = server_state(kind, iid)
-                a.click(); p.wait_for_timeout(700)
+                a.click(); opened(p)
                 d = p.locator("dialog[open]").first
                 ok = d.locator("button[data-id=ok]").first
                 with p.expect_navigation(timeout=15000) as nav:

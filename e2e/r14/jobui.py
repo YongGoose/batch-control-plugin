@@ -10,7 +10,7 @@ label says:
     page) and, for refusal pages, every link on them followed as the same user.
 Rows: out/jobui.jsonl."""
 import json, re, sys, time
-from lib import Session, close, api, groovy, BASE
+from lib import Session, close, api, groovy, BASE, react, gone, submit_and_wait
 import lib
 
 UI = sys.argv[1]
@@ -56,14 +56,24 @@ def entries(s):
                 continue
             if t and (BC.search(t) or "batch-control" in h) and (where, t) not in out:
                 out.append((where, t))
-    ov = p.locator("[data-testid=app-bar-overflow-button]")
+    ov = p.get_by_test_id("app-bar-overflow-button")
     if ov.count() and ov.first.is_visible():
-        ov.first.click(); p.wait_for_timeout(1000)
+        ov.first.click()
+        open_menu(p)
         items = [re.sub(r"\s+", " ", x).strip() for x in p.locator(".tippy-box a, .tippy-box button").all_inner_texts()]
         out += [("overflow", t) for t in items if t and BC.search(t)]
         out.append(("overflow-all", " | ".join(items)[:300]))
-        p.keyboard.press("Escape"); p.wait_for_timeout(300)
+        p.keyboard.press("Escape")
+        gone(p, ".tippy-box", 2000)
     return out
+
+
+def open_menu(p):
+    """e2e-20: wait for core's overflow menu to show its entries (it was a fixed 1 s)."""
+    try:
+        p.locator(".tippy-box").first.locator("a, button").first.wait_for(state="visible", timeout=5000)
+    except Exception:
+        pass
 
 
 def settle(p):
@@ -72,25 +82,23 @@ def settle(p):
         p.wait_for_function("() => !document.querySelector('dialog')", timeout=4000)
     except Exception:
         pass
-    p.wait_for_timeout(300)
 
 
 def click_entry(s, where, label):
     p = s.page
     settle(p)
     if where == "overflow":
-        p.locator("[data-testid=app-bar-overflow-button]").first.click(); p.wait_for_timeout(1000)
+        p.get_by_test_id("app-bar-overflow-button").first.click()
+        open_menu(p)
         el = p.locator(".tippy-box a, .tippy-box button", has_text=label).first
     else:
         sel = {"appbar": ".jenkins-app-bar a, .jenkins-app-bar button, .app-page-body__header a, .app-page-body__header button",
                "side": "#tasks a, #tasks button", "main": "#main-panel a, #main-panel button"}[where]
         el = p.locator(sel).filter(has_text=label).first
+    before, menus = p.url, p.locator(".tippy-box").count()
     el.click(timeout=8000)
-    p.wait_for_timeout(1500)
-    try:
-        p.wait_for_load_state("load", timeout=10000)
-    except Exception:
-        pass
+    # e2e-20: wait for the reaction (dialog, navigation, menu; at most 3 s) instead of a fixed 1.5 s
+    react(p, before, timeout=3000, menus=".tippy-box", menus_before=menus)
 
 
 def fill_dialog(d, role):
@@ -116,8 +124,8 @@ def test_dialog(s, nav, row, path, where, label, role):
     d = p.locator("dialog[open]").first
     row["dialog_title"] = re.sub(r"\s+", " ", d.inner_text())[:90]
     row["url_unchanged"] = p.url.replace(BASE, "").split("?")[0] == path.split("?")[0]
-    p.keyboard.press("Escape"); p.wait_for_timeout(500)
-    row["escape_closes"] = p.locator("dialog[open]").count() == 0
+    p.keyboard.press("Escape")
+    row["escape_closes"] = gone(p)
     if not row["escape_closes"]:
         s.go(path)
     click_entry(s, where, label)
@@ -125,21 +133,23 @@ def test_dialog(s, nav, row, path, where, label, role):
     c = d.locator("button[data-id=cancel], button:has-text('Cancel')")
     row["has_cancel"] = c.count() > 0
     if c.count():
-        c.first.click(); p.wait_for_timeout(500)
-        row["cancel_closes"] = p.locator("dialog[open]").count() == 0
+        c.first.click()
+        row["cancel_closes"] = gone(p)
     else:
-        p.keyboard.press("Escape"); p.wait_for_timeout(500)
+        p.keyboard.press("Escape")
+        gone(p)
     x = None
     # close (X)
     click_entry(s, where, label)
     d = p.locator("dialog[open]").first
     x = d.locator(".jenkins-dialog__close, .jenkins-dialog__title__button, button[aria-label=Close], button[title=Close]")
     if x.count() and x.first.is_visible():
-        x.first.click(); p.wait_for_timeout(500)
-        row["close_x_closes"] = p.locator("dialog[open]").count() == 0
+        x.first.click()
+        row["close_x_closes"] = gone(p)
     else:
         row["close_x_closes"] = "no X button"
-        p.keyboard.press("Escape"); p.wait_for_timeout(500)
+        p.keyboard.press("Escape")
+        gone(p)
     # empty submit
     click_entry(s, where, label)
     d = p.locator("dialog[open]").first
@@ -153,11 +163,7 @@ def test_dialog(s, nav, row, path, where, label, role):
         # core build parameters dialog (Direct Build): submit as is
         b = d.get_by_role("button", name=re.compile("^Build$"))
         if b.count():
-            b.first.click(); p.wait_for_timeout(4000)
-            try:
-                p.wait_for_load_state("load", timeout=10000)
-            except Exception:
-                pass
+            submit_and_wait(p, b.first.click, timeout=10000)  # e2e-20: was a fixed 4 s
             row["after_build"] = {"url": p.url.replace(BASE, ""), "dialog_open": p.locator("dialog[open]").count(),
                                   "h1": p.locator("h1").first.inner_text()[:80] if p.locator("h1").count() else None,
                                   "nav": nav.last}
@@ -166,10 +172,12 @@ def test_dialog(s, nav, row, path, where, label, role):
         if b.is_checked():
             b.locator("xpath=following-sibling::label").first.click()
     d.locator("textarea[name=reason]").fill("")
-    submit_btn(d).click(); p.wait_for_timeout(2500)
+    submit_and_wait(p, submit_btn(d).click, timeout=10000)  # e2e-20: was a fixed 2.5 s
     d = p.locator("dialog[open]").first
     row["empty_submit_stays"] = d.count() > 0
-    row["empty_submit_errors"] = [t.strip()[:90] for t in p.locator("dialog[open] .error, dialog[open] .jenkins-alert-danger").all_inner_texts() if t.strip()][:4]
+    row["empty_submit_errors"] = [t.strip()[:90] for t in p.locator(
+        "dialog[open] [data-batch-control-field-error], dialog[open] [data-batch-control-form-error], "
+        "dialog[open] .error, dialog[open] .jenkins-alert-danger").all_inner_texts() if t.strip()][:4]
     if not d.count():
         row["empty_submit_landing"] = (p.url.replace(BASE, ""), nav.last)
         return
@@ -177,7 +185,7 @@ def test_dialog(s, nav, row, path, where, label, role):
     txt = d.locator("input[type=text]:visible").first
     if txt.count():
         n_before = p.url
-        txt.press("Enter"); p.wait_for_timeout(1500)
+        submit_and_wait(p, lambda: txt.press("Enter"), timeout=1500)  # e2e-20: returns early when Enter submits
         row["enter_in_text"] = {"dialog_open": p.locator("dialog[open]").count(), "url": p.url.replace(BASE, "")}
         d = p.locator("dialog[open]").first
         if not d.count():

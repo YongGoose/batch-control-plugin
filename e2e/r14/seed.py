@@ -136,13 +136,28 @@ if (j.getView('batch-view') == null) {
 }
 return j.views*.viewName
 '''))
-while time.time() - t_expire < 80:
-    time.sleep(5)
+# Real time, kept (e2e-20): the approval must be older than approvedRunTimeoutMinutes (1, the minimum) before an executor
+# appears. The plugin's BatchClock.setForTest could jump ahead, but FileStore tolerates only 60 s of out-of-order appends,
+# so a jump of a minute would write records the month queries may skip. The wait overlaps the seed work above.
+time.sleep(max(0.0, 80 - (time.time() - t_expire)))
 groovy("jenkins.model.Jenkins.get().setNumExecutors(2)")
 for job in ("batch-failing", "batch-unstable"):
     ids["build_" + job] = api("admin", f"/job/{job}/build?delay=0sec", "POST").status_code
     ids["buildp_" + job] = api("admin", f"/job/{job}/buildWithParameters?delay=0sec", "POST").status_code
-time.sleep(20)
+
+
+def incidents_recorded():
+    """e2e-20 (was a fixed 20 s): both jobs idle with a completed build, and the incidents list names both."""
+    busy = groovy("""def j = jenkins.model.Jenkins.get()
+return ['batch-failing', 'batch-unstable'].collect { def p = j.getItemByFullName(it)
+  (p.isInQueue() || p.isBuilding() || p.getLastCompletedBuild() == null) ? 'busy' : 'done' }.join(',')""")
+    if "busy" in busy or "done" not in busy:
+        return False
+    t = api("admin", "/batch-control/incidents/").text
+    return "batch-failing" in t and "batch-unstable" in t
+
+
+lib.poll(incidents_recorded, timeout=120, interval=1, what="the failing/unstable builds and their incidents")
 ids["req_expired_state"] = api("admin", f"/batch-control/requests/{ids['req_expired']}/").status_code
 (lib.HERE / "out" / "ids.json").write_text(json.dumps(ids, indent=1))
 print(json.dumps(ids, indent=1))
