@@ -562,6 +562,18 @@ from scripts.
     administrator grants the requester `Job/Build` the notice can keep showing
     for up to five minutes (D-38a).
 
+<!-- Item 56 was added after 55 and sits here by topic. The comment ends the list so that it renders as 56, not 50. -->
+
+56. **An API client that posts a run request as `multipart/form-data` must send
+    the `json` field to designate more than one approver.** Jenkins' web
+    framework (Stapler) keeps only the last value of a repeated multipart
+    field, so a multipart submission that repeats the `approvers` field stores
+    only the last approver. A client that designates several approvers must
+    therefore also send the form's `json` field with an `approvers` array, or
+    post the request url-encoded instead. The Request Run page in a browser is
+    not affected, because its form always sends the `json` field (SPEC item 3,
+    D-37).
+
 ## Records and screens
 
 26. **A folder rename produces one `MOVE` record per descendant job**, plus a
