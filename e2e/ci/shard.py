@@ -168,6 +168,11 @@ UNITS = [
              "and secrets not carried (D-60, #115)"),
     Unit("r16-names", 0.2, [("r16-arrange", py("r16/arrange.py")), ("r16-names", py("r16/names.py"))],
          doc="e2e-16: CREATE name restriction in the #107 optionalBlock (ticks Create before filling); exact and /regex/"),
+    # e2e-23 R3-01 (bug-hunt batch A). r23/kill_switch.py arranges its own item (r23-killswitch), makes
+    # batch-control/changes/ unwritable with `docker exec -u root` and restores its exact modes and change control.
+    Unit("r23-kill-switch", 0.6, [("r23-kill-switch", py("r23/kill_switch.py"))], group="admin and role strategy",
+         doc="e2e-23 R3-01: with the change log unwritable, change control turned off on the form and by the setter "
+             "completes (no 500, off on disk, open windows revoked, 403 after it is back on); the JCasC boot path: T-01-19"),
     Unit("multibranch", 2.8, [
         ("mb-arrange", py("r15/arrange.py")),
         ("mb-check-crawl", py("r15/check.py", "crawl")),
