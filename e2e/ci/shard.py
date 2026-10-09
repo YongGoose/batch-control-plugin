@@ -127,6 +127,11 @@ UNITS = [
     crawl_unit("nobc", 1.2),
     Unit("actions", 2.3, [("actions", py("r14/actions.py", "all"))],
          doc="e2e-12/14 G2b: every state-changing control per role"),
+    # e2e-22 R4-01 (a) (bug-hunt batch B). r22/approver_case.py arranges its own item (r22-case). R4-01 (b), LDAP letter
+    # case, needs compose.ldap.yml, which no CI group runs: T-08-194/195 (GrantIdStrategyTest, case-insensitive realm).
+    Unit("r22-approver-case", 0.4, [("r22-approver-case", py("r22/approver_case.py"))],
+         doc="e2e-22 R4-01: a job approver restriction spelled 'Approver-1' offers the global approver-1 on the Request Run "
+             "form (which files the request) and on the Change Approvers form, as the service accepts it"),
 ] + [jobui_unit(ui, group, w) for ui in ("new", "classic") for group, w in JOBUI_GROUPS[ui]] + [
     Unit("misc", 1.8, [("misc", py("r14/misc.py", "CHPBTRMKS"))], doc="e2e-12/14 G2d: targeted checks C H P B T R M K S"),
     Unit("targeted", 0.9, [
@@ -246,7 +251,7 @@ ORDER = {u.name: i for i, u in enumerate(UNITS)}
 # the same weights into 7 has 15.1 at most, but splits each role's job UI and mixes unrelated units.
 GROUPS = [
     ("crawl and ui checks", [  # requester's and manager's crawls, the DEF-07 recheck, every control per role, the
-        "def07", "crawl-requester", "crawl-manager",  # e2e-12/14 targeted checks, round 3, the Reject colour
+        "def07", "crawl-requester", "crawl-manager", "r22-approver-case",  # e2e-12/14 targeted checks, round 3, the Reject colour
         "actions", "misc", "targeted", "round3", "r21-reject-color"]),
     ("crawls and multibranch", [  # the crawls of admin, reqonly, approver-1 and nobc, the multibranch job pages
         "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch"]),
