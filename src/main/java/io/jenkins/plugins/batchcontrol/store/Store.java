@@ -237,8 +237,8 @@ public interface Store {
 
     /**
      * Appends one run record to the monthly JSONL bucket derived from its start time. The line
-     * carries {@code appendedAt} when the record has one ({@link RunRecord#getAppendedAt()}, set by
-     * the caller at the append, D-81).
+     * carries {@code appendedAt} (D-81): the record's own {@link RunRecord#getAppendedAt()} when the
+     * caller set it, else the plugin clock's instant of this append.
      */
     void appendRunRecord(RunRecord record);
 
