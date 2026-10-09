@@ -8,7 +8,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * The few fields of a run request that listings filter and sort on (#13), kept in memory by the
+ * The few fields of a run request that listings filter and sort on, kept in memory by the
  * store so a listing reads only the XML files of the rows it renders. Derived data: rebuilt from
  * {@code requests/run/*.xml} once per Jenkins session and updated on every save.
  *

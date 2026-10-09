@@ -77,15 +77,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       atomically (temp file, then {@code ATOMIC_MOVE}).</li>
  *   <li>Append-only records (runs, changes) are monthly JSONL files, written with
  *       append + flush; Instants are stored as epoch milliseconds.</li>
- *   <li>Writes are serialized <em>per target file</em> (a fixed set of lock stripes, #18): an
+ *   <li>Writes are serialized <em>per target file</em> (a fixed set of lock stripes): an
  *       append to this month's bucket never waits for anything but another single write that
  *       happens to share its stripe, and no operation holds a lock across more than one file
  *       write or deletion. In particular retention, which deletes old months and closed
  *       entities file by file, cannot stall the queue gate or build completion.</li>
- *   <li>Page loads read JSONL buckets newest first and stop at a record cap (#13); the month
+ *   <li>Page loads read JSONL buckets newest first and stop at a record cap; the month
  *       summary counters and the entity index are derived in-memory caches, never files.</li>
  *   <li>File names derived from identifiers are validated through {@link PathCodec}; month and
- *       id names use ASCII digits whatever the default locale (#17).</li>
+ *       id names use ASCII digits whatever the default locale.</li>
  * </ul>
  */
 @Restricted(NoExternalUse.class)
@@ -159,7 +159,7 @@ public final class FileStore implements Store {
         return INSTANCE;
     }
 
-    /** The write lock of one target file (#18: per-file, never store-wide). */
+    /** The write lock of one target file (per-file, never store-wide). */
     private ReentrantLock lockFor(Path file) {
         return writeLocks[file.toAbsolutePath().normalize().hashCode() & (LOCK_STRIPES - 1)];
     }
@@ -189,7 +189,7 @@ public final class FileStore implements Store {
         return root().resolve("activation-requests");
     }
 
-    /** The upgrade seeding marker (#15); a dot file, so the {@code *.xml} listing never sees it. */
+    /** The upgrade seeding marker; a dot file, so the {@code *.xml} listing never sees it. */
     private static final String ACTIVATION_SCHEMA_MARKER = ".schema";
 
     private Path snapshotDir() {
@@ -216,7 +216,7 @@ public final class FileStore implements Store {
         return incidentDir().resolve("index");
     }
 
-    /** {@code YYYY-MM.jsonl} in ASCII digits whatever the default locale (#17). */
+    /** {@code YYYY-MM.jsonl} in ASCII digits whatever the default locale. */
     static String monthFileName(YearMonth month) {
         return String.format(Locale.ROOT, "%04d-%02d.jsonl", month.getYear(), month.getMonthValue());
     }
@@ -520,7 +520,7 @@ public final class FileStore implements Store {
         return listXmlEntities(grantDir(), Grant.class, "grant");
     }
 
-    // ---------------------------------------------------------------- activation (#15, D-39)
+    // ---------------------------------------------------------------- activation (D-39)
 
     @Override
     public void saveActivationRequest(ActivationRequest request) {
@@ -645,7 +645,7 @@ public final class FileStore implements Store {
                 "1" + System.lineSeparator(), "activation schema marker");
     }
 
-    // ---------------------------------------------------------------- config snapshots (#25)
+    // ---------------------------------------------------------------- config snapshots
 
     @Override
     public void saveConfigSnapshot(String jobFullName, String configXml) {
@@ -1034,7 +1034,7 @@ public final class FileStore implements Store {
     }
 
     /**
-     * Deletes one month bucket file by file (#18): every incident XML, patch and bucket file is
+     * Deletes one month bucket file by file: every incident XML, patch and bucket file is
      * deleted under its own lock stripe, and the lock is released before the next one, so no
      * writer waits behind more than a single deletion. Incident XMLs and patches go first and
      * the JSONL files last, so an interrupted pass leaves the index in place and the next pass
@@ -1211,7 +1211,7 @@ public final class FileStore implements Store {
         }
     }
 
-    // ---------------------------------------------------------------- entity index (#13)
+    // ---------------------------------------------------------------- entity index
 
     /**
      * The entity index of the current Jenkins session, built on first use by reading every
@@ -1674,7 +1674,7 @@ public final class FileStore implements Store {
     }
 
     /**
-     * The bounded page query behind the {@code page*} methods (#13). Months are read newest
+     * The bounded page query behind the {@code page*} methods. Months are read newest
      * first and every file from its end, so the newest records come first.
      *
      * <ul>

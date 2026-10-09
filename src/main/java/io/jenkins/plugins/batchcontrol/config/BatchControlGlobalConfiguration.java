@@ -54,7 +54,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     private static final Logger LOGGER = Logger.getLogger(BatchControlGlobalConfiguration.class.getName());
 
     // volatile: read lock-free by the queue gate and the ACL on other threads; written under
-    // this instance's monitor (#19).
+    // this instance's monitor.
     private volatile boolean runControlEnabled;
     private volatile boolean changeControlEnabled;
     private List<String> approvers = new ArrayList<>();
@@ -71,7 +71,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     private int notifyBeforeExpiryMinutes = 10;
 
     /**
-     * #19: set only on the throw-away copy {@link #configure} binds the form into. On a candidate
+     * Set only on the throw-away copy {@link #configure} binds the form into. On a candidate
      * the switch setters are plain assignments: no toggle record and no side effect happen until
      * the bound state has been written to disk.
      */
@@ -81,7 +81,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         load();
     }
 
-    /** Detached copy for transactional binding (#19); never registered, never loaded from disk. */
+    /** Detached copy for transactional binding; never registered, never loaded from disk. */
     private BatchControlGlobalConfiguration(BatchControlGlobalConfiguration source) {
         this.candidate = true;
         copyFrom(source);
@@ -124,7 +124,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     /**
-     * #19: the form submission is a transaction. The form is bound into a detached copy (the
+     * The form submission is a transaction. The form is bound into a detached copy (the
      * setters still validate), the copy is written to {@code config.xml}, and only after that
      * write succeeded is the new state applied to this instance, followed by the CONFIG_TOGGLE
      * records and the side effects (cache invalidation, revoking active grants when change control
@@ -144,7 +144,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
         // e2e-03 DEF-08: an invalid value refuses the whole submission, before anything is bound.
         // S-25-02: validation (which may ask a slow security realm) runs before the monitor is
         // taken, so it never holds up the switch setters; binding, write and apply stay one
-        // transaction under the monitor (#19).
+        // transaction under the monitor.
         JSONObject form = normalizeListFields(json);
         validate(form);
         validateApprovers(form);
@@ -218,7 +218,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * the caller. The new value is applied in memory, the toggle record and side effects follow,
      * and the configuration is then persisted; a failed write is logged at SEVERE and swallowed,
      * so a boot-time JCasC apply cannot abort startup and a switch JCasC turns on is on. The web
-     * form path ({@link #configure}) stays transactional (#19).
+     * form path ({@link #configure}) stays transactional.
      */
     public void setRunControlEnabled(boolean enabled) {
         if (this.runControlEnabled == enabled) {
@@ -261,7 +261,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
      * judged the worse of the two, so long as the cut is recorded — which
      * {@code GrantService#revokeAllActive} does, one {@code GRANT_REVOKE} record per closed window.
      *
-     * <p>#19 / D-42: on the form path the revocation runs only once the new value is durable; a
+     * <p>On the form path the revocation runs only once the new value is durable; per D-42 a
      * direct call revokes even if persisting then fails (revocation only removes permissions).
      */
     public void setChangeControlEnabled(boolean enabled) {
@@ -304,7 +304,7 @@ public class BatchControlGlobalConfiguration extends GlobalConfiguration {
     }
 
     /**
-     * Toggle records and side effects of a switch change (#19: on the form path only after the
+     * Toggle records and side effects of a switch change (on the form path only after the
      * new state is on disk; D-42: on a direct setter call before the best-effort write). The toggle record is written before the revocations, so the audit
      * history reads in causal order: the switch went off, and then these windows were closed.
      */

@@ -20,7 +20,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  * {@code <prefix>~<sha256 hex of the full name>}, which keeps two long names differing only at the
  * tail on different files (such shortened names no longer decode, but they stay stable).
  *
- * <p><b>Uniqueness (#25).</b> {@code encode} never emits {@code ~} raw (it becomes {@code %7E}), so
+ * <p><b>Uniqueness.</b> {@code encode} never emits {@code ~} raw (it becomes {@code %7E}), so
  * a shortened name always contains exactly one character no plain encoding contains and can never
  * equal the encoding of another, shorter name. Unreleased builds joined the shortened form with
  * {@code -}, which a plain encoding does emit; files in that form are neither read nor migrated

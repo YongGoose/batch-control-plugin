@@ -42,7 +42,7 @@ public final class Approvers {
 
     /**
      * Whether two user ids name the same user under Jenkins' configured user id strategy
-     * (SPEC item 3, #23; security-08 S-12), for example case-insensitively by default.
+     * (SPEC item 3; security-08 S-12), for example case-insensitively by default.
      */
     public static boolean sameUser(String a, String b) {
         if (a == null || b == null) {

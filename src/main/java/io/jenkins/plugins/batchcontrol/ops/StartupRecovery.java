@@ -51,7 +51,7 @@ public final class StartupRecovery {
     }
 
     /**
-     * Builds the store's in-memory entity index now (#13), so the first save on the queue path
+     * Builds the store's in-memory entity index now, so the first save on the queue path
      * never pays for it.
      */
     private static void prepareStore() {

@@ -242,7 +242,7 @@ public class BatchControlStrategyMonitor extends AdministrativeMonitor {
             return HttpResponses.notFound(); // S-29-09: no stack trace, no reflected name
         }
         grants.markReviewed(target);
-        // #86: land on the confirmation page (<root>/batch-control/reviewed, Administer only). The name comes
+        // Land on the confirmation page (<root>/batch-control/reviewed, Administer only). The name comes
         // from the resolved item, not the raw parameter, and is URL-encoded.
         return HttpResponses.redirectViaContextPath("batch-control/reviewed?item="
                 + java.net.URLEncoder.encode(target.getFullName(), java.nio.charset.StandardCharsets.UTF_8));

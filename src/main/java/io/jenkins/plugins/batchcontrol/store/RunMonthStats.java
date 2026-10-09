@@ -4,7 +4,7 @@ import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
- * Per-month run counters for the history summary (#13), maintained incrementally from the
+ * Per-month run counters for the history summary, maintained incrementally from the
  * append-only {@code runs/YYYY-MM.jsonl} bucket: a summary request only reads the bytes appended
  * since the previous one.
  *
