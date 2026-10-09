@@ -848,11 +848,10 @@ public class GrantViolationGuard extends SaveableListener {
                 return;
             }
             BASELINE.put(fullName, "");
-            ChangeRecord record = ChangeRecord.create(ChangeType.GRANT_VIOLATION, fullName, user,
-                    "The item was created by a user whose Item/Create comes only from grant "
-                            + grant.getId() + " and carried an authorization property; the property was removed.");
-            record.setGrantId(grant.getId());
-            Store.get().appendChangeRecord(record);
+            // Logged, not thrown, when the record cannot be written: the property is removed, and the
+            // creating user is still told (D-48).
+            appendViolation(fullName, user, grant, "The item was created by a user whose Item/Create comes only"
+                    + " from grant " + grant.getId() + " and carried an authorization property; the property was removed.");
             SelfGrantRevertFilter.flag(item); // D-48
             LOGGER.warning(() -> "Removed the authorization property of '" + fullName + "', created by '"
                     + user + "' through grant " + grant.getId());
