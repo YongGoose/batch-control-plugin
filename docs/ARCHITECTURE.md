@@ -128,7 +128,7 @@ $JENKINS_HOME/batch-control/
 ```
 
 - A job whose directory marker (identity) cannot be read counts as not activated (fail closed, SPEC 6a).
-- Identity (D-80): the state stores the id of a marker file in the job's directory, not the directory's file key, so a copied or restored JENKINS_HOME keeps its activations and a job re-created under a deleted name (or copied by Jenkins) has no marker and starts not activated.
+- Identity (D-80): the state stores the id held by the marker file `.batch-control-activation-id` (one random UUID, written when the state is first stored, seeded or approved) in the job's directory, not the directory's file key, so a copied or restored JENKINS_HOME keeps its activations and a job re-created under a deleted name (or copied by Jenkins) has no marker and starts not activated.
 - `policy.ActivationService#isActivated(Job)` is the single read the queue gate uses for timer and upstream causes; it is ANDed with `blockTimer`/`blockUpstream`.
 - Activation state is written only by an approved ACTIVATION request (or the one-time seeding), never by job configuration, so no config write path can activate a job.
 - Rename/move relocates the state file; deletion removes it. The file name uses `PathCodec` like snapshots.
