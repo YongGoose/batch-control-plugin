@@ -10,6 +10,7 @@ import hudson.model.ParameterDefinition;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.PasswordParameterDefinition;
+import hudson.model.SimpleParameterDefinition;
 import hudson.model.StringParameterValue;
 import hudson.security.Permission;
 import hudson.util.Secret;
@@ -32,6 +33,7 @@ import io.jenkins.plugins.batchcontrol.ui.ApproverInput;
 import io.jenkins.plugins.batchcontrol.ui.ApproverOptions;
 import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import io.jenkins.plugins.batchcontrol.ui.FormErrors;
+import io.jenkins.plugins.batchcontrol.ui.RepeatedField;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.RequestRunPrefill;
 import jakarta.servlet.ServletException;
@@ -536,8 +538,9 @@ public class JobRequestAction implements Action {
         // The rendered form posts a json blob (f:form) plus the raw fields; a script may post
         // the raw fields only. Both carry the same contract: reason, repeated approvers (D-37).
         JSONObject formData = req.getParameter("json") != null ? req.getSubmittedForm() : null;
+        // R4-03: a multipart body without the blob has its text part read as UTF-8 (RepeatedField).
         String reason = Util.fixEmptyAndTrim(formData != null
-                ? formData.optString("reason", "") : Util.fixNull(req.getParameter("reason")));
+                ? formData.optString("reason", "") : Util.fixNull(RepeatedField.text(req, "reason")));
         // D-72a (SPEC item 11): the incident reference the rerun fallback form carries back. The
         // request is linked only to what IncidentService#linkableIncident accepts; a missing,
         // malformed, unknown or foreign reference makes an unlinked request, never an error.
@@ -855,7 +858,9 @@ public class JobRequestAction implements Action {
             uploaded.put(name, RequestBodyLimit.uploadedSize(req, Collections.singletonList(name)));
             ParameterValue value;
             try {
-                value = definition.createValue(req);
+                value = definition instanceof SimpleParameterDefinition && RepeatedField.isMultipart(req)
+                        ? createSimpleValue((SimpleParameterDefinition) definition, req)
+                        : definition.createValue(req);
             } catch (IllegalArgumentException | Failure e) {
                 String[] raw = req.getParameterValues(name);
                 throw new ParameterRefusal(name, raw != null && raw.length > 1
@@ -868,5 +873,24 @@ public class JobRequestAction implements Action {
                 submitted.add(value);
             }
         }
+    }
+    /**
+     * R4-03: what core's {@code SimpleParameterDefinition#createValue(StaplerRequest2)} does (one
+     * value: {@code createValue(String)}; none: the default; several: refused) for a multipart
+     * body, with the field's part read as UTF-8 ({@link RepeatedField#parameterValues}) instead of
+     * Stapler's ISO-8859-1 reading, so a raw string, text, choice or password value keeps its
+     * non-ASCII characters. A urlencoded body keeps core's own call.
+     */
+    @CheckForNull
+    private static ParameterValue createSimpleValue(SimpleParameterDefinition definition, StaplerRequest2 req) {
+        String[] values = RepeatedField.parameterValues(req, definition.getName());
+        if (values == null) {
+            return definition.getDefaultParameterValue();
+        }
+        if (values.length != 1) {
+            throw new IllegalArgumentException("Illegal number of parameter values for " + definition.getName()
+                    + ": " + values.length);
+        }
+        return definition.createValue(values[0]);
     }
 }
