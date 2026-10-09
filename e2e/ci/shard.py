@@ -212,6 +212,10 @@ UNITS = [
     Unit("r19-lifecycle", 2.5, [("r19-arrange", py("r19/arrange.py")), ("r19-lifecycle", py("r19/lifecycle.py"))],
          doc="e2e-19: request form validation, decision and cancel rules, approver change, self-approval, approved-run "
              "expiry, disabled job, missing Build notice, and the mails each step sends (SPEC 2, 3, 4, 7, 12)"),
+    # e2e-22 R2-05 (bug-hunt batch B). r22/cancelled_notice.py arranges its own items (r22-cancelq, r22-cancelq-dis).
+    Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
+         doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "
+             "shown as starting shortly; the request page says the queued run was cancelled and will not start"),
     Unit("r19-kinds", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-kinds", py("r19/kinds.py")),
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
@@ -284,7 +288,7 @@ GROUPS = [
         "def07", "crawl-requester", "crawl-manager", "r22-approver-case",  # e2e-12/14 targeted checks, round 3, the Reject colour
         "actions", "misc", "targeted", "round3", "r21-reject-color"]),
     ("crawls and multibranch", [  # the crawls of admin, reqonly, approver-1 and nobc, the multibranch job pages
-        "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch"]),
+        "crawl-admin", "crawl-reqonly", "crawl-approver-1", "crawl-nobc", "multibranch", "r22-cancelled-notice"]),
     ("admin and role strategy", [  # admin's job UI, then the role-strategy profile and its crawl (last)
         "jobui-new-admin", "jobui-classic-admin", "r22-rename-queue", "role"]),
     ("job ui params and restart", [  # requester's job UI, typed parameters, requests with typed values across a

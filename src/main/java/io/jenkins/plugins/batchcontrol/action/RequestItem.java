@@ -255,9 +255,24 @@ public class RequestItem implements ModelObject {
      * plus the run id are written later by the execution listener, so the page the approver lands
      * on is one refresh behind. The view uses this to say so. It turns false as soon as the status
      * moves on (EXECUTED, EXPIRED, INVALIDATED) and is false for PENDING, REJECTED and CANCELLED.
+     * R2-05: it is false as well once the queue item of the approved run was cancelled
+     * ({@link #isQueueCancelled()}): that run will not start, so "starts shortly" would be false.
      */
     public boolean isAwaitingExecution() {
-        return request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null;
+        return request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null
+                && request.getQueueCancelledAt() == null;
+    }
+
+    /**
+     * R2-05: whether the request is approved but the queue item of its run was cancelled, from the
+     * queue or by disabling the job (which cancels the job's queued items, D-55), before a build
+     * started. The service records it ({@code RunRequestService#recordQueueCancelled}) and never
+     * submits that run again; the approved-run timeout ends the request. The view says that the
+     * run will not start instead of the {@link #isAwaitingExecution()} notice.
+     */
+    public boolean isQueueCancelled() {
+        return request.getStatus() == RequestStatus.APPROVED && request.getExecutedRunId() == null
+                && request.getQueueCancelledAt() != null;
     }
 
     /**
@@ -273,7 +288,7 @@ public class RequestItem implements ModelObject {
                 && ((ParameterizedJobMixIn.ParameterizedJob<?, ?>) job).isDisabled();
     }
 
-    /** The approved-but-not-run timeout, for the disabled-job notice. */
+    /** The approved-but-not-run timeout, for the disabled-job and cancelled-run notices. */
     public int getApprovedRunTimeoutMinutes() {
         return BatchControlGlobalConfiguration.get().getApprovedRunTimeoutMinutes();
     }
