@@ -67,8 +67,8 @@ JOB_OVERHEAD = 3.2
 
 
 class Unit:
-    def __init__(self, name, weight, steps, last=False, doc=""):
-        self.name, self.weight, self.steps, self.last, self.doc = name, weight, steps, last, doc
+    def __init__(self, name, weight, steps, last=False, doc="", group=None):
+        self.name, self.weight, self.steps, self.last, self.doc, self.group = name, weight, steps, last, doc, group
 
 
 def crawl_unit(role, weight):
@@ -143,6 +143,10 @@ UNITS = [
         ("monitor", py("r14/s_monitor.py")),
     ], doc="e2e-12/14 G2d: error pages, list pager, incident, help, strategy monitor"),
     Unit("round3", 0.6, [("round3", py("r14/round3.py", "ABCDEFGHI"))], doc="e2e-14 R3-A..I: the e2e-11 round-3 checks"),
+    # e2e-23 R1-01 (bug-hunt batch A). r23/xml_chars.py arranges its own items (r23-ansi-fail, r23-plain-fail).
+    Unit("r23-xml-chars", 0.6, [("r23-xml-chars", py("r23/xml_chars.py"))], group="crawl and ui checks",
+         doc="e2e-23 R1-01: an ANSI-coloured console tail leaves the incident readable (list, page, incidents.csv, "
+             "summary); a comment or grant reason holding U+000B is refused with a 4xx and stores nothing"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
@@ -289,6 +293,11 @@ GROUPS = [
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r22-scripted-build", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
 ]
+# A unit may name its group in UNITS (Unit(..., group=<label>)) instead of being listed above: it joins the end of that
+# group's list here, before anything reads GROUPS (a label that is no group's leaves the unit in no group, which `check`
+# reports). The e2e-23 units use it, so that each of their PRs adds lines of its own to this file and none edits the
+# group lists above, which other open PRs edit (git cannot merge two edits of neighbouring lines).
+GROUPS = [(label, names + [u.name for u in UNITS if u.group == label]) for label, names in GROUPS]
 LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
 LABEL_MAX = 25
 

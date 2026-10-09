@@ -58,4 +58,53 @@ public final class XmlChars {
     public static String describe(CharSequence text, int index) {
         return String.format(Locale.ROOT, "U+%04X", (int) text.charAt(index));
     }
+
+    /**
+     * R1-01: refuses a user-entered text that holds a character XML 1.0 cannot store, before
+     * anything is stored. The message is the one the run request form already uses:
+     * {@code "The <field> contains a character that cannot be stored (U+000B); remove it and submit
+     * again."}. {@code null} and storable texts pass. The web layer answers the
+     * {@link IllegalArgumentException} with a refusal on the form (HTTP 400).
+     *
+     * @param field what the text is, as the message names it ({@code "comment"}, {@code "reason"})
+     */
+    public static void requireStorable(@CheckForNull String text, String field) {
+        int bad = firstInvalid(text);
+        if (bad >= 0) {
+            throw new IllegalArgumentException("The " + field + " contains a character that cannot be stored ("
+                    + describe(text, bad) + "); remove it and submit again.");
+        }
+    }
+
+    /**
+     * R1-01: {@code text} without the characters XML 1.0 cannot store. For system text taken from
+     * outside the plugin (a console line, a build's parameter value) and kept for display only;
+     * every other character is kept as it is. {@code null} stays {@code null}.
+     */
+    @CheckForNull
+    public static String removeInvalid(@CheckForNull String text) {
+        int bad = firstInvalid(text);
+        if (bad < 0) {
+            return text;
+        }
+        int length = text.length();
+        StringBuilder out = new StringBuilder(length);
+        out.append(text, 0, bad);
+        for (int i = bad; i < length; i++) {
+            char c = text.charAt(i);
+            if (c < 0x20) {
+                if (c == '\t' || c == '\n' || c == '\r') {
+                    out.append(c);
+                }
+            } else if (Character.isHighSurrogate(c)) {
+                if (i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
+                    out.append(c).append(text.charAt(i + 1));
+                    i++; // a complete pair: one supplementary character
+                }
+            } else if (c != '￾' && c != '￿' && !Character.isLowSurrogate(c)) {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
 }
