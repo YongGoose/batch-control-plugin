@@ -94,13 +94,15 @@
           <bc:fieldError errors="${errors}" field="reason"/>
         </f:entry>
         <!-- D-37: posted as repeated "approvers" fields, one user id per checked box. A single
-             candidate starts checked so the common one-approver case needs no extra click. -->
+             candidate starts checked so the common one-approver case needs no extra click. The
+             json attribute puts each checked id into the json blob too, in order: on this
+             multipart form Stapler keeps only the last repeated field (ui.RepeatedField). -->
         <f:entry title="Approvers" description="Any one of the checked approvers may decide."
                  help="/plugin/batch-control/help/approvers.html">
           <j:set var="singleApprover" value="${it.approverOptions.size() == 1}"/>
           <j:forEach var="a" items="${it.approverOptions}" varStatus="s">
             <div class="jenkins-!-margin-bottom-1">
-              <f:checkbox name="approvers" value="${a}" id="batch-control-approver-${s.index}"
+              <f:checkbox name="approvers" value="${a}" json="${a}" id="batch-control-approver-${s.index}"
                           title="${a}" checked="${errors.inputKept ? errors.checked('approvers', a) : singleApprover}"/>
             </div>
           </j:forEach>
