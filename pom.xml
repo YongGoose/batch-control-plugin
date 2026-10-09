@@ -232,6 +232,15 @@
       <artifactId>file-parameters</artifactId>
       <optional>true</optional>
     </dependency>
+    <dependency>
+      <!-- Matrix projects in tests: ActivationMatrixConfigurationTest (D-82, T-06a-58..62, a
+           configuration follows its parent's run control) and the item-kind tests. Declared
+           directly rather than relying on the transitive copy through rebuild. Test scope only:
+           the main code does not reference hudson.matrix. -->
+      <groupId>org.jenkins-ci.plugins</groupId>
+      <artifactId>matrix-project</artifactId>
+      <scope>test</scope>
+    </dependency>
     <!-- Not BOM-managed; pinned to latest release supporting jenkins.baseline 2.568 (requiredCore 2.516.3). -->
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>
