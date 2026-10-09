@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-10-09 — main protected by rulesets; CI cleanup after the move to jenkinsci
+- Repository: jenkinsci/batch-control-plugin was created fresh on 2026-10-08, not transferred. Issues and PRs restart at #1, so old `#n` references in docs and code comments are dead (follow-up).
+- Rulesets on `main` (owner decision; D1 of CI-PROPOSAL): `main: CI and history` (no deletion, no force push, PR required, required checks `build` (GitHub Actions) and `Jenkins` (ci.jenkins.io), branch up to date; Repository admin may bypass, for the owner's force push) and `main: one approval` (one approving review; admin may bypass on PRs, since the sole maintainer cannot approve their own PRs).
+- PR #11 had no GitHub Actions runs: it conflicted with main because #11 and #118 both used `e2e/r19/`. Delegated: e2e-tester ← merge main into e2e/gap-audit (main's Reject-colour driver moved to `r21/`, TEST-MATRIX notes 286/287 of #11 renumbered 287/288) and merge the result into e2e/best-practice (#12, stacked on #11). Offline checks green; the Docker e2e run is left to CI.
+- Delegated: release-manager ← CONTRIBUTING and workflow headers name both required checks; e2e.yml runs only when `src/main/**`, `pom.xml`, `.mvn/**`, `e2e/**` or its own file changes; unit-test jobs named by feature (6 groups × JDK 21/25). Shard safeguard green (277 classes); the real CI run is pending.
+- Review: release-manager read-only review of the public markdown (README, README.ko, CONTRIBUTING, LICENSE, CLAUDE.md, PR template, CODEOWNERS, LIMITATIONS): 1 High (README.ko.md contradicts current behaviour), 12 Medium, 12 Low; LICENSE and CODEOWNERS fine. Fixes wait for the owner's decisions.
+- Waiting: owner pushes e2e/gap-audit, e2e/best-practice and ci/required-checks-names; owner records D1 in DECISIONS.md; decisions on README.ko.md, README length, old issue numbers and CLAUDE.md.
+- Open requests: e2e job names by feature once #12 is merged (e2e-tester `e2e/ci/shard.py`, release-manager `e2e.yml`); optional mention of the e2e paths filter in `e2e/README.md` "CI contract".
+
 ## 2026-10-07 — hosting review round 6 (mawinter69, #5338, comment 5986189363): PR #116
 - Blockers fixed: ITEM scope (one-item windows, item kind shown; D-71..D-71c, D-74) and typed run parameters incl. file parameters (D-72..D-72b, D-74).
 - Decisions: D-71, D-71a/b (replaced by D-74), D-71c, D-72, D-72a, D-72b, D-73, D-74, D-75 (followed names for readers only; D-71c (3) stands; SPEC 171/206 approved), D-76 (snapshot refresh at switch-on, creation-time saves, accepted storage residuals).

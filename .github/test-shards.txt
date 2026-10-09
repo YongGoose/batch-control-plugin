@@ -1,23 +1,110 @@
-# Surefire shards for the Build workflow (issue #54).
+# Surefire groups for the Build workflow (issue #54).
 #
-# Format: <shard-id> <comma-separated Surefire -Dtest patterns>
-# Patterns match the simple class name; only letters, digits, '_' and '*' are allowed.
+# Format: a group starts with a line "[<label>]"; the lines after it, up to the next
+# "[<label>]" line, hold its Surefire -Dtest patterns, separated by commas, spaces or line
+# breaks. Lines starting with '#' are comments.
+#   label    words of lower-case letters and digits separated by single spaces or '-', at
+#            most 25 characters. It names the job, "test (jdk 21, <label>)", so say what
+#            the group tests. Its id, the label with '-' for every space ("run-approval"),
+#            names the surefire-reports artifact and is the argument of "verify".
+#   pattern  matched against the simple class name; only letters, digits, '_' and '*' are
+#            allowed. Either a prefix ("Grant*Test") or one class name.
 #
-# Shards are contiguous first-letter ranges of the test class name, so every class that
-# starts with an upper-case A-Z letter is covered by construction. The ranges were balanced
-# with per-class times from the last single-job CI run (8,992 s of class time in total):
-#   1  A     ~1,850 s  (includes AuthorizationEntryGuardTest, the slowest class at ~460 s)
-#   2  B-F   ~1,270 s
-#   3  G-L   ~1,510 s
-#   4  M-P   ~1,830 s
-#   5  Q-R   ~1,580 s
-#   6  S-Z     ~960 s
+# Groups are features, by test class name. Estimated class time per group, from the
+# per-class times of Build runs 37871680943 and 37871413114 (mean of their JDK 21 and 25
+# jobs, 21,500 s in total; class times in a job that forks one JVM per core run higher
+# than in the old single-job run):
+#   run approval and mail      53 classes  ~4,460 s
+#   activation and reruns      37 classes  ~3,750 s
+#   windows and audit history  57 classes  ~4,090 s
+#   items and storage          40 classes  ~3,230 s  (ItemIdentityBindingTest, ~480 s)
+#   authorization and plugins  53 classes  ~3,070 s  (AuthorizationEntryGuardTest, ~370 s)
+#   parameters and ui          37 classes  ~2,910 s
+# ItemIdentityBindingTest and AuthorizationEntryGuardTest are the two slowest classes.
+# The first-letter shards these replaced measured, on the same runs: A ~2,270 s,
+# B-F ~2,630 s, G-L ~4,310 s, M-P ~3,120 s, Q-R ~4,980 s, S-Z ~4,210 s.
 #
-# .github/scripts/test-shards.py check fails the workflow when a test class matches no shard
-# or more than one shard. Rebalance here when a range grows much slower than the others.
-1 A*Test
-2 B*Test,C*Test,D*Test,E*Test,F*Test
-3 G*Test,H*Test,I*Test,J*Test,K*Test,L*Test
-4 M*Test,N*Test,O*Test,P*Test
-5 Q*Test,R*Test
-6 S*Test,T*Test,U*Test,V*Test,W*Test,X*Test,Y*Test,Z*Test
+# .github/scripts/test-shards.py check fails the workflow when a test class matches no
+# group or more than one group, when a group matches no class and when a pattern matches
+# no class (left behind by a rename or a deletion). A new test class whose name starts like
+# the classes of one group needs no change here if that group has its prefix; otherwise add
+# the prefix or the class name to the group of the feature it tests. Rebalance (move a
+# family to another group, or split a feature into two descriptively labelled groups) when
+# one group grows much slower than the others.
+
+[run approval and mail]
+Approv*Test
+DiscoverOnlyRequestScreenTest ExpiryAndCancelTest MissedInvalidationGapTest
+MultiApproverTest PendingCountTest QueueBlockTest RunControlUsabilityTest
+OwnerScenario*Test
+Request*Test
+RunRequest*Test
+# notifications
+EmailNotification*Test ExpiryNoticeIsolationTest Notification*Test
+
+[activation and reruns]
+Activation*Test
+HoldRefusalRecordTest
+NewJob*Test
+Trigger*Test
+# incidents, refused builds and reruns
+Incident*Test
+MarkerReuseAuditTest RebuildContextMenuTest RunMarkerGapTest RunRerunBudgetGapTest
+Refused*Test
+Rerun*Test
+
+[windows and audit history]
+ActiveGrantsRealJenkinsTest ComputedItemWindowTest
+ChangeControl*Test
+CreateName*Test
+Grant*Test
+Window*Test
+# change records, history, run records and CSV export
+ChangeRecord*Test
+ChangesMonthDefaultTest ConfigAuditTest DashboardLimitTest DatesClockZoneTest
+DiffSummaryAndDatesTest RecordHistoryGapTest RunRecordListenerTest
+Creation*Test
+Csv*Test
+History*Test
+Snapshot*Test
+
+[items and storage]
+Item*Test
+Move*Test
+OrganizationFolderCreationGapTest
+# the file store
+BoundedReadTest FileStoreFailSoftTest LegacySnapshotPlantTest MonthFileGapTest
+OversizedLineTest RecordIsolationGapTest RecordLookupPathTest RestartRecoveryTest
+UnreadableOpenRequestGapTest
+PathCodec*Test
+Retention*Test
+Store*Test
+
+[authorization and plugins]
+Authorization*Test
+BuildAuthenticatorMonitorTest FailClosedGapTest MatrixStrategyTest
+MonitorStandingPermissionGapTest PlainMatrixMoveGuardTest ResponsePassThroughTest
+SecurityRegressionTest SystemBuildWarningTest
+Guard*Test
+Permission*Test
+Role*Test
+Strategy*Test
+# other plugins, present or absent
+InjectedTest UpstreamNameCanaryTest
+OptionalDependency*Test
+PluginInteraction*Test
+
+[parameters and ui]
+CredentialsParameterTest DialogTypedParameterTest ParameterValuePageTest RunParameterTest
+RunRecordFileValueTest ScriptedSubmissionParametersTest SecretParameterMaskingTest
+StashedFileBodyCapTest
+Typed*Test
+ValuesFile*Test
+# pages, links and the global configuration
+ActionVisibilityTest ConfigPagePolishTest ConfigUsabilityTest ConfigurationValidationGapTest
+FilterFormCrumbTest FormRefusalUsabilityTest ModelLinkTest PolishMarkupTest RunLinkRuleTest
+SwitchSaveFailureTest UnlinkedIdTextTest XssEscapingTest
+Global*Test
+Job*Test
+Link*Test
+SectionTabs*Test
