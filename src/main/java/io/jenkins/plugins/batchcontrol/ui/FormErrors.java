@@ -195,7 +195,8 @@ public final class FormErrors {
     /**
      * Whether {@code value} was among the submitted values of the repeated {@code field}. D-37: on
      * a multipart body Stapler keeps only the last part of the field, so the form's {@code json}
-     * blob is read as well ({@link RepeatedField}).
+     * blob is read instead when it holds values for the field ({@link RepeatedField}), and a
+     * refused form re-renders the same boxes checked that the service saw.
      */
     public boolean checked(String field, String value) {
         if (!isInputKept()) {

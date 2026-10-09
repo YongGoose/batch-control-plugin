@@ -9,6 +9,7 @@ import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.StringParameterDefinition;
+import hudson.model.User;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import io.jenkins.plugins.batchcontrol.model.GrantRequest;
@@ -56,6 +57,7 @@ import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRun;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRunMultipartOk;
 import static io.jenkins.plugins.batchcontrol.ApproverFormFixtures.submitRunOk;
 import static io.jenkins.plugins.batchcontrol.BatchControlFixtures.setBatchControl;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -83,6 +85,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * parameters, T-03-29 with a core file parameter), and the job's
  * {@code batch-control/} page driven in a browser with two approvers ticked (T-03-30 without
  * parameters, T-03-31 with a file chosen) must store the whole set, in submission (page) order.
+ *
+ * <p>T-03-32 (D-37, D-72; matrix note 290) repeats those paths and T-03-07 with a non-ASCII user
+ * id ({@code 山田}, as LDAP, SAML or OIDC realms may hand out): the stored set is exactly the
+ * designated ids, each once and intact, whichever position the non-ASCII id has.
  *
  * <p>Every creation, decision and designation change goes through the frozen HTTP form
  * contract (field {@code approvers}, one user id per value; see {@link ApproverFormFixtures}).
@@ -636,6 +642,146 @@ public class MultiApproverTest {
         assertDecidedAndRanWithFile(id, fileJob, expected.get(1));
     }
 
+    // ------------------------------------------------------------------ non-ASCII ids (T-03-32)
+
+    /** {@code 山田}: a user id outside ASCII, as LDAP, SAML or OIDC realms may hand out. */
+    private static final String YAMADA = "山田";
+
+    /** {@link #YAMADA}'s UTF-8 bytes read as ISO-8859-1, quoted in the messages so a garbled copy is recognisable. */
+    private static final String YAMADA_AS_LATIN1 = new String(YAMADA.getBytes(StandardCharsets.UTF_8),
+            StandardCharsets.ISO_8859_1);
+
+    /**
+     * T-03-32 (browser-shaped multipart, non-ASCII id first): a multipart {@code submit} shaped as
+     * the Request Run form posts it (raw parts without a part charset plus core's {@code json}
+     * field, as T-03-28) designating [山田, a2] stores exactly [山田, a2]: 山田 once, intact, first.
+     * Guards: a3, who was not sent, cannot decide; 山田 approves (EXECUTED, decidedBy 山田, one build).
+     */
+    @Test
+    public void t_03_32_multipartNonAsciiApproverFirstIsStoredOnce() throws Exception {
+        allowNonAsciiApprover("a1", "a2", "a3", "admin", YAMADA);
+        String id = acceptedMultipart(YAMADA, "a2");
+        assertNonAsciiSetDecidedBy(id, Arrays.asList(YAMADA, "a2"), YAMADA, 1,
+                "a multipart submission of [" + YAMADA + ", a2]");
+    }
+
+    /**
+     * T-03-32 (browser-shaped multipart, non-ASCII id last): the same submission with [a2, 山田].
+     * Stapler keeps one raw value per multipart field name, the last one (note 289), so this is the
+     * order in which a raw {@code approvers} part decoded without a charset would carry 山田 next to
+     * the {@code json} field's copy. It stores exactly [a2, 山田]. Guards as above.
+     */
+    @Test
+    public void t_03_32_multipartNonAsciiApproverLastIsStoredOnce() throws Exception {
+        allowNonAsciiApprover("a1", "a2", "a3", "admin", YAMADA);
+        String id = acceptedMultipart("a2", YAMADA);
+        assertNonAsciiSetDecidedBy(id, Arrays.asList("a2", YAMADA), YAMADA, 1,
+                "a multipart submission of [a2, " + YAMADA + "]");
+    }
+
+    /**
+     * T-03-32 (real form): the Request Run page in a browser (HtmlUnit, JavaScript on) offers 山田
+     * as an approver; ticking 山田 and a2 stores exactly those two, in page order, each once. Done
+     * twice, with 山田 configured first and then last in the approver list, so that 山田 is the
+     * last ticked box in one of the submissions if the page follows the configured order. Both
+     * sets are checked before either assertion can stop the test. Guards per request: a3 cannot
+     * decide; 山田 approves (EXECUTED, decidedBy 山田, one build each).
+     */
+    @Test
+    public void t_03_32_requestRunFormNonAsciiApproverIsStoredOnce() throws Exception {
+        allowNonAsciiApprover(YAMADA, "a1", "a2", "a3", "admin");
+        JenkinsRule.WebClient wc = TypedParameterFixtures.browser(j, "u1");
+        HtmlForm firstForm = TypedParameterFixtures.requestRunForm(j, wc, job);
+        List<String> firstExpected = inPageOrder(firstForm, YAMADA, "a2");
+        String first = submit(wc, firstForm, YAMADA, "a2");
+
+        allowNonAsciiApprover("a1", "a2", "a3", "admin", YAMADA);
+        HtmlForm secondForm = TypedParameterFixtures.requestRunForm(j, wc, job);
+        List<String> secondExpected = inPageOrder(secondForm, YAMADA, "a2");
+        String second = submit(wc, secondForm, YAMADA, "a2");
+
+        List<String> firstStored = RunRequestService.get().load(first).getApprovers();
+        List<String> secondStored = RunRequestService.get().load(second).getApprovers();
+        assertAll(
+                () -> assertEquals(firstExpected, firstStored, "the Request Run form with " + YAMADA
+                        + " configured first must store the ticked approvers once each, intact, in page order"
+                        + " (a garbled copy would read " + YAMADA_AS_LATIN1 + "; form enctype "
+                        + firstForm.getEnctypeAttribute() + ")"),
+                () -> assertEquals(secondExpected, secondStored, "the Request Run form with " + YAMADA
+                        + " configured last must store the ticked approvers once each, intact, in page order"
+                        + " (a garbled copy would read " + YAMADA_AS_LATIN1 + "; form enctype "
+                        + secondForm.getEnctypeAttribute() + ")"));
+
+        assertNonAsciiSetDecidedBy(first, firstExpected, YAMADA, 1, "the first Request Run form submission");
+        assertNonAsciiSetDecidedBy(second, secondExpected, YAMADA, 2, "the second Request Run form submission");
+    }
+
+    /**
+     * T-03-32 (url-encoded control, as T-03-07): url-encoded {@code submit}s with [山田, a2] and
+     * with [a2, 山田] store exactly those sets. Guards as above.
+     */
+    @Test
+    public void t_03_32_urlencodedNonAsciiApproverIsStoredOnce() throws Exception {
+        allowNonAsciiApprover("a1", "a2", "a3", "admin", YAMADA);
+        String first = submitRunOk(j, "u1", job, "month-end batch", YAMADA, "a2");
+        String last = submitRunOk(j, "u1", job, "month-end batch, second run", "a2", YAMADA);
+        assertNonAsciiSetDecidedBy(first, Arrays.asList(YAMADA, "a2"), YAMADA, 1,
+                "a url-encoded submission of [" + YAMADA + ", a2]");
+        assertNonAsciiSetDecidedBy(last, Arrays.asList("a2", YAMADA), YAMADA, 2,
+                "a url-encoded submission of [a2, " + YAMADA + "]");
+    }
+
+    /**
+     * u1's browser-shaped multipart {@code submit} to {@link #job} ({@code submitRunMultipart}: raw
+     * parts plus the {@code json} field) designating {@code approvers}, every one an eligible
+     * approver: it must be accepted; returns the id of the one request it created.
+     */
+    private String acceptedMultipart(String... approvers) throws Exception {
+        Set<String> before = runRequestIds();
+        WebResponse response = ApproverFormFixtures.submitRunMultipart(j, "u1", job, "month-end batch", List.of(), null,
+                approvers);
+        assertSuccess(response, "a browser-shaped multipart submission designating " + Arrays.toString(approvers)
+                + " (every one an eligible approver; a refusal naming " + YAMADA_AS_LATIN1 + " means a raw part was"
+                + " decoded as ISO-8859-1 next to the json field)");
+        Set<String> after = runRequestIds();
+        after.removeAll(before);
+        assertEquals(1, after.size(), "the accepted submission must have created exactly one run request, got " + after);
+        return after.iterator().next();
+    }
+
+    /**
+     * Makes {@link #YAMADA} an eligible approver: an existing user (the dummy realm accepts any id)
+     * holding BatchControl/Approve, listed with the others in the given approver-list order.
+     */
+    private void allowNonAsciiApprover(String... approvers) throws Exception {
+        j.jenkins.setAuthorizationStrategy(authorization(true)
+                .grant(Jenkins.READ, Item.READ, BatchControlPermissions.APPROVE).everywhere().to(YAMADA));
+        User.getById(YAMADA, true).save();
+        cfg.setApprovers(Arrays.asList(approvers));
+        cfg.save();
+    }
+
+    /**
+     * Request {@code id} is PENDING with exactly {@code expected}; a3 (not designated) is refused
+     * and leaves it PENDING; {@code decider} approves: EXECUTED, decidedBy {@code decider}, and
+     * {@link #job} then has {@code buildsAfter} builds.
+     */
+    private void assertNonAsciiSetDecidedBy(String id, List<String> expected, String decider, int buildsAfter,
+                                            String what) throws Exception {
+        RunRequest request = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.PENDING, request.getStatus());
+        assertEquals(expected, request.getApprovers(), what + " must store exactly the designated ids, in submission"
+                + " order, each once and intact (a garbled copy of " + YAMADA + " would read " + YAMADA_AS_LATIN1 + ")");
+        assertClientError(decideRun(j, "a3", id, "approve", "not designated"), "approval by a3, who was not designated");
+        assertEquals(RequestStatus.PENDING, RunRequestService.get().load(id).getStatus());
+        assertSuccess(decideRun(j, decider, id, "approve", "checked"), "approval by " + decider + ", a designated approver");
+        j.waitUntilNoActivity();
+        RunRequest decided = RunRequestService.get().load(id);
+        assertEquals(RequestStatus.EXECUTED, decided.getStatus());
+        assertEquals(decider, decided.getDecidedBy(), "the record must name the approver who decided");
+        assertEquals(buildsAfter, job.getBuilds().size(), "each approval must run the build exactly once");
+    }
+
     /** An approval-required Freestyle job with a core file parameter UPLOAD and a string DATE. */
     private FreeStyleProject fileJob(String name) throws Exception {
         FreeStyleProject fileJob = j.createFreeStyleProject(name);
@@ -663,11 +809,27 @@ public class MultiApproverTest {
         wc.waitForBackgroundJavaScript(5000);
         assertTrue(answer.getWebResponse().getStatusCode() < 400, "fixture: the Request Run submission with "
                 + Arrays.toString(approvers) + " ticked must succeed, got HTTP " + answer.getWebResponse().getStatusCode()
-                + ": " + UsabilityFixtures.excerpt(answer.getWebResponse().getContentAsString()));
+                + alerts(answer) + ": " + UsabilityFixtures.excerpt(answer.getWebResponse().getContentAsString()));
         Set<String> after = runRequestIds();
         after.removeAll(before);
         assertEquals(1, after.size(), "fixture: the submission must have created exactly one run request, got " + after);
         return after.iterator().next();
+    }
+
+    /** The texts of the answer page's {@code role="alert"} elements (a refusal's reason), for failure messages. */
+    private static String alerts(Page answer) {
+        if (!(answer instanceof org.htmlunit.html.HtmlPage)) {
+            return "";
+        }
+        List<String> texts = new ArrayList<>();
+        for (org.htmlunit.html.HtmlElement element
+                : ((org.htmlunit.html.HtmlPage) answer).getDocumentElement().getHtmlElementDescendants()) {
+            String text = element.getTextContent().trim();
+            if ("alert".equals(element.getAttribute("role")) && !text.isEmpty()) {
+                texts.add(text);
+            }
+        }
+        return texts.isEmpty() ? "" : " (alerts " + texts + ")";
     }
 
     /** Request {@code id} is EXECUTED, decided by {@code decider}, and the one build of {@code target} got data.csv as UPLOAD. */
