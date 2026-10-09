@@ -1,15 +1,18 @@
 # Pre-hosting regression gate (issue #11, docs/CI-PROPOSAL.md N1).
 # Runs with the default read-only token and no secrets, so fork pull requests work too.
 #
-# The Surefire run is split into parallel shards (issue #54). Shard patterns live in
-# .github/test-shards.txt; .github/scripts/test-shards.py fails the run when a test class
-# matches no shard or two shards. The static checks run once, in the "checks" job. The
-# final "build" job aggregates every job and is the single required status.
+# The Surefire run is split into parallel jobs, one per feature group of test classes
+# (issue #54). The groups, their labels and their patterns live in .github/test-shards.txt;
+# .github/scripts/test-shards.py fails the run when a test class matches no group or two
+# groups. The static checks run once, in the "checks" job. The final "build" job
+# aggregates every job. It is one of the two required status checks on main, with
+# ci.jenkins.io's "Jenkins" (CONTRIBUTING.md §7): keep its name, and give this workflow no
+# path filter, since a skipped workflow leaves a required check pending.
 #
 # Every JDK the jenkinsci hosting checker accepts (21 and 25, R4-3) gets its own static
-# checks job ("build (jdk 21)") and its own test shards ("test (jdk 25, shard 1)"). The
-# list lives in env.JDKS (plan job, shard matrix) and in the checks matrix below; keep
-# them in sync with the Jenkinsfile.
+# checks job ("build (jdk 21)") and its own test jobs, named by group label ("test (jdk 25,
+# run approval and mail)"). The list lives in env.JDKS (plan job, test matrix) and in the
+# checks matrix below; keep them in sync with the Jenkinsfile.
 ---
 name: Build
 on:
@@ -37,7 +40,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check that every test class is in exactly one shard
+      - name: Check that every test class is in exactly one group
         id: shards
         env:
           JDKS: '21,25'
@@ -61,12 +64,12 @@ jobs:
           java-version: ${{ matrix.jdk }}
           cache: maven
       # Enforcer, access-modifier checker, SpotBugs and the other verify-phase checks,
-      # plus compilation of the test sources. Tests run in the shard jobs.
+      # plus compilation of the test sources. Tests run in the test jobs.
       - name: Build and check (tests skipped)
         run: mvn -B -ntp clean verify -DskipTests
 
   test:
-    name: test (jdk ${{ matrix.jdk }}, shard ${{ matrix.shard }})
+    name: test (jdk ${{ matrix.jdk }}, ${{ matrix.label }})
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -87,20 +90,20 @@ jobs:
       # parent POM does not honour -Denforcer.skip, so they run here too.
       - name: Test
         env:
-          SHARD_TESTS: ${{ matrix.tests }}
+          GROUP_TESTS: ${{ matrix.tests }}
         run: >-
           mvn -B -ntp clean test
-          -Dtest="$SHARD_TESTS"
+          -Dtest="$GROUP_TESTS"
           -Daccess-modifier-checker.skip=true
-      - name: Check that the shard ran exactly its classes
+      - name: Check that the group ran exactly its classes
         env:
-          SHARD_ID: ${{ matrix.shard }}
-        run: python3 .github/scripts/test-shards.py verify "$SHARD_ID"
+          GROUP_ID: ${{ matrix.group }}
+        run: python3 .github/scripts/test-shards.py verify "$GROUP_ID"
       - name: Upload surefire reports
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: surefire-reports-jdk${{ matrix.jdk }}-shard-${{ matrix.shard }}
+          name: surefire-reports-jdk${{ matrix.jdk }}-${{ matrix.group }}
           path: target/surefire-reports/
           if-no-files-found: ignore
           retention-days: 14

@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """Safeguard for the sharded Surefire run in .github/workflows/build.yml (issue #54).
 
+The Surefire run is split into feature groups, defined in .github/test-shards.txt (the
+format is described in its header). Each group has a label, which names its job
+("test (jdk 21, run approval)"), and an id derived from the label (lower case, every run
+of other characters turned into '-': "run-approval"), which names its artifact and is
+the argument of "verify".
+
 Usage:
   test-shards.py check
       Lists every test class Surefire would run and checks that each one matches exactly
-      one shard in .github/test-shards.txt, and that no shard is empty. On success it
-      writes the job matrix to $GITHUB_OUTPUT (key "matrix"): one entry per JDK and
-      shard. The JDK versions come from the JDKS environment variable (comma-separated,
+      one group, that no group is empty and that no pattern is stale (matches no class).
+      On success it writes the job matrix to $GITHUB_OUTPUT (key "matrix"): one entry per
+      JDK and group, with the keys jdk, group (the id), label and tests (the -Dtest
+      value). The JDK versions come from the JDKS environment variable (comma-separated,
       default "21").
-  test-shards.py verify <shard-id>
-      Run after a shard's Surefire run. Checks that target/surefire-reports holds a report
-      for every class assigned to the shard and for no other class, then writes the
-      shard's test counts to $GITHUB_STEP_SUMMARY.
+  test-shards.py verify <group-id>
+      Run after a group's Surefire run. Checks that target/surefire-reports holds a report
+      for every class assigned to the group and for no other class, then writes the
+      group's test counts to $GITHUB_STEP_SUMMARY.
 
 The pattern matching mirrors Surefire's -Dtest handling for patterns without a package
 part: the pattern is matched against the simple class name, '*' matches any run of
@@ -31,13 +38,16 @@ SHARD_FILE = ROOT / ".github" / "test-shards.txt"
 TEST_SRC = ROOT / "src" / "test" / "java"
 REPORTS = ROOT / "target" / "surefire-reports"
 
-# Surefire's default includes. A class matching one of these but no shard pattern would
+# Surefire's default includes. A class matching one of these but no group pattern would
 # be silently skipped by the sharded run, so the check treats it as an error.
 SUREFIRE_INCLUDES = ["Test*", "*Test", "*Tests", "*TestCase"]
 
 # Generated at build time by maven-hpi-plugin (insert-test goal), not present in src/test.
 GENERATED_TESTS = ["io.jenkins.plugins.batch_control.InjectedTest"]
 
+HEADER = re.compile(r"^\[(.*)\]$")
+LABEL_SYNTAX = re.compile(r"^[a-z0-9]+(?:[ -][a-z0-9]+)*$")
+LABEL_MAX = 25
 PATTERN_SYNTAX = re.compile(r"^[A-Za-z0-9_*]+$")
 
 
@@ -46,29 +56,48 @@ def fail(msg):
     sys.exit(1)
 
 
-def load_shards():
-    shards = []
+def group_id(label):
+    return re.sub(r"[^a-z0-9]+", "-", label).strip("-")
+
+
+def load_groups():
+    groups = []
     for lineno, raw in enumerate(SHARD_FILE.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split()
-        if len(parts) != 2:
-            fail(f"{SHARD_FILE.name}:{lineno}: expected '<id> <patterns>', got '{line}'")
-        shard_id, patterns = parts[0], parts[1].split(",")
-        for p in patterns:
+        where = f"{SHARD_FILE.name}:{lineno}"
+        header = HEADER.match(line)
+        if header:
+            label = header.group(1)
+            if len(label) > LABEL_MAX or not LABEL_SYNTAX.match(label):
+                fail(f"{where}: label '{label}' must be words of lower-case letters and digits "
+                     f"separated by single spaces or '-', at most {LABEL_MAX} characters")
+            gid = group_id(label)
+            if any(g["id"] == gid for g in groups):
+                fail(f"{where}: label '{label}' repeats the group id '{gid}' of another group")
+            groups.append({"id": gid, "label": label, "patterns": []})
+            continue
+        if not groups:
+            fail(f"{where}: patterns before the first '[<label>]' line")
+        for p in re.split(r"[,\s]+", line):
+            if not p:
+                continue
             if not PATTERN_SYNTAX.match(p):
-                fail(f"{SHARD_FILE.name}:{lineno}: unsupported pattern '{p}'")
-        if any(s["id"] == shard_id for s in shards):
-            fail(f"{SHARD_FILE.name}:{lineno}: duplicate shard id '{shard_id}'")
-        shards.append({"id": shard_id, "patterns": patterns})
-    if not shards:
-        fail(f"{SHARD_FILE.name} defines no shards")
-    return shards
+                fail(f"{where}: unsupported pattern '{p}'")
+            if p in groups[-1]["patterns"]:
+                fail(f"{where}: pattern '{p}' is listed twice in group '{groups[-1]['label']}'")
+            groups[-1]["patterns"].append(p)
+    if not groups:
+        fail(f"{SHARD_FILE.name} defines no groups")
+    for g in groups:
+        if not g["patterns"]:
+            fail(f"{SHARD_FILE.name}: group '{g['label']}' has no patterns")
+    return groups
 
 
 def is_abstract(path, simple):
-    # Surefire does not run abstract classes, so they need no shard.
+    # Surefire does not run abstract classes, so they need no group.
     return re.search(rf"\babstract\s+class\s+{re.escape(simple)}\b", path.read_text(encoding="utf-8")) is not None
 
 
@@ -86,22 +115,31 @@ def list_test_classes():
     return sorted(set(classes))
 
 
-def assign(shards, classes):
-    by_shard = {s["id"]: [] for s in shards}
+def assign(groups, classes):
+    by_group = {g["id"]: [] for g in groups}
+    used = set()
     errors = []
     for fqcn in classes:
         simple = fqcn.rsplit(".", 1)[-1]
-        hits = [s["id"] for s in shards if any(fnmatch.fnmatchcase(simple, p) for p in s["patterns"])]
+        hits = []
+        for g in groups:
+            matched = [p for p in g["patterns"] if fnmatch.fnmatchcase(simple, p)]
+            used.update((g["id"], p) for p in matched)
+            if matched:
+                hits.append(g)
         if not hits:
-            errors.append(f"{fqcn} matches no shard in .github/test-shards.txt")
+            errors.append(f"{fqcn} matches no group in .github/test-shards.txt")
         elif len(hits) > 1:
-            errors.append(f"{fqcn} matches more than one shard: {', '.join(hits)}")
+            errors.append(f"{fqcn} matches more than one group: {', '.join(repr(g['label']) for g in hits)}")
         else:
-            by_shard[hits[0]].append(fqcn)
-    for shard_id, members in by_shard.items():
-        if not members:
-            errors.append(f"shard {shard_id} matches no test class")
-    return by_shard, errors
+            by_group[hits[0]["id"]].append(fqcn)
+    for g in groups:
+        if not by_group[g["id"]]:
+            errors.append(f"group '{g['label']}' matches no test class")
+        for p in g["patterns"]:
+            if (g["id"], p) not in used:
+                errors.append(f"pattern '{p}' of group '{g['label']}' matches no test class (remove it)")
+    return by_group, errors
 
 
 def write_output(key, value):
@@ -118,42 +156,43 @@ def write_summary(text):
             f.write(text + "\n")
 
 
-def cmd_check():
-    shards = load_shards()
+def checked_assignment():
+    groups = load_groups()
     classes = list_test_classes()
-    by_shard, errors = assign(shards, classes)
+    by_group, errors = assign(groups, classes)
     if errors:
         for e in errors:
             print(f"::error::{e}")
         sys.exit(1)
-    lines = ["| Shard | Patterns | Classes |", "|---|---|---:|"]
-    for s in shards:
-        lines.append(f"| {s['id']} | `{','.join(s['patterns'])}` | {len(by_shard[s['id']])} |")
-    lines.append(f"| total | | {len(classes)} |")
+    return groups, classes, by_group
+
+
+def cmd_check():
+    groups, classes, by_group = checked_assignment()
+    lines = ["| Job label | Group id | Classes | Patterns |", "|---|---|---:|---|"]
+    for g in groups:
+        lines.append(f"| {g['label']} | {g['id']} | {len(by_group[g['id']])} | `{','.join(g['patterns'])}` |")
+    lines.append(f"| total | | {len(classes)} | |")
     print("\n".join(lines))
-    write_summary("### Test shards\n\n" + "\n".join(lines))
+    write_summary("### Test groups\n\n" + "\n".join(lines))
     jdks = [j.strip() for j in os.environ.get("JDKS", "21").split(",") if j.strip()]
     matrix = {
         "include": [
-            {"jdk": j, "shard": s["id"], "tests": ",".join(s["patterns"])}
+            {"jdk": j, "group": g["id"], "label": g["label"], "tests": ",".join(g["patterns"])}
             for j in jdks
-            for s in shards
+            for g in groups
         ]
     }
     write_output("matrix", json.dumps(matrix, separators=(",", ":")))
-    print(f"OK: {len(classes)} test classes, each in exactly one of {len(shards)} shards")
+    print(f"OK: {len(classes)} test classes, each in exactly one of {len(groups)} groups")
 
 
-def cmd_verify(shard_id):
-    shards = load_shards()
-    by_shard, errors = assign(shards, list_test_classes())
-    if errors:
-        for e in errors:
-            print(f"::error::{e}")
-        sys.exit(1)
-    if shard_id not in by_shard:
-        fail(f"unknown shard '{shard_id}'")
-    expected = set(by_shard[shard_id])
+def cmd_verify(gid):
+    groups, _, by_group = checked_assignment()
+    if gid not in by_group:
+        fail(f"unknown group id '{gid}'")
+    label = next(g["label"] for g in groups if g["id"] == gid)
+    expected = set(by_group[gid])
     reported = {p.name[len("TEST-"):-len(".xml")] for p in REPORTS.glob("TEST-*.xml")}
     missing = sorted(expected - reported)
     extra = sorted(reported - expected)
@@ -163,7 +202,7 @@ def cmd_verify(shard_id):
         for k in totals:
             totals[k] += int(root.get(k, "0"))
     summary = (
-        f"### Shard {shard_id}\n\n"
+        f"### Group {label}\n\n"
         f"{len(reported)} of {len(expected)} classes reported; "
         f"tests {totals['tests']}, failures {totals['failures']}, "
         f"errors {totals['errors']}, skipped {totals['skipped']}"
@@ -172,9 +211,9 @@ def cmd_verify(shard_id):
     write_summary(summary)
     write_output("tests", totals["tests"])
     for c in missing:
-        print(f"::error::shard {shard_id}: no Surefire report for {c}")
+        print(f"::error::group {label}: no Surefire report for {c}")
     for c in extra:
-        print(f"::error::shard {shard_id}: ran {c}, which belongs to another shard")
+        print(f"::error::group {label}: ran {c}, which belongs to another group")
     if missing or extra:
         sys.exit(1)
 

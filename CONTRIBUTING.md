@@ -377,17 +377,30 @@ behind any of them.
   `mvn -ntp clean verify` yourself before opening the PR. Every pull request and
   every push to `main` runs the same command in GitHub Actions
   (`.github/workflows/build.yml`, Linux). Each JDK the hosting checker accepts
-  has its own checks — `build (jdk 21)`, `build (jdk 25)`, `test (jdk 21, shard 1)`,
-  `test (jdk 25, shard 1)`, and so on — and the aggregating job `build` is the
-  single required status check for merging. After the move to jenkinsci,
+  has its own checks — `build (jdk 21)`, `build (jdk 25)` and one test job per
+  feature group of test classes, such as `test (jdk 21, run approval and mail)`
+  or `test (jdk 25, parameters and ui)` — and the aggregating job `build`
+  succeeds only when all of them do. The groups are listed, by class-name prefix
+  or class name, in `.github/test-shards.txt`, and the `shard safeguard` job
+  fails when a test class matches no group or two, or a listed name matches no
+  class. A new class whose prefix a group already lists (`Grant*Test`,
+  `Window*Test`) needs nothing; otherwise add its prefix or its name to the
+  group of the feature it tests, and take a renamed or deleted class's name out.
   ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
-  the `Jenkinsfile`.
+  the `Jenkinsfile` and reports the check `Jenkins`.
+- **Merging into `main`** needs two required status checks, `build` and
+  ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
+  (update it when GitHub says it is behind), and one approving review, from the
+  maintainer.
 - The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e (shard 1)`
-  … `e2e (shard 5)`, `e2e coverage`) runs on the same events against a real
-  Jenkins in Docker and reports the JaCoCo coverage of the lines your change
-  touched in the job summary, as annotations and in the `e2e-coverage`
-  artifact. It is **not** a required check; a red shard is worth a look (its
-  logs and screenshots are in the `e2e-shard-<k>` artifact). See
+  … `e2e (shard 5)`, `e2e coverage`) runs against a real Jenkins in Docker and
+  reports the JaCoCo coverage of the lines your change touched in the job
+  summary, as annotations and in the `e2e-coverage` artifact. It runs on the
+  same events, but only when the change touches `src/main/`, `pom.xml`,
+  `.mvn/`, `e2e/` or the workflow file itself, so a docs-only or test-only pull
+  request does not start it (a maintainer can still run it by hand). It is
+  **not** a required check; a red shard is worth a look (its logs and
+  screenshots are in the `e2e-shard-<k>` artifact). See
   `e2e/README.md`, "CI runner and e2e coverage" and "CI contract".
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
