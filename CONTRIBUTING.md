@@ -389,7 +389,10 @@ behind any of them.
   ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
   the `Jenkinsfile` and reports the check `Jenkins`. It runs the whole suite on
   one agent for each of those three platforms, with buildPlugin's 180-minute
-  limit and `failFast` off, so every platform reports its results; GitHub
+  limit and `failFast` off, so every platform reports its results. Linux uses
+  the non-spot container agents (`maven-21-nonspot`, `maven-25-nonspot`): on
+  the default spot agents the suite was regularly cut off by
+  "Agent was removed" (the `Jenkinsfile` explains how they are selected). GitHub
   Actions splits the suite into feature-named jobs for faster feedback. For the
   full list of Windows test failures, which the `Jenkins` check text cuts short,
   run the manual, not required `Windows tests` workflow
