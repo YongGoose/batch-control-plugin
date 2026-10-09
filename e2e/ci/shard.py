@@ -143,6 +143,10 @@ UNITS = [
         ("monitor", py("r14/s_monitor.py")),
     ], doc="e2e-12/14 G2d: error pages, list pager, incident, help, strategy monitor"),
     Unit("round3", 0.6, [("round3", py("r14/round3.py", "ABCDEFGHI"))], doc="e2e-14 R3-A..I: the e2e-11 round-3 checks"),
+    # e2e-23 R1-01 (bug-hunt batch A). r23/xml_chars.py arranges its own items (r23-ansi-fail, r23-plain-fail).
+    Unit("r23-xml-chars", 0.6, [("r23-xml-chars", py("r23/xml_chars.py"))], group="crawl and ui checks",
+         doc="e2e-23 R1-01: an ANSI-coloured console tail leaves the incident readable (list, page, incidents.csv, "
+             "summary); a comment or grant reason holding U+000B is refused with a 4xx and stores nothing"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).

@@ -2,6 +2,8 @@ package io.jenkins.plugins.batchcontrol.store;
 
 import com.thoughtworks.xstream.core.util.HierarchicalStreams;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
+import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
+import com.thoughtworks.xstream.io.WriterWrapper;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.ParameterValue;
 import hudson.util.XStream2;
@@ -1285,6 +1287,12 @@ public final class FileStore implements Store {
     /**
      * Writes one XStream XML file atomically under {@code dir}. {@code tmpPrefix} names the
      * temporary file; it must stay short (an encoded job name may already use 250 characters).
+     *
+     * <p>R1-01, the last line of defence: every text and attribute value goes through
+     * {@link StorableTextWriter}, so an entity holding a character XML 1.0 cannot store (which
+     * XStream would write as a character reference the reader then rejects) is refused with
+     * {@link StoreWriteException} and no unreadable file is ever written; the previous file, if
+     * any, stays as it was. The services refuse user text and clean system text before this.
      */
     private void saveXmlFile(Path dir, String fileName, String tmpPrefix, Object entity, String what) {
         Path target = PathCodec.resolveUnder(dir, fileName);
@@ -1296,7 +1304,14 @@ public final class FileStore implements Store {
             boolean moved = false;
             try {
                 try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
-                    xstream.toXML(entity, writer);
+                    // What xstream.toXML(entity, writer) does, with the check around the writer.
+                    HierarchicalStreamWriter xml = new StorableTextWriter(
+                            XStream2.getDefaultDriver().createWriter(writer));
+                    try {
+                        xstream.marshal(entity, xml);
+                    } finally {
+                        xml.flush();
+                    }
                 }
                 moveAtomically(tmp, target);
                 moved = true;
@@ -1307,11 +1322,73 @@ public final class FileStore implements Store {
                 }
             }
         } catch (IOException | RuntimeException e) {
+            UnstorableTextException unstorable = unstorableCause(e);
+            if (unstorable != null) {
+                LOGGER.warning(() -> "Refused to save the " + what + ": " + unstorable.getMessage());
+                throw new StoreWriteException("The " + what + " could not be saved: it contains a character"
+                        + " that cannot be stored (" + unstorable.getMessage() + "); nothing was stored.", e);
+            }
             // S-35-03: XStream refuses some content with a RuntimeException (U+0000, for one), so
             // every failure ends here, as one exception type the web layer shows as a refusal.
             throw new StoreWriteException("The " + what + " could not be saved; nothing was stored.", e);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** The {@link UnstorableTextException} in the cause chain of {@code e} (XStream wraps it), or null. */
+    @CheckForNull
+    private static UnstorableTextException unstorableCause(Throwable e) {
+        Set<Throwable> seen = new HashSet<>();
+        for (Throwable t = e; t != null && seen.add(t); t = t.getCause()) {
+            if (t instanceof UnstorableTextException) {
+                return (UnstorableTextException) t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * R1-01: a text value or attribute value of an entity holds a character XML 1.0 cannot store
+     * ({@link XmlChars}). Its message is the character as {@code U+XXXX}.
+     */
+    private static final class UnstorableTextException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        UnstorableTextException(String character) {
+            super(character, null, false, false);
+        }
+    }
+
+    /**
+     * R1-01: passes everything to the XML writer of the store's driver, after checking each text
+     * and attribute value with {@link XmlChars#firstInvalid}; a value it cannot store aborts the
+     * save with {@link UnstorableTextException} before the value is written.
+     */
+    private static final class StorableTextWriter extends WriterWrapper {
+
+        StorableTextWriter(HierarchicalStreamWriter wrapped) {
+            super(wrapped);
+        }
+
+        @Override
+        public void addAttribute(String name, String value) {
+            check(value);
+            super.addAttribute(name, value);
+        }
+
+        @Override
+        public void setValue(String text) {
+            check(text);
+            super.setValue(text);
+        }
+
+        private static void check(String text) {
+            int bad = XmlChars.firstInvalid(text);
+            if (bad >= 0) {
+                throw new UnstorableTextException(XmlChars.describe(text, bad));
+            }
         }
     }
 
