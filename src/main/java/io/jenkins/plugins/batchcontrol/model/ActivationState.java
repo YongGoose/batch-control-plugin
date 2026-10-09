@@ -35,9 +35,12 @@ public final class ActivationState {
     private String deactivatedBy;
     private Long deactivatedAtMillis;
     /**
-     * security-13 S-13-09: the marker of the item's root directory ({@code security.ItemIdentity})
-     * when this state was written; {@code null} in states written without one. A state whose
-     * marker differs from the item's current directory belongs to another item of the same name.
+     * security-13 S-13-09, D-80: the id of the marker file in the item's root directory
+     * ({@code security.ItemIdentity}) when this state was written; {@code null} when it could not be
+     * written. A state whose id differs from the marker in the item's current directory (or that has
+     * none) belongs to another item of the same name, or cannot be shown to be this item's own, and
+     * does not count as activated. States written before D-80 hold the directory's file key, which
+     * never equals a marker id; they are not converted (D-69).
      */
     private String itemIdentity;
 
