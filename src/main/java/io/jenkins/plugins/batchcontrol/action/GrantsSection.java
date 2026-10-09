@@ -8,6 +8,7 @@ import hudson.model.ModelObject;
 import hudson.security.Permission;
 import hudson.util.FormValidation;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.CreateNamePattern;
 import io.jenkins.plugins.batchcontrol.model.Grant;
 import io.jenkins.plugins.batchcontrol.model.GrantAction;
@@ -1003,7 +1004,8 @@ public class GrantsSection implements ModelObject, StaplerProxy {
     }
 
     private static boolean isOwn(Grant grant) {
-        return Jenkins.getAuthentication2().getName().equals(grant.getUser());
+        // R4-01: under the realm's user id strategy, as the service compares ids.
+        return Approvers.sameUser(Jenkins.getAuthentication2().getName(), grant.getUser());
     }
 
     private static long minutesOf(Grant grant) {

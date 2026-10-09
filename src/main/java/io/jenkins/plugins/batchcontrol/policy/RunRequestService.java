@@ -274,7 +274,7 @@ public final class RunRequestService {
         }
         String requester = request.getRequester();
         org.springframework.security.core.Authentication current = Jenkins.getAuthentication2();
-        if (requester != null && requester.equals(current.getName())) {
+        if (Approvers.sameUser(requester, current.getName())) {
             return !job.hasPermission(Item.BUILD);
         }
         Boolean cached = requesterBuildCache.get(request.getId());
