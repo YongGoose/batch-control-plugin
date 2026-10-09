@@ -383,21 +383,25 @@ behind any of them.
   `Window*Test`) needs nothing; otherwise add its prefix or its name to the
   group of the feature it tests, and take a renamed or deleted class's name out.
   ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
-  the `Jenkinsfile` and reports the check `Jenkins`.
+  the `Jenkinsfile` and reports the check `Jenkins`. It runs the whole suite on
+  one agent for each of those three platforms, with buildPlugin's 180-minute
+  limit and `failFast` off, so every platform reports its results; GitHub
+  Actions splits the suite into feature-named jobs for faster feedback.
 - **Merging into `main`** needs two required status checks, `build` and
   ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
   (update it when GitHub says it is behind), and one approving review, from the
   maintainer.
-- The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e (shard 1)`
-  … `e2e (shard 5)`, `e2e coverage`) runs against a real Jenkins in Docker and
-  reports the JaCoCo coverage of the lines your change touched in the job
-  summary, as annotations and in the `e2e-coverage` artifact. It runs on the
-  same events, but only when the change touches `src/main/`, `pom.xml`,
+- The scripted e2e pass (`.github/workflows/e2e.yml`: `e2e build`, `e2e groups`,
+  one `e2e (<label>)` job per group of `e2e/ci/shard.py`, such as
+  `e2e (crawl and ui checks)`, and `e2e coverage`) runs against a real Jenkins
+  in Docker and reports the JaCoCo coverage of the lines your change touched in
+  the job summary, as annotations and in the `e2e-coverage` artifact. It runs on
+  the same events, but only when the change touches `src/main/`, `pom.xml`,
   `.mvn/`, `e2e/` or the workflow file itself, so a docs-only or test-only pull
   request does not start it (a maintainer can still run it by hand). It is
-  **not** a required check; a red shard is worth a look (its logs and
-  screenshots are in the `e2e-shard-<k>` artifact). See
-  `e2e/README.md`, "CI runner and e2e coverage" and "CI contract".
+  **not** a required check; a red `e2e (<label>)` job is worth a look (its logs
+  and screenshots are in the `e2e-shard-<k>` artifact, k being the group's
+  number). See `e2e/README.md`, "CI runner and e2e coverage" and "CI contract".
 - Behaviour change → spec change first (§3). Screen change → looked at in a
   browser (§6). New behaviour → matrix row and a failing test first (§4).
 - Security vulnerabilities do **not** go in a GitHub issue or PR. Use the Jenkins
