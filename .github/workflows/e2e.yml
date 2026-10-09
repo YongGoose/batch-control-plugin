@@ -1,4 +1,5 @@
-# Scripted e2e pass on a real Jenkins, in five shards, with JaCoCo coverage of the changed lines.
+# Scripted e2e pass on a real Jenkins, in one shard per group of e2e/ci/shard.py, with JaCoCo
+# coverage of the changed lines.
 # Contract: e2e/README.md, "CI contract (for .github/workflows)".
 #
 # The shards are the fixed, named groups of e2e/ci/shard.py (GROUPS). The "e2e groups" job checks
