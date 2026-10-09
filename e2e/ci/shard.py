@@ -242,6 +242,11 @@ UNITS = [
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
+    # e2e-22 R3-04 (bug-hunt batch B). r22/grant_monitor.py arranges its own item (r22-monitor) and holds the GrantService
+    # monitor for 10 s from the script console while the requester's REST requests run; REST only, no screenshot.
+    Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],
+         doc="e2e-22 R3-04: while another thread holds the GrantService monitor, the requester's job lists and an item "
+             "answer at once with the baseline content and no permission check is BLOCKED on it (T-08-196 end to end)"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
@@ -273,7 +278,7 @@ GROUPS = [
         "jobui-new-reqonly", "jobui-classic-reqonly", "r22-nonascii-reason",  # removed on disk with reload and restart (last)
         "r16-items", "r16-rename", "r16-follow", "r16-names", "r17-s39", "r19-kinds", "r17-disk"]),
     ("job ui other roles", [  # the job UI of approver-1, manager and nobc
-        "jobui-new-others", "jobui-classic-others"]),
+        "jobui-new-others", "jobui-classic-others", "r22-grant-monitor"]),
     ("runs and switches", [  # the run gate, reruns and the prefilled form, triggers, other plugins, the request
         "r16-rerun", "r16-d60",  # lifecycle, then the global switches and the strategy (last)
         "r19-gate", "r22-scripted-build", "r19-plugins", "r19-triggers", "r19-lifecycle", "r18-final"]),
