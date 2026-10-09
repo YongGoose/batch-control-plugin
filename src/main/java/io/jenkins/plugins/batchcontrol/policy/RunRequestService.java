@@ -1278,13 +1278,27 @@ public final class RunRequestService {
         }
     }
 
-    /** Request ids whose approval marker is currently sitting on a queue item. */
+    /**
+     * Request ids whose approval marker is currently sitting on a queue item, whoever asks.
+     *
+     * <p>ACL.SYSTEM2 switch, for reading the queue only (R2-04): {@code Queue.getItems()} lists only
+     * the items the current user can read, and this answer decides whether an ending request's
+     * parameter files are still the queue's (a queued item disposes of its own files when it is
+     * cancelled) or are disposed of now; reading the queue as, for example, a user who just renamed
+     * a job they can no longer read would dispose of the files of a run that is still queued. No
+     * permission is exercised for the caller: the result is a set of request ids that is never
+     * shown to anyone, and every caller has completed its own permission checks before it ends a
+     * request.
+     */
     public static Set<String> queuedMarkerRequestIds(Jenkins jenkins) {
         Set<String> ids = new java.util.HashSet<>();
-        for (Queue.Item item : jenkins.getQueue().getItems()) {
-            ApprovedRunAction marker = item.getAction(ApprovedRunAction.class);
-            if (marker != null) {
-                ids.add(marker.getRequestId());
+        // ACL.SYSTEM2 switch: read only, for the reason in the javadoc.
+        try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) {
+            for (Queue.Item item : jenkins.getQueue().getItems()) {
+                ApprovedRunAction marker = item.getAction(ApprovedRunAction.class);
+                if (marker != null) {
+                    ids.add(marker.getRequestId());
+                }
             }
         }
         return ids;
