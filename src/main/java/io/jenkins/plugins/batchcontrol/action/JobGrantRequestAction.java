@@ -6,6 +6,7 @@ import hudson.model.Action;
 import hudson.model.Item;
 import hudson.model.Job;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.security.BatchControlPermissions;
 import io.jenkins.plugins.batchcontrol.ui.Dialogs;
 import jenkins.model.Jenkins;
@@ -51,6 +52,8 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *       expires — which is the moment the user needs it.</li>
  * </ol>
  * The job page already requires {@code Item/Read}, so no further visibility check is needed.
+ * A job's sub-item (a matrix configuration, a Maven module) never shows it (D-82): it is
+ * configured through its parent job, where the entry is offered.
  */
 @Restricted(NoExternalUse.class)
 public class JobGrantRequestAction implements Action {
@@ -72,6 +75,11 @@ public class JobGrantRequestAction implements Action {
     @CheckForNull
     public String getIconFileName() {
         if (!BatchControlGlobalConfiguration.get().isChangeControlEnabled()) {
+            return null;
+        }
+        if (ActivationService.isSubItem(job)) {
+            // D-82: a job's sub-item (a matrix configuration, a Maven module) is configured
+            // through its parent job; a window is requested on that job.
             return null;
         }
         if (!Jenkins.get().hasPermission(BatchControlPermissions.REQUEST_GRANT)) {

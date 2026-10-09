@@ -6,11 +6,13 @@ import hudson.cli.CLICommand;
 import hudson.model.Action;
 import hudson.model.Cause;
 import hudson.model.CauseAction;
+import hudson.model.Executor;
 import hudson.model.Failure;
 import hudson.model.Job;
 import hudson.model.ParameterValue;
 import hudson.model.ParametersAction;
 import hudson.model.Queue;
+import hudson.model.Run;
 import hudson.security.ACL;
 import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
@@ -70,6 +72,10 @@ import org.kohsuke.stapler.StaplerRequest2;
  * <p>Steps from the timer step on apply to every job, with or without the job property and
  * whatever {@code approvalRequired} says; a computed child's activation is carried by its
  * computed-folder ancestor (D-46).
+ *
+ * <p>D-82: a job's sub-item (a matrix configuration, a Maven module) is judged by its parent
+ * job's approval property and activation; a run of it started by the parent's run in progress
+ * passes (step 1b), since the parent's run passed this gate itself.
  *
  * <p>A quiet refusal of a timer, upstream, SCM, unclassified or Replay submission writes a
  * {@link ChangeType#TRIGGER_BLOCKED} record, coalesced per job and cause kind to one per
@@ -378,7 +384,11 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             return true;
         }
         Job<?, ?> job = (Job<?, ?>) p;
-        BatchControlJobProperty property = job.getProperty(BatchControlJobProperty.class);
+        // D-82: a job's sub-item (a matrix configuration, a Maven module) has no approval state of
+        // its own; its parent job's property governs it. Refusals shown to a person name that job,
+        // where a run request is made; records keep the submitted item's name.
+        Job<?, ?> governing = ActivationService.governingJob(job);
+        BatchControlJobProperty property = governing.getProperty(BatchControlJobProperty.class);
         boolean approvalRequired = property != null && property.isApprovalRequired();
         List<Cause> causes = collectCauses(actions);
         List<Cause> effective = retryAwareCauses(causes);
@@ -397,6 +407,13 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                 }
                 return consumed;
             }
+        }
+
+        // 1b. D-82: a sub-item's run started by its parent job's run, from that run's own executor
+        // while it is building. The parent's run passed this gate itself (activated, approved or a
+        // person's run), and starting its configurations is part of it.
+        if (startedByOwnParentRun(job, causes)) {
+            return true;
         }
 
         if (approvalRequired) {
@@ -433,10 +450,10 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                     // page instead of the replay action's generic "not buildable" crash page;
                     // the CLI gets a one-line error (DEF-14). Anything else stays quiet.
                     if (CLICommand.getCurrent() != null) {
-                        throw new IllegalStateException(replayRefusedMessage(job));
+                        throw new IllegalStateException(replayRefusedMessage(governing));
                     }
                     if (Stapler.getCurrentRequest2() != null && isHumanSubmission(causes)) {
-                        throw new ApprovalRequiredFailure(job, replayRefusedMessage(job));
+                        throw new ApprovalRequiredFailure(governing, replayRefusedMessage(governing));
                     }
                     return false;
                 }
@@ -483,7 +500,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                                 + job.getFullName() + "'");
                     }
                     if (isTokenBuildEndpoint(job)) {
-                        RemoteRunRefusal refused = new RemoteRunRefusal(remoteRefusedMessage(job));
+                        RemoteRunRefusal refused = new RemoteRunRefusal(remoteRefusedMessage(governing));
                         // D-72: the token endpoint built these values from this request; they
                         // never reach the queue, so their temporary files go now.
                         disposeOwnValues(job, causes, actions);
@@ -522,7 +539,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
                         }
                         // D-60: a re-run carries its source build's values, not a new submission;
                         // its refusal page does not pre-fill the request form.
-                        RuntimeException refused = refusal(job, causes, own == null ? submittedValues(actions) : null);
+                        RuntimeException refused = refusal(governing, causes,
+                                own == null ? submittedValues(actions) : null);
                         // D-72: the person's own submission is never queued, so the temporary
                         // files of its values go now (the refusal carries no file, #10). Built
                         // first: the refusal has taken what it carries from the values.
@@ -611,6 +629,42 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             }
         }
         return activatedOrRefuse(job, KIND_OTHER, "an unattended run (" + describe(causes) + ")");
+    }
+
+    /**
+     * D-82: whether the submission of sub-item {@code job} was made by its parent job's run that is
+     * building now, which is how a matrix project starts its configurations
+     * ({@code MatrixConfiguration#scheduleBuild} with an {@link Cause.UpstreamCause} of the parent
+     * run, from that run's executor). Every cause must be a plain upstream cause naming the parent
+     * job and a run of it that is building, and the current thread must be the executor running
+     * that very run. A person's submission (a {@code UserIdCause}), a re-run (a Rebuild's cause
+     * names the sub-item itself, a retry adds its own cause) or a cause made up elsewhere does not
+     * meet all three, so it is judged by the parent's rules instead.
+     */
+    private static boolean startedByOwnParentRun(Job<?, ?> job, List<Cause> causes) {
+        if (!(job.getParent() instanceof Job) || causes.isEmpty()) {
+            return false;
+        }
+        Job<?, ?> parent = (Job<?, ?>) job.getParent();
+        Executor executor = Executor.currentExecutor();
+        Queue.Executable executing = executor == null ? null : executor.getCurrentExecutable();
+        if (executing == null) {
+            return false;
+        }
+        for (Cause cause : causes) {
+            if (cause == null || cause.getClass() != Cause.UpstreamCause.class) {
+                return false;
+            }
+            Cause.UpstreamCause upstream = (Cause.UpstreamCause) cause;
+            if (!parent.getFullName().equals(upstream.getUpstreamProject())) {
+                return false;
+            }
+            Run<?, ?> run = parent.getBuildByNumber(upstream.getUpstreamBuild());
+            if (run == null || run != executing || !run.isBuilding()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -753,8 +807,8 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
         }
         hudson.model.Item subject = ActivationService.activationSubject(job);
         String carrier = subject.getFullName();
-        String notActivated = carrier.equals(job.getFullName())
-                ? "the job is not activated" : "its folder '" + carrier + "' is not activated";
+        String notActivated = carrier.equals(job.getFullName()) ? "the job is not activated"
+                : (subject instanceof Job ? "its parent job '" : "its folder '") + carrier + "' is not activated";
         logRateLimited("activation-" + kind, job, () -> "Blocked " + what + " of job '" + job.getFullName()
                 + "' (" + notActivated + ")");
         // e2e-04 FD-07: a refusal after a HOLD is not merged into a record written before the job

@@ -18,6 +18,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.model.Incident;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.IncidentService;
+import io.jenkins.plugins.batchcontrol.policy.ActivationService;
 import io.jenkins.plugins.batchcontrol.policy.ParameterFiles;
 import io.jenkins.plugins.batchcontrol.policy.RequestBodyLimit;
 import io.jenkins.plugins.batchcontrol.policy.RequestTooLargeException;
@@ -167,12 +168,14 @@ public class JobRequestAction implements Action {
     /**
      * {@code null} without {@code BatchControl/Request}: per {@link Action#getUrlName()} that makes
      * the action unreachable, so its whole URL space answers 404 (absent, not refused).
-     * {@link #doSubmit} re-checks the permission on top of this.
+     * {@link #doSubmit} re-checks the permission on top of this. Also {@code null} on a job's
+     * sub-item (a matrix configuration, a Maven module, D-82): run requests are made on its parent
+     * job, whose refusal page and notices link that job's form.
      */
     @Override
     @CheckForNull
     public String getUrlName() {
-        return canRequest() ? "batch-control" : null;
+        return canRequest() && !ActivationService.isSubItem(job) ? "batch-control" : null;
     }
 
     /**
@@ -208,9 +211,12 @@ public class JobRequestAction implements Action {
 
     // ---------------------------------------------------------------- view model
 
-    /** True when run control is on and this job requires approved runs. */
+    /**
+     * True when run control is on and this job requires approved runs. Never on a job's sub-item
+     * (D-82): it has no approval property and no run requests of its own.
+     */
     public boolean isActive() {
-        return RunRequestService.requiresApprovalToRun(job);
+        return !ActivationService.isSubItem(job) && RunRequestService.requiresApprovalToRun(job);
     }
 
     /**
