@@ -1,4 +1,4 @@
-# Surefire groups for the Build workflow (issue #54).
+# Surefire groups for the Build workflow.
 #
 # Format: a group starts with a line "[<label>]"; the lines after it, up to the next
 # "[<label>]" line, hold its Surefire -Dtest patterns, separated by commas, spaces or line

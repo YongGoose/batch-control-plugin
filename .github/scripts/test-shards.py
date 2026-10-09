@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safeguard for the sharded Surefire run in .github/workflows/build.yml (issue #54).
+"""Safeguard for the sharded Surefire run in .github/workflows/build.yml.
 
 The Surefire run is split into feature groups, defined in .github/test-shards.txt (the
 format is described in its header). Each group has a label, which names its job

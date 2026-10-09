@@ -1,4 +1,4 @@
-# Early warning against the newest role-strategy release (issue #77).
+# Early warning against the newest role-strategy release.
 # Batch Control's role strategy descriptor forwards to role-strategy's own descriptor methods
 # (D-35g), and role-strategy's pages call them on the installed strategy. If a release adds or
 # renames such an endpoint, or rebuilds the strategy on save (the Manage-Roles reset of D-35f),

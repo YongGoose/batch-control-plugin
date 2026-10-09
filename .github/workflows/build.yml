@@ -1,8 +1,8 @@
-# Pre-hosting regression gate (issue #11, docs/CI-PROPOSAL.md N1).
+# Pre-hosting regression gate (docs/CI-PROPOSAL.md N1).
 # Runs with the default read-only token and no secrets, so fork pull requests work too.
 #
-# The Surefire run is split into parallel jobs, one per feature group of test classes
-# (issue #54). The groups, their labels and their patterns live in .github/test-shards.txt;
+# The Surefire run is split into parallel jobs, one per feature group of test classes.
+# The groups, their labels and their patterns live in .github/test-shards.txt;
 # .github/scripts/test-shards.py fails the run when a test class matches no group or two
 # groups. The static checks run once, in the "checks" job. The final "build" job
 # aggregates every job. It is one of the two required status checks on main, with
