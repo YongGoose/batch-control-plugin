@@ -268,6 +268,14 @@ UNITS = [
          group="job ui windows and disk",
          doc="e2e-23 R2-02/R2-01: an approved run of an activated matrix project runs its configurations; a configuration "
              "has no activation or request UI of its own and points to its parent; its direct build is refused"),
+    # e2e-25 #45 (Wave C-UI). r25/pager_params.py arranges its own folder of 51 jobs (r25-pg, label r25-nowhere) and
+    # account (r25-pager), files over 150 requests of each kind and, at its end, cancels the pending ones, revokes the
+    # windows and cancels the queued runs. Weight: 1.3 min on a fresh stack (2026-10-10, local; 0.9 min of it the
+    # arrangement: 51 jobs created over REST, then 714 REST calls), with room for the slower runner.
+    Unit("r25-pager-params", 2.0, [("r25-pager-params", py("r25/pager_params.py"))], group="job ui windows and disk",
+         doc="e2e-25 #45: paging one list on the Run Requests, Grants or Activations page keeps the other lists' page "
+             "parameters and pages; guards: the own list pages, every list honours its parameter, markup in a "
+             "parameter is escaped"),
     Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
