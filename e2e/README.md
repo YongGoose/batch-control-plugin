@@ -462,7 +462,8 @@ POSTs from a browser session), `x1b.mjs`/`x1c.mjs` (stale change-approvers form)
 ## e2e-06 driver (`r6/`, Python)
 
 For a machine without Node.js: `r6/lib.py` is `legacy/extra/lib.mjs` ported to Python Playwright
-(`python3 -m venv venv && venv/bin/pip install playwright requests`; it drives the installed
+(`python3 -m venv venv && venv/bin/pip install -r e2e/ci/requirements.txt`, Python >= 3.10, the
+pinned set of the CI pass; it drives the installed
 Google Chrome). Base URL `http://localhost:8080/jenkins` (override with `BC_BASE`), screenshots to
 `screenshots/run-6/`, logs to `r6/out/` (git-ignored). `arrange.py` adds the `mover1..3` accounts
 and the `prod/` folder (script console, arrangement only; JCasC drops the accounts' matrix entries
