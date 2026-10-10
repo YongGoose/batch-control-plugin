@@ -233,6 +233,11 @@ UNITS = [
     Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
          doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "
              "shown as starting shortly; the request page says the queued run was cancelled and will not start"),
+    # e2e-24 #38 (wave A). r24/deleted_job.py deletes and re-creates its own items (r24-del-*) and cancels what it leaves
+    # PENDING.
+    Unit("r24-deleted-job", 1.4, [("r24-deleted-job", py("r24/deleted_job.py"))], group="crawls and multibranch",
+         doc="e2e-24 #38: deleting a job, or a folder above it, invalidates its PENDING run requests naming the deletion; "
+             "approving one is refused (browser and REST) and a job re-created under the name gets no build; guards"),
     Unit("r19-kinds", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-kinds", py("r19/kinds.py")),
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
