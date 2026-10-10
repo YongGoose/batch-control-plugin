@@ -125,6 +125,8 @@ Store*Test
 CredentialsParameterTest DialogTypedParameterTest ParameterValuePageTest RunParameterTest
 RunRecordFileValueTest ScriptedSubmissionParametersTest SecretParameterMaskingTest
 StashedFileBodyCapTest
+PagerParameterTest
+PagerRealJenkinsTest
 Typed*Test
 ValuesFile*Test
 # pages, forms and the global configuration
