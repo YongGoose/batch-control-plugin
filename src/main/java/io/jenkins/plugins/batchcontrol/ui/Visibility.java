@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.ui;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Item;
 import hudson.model.Job;
+import hudson.model.Run;
 import io.jenkins.plugins.batchcontrol.model.ActivationRequest;
 import io.jenkins.plugins.batchcontrol.model.Approvers;
 import io.jenkins.plugins.batchcontrol.model.Grant;
@@ -103,7 +104,8 @@ public final class Visibility {
      * record-visibility boundary (S-12, every {@code ViewHistory} holder sees every row), but a
      * link to a job the viewer cannot read would only advertise the job's URL and answer 404.
      *
-     * @return the root-relative build URL ({@code job/a/job/b/12/}), or {@code null} for plain text
+     * @return the root-relative build URL, the run's own {@link Run#getUrl()} ({@code job/a/job/b/12/},
+     *         {@code job/mx/X=a/1/} for a matrix configuration), or {@code null} for plain text
      */
     @CheckForNull
     public static String runUrl(@CheckForNull String jobFullName, int number) {
@@ -116,10 +118,13 @@ public final class Visibility {
         }
         // e2e-03 DEF-23: a build deleted since it was recorded (log rotation, a manual delete)
         // answers 404, so it is plain text too. The history record itself stays.
-        if (job.getBuildByNumber(number) == null) {
+        Run<?, ?> run = job.getBuildByNumber(number);
+        if (run == null) {
             return null;
         }
-        return RunLinks.runUrl(jobFullName, number);
+        // #42: the run's own URL, not one built from the full name: a matrix configuration or a
+        // Maven module lives at job/mx/X=a/1/, not job/mx/job/X%3Da/1/.
+        return run.getUrl();
     }
 
     /**
@@ -133,9 +138,8 @@ public final class Visibility {
         if (runId == null) {
             return null;
         }
-        String url = RunLinks.runUrlFromRunId(runId);
-        if (url == null) {
-            return null;
+        if (RunLinks.runUrlFromRunId(runId) == null) {
+            return null; // not of the form jobFullName#number
         }
         int hash = runId.lastIndexOf('#');
         int number;
@@ -144,8 +148,9 @@ public final class Visibility {
         } catch (NumberFormatException e) {
             return null;
         }
-        // Same rule as runUrl(String, int): readable job and a build that still exists.
-        return runUrl(runId.substring(0, hash), number) != null ? url : null;
+        // Same rule and the same URL as runUrl(String, int): readable job, a build that still
+        // exists, and that build's own URL (#42).
+        return runUrl(runId.substring(0, hash), number);
     }
 
     /**
