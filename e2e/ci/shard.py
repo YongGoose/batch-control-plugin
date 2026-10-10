@@ -279,6 +279,12 @@ UNITS = [
     Unit("r23-history-late", 1.6, [("r23-history-late", py("r23/history_late.py"))], group="runs and switches",
          doc="e2e-23 R1-02: a run recorded late (held 65 s in onCompleted) does not hide the run recorded before it from "
              "the History listing of its day, which matches runs.csv"),
+    # e2e-25 #42 (Wave C-UI). r25/run_links.py arranges its own items (r25-links-*), activates its matrix project
+    # through the request flow and runs each job once per pass (approved requests).
+    Unit("r25-run-links", 1.2, [("r25-run-links", py("r25/run_links.py"))], group="runs and switches",
+         doc="e2e-25 #42: every run link on History, the Run Dashboard, Incidents and the incident pages resolves (200) "
+             "to the run's own URL for a matrix configuration; guards: a Freestyle job, a job in a folder, the matrix "
+             "parent and the request page's executed run"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
