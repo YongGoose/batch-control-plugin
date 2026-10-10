@@ -24,14 +24,14 @@ properties([
 // mid-run (jenkins-infra/helpdesk#4906, #5171). The first platform also records coverage,
 // static analysis and the Incrementals artifacts.
 def platforms = [
-  [name: 'linux-21', label: 'maven-21-nonspot', jdk: '21'],
-  [name: 'linux-25', label: 'maven-25-nonspot', jdk: '25'],
-  [name: 'windows-21', label: 'maven-21-windows-nonspot', jdk: '21'],
+  [name: 'linux-21', label: 'maven-21', jdk: '21'],
+  [name: 'linux-25', label: 'maven-25', jdk: '25'],
+  [name: 'windows-21', label: 'maven-21-windows', jdk: '21'],
 ]
 
 def groups
 stage('Plan') {
-  onAgent('maven-21-nonspot', 10) {
+  onAgent('maven-21', 10) {
     infra.checkoutSCM()
     discoverReferenceBuild()
     // Test sources, then "path:abstract class Name" for every abstract class.
