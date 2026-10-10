@@ -11,6 +11,7 @@ import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.customizebuildnow.BuildNowTextProperty;
 import org.jenkinsci.plugins.customizebuildnow.Labels;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -92,6 +93,7 @@ public class PluginInteractionCustomizeBuildNowTest {
      * caption) does not queue a run without approval; the refusal is not silent.
      */
     @Test
+    @Tag("core")
     public void t_06_22_relabelledBuildUrlIsBlocked() throws Exception {
         Page response = post(j, "u1", job.getUrl() + "build");
         assertEquals(400, response.getWebResponse().getStatusCode(), "a blocked manual run must answer HTTP 400 (silent failure is forbidden)");
@@ -115,6 +117,7 @@ public class PluginInteractionCustomizeBuildNowTest {
 
     /** T-06-23: an approved request on the relabelled job is queued exactly once. */
     @Test
+    @Tag("core")
     public void t_06_23_approvedRunQueuedExactlyOnce() throws Exception {
         requestAndApprove(job);
         j.assertBuildStatusSuccess(assertApprovedRunQueuedExactlyOnce(j, job));

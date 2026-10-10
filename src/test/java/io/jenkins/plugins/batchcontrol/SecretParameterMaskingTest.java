@@ -41,6 +41,7 @@ import org.htmlunit.html.HtmlPage;
 import org.htmlunit.html.HtmlSelect;
 import org.htmlunit.html.HtmlTextArea;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -85,6 +86,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * D-72) only; no src/main knowledge.
  */
 @WithJenkins
+@Tag("core")
 public class SecretParameterMaskingTest {
 
     /** The mask SPEC item 5 and ARCHITECTURE section 5 name (D-72). */

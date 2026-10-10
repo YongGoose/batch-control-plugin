@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from the contract above, docs/SPEC.md and docs/ARCHITECTURE.md section 5 only (no
  * src/main knowledge).
  */
+@Tag("core")
 class SharingRetryTest {
 
     /** The sum of the twelve pauses of the contract. */

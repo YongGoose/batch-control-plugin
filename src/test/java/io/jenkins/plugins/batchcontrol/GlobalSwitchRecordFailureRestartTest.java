@@ -20,6 +20,7 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Written from docs/SPEC.md, docs/DECISIONS.md and docs/ARCHITECTURE.md only (no src/main knowledge).
  */
+@Tag("core")
 public class GlobalSwitchRecordFailureRestartTest {
 
     static final String CASC_PROPERTY = "casc.jenkins.config";

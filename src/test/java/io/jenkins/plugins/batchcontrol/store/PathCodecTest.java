@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.store;
 import io.jenkins.plugins.batchcontrol.model.GrantScope;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
  */
+@Tag("core")
 public class PathCodecTest {
 
     /**

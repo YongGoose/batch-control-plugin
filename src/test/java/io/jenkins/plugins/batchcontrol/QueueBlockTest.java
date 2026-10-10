@@ -41,6 +41,7 @@ import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import hudson.cli.CLICommandInvoker;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -95,6 +96,7 @@ public class QueueBlockTest {
 
     /** T-06-01: POST /job/X/build does not enter the queue. */
     @Test
+    @Tag("core")
     public void t_06_01_restBuildPostIsBlocked() throws Exception {
         protect(job);
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
@@ -105,6 +107,7 @@ public class QueueBlockTest {
 
     /** T-06-02: POST /job/X/buildWithParameters does not enter the queue. */
     @Test
+    @Tag("core")
     public void t_06_02_restBuildWithParametersIsBlocked() throws Exception {
         FreeStyleProject parametrized = j.createFreeStyleProject("batch-p");
         parametrized.addProperty(new ParametersDefinitionProperty(
@@ -123,6 +126,7 @@ public class QueueBlockTest {
 
     /** T-06-03: CLI build does not enter the queue. */
     @Test
+    @Tag("core")
     public void t_06_03_cliBuildIsBlocked() throws Exception {
         protect(job);
         new CLICommandInvoker(j, "build").invokeWithArgs("batch-x");
@@ -132,6 +136,7 @@ public class QueueBlockTest {
 
     /** T-06-04: Pipeline Replay of an approval-required job does not enter the queue. */
     @Test
+    @Tag("core")
     public void t_06_04_pipelineReplayIsBlocked() throws Exception {
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "pipe"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
@@ -149,6 +154,7 @@ public class QueueBlockTest {
 
     /** T-06-05: an upstream build step is blocked when blockUpstream=true (no allow list). */
     @Test
+    @Tag("core")
     public void t_06_05_upstreamBuildStepBlockedWhenBlockUpstream() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
@@ -167,6 +173,7 @@ public class QueueBlockTest {
 
     /** T-06-06: a TimerTrigger (cron) cause passes by default. */
     @Test
+    @Tag("core")
     public void t_06_06_timerCausePassesByDefault() throws Exception {
         protect(job);
         activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a: the timer door is open only once activated (note 91)
@@ -178,6 +185,7 @@ public class QueueBlockTest {
 
     /** T-06-07: blockTimer=true blocks the cron cause silently (no exception, just refused + log). */
     @Test
+    @Tag("core")
     public void t_06_07_timerCauseBlockedWhenBlockTimer() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockTimer(true);
@@ -231,6 +239,7 @@ public class QueueBlockTest {
 
     /** T-06-08: the plugin's own approved submission passes and runs the build. */
     @Test
+    @Tag("core")
     public void t_06_08_approvedRequestPassesThrough() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -259,6 +268,7 @@ public class QueueBlockTest {
 
     /** T-06-09: clicking the job page's build anchor (WebClient) does not enter the queue. */
     @Test
+    @Tag("core")
     public void t_06_09_buildNowAnchorClickIsBlocked() throws Exception {
         protect(job);
         JenkinsRule.WebClient wc = j.createWebClient().withThrowExceptionOnFailingStatusCode(false);
@@ -285,6 +295,7 @@ public class QueueBlockTest {
 
     /** T-06-10: UpstreamCause passes by default (blockUpstream unset). */
     @Test
+    @Tag("core")
     public void t_06_10_upstreamPassesByDefault() throws Exception {
         protect(job);
         activate(job, UNSECURED_REQUESTER, UNSECURED_APPROVER); // item 6a (note 91)
@@ -301,6 +312,7 @@ public class QueueBlockTest {
 
     /** T-06-11: blockUpstream=true with allowedUpstreamJobs=[Y] lets Y through. */
     @Test
+    @Tag("core")
     public void t_06_11_allowedUpstreamJobPasses() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
@@ -321,6 +333,7 @@ public class QueueBlockTest {
 
     /** T-06-12: an upstream job outside the allow list is blocked and itself ends FAILURE. */
     @Test
+    @Tag("core")
     public void t_06_12_nonAllowedUpstreamIsBlockedAndUpstreamFails() throws Exception {
         BatchControlJobProperty property = new BatchControlJobProperty(true);
         property.setBlockUpstream(true);
@@ -340,6 +353,7 @@ public class QueueBlockTest {
 
     /** T-06-16: a job without approvalRequired is unaffected by run control. */
     @Test
+    @Tag("core")
     public void t_06_16_nonApprovalJobUnaffected() throws Exception {
         // D-31 attaches approvalRequired=true at creation while run control is on; this row is
         // about a job that carries no batch-control property at all, so strip it back to that.
@@ -363,6 +377,7 @@ public class QueueBlockTest {
      * job, including the job itself (D-16), exactly like T-06-12's non-allow-listed upstream job.
      */
     @Test
+    @Tag("core")
     public void t_sec_32_selfUpstreamCauseFollowsBlockUpstreamPolicy() throws Exception {
         secureWithRunControl(j);
 

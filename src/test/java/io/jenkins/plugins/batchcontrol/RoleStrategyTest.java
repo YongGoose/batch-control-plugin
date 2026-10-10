@@ -22,6 +22,7 @@ import java.util.Collections;
 import org.jenkinsci.plugins.rolestrategy.RoleBasedProjectNamingStrategy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -149,6 +150,7 @@ public class RoleStrategyTest {
      * from the first check past its expiry.
      */
     @Test
+    @Tag("core")
     public void t_02_16_grantLayeredOverRoleAclAndExpires() throws Exception {
         install();
         StrategyFixtures.changeControlOn();
@@ -175,6 +177,7 @@ public class RoleStrategyTest {
      * with change control off. The Manage Roles save paths themselves are T-02-88..95.
      */
     @Test
+    @Tag("core")
     public void t_02_17_plainRoleStrategyFromSecurityPageFailsSafeAndMonitorShows() throws Exception {
         install();
         BatchControlGlobalConfiguration cfg = StrategyFixtures.changeControlOn();

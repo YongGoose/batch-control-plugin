@@ -43,6 +43,7 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -113,6 +114,7 @@ public class HistoryWebTest {
      * but not ViewHistory gets 403; a ViewHistory holder gets 200.
      */
     @Test
+    @Tag("core")
     public void t_12_01_historyWithoutViewHistoryIsRefused() throws Exception {
         JenkinsRule.WebClient noBatchControl = webClient("nohist");
         assertEquals(404, get(noBatchControl, "batch-control/history/").getStatusCode(), "GET /batch-control/history by a user with no Batch Control permission must be 404 (SPEC 2, #31)");
@@ -131,6 +133,7 @@ public class HistoryWebTest {
 
     /** T-12-02: the retention work deletes month files past retentionMonths and records it. */
     @Test
+    @Tag("core")
     public void t_12_02_retentionDeletesOldMonthFilesAndLeavesRecord() throws Exception {
         cfg.setRetentionMonths(1);
         cfg.save();
@@ -303,6 +306,7 @@ public class HistoryWebTest {
      * included) are absent, not merely refused -&gt; 404 (was 403).
      */
     @Test
+    @Tag("core")
     public void t_12_05_csvExportsWithoutViewHistoryAre403() throws Exception {
         JenkinsRule.WebClient noHistory = webClient("nohist");
         for (String path : CSV_PATHS) {
@@ -360,6 +364,7 @@ public class HistoryWebTest {
 
     /** T-SEC-06 (remainder): GET on the incident transition endpoints never changes state. */
     @Test
+    @Tag("core")
     public void t_sec_06_getOnIncidentTransitionEndpointsIsRejected() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("sec-fail");
         job.getBuildersList().add(new FailureBuilder());
@@ -395,6 +400,7 @@ public class HistoryWebTest {
 
     /** T-SEC-06 (remainder): GET on the global configure paths never flips a switch. */
     @Test
+    @Tag("core")
     public void t_sec_06_getOnConfigurePathsDoesNotToggleSwitches() throws Exception {
         assertTrue(cfg.isRunControlEnabled(), "precondition from setUp");
         assertFalse(cfg.isChangeControlEnabled(), "precondition from setUp");

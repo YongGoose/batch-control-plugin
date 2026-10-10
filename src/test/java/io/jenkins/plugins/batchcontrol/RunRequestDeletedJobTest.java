@@ -20,6 +20,7 @@ import java.util.Locale;
 import jenkins.model.Jenkins;
 import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -88,6 +89,7 @@ public class RunRequestDeletedJobTest {
      * a1's approval of it is accepted and {@code del-keep} runs exactly once.
      */
     @Test
+    @Tag("core")
     public void t_07_13_deletingAJobInvalidatesItsPendingRunRequest() throws Exception {
         FreeStyleProject deleted = controlled("del-x");
         FreeStyleProject kept = controlled("del-keep");
@@ -166,6 +168,7 @@ public class RunRequestDeletedJobTest {
      * its creation is approved by a1 and runs the re-created job exactly once.
      */
     @Test
+    @Tag("core")
     public void t_07_15_aJobReCreatedUnderTheOldNameNeverRunsTheDeletedJobsRequest() throws Exception {
         FreeStyleProject original = controlled("del-re");
         String stale = submitRunOk(j, "r", original, "run on the original del-re", "a1");

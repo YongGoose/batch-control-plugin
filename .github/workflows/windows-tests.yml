@@ -1,37 +1,55 @@
-# Windows test run, for diagnosis only.
+# The full test suite on Windows with JDK 21.
 #
-# Why: ci.jenkins.io builds Windows on JDK 21 (Jenkinsfile, "Jenkins" check), but its test
-# report needs a login and its GitHub check text names only the first one or two failing
-# tests. This workflow runs the same test groups as build.yml (.github/test-shards.txt,
-# through .github/scripts/test-shards.py) on windows-latest with JDK 21, lets every group
-# finish (-Dmaven.test.failure.ignore=true, fail-fast off), and the "windows test summary"
-# job lists every failing test, every class with no report and the per-group totals in its
-# job summary. The raw reports are in the windows-surefire-<group-id> artifacts.
+# Why: ci.jenkins.io builds Windows on JDK 21 too (Jenkinsfile, "Jenkins" check), but only the
+# tests tagged @Tag("core") (pom.xml, profile core-tests-on-jenkins): the whole suite is too
+# long for its agents (jenkinsci/batch-control-plugin#80). This workflow runs every test on
+# Windows, as build.yml does on Linux. It runs the same test groups as build.yml
+# (.github/test-shards.txt, through .github/scripts/test-shards.py) on windows-latest with
+# JDK 21, lets every group finish (-Dmaven.test.failure.ignore=true, fail-fast off), and the
+# "windows test summary" job lists every failing test, every class with no report and the
+# per-group totals in its job summary. The raw reports are in the windows-surefire-<group-id>
+# artifacts.
 #
-# When it runs: on demand, and on a pull request only when the pull request changes this
-# file or its summary script. It never runs on other pull requests or on pushes, so it
-# never slows them down. It is not a required status check, and must not become one: a red
-# summary is information about Windows, not a merge gate. Keep its job names away from
+# Red on any failure: the summary job fails when a test failed or errored, a class has no
+# report, or a test job did not succeed (build error, timeout). It is not a required status
+# check, so it may be path-filtered: it runs on pull requests and pushes to main that change
+# the code, the build or the test groups, and on demand. Keep its job names away from
 # build.yml's ("build", "test (jdk ..., ...)").
 #
-# How to run it on a branch:
+# How to run it on a branch (on your fork: add -R <you>/batch-control-plugin):
 #   gh workflow run windows-tests.yml --ref <branch>
 #   gh run watch "$(gh run list --workflow windows-tests.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 ---
 name: Windows tests
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - '.mvn/**'
+      - '.github/test-shards.txt'
+      - '.github/scripts/**'
+      - '.github/workflows/windows-tests.yml'
   pull_request:
     paths:
-      - .github/workflows/windows-tests.yml
-      - .github/scripts/surefire-summary.py
+      - 'src/**'
+      - 'pom.xml'
+      - '.mvn/**'
+      - '.github/test-shards.txt'
+      - '.github/scripts/**'
+      - '.github/workflows/windows-tests.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a pull request, or a new manual run on the same ref, replaces the unfinished
+# run; every push to main gets its own complete run.
 concurrency:
   group: windows-tests-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   plan:
@@ -117,7 +135,8 @@ jobs:
           pattern: windows-surefire-*
           path: reports/
       # Red when a test failed or errored, a class has no report or a test job did not
-      # succeed (build error, timeout). Informational: this is not a required check.
+      # succeed (build error, timeout). Not a required check, but a red run needs a look
+      # before merging.
       - name: Summarize the failures
         env:
           TEST_RESULT: ${{ needs.test.result }}

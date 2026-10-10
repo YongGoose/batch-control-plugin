@@ -25,6 +25,7 @@ import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -255,6 +256,7 @@ public class ItemIdentityBindingTest {
      * a window that confers nothing. The folder half of m-1 is T-08-130.
      */
     @Test
+    @Tag("core")
     public void t_08_134_configureWindowOnAJobDoesNotAllowRenamingIt() throws Exception {
         openWindow("u1", "ops/prod", "CONFIGURE");
         assertTrue(can("u1", opsProd, Item.CONFIGURE), "guard: before the rename the window confers Configure on ops/prod");
@@ -308,6 +310,7 @@ public class ItemIdentityBindingTest {
      * Configure on the old job.
      */
     @Test
+    @Tag("core")
     public void t_08_136_windowDoesNotReachAJobRecreatedUnderItsName() throws Exception {
         FreeStyleProject x = ops.createProject(FreeStyleProject.class, "x");
         openWindow("u1", "ops/x", "CONFIGURE");
@@ -670,6 +673,7 @@ public class ItemIdentityBindingTest {
      * GRANT_VIOLATION is recorded.
      */
     @Test
+    @Tag("core")
     public void t_08_163_switchOffRenamesAsInJenkins() throws Exception {
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setChangeControlEnabled(false);

@@ -7,6 +7,7 @@ import hudson.plugins.throttleconcurrents.ThrottleMatrixProjectOptions;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import java.util.Collections;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the queue beyond a per-project concurrency limit. Rows T-06-38 .. T-06-39.
  */
 @WithJenkins
+@Tag("core")
 public class PluginInteractionThrottleConcurrentsTest {
 
     private JenkinsRule j;

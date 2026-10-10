@@ -44,6 +44,7 @@ import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -80,6 +81,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Written from docs/SPEC.md items 4 and 5, docs/DECISIONS.md D-72, D-72b and D-74, and
  * docs/ARCHITECTURE.md section 5 only (no src/main knowledge).
  */
+@Tag("core")
 public class ValuesFileRestartTest {
 
     private static final String SECRET = "rs-s3cr3t-d74-Mv7";

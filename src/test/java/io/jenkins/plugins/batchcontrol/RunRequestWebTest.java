@@ -24,6 +24,7 @@ import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import hudson.cli.CLICommandInvoker;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -77,6 +78,7 @@ public class RunRequestWebTest {
 
     /** T-SEC-01: GET on the approve endpoint is rejected (POST only). */
     @Test
+    @Tag("core")
     public void t_sec_01_getApproveIsRejected() throws Exception {
         String id = createPending();
         JenkinsRule.WebClient wc = webClient().login("a1");
@@ -97,6 +99,7 @@ public class RunRequestWebTest {
      * are absent, not merely refused -&gt; 404 (was 403).
      */
     @Test
+    @Tag("core")
     public void t_sec_02_approveWithoutPermissionIs403() throws Exception {
         String id = createPending();
         JenkinsRule.WebClient wc = webClient().login("u2");
@@ -112,6 +115,7 @@ public class RunRequestWebTest {
 
     /** T-SEC-05: a state-changing POST without a CSRF crumb is 403 even for the right user. */
     @Test
+    @Tag("core")
     public void t_sec_05_postWithoutCrumbIs403() throws Exception {
         String id = createPending();
         JenkinsRule.WebClient wc = webClient().login("a1");
@@ -127,6 +131,7 @@ public class RunRequestWebTest {
 
     /** T-SEC-06: GET on the other state-changing endpoints (reject, cancel) is rejected. */
     @Test
+    @Tag("core")
     public void t_sec_06_getOnRejectAndCancelIsRejected() throws Exception {
         String id = createPending();
 
@@ -145,6 +150,7 @@ public class RunRequestWebTest {
 
     /** T-04-04: records are append-only; no modify/delete HTTP endpoint exists (404/405). */
     @Test
+    @Tag("core")
     public void t_04_04_noModifyOrDeleteEndpointForRecords() throws Exception {
         String id = createPending();
         JenkinsRule.WebClient wc = webClient().login("admin");
@@ -169,6 +175,7 @@ public class RunRequestWebTest {
 
     /** T-05-03: no endpoint can change the stored parameters of an APPROVED request. */
     @Test
+    @Tag("core")
     public void t_05_03_noParameterChangePathAfterApproval() throws Exception {
         String id = createPending();
         j.jenkins.doQuietDown(); // hold the state at APPROVED

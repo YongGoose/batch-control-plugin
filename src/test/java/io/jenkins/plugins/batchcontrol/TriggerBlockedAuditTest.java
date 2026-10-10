@@ -31,6 +31,7 @@ import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -91,6 +92,7 @@ public class TriggerBlockedAuditTest {
 
     /** T-06-43 (#21): a refused timer run leaves one TRIGGER_BLOCKED record naming TIMER and blockTimer. */
     @Test
+    @Tag("core")
     public void t_06_43_refusedTimerRunWritesOneTriggerBlockedRecord() throws Exception {
         FreeStyleProject job = timerLocked("tb-timer");
         clockAt(T0);
@@ -136,6 +138,7 @@ public class TriggerBlockedAuditTest {
 
     /** T-06-45 (#21): a refused Replay leaves one record naming REPLAY and approvalRequired. */
     @Test
+    @Tag("core")
     public void t_06_45_refusedReplayWritesOneTriggerBlockedRecord() throws Exception {
         WorkflowJob pipeline = uncontrolled(j.createProject(WorkflowJob.class, "tb-replay"));
         pipeline.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
@@ -320,6 +323,7 @@ public class TriggerBlockedAuditTest {
      * recorded, so the first refusal really went through the failing write path.
      */
     @Test
+    @Tag("core")
     public void t_06_53_refusalHoldsWhenTheAuditWriteFails() throws Exception {
         clockAt(T0);
         FreeStyleProject job = timerLocked("tb-failing-write");

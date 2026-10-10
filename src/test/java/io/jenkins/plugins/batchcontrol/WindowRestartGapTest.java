@@ -50,6 +50,7 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -464,6 +465,7 @@ public class WindowRestartGapTest {
      * nothing.
      */
     @Test
+    @Tag("core")
     public void t_gap_377_revokeSurvivesARestartWhenOnlyTheGrantFileWasWritten() throws Throwable {
         session.then(r -> {
             prepare(r, false);

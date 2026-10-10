@@ -23,6 +23,7 @@ import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -121,6 +122,7 @@ public class ItemScopeTest {
      * comes with CONFIGURE (P-11) stays on the folder too.
      */
     @Test
+    @Tag("core")
     public void t_08_100_configureWindowOnAFolderCoversTheFolderOnly() throws Exception {
         openWindow("ops", List.of("CONFIGURE"), null);
 
@@ -167,6 +169,7 @@ public class ItemScopeTest {
      * {@code ops/sub} nor at the root.
      */
     @Test
+    @Tag("core")
     public void t_08_102_createWindowCreatesDirectlyInTheFolderOnly() throws Exception {
         openWindow("ops", List.of("CREATE"), null);
 

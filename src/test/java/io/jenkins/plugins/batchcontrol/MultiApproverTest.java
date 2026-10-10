@@ -37,6 +37,7 @@ import org.htmlunit.html.HtmlFormUtil;
 import org.htmlunit.util.KeyDataPair;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -160,6 +161,7 @@ public class MultiApproverTest {
      * runs exactly once and the record names a2 as the decider.
      */
     @Test
+    @Tag("core")
     public void t_03_09_anyDesignatedApproverMayApproveAndIsNamed() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
 
@@ -182,6 +184,7 @@ public class MultiApproverTest {
      * nor reject; the decider stays a1 and the job ran exactly once.
      */
     @Test
+    @Tag("core")
     public void t_03_10_secondDecisionAfterApprovalIsRefused() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
         assertSuccess(decideRun(j, "a1", id, "approve", "ok"), "the first approval by a1");
@@ -203,6 +206,7 @@ public class MultiApproverTest {
      * refused and nothing is ever built (queue empty, next build number unchanged, no build).
      */
     @Test
+    @Tag("core")
     public void t_03_11_firstRejectionClosesTheRequest() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
         assertSuccess(decideRun(j, "a1", id, "reject", "wrong date"), "the rejection by a1");
@@ -220,6 +224,7 @@ public class MultiApproverTest {
 
     /** T-03-12: a non-admin requester may not be a member of the set, even among others. */
     @Test
+    @Tag("core")
     public void t_03_12_requesterInsideTheSetIsRefused() throws Exception {
         // u1 is on the global list, so the only reason to refuse is self-designation
         cfg.setApprovers(Arrays.asList("a1", "a2", "a3", "admin", "u1"));
@@ -250,6 +255,7 @@ public class MultiApproverTest {
 
     /** T-03-14: every member must be on the approver list; one ineligible member refuses the whole set. */
     @Test
+    @Tag("core")
     public void t_03_14_everyMemberMustBeOnTheApproverList() throws Exception {
         Set<String> before = runRequestIds();
         assertClientError(submitRun(j, "u1", job, "month-end batch", "a1", "x9"), "a set with the unlisted user x9");
@@ -264,6 +270,7 @@ public class MultiApproverTest {
      * administrator cannot decide; the request stays PENDING and nothing is built.
      */
     @Test
+    @Tag("core")
     public void t_03_15_approverOutsideTheSetCannotDecide() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
 
@@ -305,6 +312,7 @@ public class MultiApproverTest {
      * who was removed can no longer decide and a member who was added can.
      */
     @Test
+    @Tag("core")
     public void t_03_17_changeApproverEditsTheSetAndRecordsBothSets() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
 
@@ -346,6 +354,7 @@ public class MultiApproverTest {
 
     /** T-03-19: only the requester changes the set, and only before a decision. */
     @Test
+    @Tag("core")
     public void t_03_19_changeByAnotherUserOrAfterDecisionIsRefused() throws Exception {
         String id = submitRunOk(j, "u1", job, "month-end batch", "a1", "a2");
 
@@ -452,6 +461,7 @@ public class MultiApproverTest {
      * ownership check on top of visibility refuses with 403, not 404.
      */
     @Test
+    @Tag("core")
     public void t_03_26_grantChangeApproverByDesignatedApproverIsForbidden() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();
@@ -472,6 +482,7 @@ public class MultiApproverTest {
      * designation and its change history are unaffected.
      */
     @Test
+    @Tag("core")
     public void t_03_24_grantChangeApproverByGetIsRefused() throws Exception {
         cfg.setChangeControlEnabled(true);
         cfg.save();

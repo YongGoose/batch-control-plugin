@@ -291,6 +291,58 @@
     </plugins>
   </build>
 
+  <profiles>
+    <profile>
+      <!-- ci.jenkins.io runs only the tests tagged @Tag("core") (the criteria are in
+           docs/TEST-MATRIX.md, note 330). The whole suite takes about 103 minutes on four forks
+           there, longer than buildPlugin's 60-minute default, and spot agents get reclaimed
+           during so long a run (jenkinsci/batch-control-plugin#80). GitHub Actions runs every
+           test: build.yml on Linux with JDK 21 and 25, windows-tests.yml on Windows with JDK 21.
+
+           Active only when Maven runs inside a Jenkins build, which sets BUILD_URL. GitHub
+           Actions and local builds do not set it, so they still run everything. (Not
+           JENKINS_URL: shells that use the Jenkins CLI often export it.) To run everything
+           inside a Jenkins build anyway, add -P '!core-tests-on-jenkins'.
+
+           default-test keeps only the core tag, and failIfNoTests makes it fail when no test
+           carries the tag, so a lost or renamed tag turns ci.jenkins.io red instead of leaving
+           only InjectedTest. The InjectedTest that maven-hpi-plugin generates (the plugin's
+           automatic checks) has no tag, so the filter would drop it; the injected-test
+           execution runs it on its own. -->
+      <id>core-tests-on-jenkins</id>
+      <activation>
+        <property>
+          <name>env.BUILD_URL</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>default-test</id>
+                <configuration>
+                  <groups>core</groups>
+                  <failIfNoTests>true</failIfNoTests>
+                </configuration>
+              </execution>
+              <execution>
+                <id>injected-test</id>
+                <goals>
+                  <goal>test</goal>
+                </goals>
+                <configuration>
+                  <test>InjectedTest</test>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+
   <repositories>
     <repository>
       <id>repo.jenkins-ci.org</id>
