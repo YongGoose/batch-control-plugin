@@ -272,6 +272,8 @@ public class CreationRecordGapTest {
             assertEquals(1, configure.size(), "guard (SPEC 9): one real change of the job writes exactly one CONFIGURE record: "
                     + describe(configure));
         }
+        // a config.xml POST to a multibranch project schedules an indexing (branch-api MultiBranchProject#onLoad); let it finish so teardown does not delete indexing.log while it is open (Windows refuses)
+        j.waitUntilNoActivity();
     }
 
     private int createFromXml(String parentUrl, String name, String xml) throws Exception {
