@@ -35,6 +35,7 @@ import jenkins.model.Jenkins;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -78,6 +79,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5, docs/TEST-MATRIX.md and the frozen
  * contract only (no src/main knowledge).
  */
+@Tag("core")
 public class UnsavedExecutionRecoveryTest {
 
     private static final String JOB = "unsaved-exec-j";

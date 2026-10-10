@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.Set;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -41,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class ApproverIdentitySecurityTest {
 
     private JenkinsRule j;

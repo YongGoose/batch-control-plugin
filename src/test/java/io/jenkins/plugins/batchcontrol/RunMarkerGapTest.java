@@ -36,6 +36,7 @@ import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -127,6 +128,7 @@ public class RunMarkerGapTest {
      * triple).
      */
     @Test
+    @Tag("core")
     public void t_gap_119_markerOfAnUnknownRequestIsRefused() throws Exception {
         String forged = UUID.randomUUID().toString();
         assertRefusedSubmission("a marker naming no request", jobJ, new ApprovedRunAction(forged));
@@ -139,6 +141,7 @@ public class RunMarkerGapTest {
      * stays PENDING with no executed run.
      */
     @Test
+    @Tag("core")
     public void t_gap_120_markerOfAPendingRequestIsRefused() throws Exception {
         String id = create("pending marker", "2026-09-22");
         assertRefusedSubmission("the marker of a PENDING request", jobJ, new ApprovedRunAction(id));
@@ -154,6 +157,7 @@ public class RunMarkerGapTest {
      * Guard: no such record existed before the attempt.
      */
     @Test
+    @Tag("core")
     public void t_gap_121_markerPresentedOnAnotherJobIsRefusedAndRecorded() throws Exception {
         String id = create("approved, never queued", "2026-09-22");
         QueueRefusalFixtures.refusedBeforeTheGate(jobJ, () -> approve(id));

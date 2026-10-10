@@ -41,6 +41,7 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -209,6 +210,7 @@ public class StoreFaultGapTest {
      * the build with P's value. Skipped where this process can still read the file.
      */
     @Test
+    @Tag("core")
     public void t_gap_342_unreadableValuesFileBlocksApproval() throws Exception {
         RunRequest request = as("u1", () -> RunRequestService.get().create(job, List.of(new StringParameterValue("P", "l3-value")),
                 "needs its values", "a1"));
@@ -306,6 +308,7 @@ public class StoreFaultGapTest {
      * told from outside (note 279). Guard: a request with a string value on another job is stored.
      */
     @Test
+    @Tag("core")
     public void t_gap_386_valueThatCannotBeWrittenLeavesNoRequestFile() throws Exception {
         FreeStyleProject unwritable = j.createFreeStyleProject("l3-unwritable");
         unwritable.addProperty(new ParametersDefinitionProperty(new UnwritableDefinition("U")));

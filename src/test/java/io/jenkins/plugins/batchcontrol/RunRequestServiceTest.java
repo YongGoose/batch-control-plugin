@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class RunRequestServiceTest {
 
     private JenkinsRule j;

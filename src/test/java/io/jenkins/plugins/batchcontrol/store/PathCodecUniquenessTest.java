@@ -3,6 +3,7 @@ package io.jenkins.plugins.batchcontrol.store;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5, issue #25 and docs/TEST-MATRIX.md
  * only (no src/main knowledge).
  */
+@Tag("core")
 public class PathCodecUniquenessTest {
 
     /** Victim: two folders and a leaf, encoded length 100 + 3 + 70 + 3 + 100 = 276 (shortened). */

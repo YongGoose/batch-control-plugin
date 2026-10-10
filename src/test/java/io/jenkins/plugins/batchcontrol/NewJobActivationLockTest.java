@@ -24,6 +24,7 @@ import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -210,6 +211,7 @@ public class NewJobActivationLockTest {
      * installed-but-disabled control changes nothing.
      */
     @Test
+    @Tag("core")
     public void t_08_34_runControlOffLocksNothing() throws Exception {
         setRunControl(false);
 

@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** One unparseable or unknown-enum JSONL line is skipped; the rest of the month still lists. */
 @WithJenkins
+@Tag("core")
 public class FileStoreFailSoftTest {
 
     @Test

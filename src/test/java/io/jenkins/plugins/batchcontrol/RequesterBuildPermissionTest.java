@@ -25,6 +25,7 @@ import jenkins.model.Jenkins;
 import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -132,6 +133,7 @@ public class RequesterBuildPermissionTest {
      * the per-job action is absent, T-02-09) and stores nothing; no build.
      */
     @Test
+    @Tag("core")
     public void t_05_08_submitWithoutRequestOrItemReadIsRefused() throws Exception {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         int nextBuildNumber = job.getNextBuildNumber();
@@ -173,6 +175,7 @@ public class RequesterBuildPermissionTest {
      * Request) and nrd (no Item/Read) is refused with 403; nothing is stored or linked.
      */
     @Test
+    @Tag("core")
     public void t_05_10_incidentRerunWithoutViewHistoryRequestOrReadIsRefused() throws Exception {
         Incident incident = failingJobIncident("inc-x");
         Set<String> before = ApproverFormFixtures.runRequestIds();
@@ -195,6 +198,7 @@ public class RequesterBuildPermissionTest {
      * and stores nothing.
      */
     @Test
+    @Tag("core")
     public void t_05_11_serviceCreateNeedsRequestAndReadNotBuild() throws Exception {
         int nextBuildNumber = job.getNextBuildNumber();
 
@@ -266,6 +270,7 @@ public class RequesterBuildPermissionTest {
 
     /** T-05-13 (D-38a): Request on another job does not count: ob submits on batch-x -> refused, nothing stored; ob on other-x succeeds. */
     @Test
+    @Tag("core")
     public void t_05_13_requestIsCheckedOnTheRequestedJob() throws Exception {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         int nextBuildNumber = job.getNextBuildNumber();

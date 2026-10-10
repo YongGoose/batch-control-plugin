@@ -24,6 +24,7 @@ import java.util.Set;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -128,6 +129,7 @@ public class RequestFolderScopeServiceTest {
      * Manage) can still cancel both.
      */
     @Test
+    @Tag("core")
     public void t_05_34_requesterWhoLostRequestIsRefusedAndManageCanStillCancel() throws Exception {
         RunRequest run = asUser("fr", () -> RunRequestService.get().create(inside, new LinkedHashMap<>(), "month-end", "a1"));
         ActivationRequest act = asUser("fr", () -> ActivationService.get().create((Item) inside,

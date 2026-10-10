@@ -18,6 +18,7 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.html.HtmlForm;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Expected API contract is listed in the test-author report for this slice.
  */
 @WithJenkins
+@Tag("core")
 public class GlobalSwitchTest {
 
     private JenkinsRule j;

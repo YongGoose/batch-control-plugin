@@ -36,6 +36,7 @@ import org.htmlunit.html.HtmlCheckBoxInput;
 import org.htmlunit.html.HtmlForm;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -99,6 +100,7 @@ public class SwitchSaveFailureTest {
      * and still conferring.
      */
     @Test
+    @Tag("core")
     public void t_01_07_failedSaveTurningChangeControlOffAppliesNothing() throws Exception {
         Grant grant = changeControlOnWithActiveGrant();
         int toggles = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size();
@@ -119,6 +121,7 @@ public class SwitchSaveFailureTest {
 
     /** T-01-08 (guard of T-01-07): the same form submission without the fault toggles, records and revokes. */
     @Test
+    @Tag("core")
     public void t_01_08_successfulSaveTurningChangeControlOffTogglesRecordsAndRevokes() throws Exception {
         Grant grant = changeControlOnWithActiveGrant();
         int revokes = records(ChangeType.GRANT_REVOKE, null).size();
@@ -145,6 +148,7 @@ public class SwitchSaveFailureTest {
      * record, and a manual build still runs (run control never took effect).
      */
     @Test
+    @Tag("core")
     public void t_01_09_failedSaveTurningRunControlOnAppliesNothing() throws Exception {
         setBatchControl(job, new BatchControlJobProperty(true));
         assertFalse(cfg.isRunControlEnabled(), "fixture: run control must start off");
@@ -162,6 +166,7 @@ public class SwitchSaveFailureTest {
 
     /** T-01-10 (guard of T-01-09): the same form submission without the fault toggles, records and blocks. */
     @Test
+    @Tag("core")
     public void t_01_10_successfulSaveTurningRunControlOnTogglesRecordsAndBlocks() throws Exception {
         setBatchControl(job, new BatchControlJobProperty(true));
         int nextBuildNumber = job.getNextBuildNumber();
@@ -190,6 +195,7 @@ public class SwitchSaveFailureTest {
      * on in memory and a CONFIG_TOGGLE record is written.
      */
     @Test
+    @Tag("core")
     public void t_01_11_directSetterWithUnwritableFileAppliesAndDoesNotThrow() throws Exception {
         assertFalse(cfg.isChangeControlEnabled(), "fixture: change control must start off");
         int toggles = records(ChangeType.CONFIG_TOGGLE, "changeControlEnabled").size();

@@ -30,6 +30,7 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -159,6 +160,7 @@ public class AuthorizationEntryGuardTest {
      * never held a grant. Guarding is per item, so the entry is reverted and recorded.
      */
     @Test
+    @Tag("core")
     public void t_02_54_entryForAnyPrincipalOnAGuardedItemIsReverted() throws Exception {
         grantBob();
         int violations = violations().size();
@@ -324,6 +326,7 @@ public class AuthorizationEntryGuardTest {
      * record names c1, and the build's entry for bob is then kept without a GRANT_VIOLATION.
      */
     @Test
+    @Tag("core")
     public void t_02_64_explicitReviewClearsTheGuard() throws Exception {
         requestPermissionFor("c1"); // the job's Batch Control page needs BatchControl/Request (LIMITATIONS 35)
         grantBob();
@@ -358,6 +361,7 @@ public class AuthorizationEntryGuardTest {
 
     /** T-02-69 (D-58b (3)): bob, whose Configure comes only from his grant, cannot mark the job reviewed (403). */
     @Test
+    @Tag("core")
     public void t_02_69_grantOnlyUserCannotMarkReviewed() throws Exception {
         requestPermissionFor("bob"); // bob reaches the page, so the refusal is the review rule, not a 404
         grantBob();
@@ -405,6 +409,7 @@ public class AuthorizationEntryGuardTest {
      * reverted.
      */
     @Test
+    @Tag("core")
     public void t_02_71_replayByAGrantHolderMarksTheJob() throws Exception {
         WorkflowJob other = j.jenkins.createProject(WorkflowJob.class, "replay-me");
         other.setDefinition(new CpsFlowDefinition("echo 'hello'", true));
@@ -494,6 +499,7 @@ public class AuthorizationEntryGuardTest {
      * through an HTTP request (POST config.xml) while bob holds a grant on the job. It is kept.
      */
     @Test
+    @Tag("core")
     public void t_02_55_administratorsEntryThroughHttpIsKept() throws Exception {
         grantBob();
         int violations = violations().size();
@@ -508,6 +514,7 @@ public class AuthorizationEntryGuardTest {
 
     /** T-02-56 (D-58, SPEC 1): with change control off the same script entry for bob is kept. */
     @Test
+    @Tag("core")
     public void t_02_56_changeControlOffRevertsNothing() throws Exception {
         grantBob();
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
@@ -594,6 +601,7 @@ public class AuthorizationEntryGuardTest {
      * by c1 is written.
      */
     @Test
+    @Tag("core")
     public void t_02_76_markedRunCannotBeReRunAfterTheReview() throws Exception {
         WorkflowJob job = replayedUnderGrant();
         assertTrue(postForm("admin", "manage/administrativeMonitor/batch-control-strategy/markReviewed", "item=replay-me") < 400,

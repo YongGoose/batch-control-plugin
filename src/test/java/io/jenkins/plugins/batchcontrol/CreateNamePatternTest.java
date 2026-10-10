@@ -27,6 +27,7 @@ import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -114,6 +115,7 @@ public class CreateNamePatternTest {
      * refuses a longer name; "exact" refuses a name the dot would match as a regex.
      */
     @Test
+    @Tag("core")
     public void t_08_38_exactNameRestrictionRefusesOtherNames() throws Exception {
         grant("nightly.report", "CREATE");
 
@@ -133,6 +135,7 @@ public class CreateNamePatternTest {
 
     /** T-08-39: a /regex/ restriction admits names that match in full and refuses the rest. */
     @Test
+    @Tag("core")
     public void t_08_39_regexRestrictionMatchesInFull() throws Exception {
         grant("/nightly-[a-z]+/", "CREATE");
 

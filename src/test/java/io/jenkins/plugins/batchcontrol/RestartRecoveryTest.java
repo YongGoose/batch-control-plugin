@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@Tag("core")
 public class RestartRecoveryTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T09:00:00Z");

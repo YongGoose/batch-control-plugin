@@ -18,6 +18,7 @@ import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * docs/DECISIONS.md D-58a, docs/ARCHITECTURE.md and docs/TEST-MATRIX.md only (no src/main
  * knowledge).
  */
+@Tag("core")
 public class AuthorizationGuardRestartTest {
 
     @RegisterExtension

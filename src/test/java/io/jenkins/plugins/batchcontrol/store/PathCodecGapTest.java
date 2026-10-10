@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  *
  * <p>Written from docs/SPEC.md item 4 and docs/ARCHITECTURE.md section 5 only (no src/main knowledge).
  */
+@Tag("core")
 public class PathCodecGapTest {
 
     private static final Pattern PERCENT = Pattern.compile("%(?![0-9A-Fa-f]{2})");

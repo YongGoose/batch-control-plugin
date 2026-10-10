@@ -25,6 +25,7 @@ import jenkins.branch.BranchSource;
 import jenkins.scm.impl.SingleSCMSource;
 import hudson.scm.NullSCM;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -150,6 +151,7 @@ public class ActivationLifecycleTest {
      * starts not activated and its timer is refused; the state file is gone.
      */
     @Test
+    @Tag("core")
     public void t_06a_30_deleteRemovesActivation() throws Exception {
         FreeStyleProject job = activatedJob("life-del");
         assertEquals(1, stateFiles());

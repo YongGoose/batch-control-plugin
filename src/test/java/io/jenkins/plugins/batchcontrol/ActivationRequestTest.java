@@ -18,6 +18,7 @@ import java.util.List;
 import jenkins.model.Jenkins;
 import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -98,6 +99,7 @@ public class ActivationRequestTest {
      * records who decided, writes exactly one ACTIVATED record, and the timer then runs.
      */
     @Test
+    @Tag("core")
     public void t_06a_16_designatedApproverApprovesAndTheJobIsActivated() throws Exception {
         WebResponse form = get(j, "u1", job.getUrl() + "batch-control-activation/");
         assertEquals(200, form.getStatusCode(), "the requester must be able to open the activation form");
@@ -168,6 +170,7 @@ public class ActivationRequestTest {
      * designate and approve themselves.
      */
     @Test
+    @Tag("core")
     public void t_06a_18_selfApprovalIsRefusedExceptForTheAdministrator() throws Exception {
         assertClientError(submitActivation(j, "a3", job, "ACTIVATE", "self", "a3"), "a3 designating a3");
         assertClientError(submitActivation(j, "a3", job, "ACTIVATE", "self in a set", "a1", "a3"),
@@ -185,6 +188,7 @@ public class ActivationRequestTest {
      * and the request stays PENDING; any member of a larger set may decide.
      */
     @Test
+    @Tag("core")
     public void t_06a_19_onlyADesignatedApproverMayDecide() throws Exception {
         String id = submitActivationOk(j, "u1", job, "ACTIVATE", "go live", "a1");
 
@@ -223,6 +227,7 @@ public class ActivationRequestTest {
      * approver cannot request without Request (403/404); nothing is stored in any case.
      */
     @Test
+    @Tag("core")
     public void t_06a_21_requestingNeedsRequestAndItemRead() throws Exception {
         assertEquals(404, get(j, "viewer", job.getUrl() + "batch-control-activation/").getStatusCode(),
                 "the activation form must be absent for a user without Request");
@@ -242,6 +247,7 @@ public class ActivationRequestTest {
      * the decision URLs changes nothing (HTTP 4xx, typically 405).
      */
     @Test
+    @Tag("core")
     public void t_06a_22_getOnStateChangingUrlsChangesNothing() throws Exception {
         int submit = getAs(j, "u1", job.getUrl() + "batch-control-activation/submit?action=ACTIVATE&reason=x&approvers=a1")
                 .getStatusCode();
@@ -264,6 +270,7 @@ public class ActivationRequestTest {
      * the state names who put it on hold, and the timer is refused.
      */
     @Test
+    @Tag("core")
     public void t_06a_23_approvedHoldDeactivatesAndRecordsHeld() throws Exception {
         activate(job, "u1", "a1");
         String id = submitActivationOk(j, "u1", job, "HOLD", "vendor outage", "a2");
