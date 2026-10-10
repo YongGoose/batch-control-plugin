@@ -118,6 +118,7 @@ History*Test
 Snapshot*Test
 # the file store
 BoundedReadTest FileStoreFailSoftTest LegacySnapshotPlantTest MonthFileGapTest
+MonthBucketZoneTest
 OversizedLineTest RecordIsolationGapTest RecordLookupPathTest RestartRecoveryTest
 SharingRetryTest UnreadableOpenRequestGapTest
 PathCodec*Test
