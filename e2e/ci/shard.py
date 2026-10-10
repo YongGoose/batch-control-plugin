@@ -147,6 +147,12 @@ UNITS = [
     Unit("r23-xml-chars", 0.6, [("r23-xml-chars", py("r23/xml_chars.py"))], group="crawl and ui checks",
          doc="e2e-23 R1-01: an ANSI-coloured console tail leaves the incident readable (list, page, incidents.csv, "
              "summary); a comment or grant reason holding U+000B is refused with a 4xx and stores nothing"),
+    # e2e-25 #43 (Wave C-UI, D-85 BOM by default). r25/csv_bom.py arranges its own item (r25-csv-배치), runs it once
+    # per pass through an approved request and alternates its activation (ACTIVATE/HOLD) to write a change record.
+    Unit("r25-csv-bom", 0.7, [("r25-csv-bom", py("r25/csv_bom.py"))], group="crawl and ui checks",
+         doc="e2e-25 #43: runs.csv, incidents.csv, changes.csv and requests.csv (REST, filtered, empty, and the History "
+             "page's download buttons) start with the UTF-8 BOM and the header row; guards: content type and "
+             "attachment name unchanged, the existing columns, Korean values in UTF-8"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
@@ -157,6 +163,11 @@ UNITS = [
     Unit("r16-follow", 2.4, [("r16-arrange", py("r16/arrange.py")), ("r16-follow", py("r16/follow.py"))],
          doc="e2e-16: windows follow admin rename/move, deletion ends them and DELETE records name the deleting user (D-74, "
              "1864bdc); refused moves once per minute (D-73); CREATE window under a naming strategy (T-08-168)"),
+    # e2e-24 #39 (wave A). r24/switch_race.py arranges its own items (r24-race-1..12) and API tokens it revokes, switches
+    # change control off and on (which revokes every open window), and leaves it on with no pending request.
+    Unit("r24-switch-race", 1.8, [("r24-switch-race", py("r24/switch_race.py"))], group="job ui windows and disk",
+         doc="e2e-24 #39: an approval racing the change-control switch-off leaves no active window and confers nothing "
+             "after the switch is back on: a deterministic hold (store write) and a 40-round REST stress; guards"),
     Unit("r16-params", 1.4, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
          doc="e2e-16: typed parameters (core file, stashedFile, base64File, password) page+dialog; values file; 413 at both "
              "stages; repeated name, U+0000, disposal (D-72, D-72b, D-74)"),
@@ -214,6 +225,12 @@ UNITS = [
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
              "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
              "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+    # e2e-24 #37 (wave A). r24/user_cause.py deletes and re-creates its own items (r24-ucause*) and activates one through
+    # an approved ACTIVATE request; the deprecated cause is submitted from the script console and the CLI groovy command.
+    Unit("r24-user-cause", 1.6, [("r24-user-cause", py("r24/user_cause.py"))], group="runs and switches",
+         doc="e2e-24 #37: a submission whose only cause is the deprecated Cause.UserCause is refused like UserIdCause "
+             "(same refusal and records; console and CLI; activated and not activated); guards: UserIdCause, a job "
+             "without approval, an approved run once"),
     # e2e-22 R4-02 (bug-hunt batch B). r22/scripted_build.py arranges its own item (r22-script) and a requester API token
     # it revokes at its end.
     Unit("r22-scripted-build", 0.4, [("r22-scripted-build", py("r22/scripted_build.py"))],
@@ -237,6 +254,11 @@ UNITS = [
     Unit("r22-cancelled-notice", 0.5, [("r22-cancelled-notice", py("r22/cancelled_notice.py"))],
          doc="e2e-22 R2-05: an approved run whose queue item was cancelled (from the queue, or by disabling the job) is not "
              "shown as starting shortly; the request page says the queued run was cancelled and will not start"),
+    # e2e-24 #38 (wave A). r24/deleted_job.py deletes and re-creates its own items (r24-del-*) and cancels what it leaves
+    # PENDING.
+    Unit("r24-deleted-job", 1.4, [("r24-deleted-job", py("r24/deleted_job.py"))], group="crawls and multibranch",
+         doc="e2e-24 #38: deleting a job, or a folder above it, invalidates its PENDING run requests naming the deletion; "
+             "approving one is refused (browser and REST) and a job re-created under the name gets no build; guards"),
     Unit("r19-kinds", 1.0, [("r19-arrange", py("r19/arrange.py")), ("r19-kinds", py("r19/kinds.py")),
                             ("r19-guard", py("r19/guard.py"))],
          doc="e2e-19: matrix project and organization folder windows, credentials and run parameters through an approved "
@@ -283,10 +305,23 @@ UNITS = [
     Unit("r23-history-late", 1.6, [("r23-history-late", py("r23/history_late.py"))], group="runs and switches",
          doc="e2e-23 R1-02: a run recorded late (held 65 s in onCompleted) does not hide the run recorded before it from "
              "the History listing of its day, which matches runs.csv"),
+    # e2e-25 #42 (Wave C-UI). r25/run_links.py arranges its own items (r25-links-*), activates its matrix project
+    # through the request flow and runs each job once per pass (approved requests).
+    Unit("r25-run-links", 1.2, [("r25-run-links", py("r25/run_links.py"))], group="runs and switches",
+         doc="e2e-25 #42: every run link on History, the Run Dashboard, Incidents and the incident pages resolves (200) "
+             "to the run's own URL for a matrix configuration; guards: a Freestyle job, a job in a folder, the matrix "
+             "parent and the request page's executed run"),
     # e2e-21 (71d267b). r21/arrange.py is idempotent (item r21-reject).
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
+    # e2e-25 #41 (Wave C-UI). r25/breadcrumb_menu.py arranges its own folder, job and accounts (r25-team, r25-folder-*)
+    # and cancels the folder requester's pending request at its end.
+    Unit("r25-breadcrumb-menu", 0.6, [("r25-breadcrumb-menu", py("r25/breadcrumb_menu.py"))],
+         group="crawls and multibranch",
+         doc="e2e-25 #41: the Batch Control context menu lists exactly the tab bar's sections for a requester with "
+             "Request on one folder only (JSON and the breadcrumb dropdown); guards: admin, approver-1, and no menu for "
+             "nobc and a folder requester without requests of their own"),
     # e2e-22 R3-04 (bug-hunt batch B). r22/grant_monitor.py arranges its own item (r22-monitor) and holds the GrantService
     # monitor for 10 s from the script console while the requester's REST requests run; REST only, no screenshot.
     Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],

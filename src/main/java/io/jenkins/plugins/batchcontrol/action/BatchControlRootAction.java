@@ -86,15 +86,18 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
      * The breadcrumb dropdown: the same tabs, in the same order and with the same badges, as the
      * tab bar ({@link SectionTabs#current()}, permission-filtered by {@link SectionAccess}), plus
      * the configuration page for a {@code BatchControl/Manage} holder. Read-only; empty for a
-     * user without any Batch Control permission (who gets 404 before reaching it anyway).
+     * user the page does not admit ({@link SectionAccess#canOpenRoot()}, the gate of the tab bar
+     * too), who gets 404 before reaching it anyway.
      */
     // Read-only: served by GET to core's breadcrumb context-menu script; lists only sections the caller may open.
     @SuppressWarnings({"lgtm[jenkins/csrf]", "lgtm[jenkins/no-permission-check]"})
     @Override
     public ContextMenu doContextMenu(StaplerRequest2 request, StaplerResponse2 response) {
         ContextMenu menu = new ContextMenu();
-        if (!Jenkins.get().hasAnyPermission(SectionAccess.anyPermission())) {
-            return menu; // no Batch Control permission: nothing to list (the URL is 404 anyway)
+        // #41: the page's own gate (D-38b), so a requester whose Request is held only on some jobs
+        // or folders gets the same sections as the tab bar, not an empty menu.
+        if (!isVisible()) {
+            return menu; // cannot open the page: nothing to list (the URL is 404 anyway)
         }
         String base = request.getContextPath() + "/" + "batch-control/";
         for (SectionTabs.Tab tab : SectionTabs.current()) {
