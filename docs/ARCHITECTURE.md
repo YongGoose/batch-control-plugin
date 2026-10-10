@@ -88,7 +88,7 @@ GrantAwareACL extends ACL            (unchanged logic)
 ```
 $JENKINS_HOME/batch-control/
 ├── config.xml                    전역 설정 (GlobalConfiguration 표준 위치는 $JENKINS_HOME/io.jenkins...xml, 이 파일은 사용 안 함)
-├── requests/run/<id>.xml         RunRequest (XStream). 상태 변경 시 파일 전체 재작성 (원자적: tmp → rename)
+├── requests/run/<id>.xml         RunRequest (XStream). 상태 변경 시 파일 전체 재작성 (atomically: a temporary file in the same directory, forced with `FileChannel.force(true)`, moved onto the target with `ATOMIC_MOVE`, then the directory forced; the directory force is skipped on Windows and elsewhere a refusal is logged and does not fail the write, as in core's `AtomicFileWriter`; #34)
 ├── requests/run/<id>.values.xml  RunRequestValues: the typed ParameterValues, written once at submission (D-74)
 ├── requests/grant/<id>.xml       GrantRequest
 ├── grants/<id>.xml               Grant
@@ -100,7 +100,7 @@ $JENKINS_HOME/batch-control/
 ```
 
 - ID: `yyyyMMdd-HHmmss-<6자리 랜덤>` (파일명 안전, 시간순 정렬 가능).
-- 쓰기: 저장소 단위 `ReentrantLock`. JSONL append는 `Files.write(APPEND)` 후 flush. An append first ends a torn last line (a file that does not end with a line end, or whose last byte cannot be read, gets one; at worst a blank line, which readers skip), so a damaged line never swallows the next record.
+- 쓰기: 저장소 단위 `ReentrantLock`. A JSONL append writes the line through a `FileChannel` and forces it to disk (`FileChannel.force(true)`) before the operation reports success; a month file created by the append also has its directory forced (#34). An append first ends a torn last line (a file that does not end with a line end, or whose last byte cannot be read, gets one; at worst a blank line, which readers skip), so a damaged line never swallows the next record.
 - Unreadable entity files (an XML file that cannot be read or parsed) are skipped with a warning in listings and in the grant cache; a skipped grant confers nothing. Open-request listings skip a request that became unreadable after startup (it keeps its index entry and is picked up once readable); a D-21 invalidation missed because of it is remembered in memory and applied once readable.
 - Reads (#13, D-81): list screens page newest-first by streaming month files from the end (a run line's own `appendedAt` decides where a date-filtered scan may stop; older lines fall back to start + duration) and stop after the page window or at most 50,000 scanned records (`RecordPage.truncated`, and the screen asks the user to narrow the filter). Diffs are read only for the rows shown. Month counters for summaries are kept in memory and updated from what was appended since the last read. An in-memory index of requests and grants is built once per session at startup; the expiry, recovery and invalidation scans load only open requests. All of this is derived state, never persisted, and rebuilt on restart.
 - Locks (#18): one lock per file stripe (64 stripes by path hash) instead of a single store lock. Retention deletes one file at a time under that file's lock, so the queue gate and build completion wait behind at most one write.
