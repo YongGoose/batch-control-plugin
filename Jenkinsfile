@@ -8,9 +8,9 @@
  *   pipeline: the ci.jenkins.io administrators asked for that in
  *   jenkinsci/batch-control-plugin#80.
  * - Linux on JDK 25 and Windows on JDK 21, the two JDKs the hosting checker accepts.
- * - Core tests only. A Jenkins build sets JENKINS_URL, which activates the
+ * - Core tests only. A Jenkins build sets BUILD_URL, which activates the
  *   core-tests-on-jenkins profile in pom.xml: Surefire runs the tests tagged @Tag("core") and
- *   the generated InjectedTest. The whole suite took about 103 minutes on four forks here,
+ *   the generated InjectedTest, and fails when no test carries the tag. The whole suite took about 103 minutes on four forks here,
  *   too long for the default timeout and for spot agents. It runs on GitHub Actions instead:
  *   Linux on JDK 21 and 25 in the `build` workflow, Windows on JDK 21 in `windows-tests`.
  * - timeout: 90 minutes per platform. The core tests take about 30 minutes on four forks;

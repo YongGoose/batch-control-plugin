@@ -397,9 +397,10 @@ behind any of them.
   ci.jenkins.io builds the `Jenkinsfile`, a plain `buildPlugin` call, on Linux
   with JDK 25 and on Windows with JDK 21, and reports the check `Jenkins`. It
   runs only the tests tagged `@Tag("core")` and the generated `InjectedTest`:
-  a Jenkins build sets `JENKINS_URL`, which activates the
+  a Jenkins build sets `BUILD_URL`, which activates the
   `core-tests-on-jenkins` profile in `pom.xml` (local and GitHub Actions builds
-  do not set it, and run everything). The whole suite takes about 103 minutes
+  do not set it, and run everything). The profile fails the build when no test
+  carries the tag, so a lost tag shows up as a red `Jenkins` check. The whole suite takes about 103 minutes
   on four forks there, longer than buildPlugin's default timeout, and spot
   agents get reclaimed during so long a run. ci.jenkins.io runs on spot agents
   only, and buildPlugin retries an agent that is reclaimed. Never add
