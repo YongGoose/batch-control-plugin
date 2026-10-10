@@ -17,7 +17,7 @@ are what makes the rest of the repository readable.
 
 | | |
 |---|---|
-| JDK | **21 or 25** (Temurin). JDK 17 cannot build against Jenkins 2.568.x, whose core needs Java 21. The `Jenkinsfile` builds Linux on 21 and 25 and Windows on 21, and the GitHub Actions build runs on 21 and 25. |
+| JDK | **21 or 25** (Temurin). JDK 17 cannot build against Jenkins 2.568.x, whose core needs Java 21. ci.jenkins.io (`Jenkinsfile`) builds Linux on 25 and Windows on 21, and the GitHub Actions build runs Linux on 21 and 25. |
 | Maven | **3.9.6** or newer (the parent POM enforces it). |
 | Docker | Only for the end-to-end environment (§5). Not needed for `mvn verify`. |
 
@@ -386,23 +386,32 @@ behind any of them.
   class. A new class whose prefix a group already lists (`Grant*Test`,
   `Window*Test`) needs nothing; otherwise add its prefix or its name to the
   group of the feature it tests, and take a renamed or deleted class's name out.
-  ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
-  the `Jenkinsfile` and reports the check `Jenkins`. It uses the same groups:
-  each platform runs one agent per group, named like
-  `linux-21 (run approval and mail)` or `windows-21 (parameters and ui)`, and
-  one `<platform> (checks)` agent for `verify` with the tests skipped. A first
-  `Plan` stage fails when a test class matches no group or two, and each group's
-  agent fails unless Surefire reported exactly that group's classes, so every
-  class runs once per platform. A failing test fails its agent and the build;
-  the other agents still finish. Every agent is non-spot (`maven-21-nonspot`,
-  `maven-25-nonspot`, `maven-21-windows-nonspot`), is retried once on a new
-  agent if it is lost, and has a 60-minute limit (30 for `checks`); the
-  whole suite on one agent took 2 to 3 hours and hit buildPlugin's 180-minute
-  cap. Coverage (`linux-21`), static analysis and the Incrementals artifacts
-  are recorded as buildPlugin records them. For the
+  ci.jenkins.io also builds the `Jenkinsfile`, a plain `buildPlugin` call, on
+  Linux with JDK 25 and on Windows with JDK 21, and reports the check
+  `Jenkins`. Each platform runs the whole suite on one agent (the groups above
+  are not used there), on spot agents only: buildPlugin retries an agent that
+  is reclaimed. Never add `nonspot` labels or turn the `Jenkinsfile` into a
+  custom pipeline; the ci.jenkins.io administrators asked for that in
+  jenkinsci/batch-control-plugin#80. buildPlugin also records coverage, static
+  analysis and the Incrementals artifacts. For the
   full list of Windows test failures, which the `Jenkins` check text cuts short,
   run the manual, not required `Windows tests` workflow
   (`gh workflow run windows-tests.yml --ref <branch>`) and read its summary.
+- **Verify on your fork before you open the pull request.** ci.jenkins.io is
+  shared by every Jenkins project and runs on sponsored capacity, and it builds
+  every pull request again on every push. So:
+  1. Fork the repository, enable Actions on the fork, and push your topic
+     branch there, never to `jenkinsci/batch-control-plugin`.
+  2. Run the `build` workflow on that branch from the fork's Actions tab
+     ("Run workflow"), or with
+     `gh workflow run build.yml --ref <branch> -R <you>/batch-control-plugin`.
+     For a change to the UI or to behaviour, run the `e2e` workflow the same
+     way (`e2e.yml`). A run started by hand has no base commit, so it reports
+     no changed-line coverage; the pull request's own e2e run does.
+  3. Open the pull request from that branch when they are green.
+  4. Batch your commits: push the answers to a review round together, not one
+     commit at a time, because every push to a pull request rebuilds it on
+     ci.jenkins.io.
 - **Merging into `main`** needs two required status checks, `build` and
   ci.jenkins.io's `Jenkins`, green on a branch that is up to date with `main`
   (update it when GitHub says it is behind), and one approving review, from the

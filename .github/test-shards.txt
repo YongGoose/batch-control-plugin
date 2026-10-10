@@ -1,6 +1,7 @@
-# Surefire groups for the Build workflow and for the Jenkinsfile (ci.jenkins.io), whose
-# planGroups() reads this format and applies the rules of .github/scripts/test-shards.py: change
-# both if either changes.
+# Surefire groups for the GitHub Actions Build workflow (build.yml) and the manual Windows tests
+# workflow (windows-tests.yml), both read through .github/scripts/test-shards.py. ci.jenkins.io
+# does not use them: its Jenkinsfile is a plain buildPlugin call that runs the whole suite on one
+# agent per platform.
 #
 # Format: a group starts with a line "[<label>]"; the lines after it, up to the next
 # "[<label>]" line, hold its Surefire -Dtest patterns, separated by commas, spaces or line

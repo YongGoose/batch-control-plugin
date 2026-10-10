@@ -12,7 +12,9 @@
 # Every JDK the jenkinsci hosting checker accepts (21 and 25, R4-3) gets its own static
 # checks job ("build (jdk 21)") and its own test jobs, named by group label ("test (jdk 25,
 # run approval and mail)"). The list lives in env.JDKS (plan job, test matrix) and in the
-# checks matrix below; keep them in sync with the Jenkinsfile.
+# checks matrix below; keep the two in sync with each other. They need not match the
+# Jenkinsfile: ci.jenkins.io builds Linux on JDK 25 and Windows on JDK 21, and these jobs add
+# Linux on JDK 21.
 ---
 name: Build
 on:
