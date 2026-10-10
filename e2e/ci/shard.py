@@ -157,6 +157,11 @@ UNITS = [
     Unit("r16-follow", 2.4, [("r16-arrange", py("r16/arrange.py")), ("r16-follow", py("r16/follow.py"))],
          doc="e2e-16: windows follow admin rename/move, deletion ends them and DELETE records name the deleting user (D-74, "
              "1864bdc); refused moves once per minute (D-73); CREATE window under a naming strategy (T-08-168)"),
+    # e2e-24 #39 (wave A). r24/switch_race.py arranges its own items (r24-race-1..12) and API tokens it revokes, switches
+    # change control off and on (which revokes every open window), and leaves it on with no pending request.
+    Unit("r24-switch-race", 1.8, [("r24-switch-race", py("r24/switch_race.py"))], group="job ui windows and disk",
+         doc="e2e-24 #39: an approval racing the change-control switch-off leaves no active window and confers nothing "
+             "after the switch is back on: a deterministic hold (store write) and a 40-round REST stress; guards"),
     Unit("r16-params", 1.4, [("r16-arrange", py("r16/arrange.py")), ("r16-params", py("r16/params.py"))],
          doc="e2e-16: typed parameters (core file, stashedFile, base64File, password) page+dialog; values file; 413 at both "
              "stages; repeated name, U+0000, disposal (D-72, D-72b, D-74)"),
