@@ -1197,6 +1197,34 @@ public final class GrantService {
     }
 
     /**
+     * #39: the approval's registration. {@code approval} decides the request and returns the window
+     * to register; it runs under this monitor, and the window is registered as {@link #register(Grant,
+     * Item)} does before the monitor is released.
+     *
+     * <p>Why under this monitor: turning change control off writes the switch first and then calls
+     * {@link #revokeAllActive()}, which holds this monitor while it ends every active window. A
+     * switch check made inside {@code approval} is therefore atomic with the registration relative to
+     * that revocation. Either the check runs first, so the window is in the cache when
+     * {@code revokeAllActive} lists it and the switch-off ends it, or it runs after, sees the switch
+     * off, and refuses before anything is decided or registered. No window can be registered after a
+     * switch-off has returned.
+     *
+     * <p>Lock order, which this method keeps acyclic: {@code policy.GrantRequestService}'s lock, then
+     * this monitor, then the store. The switch-off path takes the configuration's monitor and then
+     * this monitor. Nothing that runs under this monitor (including {@code approval}) takes the
+     * configuration's monitor or {@code GrantRequestService}'s lock: the switch is a volatile read.
+     *
+     * @param approval decides the request (re-checks the switch, persists the decision) and returns
+     *                 the window to register; an exception it throws registers nothing
+     * @return as {@link #register(Grant, Item)}
+     */
+    public synchronized boolean registerApproved(Item item, java.util.function.Supplier<Grant> approval) {
+        Objects.requireNonNull(item, "item");
+        Grant grant = Objects.requireNonNull(approval.get(), "grant");
+        return register(grant, item);
+    }
+
+    /**
      * S-39-02: whether {@code item} is still the item at its full name: its deletion has not been
      * reported ({@link #endWindowsOf}), and the item Jenkins finds at that name is the same object.
      */
