@@ -2,7 +2,9 @@
 <!-- D-66: the footer of one of the Pending, Active and Ended lists, 50 rows a page (ui.Paging):
      always "Page N (M requests)", singular for one (E2E-1 UX-9), with the total counted over the
      rows the viewer may see (S-16: a count must not reveal hidden requests), and Previous/Next
-     links when there are more pages. Each list pages with its own query parameter. -->
+     links when there are more pages. Each list pages with its own query parameter; a link keeps
+     every other parameter of the current URL, so paging one list leaves the others where they
+     are (#45, ui.Paging#query). -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
   <st:documentation>
     Paging links of one list.
@@ -15,13 +17,17 @@
     <st:attribute name="singular" use="required">The counted noun for one row, for example "request".</st:attribute>
     <st:attribute name="plural" use="required">The counted noun for other counts, for example "requests".</st:attribute>
   </st:documentation>
+  <!-- #45: the links keep the current URL's other parameters (ui.Paging#query), reached through
+       the root action, not j:invokeStatic: invokeStatic loads classes with core's class loader
+       and cannot see plugin classes in a real Jenkins (only a flat test classpath; see bc:tabs). -->
+  <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
   <div class="jenkins-buttons-row jenkins-!-margin-top-1" role="navigation" aria-label="Pages of ${attrs.label}">
       <j:if test="${attrs.hasPrevious}">
-        <a class="jenkins-button" href="?${attrs.param}=${attrs.page - 1}">Previous</a>
+        <a class="jenkins-button" href="?${bcRoot.pagerQuery(attrs.param, attrs.page - 1)}">Previous</a>
       </j:if>
       <span>Page ${attrs.page} (${attrs.total} ${attrs.total == 1 ? attrs.singular : attrs.plural})</span>
       <j:if test="${attrs.hasNext}">
-        <a class="jenkins-button" href="?${attrs.param}=${attrs.page + 1}">Next</a>
+        <a class="jenkins-button" href="?${bcRoot.pagerQuery(attrs.param, attrs.page + 1)}">Next</a>
       </j:if>
     </div>
 </j:jelly>
