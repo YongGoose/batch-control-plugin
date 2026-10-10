@@ -119,7 +119,7 @@ public final class RunRequestService {
 
     /**
      * D-21 invalidations of requests whose file could not be read (or whose end could not be written)
-     * when their job was renamed or moved. Such a request cannot be approved (an approval ends it
+     * when their job was renamed, moved or (#38) deleted. Such a request cannot be approved (an approval ends it
      * instead), and it is ended INVALIDATED as soon as it can be read and written
      * ({@link #applyMissedInvalidations}, every minute). Memory only: startup recovery, the only other
      * path that submits a run, starts with none.
@@ -624,6 +624,14 @@ public final class RunRequestService {
                 throw new IllegalStateException("Request " + id
                         + " passed its pending timeout and is now EXPIRED.");
             }
+            // #38: a request whose job no longer exists is refused and stays PENDING (Reject is still
+            // possible). Deleting the job ends its requests INVALIDATED (invalidateForDeletedItem); this
+            // catches a job that is gone without that event having reached the request, for example a
+            // job that did not load. A job re-created under the name after a deletion whose
+            // invalidation the request missed is caught by the missed-invalidation check above.
+            if (ApprovalPolicy.jobForPolicy(request.getJobFullName()) == null) {
+                throw new IllegalStateException(jobMissingMessage(request));
+            }
             // D-55 (e2e-04 FD-06): an approval of a disabled job could never start, so it is
             // refused and the request stays PENDING; Reject is still possible.
             if (jobDisabled(request.getJobFullName())) {
@@ -652,6 +660,12 @@ public final class RunRequestService {
         submitApproved(request, values);
         RunRequest reloaded = load(id);
         return reloaded != null ? reloaded : request;
+    }
+
+    /** #38: the refusal of an approval whose job no longer exists. */
+    private static String jobMissingMessage(RunRequest request) {
+        return "The job '" + request.getJobFullName() + "' no longer exists, so request " + request.getId()
+                + " cannot be approved and nothing was scheduled. You can still reject the request.";
     }
 
     /**
@@ -1078,13 +1092,54 @@ public final class RunRequestService {
      * @return the ids of the requests that were invalidated
      */
     public List<String> invalidateForJob(String oldFullName, String reason) {
+        return invalidateOpen(oldFullName, false, reason);
+    }
+
+    /** The reason a run request ends with when its job is deleted (#38). */
+    private static String jobDeletedReason(String jobFullName) {
+        return "Target job deleted: '" + jobFullName + "'";
+    }
+
+    /** The reason a run request ends with when a folder above its job is deleted (#38). */
+    private static String folderDeletedReason(String folderFullName) {
+        return "Target job deleted with its folder: '" + folderFullName + "'";
+    }
+
+    /**
+     * #38: an item was deleted. Every PENDING/APPROVED request on it ends INVALIDATED, and, with
+     * {@code withDescendants} (a deleted folder or any other item group), so does every such request on
+     * an item below it, so that no request outlives its job and a job later created under the same name
+     * never runs a request that was about the deleted one. The same rule as for a rename or move
+     * (D-21) and as for the activation requests of a deleted job (SPEC 6a), with the same fail-safe
+     * handling of a request whose file cannot be read or written now ({@link #invalidateForJob}): it
+     * cannot be approved, and it ends INVALIDATED as soon as it can be read and written.
+     *
+     * @return the ids of the requests that were invalidated
+     */
+    public List<String> invalidateForDeletedItem(String fullName, boolean withDescendants) {
+        List<String> invalidated = new ArrayList<>(invalidateOpen(fullName, false, jobDeletedReason(fullName)));
+        if (withDescendants) {
+            // Everything below the item, in one pass over the open requests (its own were ended above).
+            invalidated.addAll(invalidateOpen(fullName, true, folderDeletedReason(fullName)));
+        }
+        return invalidated;
+    }
+
+    /**
+     * Ends, as INVALIDATED for {@code reason}, every PENDING/APPROVED request on {@code fullName}, or,
+     * with {@code below}, on any item below it (not on {@code fullName} itself); see
+     * {@link #invalidateForJob} for the fail-safe handling of a request that cannot be read or written.
+     */
+    private List<String> invalidateOpen(String fullName, boolean below, String reason) {
+        String prefix = fullName + "/";
         List<String> invalidated = new ArrayList<>();
         // D-72: read before this service's lock is taken (lock order with the queue).
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         Set<String> queued = jenkins == null ? new HashSet<>() : queuedMarkerRequestIds(jenkins);
         List<String> unreadable = new ArrayList<>();
         for (RunRequest snapshot : store.listOpenRunRequests(unreadable::add)) {
-            if (!oldFullName.equals(snapshot.getJobFullName())) {
+            String job = snapshot.getJobFullName();
+            if (job == null || !(below ? job.startsWith(prefix) : job.equals(fullName))) {
                 continue;
             }
             RequestStatus status = snapshot.getStatus();
@@ -1098,7 +1153,7 @@ public final class RunRequestService {
                     invalidated.add(request.getId());
                 }
             } catch (RuntimeException e) {
-                missedInvalidations.add(snapshot.getId(), oldFullName, false, reason);
+                missedInvalidations.add(snapshot.getId(), fullName, below, reason);
                 LOGGER.log(java.util.logging.Level.WARNING, "Could not invalidate run request " + snapshot.getId()
                         + " (" + reason + "); it cannot be approved, and it is invalidated as soon as it can be read"
                         + " and written", e);
@@ -1107,7 +1162,7 @@ public final class RunRequestService {
             }
         }
         for (String id : unreadable) {
-            missedInvalidations.add(id, oldFullName, false, reason);
+            missedInvalidations.add(id, fullName, below, reason);
         }
         return invalidated;
     }

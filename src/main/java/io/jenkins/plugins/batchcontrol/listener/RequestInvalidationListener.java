@@ -3,6 +3,8 @@ package io.jenkins.plugins.batchcontrol.listener;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.Job;
 import hudson.model.Queue;
 import hudson.model.listeners.ItemListener;
 import hudson.security.ACL;
@@ -11,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.policy.RunRequestService;
 import io.jenkins.plugins.batchcontrol.queue.ApprovedRunAction;
 import java.util.Collection;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
@@ -19,7 +22,7 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
 /**
  * D-21: renaming or moving a job ends every PENDING/APPROVED request that targets its old
  * full name in status INVALIDATED (the approver reviewed a different identity than the one
- * that would run). Runs regardless of the control switches — invalidation is a safety rule,
+ * that would run). #38: deleting a job, or a folder above it, does the same ({@link #onDeleted}). Runs regardless of the control switches — invalidation is a safety rule,
  * not a control feature.
  *
  * <p>{@code onLocationChanged} fires for both renames and moves (Jenkins core calls
@@ -54,6 +57,30 @@ public class RequestInvalidationListener extends ItemListener {
     }
 
     /**
+     * #38: deleting a job ends its PENDING/APPROVED run requests INVALIDATED, and deleting a folder (or
+     * any other item group) does the same for the requests on the items below it, as SPEC 6a already
+     * does for activation requests. Core cancels the deleted items' queued runs before it reports the
+     * deletion; any run of an invalidated request still queued is cancelled here too.
+     */
+    @Override
+    public void onDeleted(Item item) {
+        if (!(item instanceof Job) && !(item instanceof ItemGroup)) {
+            return;
+        }
+        List<String> invalidated;
+        try {
+            invalidated = RunRequestService.get().invalidateForDeletedItem(item.getFullName(), item instanceof ItemGroup);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.WARNING, e, () -> "Could not invalidate the run requests of the deleted item '"
+                    + item.getFullName() + "'; their approval is refused while the job does not exist");
+            return;
+        }
+        if (!invalidated.isEmpty()) {
+            cancelQueuedMarkers(invalidated, null);
+        }
+    }
+
+    /**
      * Best effort: an invalidated approval must never execute, so drop its queued item too. With
      * {@code moved} given, the queued runs of that item whose request missed its invalidation
      * ({@link RunRequestService#hasMissedInvalidation}) are dropped as well.
@@ -64,7 +91,8 @@ public class RequestInvalidationListener extends ItemListener {
      * at all), so its approved run would stay queued and later run. The permission checks are
      * complete when this runs: core fires {@code onLocationChanged} only after it has checked the
      * user's permission to rename or move the item (and Batch Control's own move and change-control
-     * checks ran before that); the periodic work calls this as SYSTEM already. Nothing read here
+     * checks ran before that), and {@code onDeleted} only after it has checked Item/Delete (#38); the
+     * periodic work calls this as SYSTEM already. Nothing read here
      * is shown to the user: the only effect is that the runs of the given (already ended) requests
      * are cancelled.
      */

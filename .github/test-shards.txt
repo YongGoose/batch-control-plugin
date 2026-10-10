@@ -53,6 +53,7 @@ JobRunSidebarEntryTest UnsavedExecutionRecoveryTest
 Approv*Test
 DiscoverOnlyRequestScreenTest ExpiryAndCancelTest MissedInvalidationGapTest
 MultiApproverTest PendingCountTest QueueBlockTest RunControlUsabilityTest
+DeprecatedUserCauseTest
 OwnerScenario*Test
 # notifications
 EmailNotification*Test ExpiryNoticeIsolationTest Notification*Test
@@ -93,6 +94,8 @@ PermissionBoundaryGapTest
 # what a viewer is shown: actions, links, job URLs, section tabs
 ActionVisibilityTest JobUrlRoutingRealJenkinsTest ModelLinkTest RunLinkRuleTest
 UnlinkedIdTextTest
+RunLinkResolutionTest
+ContextMenuItemLevelRequesterTest
 Link*Test
 SectionTabs*Test
 
@@ -125,6 +128,7 @@ Store*Test
 CredentialsParameterTest DialogTypedParameterTest ParameterValuePageTest RunParameterTest
 RunRecordFileValueTest ScriptedSubmissionParametersTest SecretParameterMaskingTest
 StashedFileBodyCapTest
+JsonSubmissionDefaultsTest
 Typed*Test
 ValuesFile*Test
 # pages, forms and the global configuration

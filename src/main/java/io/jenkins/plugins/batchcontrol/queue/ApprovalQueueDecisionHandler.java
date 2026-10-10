@@ -55,7 +55,8 @@ import org.kohsuke.stapler.StaplerRequest2;
  *       refused quietly;</li>
  *   <li>remote (build-token) cause → refuse and record the attempt (S-14); inside an HTTP
  *       request the caller gets a plain-text 403 (DEF-33/34), elsewhere the refusal is quiet;</li>
- *   <li>user-originated causes (UserIdCause, incl. the CLI subtype) → throw
+ *   <li>user-originated causes (UserIdCause, incl. the CLI subtype, and the deprecated
+ *       UserCause, #37) → throw
  *       {@link Failure} with guidance and a link to the request screen (no silent failure,
  *       PoC finding D-1);</li>
  *   <li>automatic retry → judged by the retried build's causes; a retry of an approved or
@@ -520,7 +521,9 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             boolean retry = isAutomaticRetry(causes);
             if (!retry || userClickedRetry) {
                 for (Cause cause : causes) {
-                    if (cause instanceof Cause.UserIdCause) {
+                    // #37: the deprecated UserCause is a person's submission exactly like a
+                    // UserIdCause (isHumanSubmission already says so) and is refused the same way.
+                    if (isUserCause(cause)) {
                         // S-22-05: the submission's own re-run cause is the last one; earlier ones
                         // were copied from the build it repeats.
                         String own = lastRerunKind(causes);
@@ -558,7 +561,7 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             // never gets here; step 1 refuses it and writes MARKER_REUSE_BLOCKED (D-30).
             for (Cause cause : effective) {
                 // S-23-07: a copied ReplayCause also marks a person's run (a Replay is always manual).
-                if (cause instanceof ApprovedCause || cause instanceof Cause.UserIdCause
+                if (cause instanceof ApprovedCause || isUserCause(cause)
                         || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                     logRateLimited("reuse", job, () -> "Blocked a re-run of job '" + job.getFullName()
                             + "' that re-uses an earlier approved or manual run without a new approval: " + causes);
@@ -677,7 +680,6 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
      * which is consumed before this is asked. A build token ({@code RemoteCause}) and an automatic
      * retry (D-47), whatever causes it copied from the build it retries, are unattended.
      */
-    @SuppressWarnings("deprecation")
     private static boolean isHumanSubmission(List<Cause> causes) {
         if (isAutomaticRetry(causes)) {
             // D-47: the person in a retry's cause list acted on the retried build, not on this one.
@@ -687,12 +689,20 @@ public class ApprovalQueueDecisionHandler extends Queue.QueueDecisionHandler {
             return false;
         }
         for (Cause cause : causes) {
-            if (cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause
-                    || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
+            if (isUserCause(cause) || REPLAY_CAUSE_CLASS.equals(cause.getClass().getName())) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Whether {@code cause} names a user: a {@code UserIdCause} (and its CLI subtype) or the
+     * deprecated {@code UserCause}, which the approval-required steps treat exactly alike (#37).
+     */
+    @SuppressWarnings("deprecation")
+    private static boolean isUserCause(Cause cause) {
+        return cause instanceof Cause.UserIdCause || cause instanceof Cause.UserCause;
     }
 
     private static boolean hasUserIdCause(List<Cause> causes) {
