@@ -1,8 +1,8 @@
 # Python packages of the CI e2e pass (ci/run.sh, ci/coverage-diff.py), pinned. Python >= 3.10.
 playwright==1.63.0
-requests==2.32.5
+requests==2.33.0
 diff-cover==10.6.0
-# diff-cover needs chardet (>=3); requests warns ("RequestsDependencyWarning") about chardet >= 6.
+# diff-cover needs chardet (>=3); requests 2.33 accepts chardet >= 3.0.2, < 8 (2.32 warned, "RequestsDependencyWarning", about >= 6).
 chardet==5.2.0
 # e2e-20: pytest is the entry point of a shard (ci/test_shard.py, JUnit XML); pytest-rerunfailures retries only the
 # steps marked flaky (ci/shard.py FLAKY); pytest-playwright gives the content-check self-test its browser fixtures.
