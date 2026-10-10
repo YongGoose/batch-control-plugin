@@ -17,7 +17,7 @@ are what makes the rest of the repository readable.
 
 | | |
 |---|---|
-| JDK | **21 or 25** (Temurin). JDK 17 cannot build against Jenkins 2.568.x, whose core needs Java 21. ci.jenkins.io (`Jenkinsfile`) builds Linux on 25 and Windows on 21, and the GitHub Actions build runs Linux on 21 and 25. |
+| JDK | **21 or 25** (Temurin). JDK 17 cannot build against Jenkins 2.568.x, whose core needs Java 21. ci.jenkins.io (`Jenkinsfile`) builds Linux on 25 and Windows on 21 with the core tests only; GitHub Actions runs the whole suite on Linux with 21 and 25 and on Windows with 21. |
 | Maven | **3.9.6** or newer (the parent POM enforces it). |
 | Docker | Only for the end-to-end environment (§5). Not needed for `mvn verify`. |
 
@@ -386,17 +386,31 @@ behind any of them.
   class. A new class whose prefix a group already lists (`Grant*Test`,
   `Window*Test`) needs nothing; otherwise add its prefix or its name to the
   group of the feature it tests, and take a renamed or deleted class's name out.
-  ci.jenkins.io also builds the `Jenkinsfile`, a plain `buildPlugin` call, on
-  Linux with JDK 25 and on Windows with JDK 21, and reports the check
-  `Jenkins`. Each platform runs the whole suite on one agent (the groups above
-  are not used there), on spot agents only: buildPlugin retries an agent that
-  is reclaimed. Never add `nonspot` labels or turn the `Jenkinsfile` into a
-  custom pipeline; the ci.jenkins.io administrators asked for that in
+  The whole suite also runs on Windows with JDK 21, in the `Windows tests`
+  workflow (`.github/workflows/windows-tests.yml`), on every pull request and
+  every push to `main` that touches `src/`, `pom.xml`, `.mvn/`, the test groups
+  or their scripts: one job per group, such as
+  `windows test (jdk 21, run approval and mail)`, and a `windows test summary`
+  job that lists every failing test and every class without a report and is
+  red when there is any. It is not a required check, but a red run needs a
+  look before merging.
+  ci.jenkins.io builds the `Jenkinsfile`, a plain `buildPlugin` call, on Linux
+  with JDK 25 and on Windows with JDK 21, and reports the check `Jenkins`. It
+  runs only the tests tagged `@Tag("core")` and the generated `InjectedTest`:
+  a Jenkins build sets `JENKINS_URL`, which activates the
+  `core-tests-on-jenkins` profile in `pom.xml` (local and GitHub Actions builds
+  do not set it, and run everything). The whole suite takes about 103 minutes
+  on four forks there, longer than buildPlugin's default timeout, and spot
+  agents get reclaimed during so long a run. ci.jenkins.io runs on spot agents
+  only, and buildPlugin retries an agent that is reclaimed. Never add
+  `nonspot` labels or turn the `Jenkinsfile` into a custom pipeline; the
+  ci.jenkins.io administrators asked for that in
   jenkinsci/batch-control-plugin#80. buildPlugin also records coverage, static
-  analysis and the Incrementals artifacts. For the
-  full list of Windows test failures, which the `Jenkins` check text cuts short,
-  run the manual, not required `Windows tests` workflow
-  (`gh workflow run windows-tests.yml --ref <branch>`) and read its summary.
+  analysis and the Incrementals artifacts.
+- **`@Tag("core")`** marks the tests ci.jenkins.io runs, about a quarter of the
+  suite. The criteria for what belongs there are in `docs/TEST-MATRIX.md`,
+  note 330; tag a new test only when it meets them. An untagged test still
+  runs in `build` and in `Windows tests`.
 - **Verify on your fork before you open the pull request.** ci.jenkins.io is
   shared by every Jenkins project and runs on sponsored capacity, and it builds
   every pull request again on every push. So:
@@ -407,7 +421,9 @@ behind any of them.
      `gh workflow run build.yml --ref <branch> -R <you>/batch-control-plugin`.
      For a change to the UI or to behaviour, run the `e2e` workflow the same
      way (`e2e.yml`). A run started by hand has no base commit, so it reports
-     no changed-line coverage; the pull request's own e2e run does.
+     no changed-line coverage; the pull request's own e2e run does. Run
+     `windows-tests.yml` the same way if you want the Windows result before
+     the pull request starts it.
   3. Open the pull request from that branch when they are green.
   4. Batch your commits: push the answers to a review round together, not one
      commit at a time, because every push to a pull request rebuilds it on
