@@ -176,6 +176,7 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - Acceptance: while change control is on, a refused deletion of an item says that an approved `DELETE` window on that item is needed; it points a user who may request windows to the Grants screen and tells anyone else to ask an administrator, and for an item kind on which no window can allow deletion it says so. (e2e-03 DEF-26, D-78)
 - Acceptance: requesting a permission window (from the Batch Control grants page, a job page or a folder page) and requesting a run (the Request Run action) open a dialog on the current page; submitting it creates the request and leads to its detail page. The grants, run requests and activations pages list pending requests first, then active and ended items, each row linking to its detail page; the request form is not the first thing on the grants page. A permission window can be revoked from its own detail page as well as from the list. A refused direct build still leads to the pre-filled Request Run page (D-60). (D-66)
 - Acceptance: the Batch Control overview shows pending counts only as tab badges (no separate banner or count table). The run dashboard shows at most the 50 most recent runs and links to History for the rest. (D-67)
+- Acceptance: a holder of Overall/Administer sees an "Administrator checks" section on the Batch Control overview that lists the findings of the `batch-control-strategy` and configure-without-grant monitors with their remedies, also while a monitor is disabled or dismissed; no other user sees the section, and the missing-strategy warning comes from `batch-control-strategy` alone. (D-86)
 - Acceptance: new requests and windows get UUID identifiers; identifiers stored in the earlier format still load and resolve. (D-68)
 
 **9. 변경 자동 기록**
@@ -221,6 +222,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 - 수용 기준: `ViewHistory` 권한이 없으면 모든 조회 화면과 CSV가 403이다.
 - 수용 기준: 보관 기간 지난 월 파일은 주기 작업이 삭제하고, 삭제 사실을 ChangeRecord(type=RETENTION)로 남긴다.
 - 수용 기준: CSV 셀 값이 `=`, `+`, `-`, `@`로 시작하면 수식으로 해석되지 않도록 무해화(`'` 프리픽스)된다. (R-3, D-18)
+- Acceptance: every CSV export starts with the UTF-8 byte order mark (EF BB BF) followed by the header row; the content type stays `text/csv; charset=UTF-8` and the columns are unchanged. (D-85)
 
 ### 확장 (2차)
 
