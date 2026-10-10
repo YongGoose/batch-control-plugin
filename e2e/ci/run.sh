@@ -109,6 +109,7 @@ DRIVER_OUT+=(r25/out)  # e2e-25 (Wave C-UI), on its own line
 prev="$E2E/ci/out/_previous/$(date +%Y%m%d-%H%M%S)-$K"
 DRIVER_OUT+=(r23/out)  # e2e-23 (bug-hunt batch A), on its own line
 DRIVER_OUT+=(r24/out)  # e2e-24 (wave A), on its own line
+DRIVER_OUT+=(r26/out)  # e2e-26 (wave B: #36, #34, #32, #33), on its own line
 for d in "${DRIVER_OUT[@]}"; do
   if [ -d "$E2E/$d" ] && [ -n "$(ls -A "$E2E/$d" 2>/dev/null)" ]; then mkdir -p "$prev/$(dirname "$d")"; mv "$E2E/$d" "$prev/$d"; fi
 done
