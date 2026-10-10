@@ -143,6 +143,7 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - 수용 기준: 취소는 요청자 본인 또는 `Manage` 권한자만 가능하고, PENDING 상태에서만 가능하다.
 - 수용 기준: 요청 상태 전이는 원자적이다(compare-and-set). 동시 승인 2건 중 정확히 1건만 성립하고 빌드는 정확히 1회만 투입된다. 승인과 취소가 경합하면 하나만 성립하며 상태 혼합(예: CANCELLED에 executedRunId)이 없다. 큐 투입 직전에 만료를 재확인(check-at-submit)하여 만료된 승인 건은 절대 투입되지 않는다. (R-5, D-20)
 - 수용 기준: PENDING/APPROVED 요청의 대상 잡이 rename 또는 move되면 요청은 상태 INVALIDATED로 종료되고 이력에 남는다. (R-6, D-21)
+- Acceptance: deleting a job, or a folder above it, ends its PENDING and APPROVED run requests as INVALIDATED with a reason that names the deletion, like the activation requests of a deleted job. Approving a run request whose job no longer exists is refused with nothing scheduled, and a job re-created under the same name never runs a request made for the deleted one. (#38, D-87)
 
 ### 변경 통제
 
@@ -176,6 +177,7 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - Acceptance: while change control is on, a refused deletion of an item says that an approved `DELETE` window on that item is needed; it points a user who may request windows to the Grants screen and tells anyone else to ask an administrator, and for an item kind on which no window can allow deletion it says so. (e2e-03 DEF-26, D-78)
 - Acceptance: requesting a permission window (from the Batch Control grants page, a job page or a folder page) and requesting a run (the Request Run action) open a dialog on the current page; submitting it creates the request and leads to its detail page. The grants, run requests and activations pages list pending requests first, then active and ended items, each row linking to its detail page; the request form is not the first thing on the grants page. A permission window can be revoked from its own detail page as well as from the list. A refused direct build still leads to the pre-filled Request Run page (D-60). (D-66)
 - Acceptance: the Batch Control overview shows pending counts only as tab badges (no separate banner or count table). The run dashboard shows at most the 50 most recent runs and links to History for the rest. (D-67)
+- Acceptance: a holder of Overall/Administer sees an "Administrator checks" section on the Batch Control overview that lists the findings of the `batch-control-strategy` and configure-without-grant monitors with their remedies, also while a monitor is disabled or dismissed; no other user sees the section, and the missing-strategy warning comes from `batch-control-strategy` alone. (D-86)
 - Acceptance: new requests and windows get UUID identifiers; identifiers stored in the earlier format still load and resolve. (D-68)
 
 **9. 변경 자동 기록**
@@ -221,6 +223,7 @@ FAILURE, UNSTABLE 결과는 사람 개입 없이 오류 건으로 자동 등록�
 - 수용 기준: `ViewHistory` 권한이 없으면 모든 조회 화면과 CSV가 403이다.
 - 수용 기준: 보관 기간 지난 월 파일은 주기 작업이 삭제하고, 삭제 사실을 ChangeRecord(type=RETENTION)로 남긴다.
 - 수용 기준: CSV 셀 값이 `=`, `+`, `-`, `@`로 시작하면 수식으로 해석되지 않도록 무해화(`'` 프리픽스)된다. (R-3, D-18)
+- Acceptance: every CSV export starts with the UTF-8 byte order mark (EF BB BF) followed by the header row; the content type stays `text/csv; charset=UTF-8` and the columns are unchanged. (D-85)
 
 ### 확장 (2차)
 
@@ -275,7 +278,7 @@ ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RET
 RunRequest:  PENDING -> APPROVED -> EXECUTED
              PENDING -> REJECTED | CANCELLED | EXPIRED
              APPROVED -> EXPIRED (approvedRunTimeout)
-             PENDING | APPROVED -> INVALIDATED (대상 잡 rename/move, D-21)
+             PENDING | APPROVED -> INVALIDATED (대상 잡 rename/move, D-21; job or folder deleted, D-87)
 GrantRequest: PENDING -> APPROVED(=Grant 생성) | REJECTED | CANCELLED | EXPIRED
 Grant:       ACTIVE -> EXPIRED(시각) | REVOKED(수동)
 Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서 코멘트 추가는 가능)

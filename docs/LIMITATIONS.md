@@ -789,8 +789,8 @@ from scripts.
     still cannot be approved then, and an approved run past its timeout is
     not submitted, because each decision and each submission compares the
     clock itself. An invalidation that such a request missed (its job
-    renamed or moved, D-21; for an activation request also its job deleted,
-    or another request on the job approved, SPEC item 6a), or whose end
+    renamed or moved, D-21, or deleted, D-87; for an activation request also
+    another request on the job approved, SPEC item 6a), or whose end
     could not be written, is kept in memory: the request cannot be approved,
     its approved run waiting in the queue on a job that is renamed or moved
     is cancelled at once, and within a minute of its file becoming readable
@@ -805,6 +805,10 @@ from scripts.
     or moved meanwhile, an approval of it acts on whatever item then has the
     old name. The request screens, which read every file, show it once it
     can be read, and a decision made on its page puts it back on the list. A
+    run request whose file was unreadable when its job was deleted, and
+    that is still open when Jenkins restarts, can likewise be approved
+    against a job re-created under the same name before the approval (D-87,
+    issue #68). A
     request whose file can be read but not written when it falls due for
     expiry or for its `EXPIRING` notice is logged, tried again on the next
     run and does not hold up the others. Request
@@ -1352,6 +1356,11 @@ code does on purpose.
     later core release changes that API, the request dialogs on the new job
     page may stop opening. The full request pages under `/batch-control/`
     keep working either way.
+51. **CSV exports start with a UTF-8 byte order mark.** Every CSV export
+    begins with a BOM (D-85, issue #43) so that Excel reads non-ASCII text
+    correctly. A strict CSV parser that does not expect a BOM sees it before
+    the first header name (for example `\ufeffrunId`). Excel, LibreOffice and
+    most CSV libraries handle it; otherwise strip the first three bytes.
 
 ## Out of scope by design
 

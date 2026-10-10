@@ -326,7 +326,10 @@ pending).
 - Services and ports: none as workflow `services:`. `run.sh` starts Jenkins (`localhost:18080/jenkins`) and mailpit
   (`localhost:18025`) with `docker compose`, building `e2e/Dockerfile` (`jenkins/jenkins:2.568.3-lts-jdk21` plus the
   plugins of `e2e/plugins.txt` from the Jenkins update centre) and pulling `axllent/mailpit`. Network needed:
-  Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN.
+  Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN. The unit
+  `r26-store-force` (#34) also builds `r26/strace.Dockerfile` (`alpine:3.24` plus `strace` from the Alpine package
+  mirror) and runs it as a sidecar in the Jenkins container's PID namespace with `--cap-add SYS_PTRACE` (the runner's
+  Docker allows it; the Jenkins container gets no extra capability).
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
   the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven

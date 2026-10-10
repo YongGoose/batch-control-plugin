@@ -39,15 +39,26 @@ public final class CsvWriter {
         this.out = out;
     }
 
+    /** #43 (D-85): U+FEFF, written as the UTF-8 byte order mark EF BB BF. */
+    private static final char BYTE_ORDER_MARK = '\uFEFF';
+
     /**
-     * Sets the CSV content type and attachment disposition on the response and returns a writer.
+     * Sets the CSV content type and attachment disposition on the response, writes the UTF-8 byte
+     * order mark and returns a writer for the header row and the data rows.
+     *
+     * <p>#43 (owner decision 2026-10-10, D-85): every export starts with the byte order mark,
+     * once, so a spreadsheet application reads non-ASCII values (job names, reasons, comments)
+     * as UTF-8 instead of the system code page. A strict CSV parser sees it before the first
+     * header name (LIMITATIONS).
      *
      * @param filename download name; must be a constant, caller-controlled name (never user input)
      */
     public static CsvWriter open(StaplerResponse2 rsp, String filename) throws IOException {
         rsp.setContentType("text/csv;charset=UTF-8");
         rsp.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-        return new CsvWriter(rsp.getWriter());
+        PrintWriter out = rsp.getWriter();
+        out.print(BYTE_ORDER_MARK);
+        return new CsvWriter(out);
     }
 
     /** Writes one row; each cell is sanitized and quoted as needed. Nulls become empty cells. */
