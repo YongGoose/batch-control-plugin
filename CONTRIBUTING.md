@@ -387,13 +387,19 @@ behind any of them.
   `Window*Test`) needs nothing; otherwise add its prefix or its name to the
   group of the feature it tests, and take a renamed or deleted class's name out.
   ci.jenkins.io also builds Linux on JDK 21 and 25 and Windows on JDK 21 from
-  the `Jenkinsfile` and reports the check `Jenkins`. It runs the whole suite on
-  one agent for each of those three platforms, with buildPlugin's 180-minute
-  limit and `failFast` off, so every platform reports its results. Linux uses
-  the non-spot container agents (`maven-21-nonspot`, `maven-25-nonspot`): on
-  the default spot agents the suite was regularly cut off by
-  "Agent was removed" (the `Jenkinsfile` explains how they are selected). GitHub
-  Actions splits the suite into feature-named jobs for faster feedback. For the
+  the `Jenkinsfile` and reports the check `Jenkins`. It uses the same groups:
+  each platform runs one agent per group, named like
+  `linux-21 (run approval and mail)` or `windows-21 (parameters and ui)`, and
+  one `<platform> (checks)` agent for `verify` with the tests skipped. A first
+  `Plan` stage fails when a test class matches no group or two, and each group's
+  agent fails unless Surefire reported exactly that group's classes, so every
+  class runs once per platform. A failing test fails its agent and the build;
+  the other agents still finish. Every agent is non-spot (`maven-21-nonspot`,
+  `maven-25-nonspot`, `maven-21-windows-nonspot`), is retried once on a new
+  agent if it is lost, and has a 60-minute limit (30 for `checks`); the
+  whole suite on one agent took 2 to 3 hours and hit buildPlugin's 180-minute
+  cap. Coverage (`linux-21`), static analysis and the Incrementals artifacts
+  are recorded as buildPlugin records them. For the
   full list of Windows test failures, which the `Jenkins` check text cuts short,
   run the manual, not required `Windows tests` workflow
   (`gh workflow run windows-tests.yml --ref <branch>`) and read its summary.
