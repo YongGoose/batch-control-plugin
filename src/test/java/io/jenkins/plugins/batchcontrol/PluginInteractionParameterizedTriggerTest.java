@@ -13,6 +13,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -58,6 +59,7 @@ public class PluginInteractionParameterizedTriggerTest {
      * (blockUpstream=true, empty allow list). X does not reach the queue.
      */
     @Test
+    @Tag("core")
     public void t_06_27_manualTriggerBuildStepBlockedWhenBlockUpstream() throws Exception {
         blockUpstream(target);
         FreeStyleProject upstream = upstreamWithBuildStep("pt-y");
@@ -74,6 +76,7 @@ public class PluginInteractionParameterizedTriggerTest {
      * (blockUpstream=true). X does not reach the queue.
      */
     @Test
+    @Tag("core")
     public void t_06_28_postBuildTriggerBlockedWhenBlockUpstream() throws Exception {
         blockUpstream(target);
         FreeStyleProject upstream = uncontrolled(j.createFreeStyleProject("pt-post"));

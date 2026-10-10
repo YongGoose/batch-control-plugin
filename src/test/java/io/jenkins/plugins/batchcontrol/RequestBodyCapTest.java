@@ -48,6 +48,7 @@ import org.htmlunit.util.KeyDataPair;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -128,6 +129,7 @@ public class RequestBodyCapTest {
      * directories, nothing is queued.
      */
     @Test
+    @Tag("core")
     public void t_05_59_overSizeMultipartSubmissionIsRefusedWith413() throws Exception {
         System.setProperty(CAP_PROPERTY, Long.toString(CAP));
         Set<String> before = ApproverFormFixtures.runRequestIds();
@@ -248,6 +250,7 @@ public class RequestBodyCapTest {
      * crumb is refused with 403; no request is created and no temporary file is left behind.
      */
     @Test
+    @Tag("core")
     public void t_05_64_multipartSubmissionWithoutCrumbIsRefused() throws Exception {
         Set<String> before = ApproverFormFixtures.runRequestIds();
         Set<Path> tempBefore = tempFiles(j);

@@ -8,6 +8,7 @@ import hudson.security.ACL;
 import hudson.security.ACLContext;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -46,6 +47,7 @@ public class PluginInteractionRebuildTest {
      * reach the queue.
      */
     @Test
+    @Tag("core")
     public void t_06_24_rebuildOfUnapprovedBuildIsBlocked() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rb-x"));
         BatchControlFixtures.activateAsAdmin(job); // D-46: a cause-less submission needs an activation (note 109)
@@ -64,6 +66,7 @@ public class PluginInteractionRebuildTest {
      * consumption; the approved run is queued exactly once).
      */
     @Test
+    @Tag("core")
     public void t_06_25_rebuildOfApprovedRunIsBlocked() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("rb-approved");
         setBatchControl(job, new BatchControlJobProperty(true));

@@ -59,6 +59,7 @@ import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -263,6 +264,7 @@ public class StoreRestartGapTest {
      * says it is not activated. Guard: {@code al}'s timer still runs.
      */
     @Test
+    @Tag("core")
     public void t_gap_343_corruptActivationStateFailsClosedAfterARestart() throws Throwable {
         session.then(r -> {
             prepare(r, true);

@@ -26,6 +26,7 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -44,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * Written from docs/SPEC.md, docs/ARCHITECTURE.md section 5 and docs/TEST-MATRIX.md only.
  */
+@Tag("core")
 public class GrantRestartTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T09:00:00Z");

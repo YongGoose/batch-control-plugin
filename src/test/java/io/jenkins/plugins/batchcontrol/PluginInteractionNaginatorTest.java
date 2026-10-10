@@ -15,6 +15,7 @@ import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -67,6 +68,7 @@ public class PluginInteractionNaginatorTest {
      * T-06-33: u1 presses naginator's Retry on a failed approved run; no second run is queued.
      */
     @Test
+    @Tag("core")
     public void t_06_33_manualRetryOfApprovedRunIsBlocked() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("nag-manual");
         job.getBuildersList().add(new FailureBuilder());
@@ -88,6 +90,7 @@ public class PluginInteractionNaginatorTest {
      * matrix note 55.
      */
     @Test
+    @Tag("core")
     public void t_06_34_automaticRetryOfApprovedRunIsBlocked() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("nag-auto");
         job.getBuildersList().add(new FailureBuilder());
@@ -140,6 +143,7 @@ public class PluginInteractionNaginatorTest {
      * as the blocking switch (note 101) — the marker-free path S-14-01 found bypassing this.
      */
     @Test
+    @Tag("core")
     public void t_06_54_automaticRetryWithoutActivationIsBlockedAndRecorded() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("nag-noact"));
         job.getBuildersList().add(new FailureBuilder());

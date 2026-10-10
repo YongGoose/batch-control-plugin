@@ -16,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
@@ -31,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  *
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
+@Tag("core")
 public class StoreDurabilityTest {
 
     private static final Instant T0 = Instant.parse("2026-09-20T10:00:00Z");

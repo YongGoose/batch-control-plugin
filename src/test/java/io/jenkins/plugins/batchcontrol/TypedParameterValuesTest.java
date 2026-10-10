@@ -53,6 +53,7 @@ import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -314,6 +315,7 @@ public class TypedParameterValuesTest {
      * reaches the build.
      */
     @Test
+    @Tag("core")
     public void t_05_45_passwordReachesTheBuildAndIsStoredOnlyEncrypted() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("secret-svc");
         addParameters(job, new PasswordParameterDefinition("TOKEN", Secret.fromString(SECRET_DEFAULT), "token"),
@@ -625,6 +627,7 @@ public class TypedParameterValuesTest {
      * created and the upload is not disposed of before the build used it.
      */
     @Test
+    @Tag("core")
     public void t_05_97_runControlOffLeavesTypedSubmissionsUnchanged() throws Exception {
         BatchControlGlobalConfiguration cfg = BatchControlGlobalConfiguration.get();
         cfg.setRunControlEnabled(false);

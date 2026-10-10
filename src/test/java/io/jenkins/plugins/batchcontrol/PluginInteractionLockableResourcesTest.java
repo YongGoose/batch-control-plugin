@@ -6,6 +6,7 @@ import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
 import org.jenkins.plugins.lockableresources.LockableResourcesManager;
 import org.jenkins.plugins.lockableresources.RequiredResourcesProperty;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * a Freestyle build until its resource is free. Rows T-06-36 .. T-06-37.
  */
 @WithJenkins
+@Tag("core")
 public class PluginInteractionLockableResourcesTest {
 
     private static final String RESOURCE = "batch-db";

@@ -21,6 +21,7 @@ import org.htmlunit.CollectingAlertHandler;
 import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class XssEscapingTest {
 
     private static final String SCRIPT_PAYLOAD = "<script>alert('xss-reason')</script>";

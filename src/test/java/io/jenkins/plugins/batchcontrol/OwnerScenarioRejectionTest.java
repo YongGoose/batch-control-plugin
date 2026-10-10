@@ -18,6 +18,7 @@ import java.util.Map;
 import jenkins.model.Jenkins;
 import org.htmlunit.html.HtmlPage;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -93,6 +94,7 @@ public class OwnerScenarioRejectionTest {
      * build is ever queued or started, and the decision stays readable in the history.
      */
     @Test
+    @Tag("core")
     public void t_os_01_rejectionIsTerminalAndNoBuildEverRuns() throws Exception {
         RunRequest request = createAs(REQUESTER, APPROVER);
         assertEquals(RequestStatus.PENDING, request.getStatus());

@@ -28,6 +28,7 @@ import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -117,6 +118,7 @@ public class MoveChangeControlTest {
      * through and records no violation.
      */
     @Test
+    @Tag("core")
     public void t_sec_53_moveOnlyUserWithCreateConfigureGrantCannotMoveIn() throws Exception {
         grant("u1", "team", null, "CREATE", "CONFIGURE");
 
@@ -295,6 +297,7 @@ public class MoveChangeControlTest {
      * Falsifiability twin (first): with change control on, the same move is refused.
      */
     @Test
+    @Tag("core")
     public void t_sec_60_changeControlOffLeavesMovesAsInJenkins() throws Exception {
         folderPermission(team, "u1", Item.CREATE);
         assertClientError(move("u1", prod.getItem("x"), team), "twin: with change control on the move is refused");

@@ -37,6 +37,7 @@ import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -160,6 +161,7 @@ public class ActivationMatrixConfigurationTest {
      * no run (blocking triple).
      */
     @Test
+    @Tag("core")
     public void t_06a_59_directConfigurationBuildFollowsTheParentsApproval() throws Exception {
         MatrixProject mx = matrix("mx", true);
         activate(mx, "u1", "a1");

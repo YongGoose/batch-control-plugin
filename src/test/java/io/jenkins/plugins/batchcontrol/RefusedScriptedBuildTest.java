@@ -27,6 +27,7 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -62,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class RefusedScriptedBuildTest {
 
     /** The Accept header a browser sends for a page (HtmlUnit's and the major browsers' shape). */

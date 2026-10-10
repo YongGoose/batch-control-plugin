@@ -37,6 +37,7 @@ import org.htmlunit.html.HtmlInput;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -112,6 +113,7 @@ public class ActivationConfigPathTest {
 
     /** T-06a-11 (P0): the administrator POSTs an edited config.xml. */
     @Test
+    @Tag("core")
     public void t_06a_11_restConfigXmlDoesNotActivate() throws Exception {
         FreeStyleProject job = createAsAdmin("", "path-rest");
         JenkinsRule.WebClient admin = j.createWebClient().withThrowExceptionOnFailingStatusCode(false).login("admin");
@@ -204,6 +206,7 @@ public class ActivationConfigPathTest {
      * through config.xml. No approver consented to the job entering service, so it does not run.
      */
     @Test
+    @Tag("core")
     public void t_06a_15_permissionWindowHolderCannotActivateTheJobItCreated() throws Exception {
         Folder folder = j.jenkins.createProject(Folder.class, "team");
         GrantRequest request;

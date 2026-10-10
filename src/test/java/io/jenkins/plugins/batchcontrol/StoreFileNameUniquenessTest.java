@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -66,6 +67,7 @@ public class StoreFileNameUniquenessTest {
      * baseline in place.
      */
     @Test
+    @Tag("core")
     public void t_04_06_craftedLongNameDoesNotShareTheVictimsSnapshot() throws Exception {
         Folder a = j.jenkins.createProject(Folder.class, FOLDER_A);
         Folder b = a.createProject(Folder.class, FOLDER_B);

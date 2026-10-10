@@ -15,6 +15,7 @@ import org.htmlunit.html.HtmlForm;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -42,6 +43,7 @@ public class PermissionsTest {
 
     /** T-02-01: a user without BatchControl/Manage cannot save the global configuration (403). */
     @Test
+    @Tag("core")
     public void t_02_01_userWithoutManageCannotSaveGlobalConfig() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -96,6 +98,7 @@ public class PermissionsTest {
 
     /** T-02-05: a Manage holder can POST the global config form; values are saved (form round-trip keeps them). */
     @Test
+    @Tag("core")
     public void t_02_05_manageUserCanSaveGlobalConfig() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()

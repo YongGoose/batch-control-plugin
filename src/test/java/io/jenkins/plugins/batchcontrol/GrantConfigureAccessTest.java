@@ -33,6 +33,7 @@ import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -178,6 +179,7 @@ public class GrantConfigureAccessTest {
      * the implied-permission handling may not leak a permanent permission.
      */
     @Test
+    @Tag("core")
     public void t_08_17_readPathsRevertWhenWindowCloses() throws Exception {
         grantConfigureOnJobX();
 
@@ -202,6 +204,7 @@ public class GrantConfigureAccessTest {
      * stay denied, and DELETE — an action this grant does not carry — stays denied too.
      */
     @Test
+    @Tag("core")
     public void t_08_18_impliedPermissionsDoNotWidenScopeOrActions() throws Exception {
         grantConfigureOnJobX();
 

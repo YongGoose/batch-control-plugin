@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -53,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * contract only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class DeprecatedUserCauseTest {
 
     private JenkinsRule j;
