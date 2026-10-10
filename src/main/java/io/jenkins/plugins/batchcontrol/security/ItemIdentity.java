@@ -1,6 +1,7 @@
 package io.jenkins.plugins.batchcontrol.security;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import io.jenkins.plugins.batchcontrol.store.DurableFiles;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -155,9 +156,11 @@ public final class ItemIdentity {
             try {
                 // Atomic: a temporary file in the same directory, moved over the marker.
                 temp = Files.createTempFile(dir, MARKER_FILE, ".tmp");
-                Files.write(temp, (UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII));
+                // #34: forced before the rename, and the directory after it.
+                DurableFiles.writeForced(temp, (UUID.randomUUID() + "\n").getBytes(StandardCharsets.US_ASCII));
                 Files.move(temp, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
                 temp = null;
+                DurableFiles.forceDirectory(dir);
             } catch (IOException | RuntimeException e) {
                 LOGGER.log(Level.WARNING, e, () -> "Could not write the activation marker " + marker);
                 return null;

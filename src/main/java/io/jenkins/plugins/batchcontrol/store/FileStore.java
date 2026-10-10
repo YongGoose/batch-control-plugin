@@ -20,14 +20,17 @@ import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRecord;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.model.RunRequestValues;
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
@@ -1303,7 +1306,11 @@ public final class FileStore implements Store {
             Path tmp = Files.createTempFile(dir, tmpPrefix, ".tmp");
             boolean moved = false;
             try {
-                try (Writer writer = Files.newBufferedWriter(tmp, StandardCharsets.UTF_8)) {
+                // #34: the content is forced to disk before the rename (as Files.newBufferedWriter
+                // does, an unmappable character is refused rather than replaced).
+                try (FileChannel channel = FileChannel.open(tmp, StandardOpenOption.WRITE);
+                     Writer writer = new BufferedWriter(new OutputStreamWriter(Channels.newOutputStream(channel),
+                             StandardCharsets.UTF_8.newEncoder()))) {
                     // What xstream.toXML(entity, writer) does, with the check around the writer.
                     HierarchicalStreamWriter xml = new StorableTextWriter(
                             XStream2.getDefaultDriver().createWriter(writer));
@@ -1312,9 +1319,12 @@ public final class FileStore implements Store {
                     } finally {
                         xml.flush();
                     }
+                    writer.flush();
+                    channel.force(true);
                 }
                 moveAtomically(tmp, target);
                 moved = true;
+                DurableFiles.forceDirectory(dir);
             } finally {
                 if (!moved) {
                     // S-35-03: the partly written temporary file of a failed save is removed.
@@ -1553,9 +1563,10 @@ public final class FileStore implements Store {
             Path tmp = Files.createTempFile(dir, "write", ".tmp");
             boolean moved = false;
             try {
-                Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+                DurableFiles.writeForced(tmp, text.getBytes(StandardCharsets.UTF_8));
                 moveAtomically(tmp, target);
                 moved = true;
+                DurableFiles.forceDirectory(dir);
             } finally {
                 if (!moved) {
                     deleteQuietly(tmp);
@@ -1636,6 +1647,7 @@ public final class FileStore implements Store {
         lock.lock();
         try {
             Files.createDirectories(dir);
+            boolean created = !Files.exists(file);
             try (FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
                 long end = channel.size();
                 if (end > 0 && !lastLineEnded(file, end)) {
@@ -1645,6 +1657,12 @@ public final class FileStore implements Store {
                 while (bytes.hasRemaining()) {
                     end += channel.write(bytes, end);
                 }
+                // #34: the record is on disk before the operation that wrote it reports success.
+                channel.force(true);
+            }
+            if (created) {
+                // A new month file's directory entry, once a month.
+                DurableFiles.forceDirectory(dir);
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to append record to " + file, e);
