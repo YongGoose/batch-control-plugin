@@ -125,6 +125,7 @@ Store*Test
 CredentialsParameterTest DialogTypedParameterTest ParameterValuePageTest RunParameterTest
 RunRecordFileValueTest ScriptedSubmissionParametersTest SecretParameterMaskingTest
 StashedFileBodyCapTest
+JsonSubmissionDefaultsTest
 Typed*Test
 ValuesFile*Test
 # pages, forms and the global configuration
