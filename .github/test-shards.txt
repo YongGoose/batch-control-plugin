@@ -93,6 +93,7 @@ PermissionBoundaryGapTest
 # what a viewer is shown: actions, links, job URLs, section tabs
 ActionVisibilityTest JobUrlRoutingRealJenkinsTest ModelLinkTest RunLinkRuleTest
 UnlinkedIdTextTest
+ContextMenuItemLevelRequesterTest
 Link*Test
 SectionTabs*Test
 
