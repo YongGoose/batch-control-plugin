@@ -311,6 +311,13 @@ UNITS = [
     Unit("r21-reject-color", 0.3, [("r21-arrange", py("r21/arrange.py")), ("r21-reject-color", py("r21/reject_color.py", "RGA"))],
          doc="e2e-21: approver-1's Reject button on the run, permission window and activation request pages renders in "
              "var(--destructive-color) (computed colour vs a probe), the Approve button does not"),
+    # e2e-25 #41 (Wave C-UI). r25/breadcrumb_menu.py arranges its own folder, job and accounts (r25-team, r25-folder-*)
+    # and cancels the folder requester's pending request at its end.
+    Unit("r25-breadcrumb-menu", 0.6, [("r25-breadcrumb-menu", py("r25/breadcrumb_menu.py"))],
+         group="crawls and multibranch",
+         doc="e2e-25 #41: the Batch Control context menu lists exactly the tab bar's sections for a requester with "
+             "Request on one folder only (JSON and the breadcrumb dropdown); guards: admin, approver-1, and no menu for "
+             "nobc and a folder requester without requests of their own"),
     # e2e-22 R3-04 (bug-hunt batch B). r22/grant_monitor.py arranges its own item (r22-monitor) and holds the GrantService
     # monitor for 10 s from the script console while the requester's REST requests run; REST only, no screenshot.
     Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],

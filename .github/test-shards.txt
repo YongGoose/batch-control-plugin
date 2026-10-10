@@ -95,6 +95,7 @@ PermissionBoundaryGapTest
 ActionVisibilityTest JobUrlRoutingRealJenkinsTest ModelLinkTest RunLinkRuleTest
 UnlinkedIdTextTest
 RunLinkResolutionTest
+ContextMenuItemLevelRequesterTest
 Link*Test
 SectionTabs*Test
 
