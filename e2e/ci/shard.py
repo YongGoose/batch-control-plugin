@@ -210,6 +210,12 @@ UNITS = [
          doc="e2e-19: every manual path refused (REST build/buildWithParameters, CLI, build token, build-token-root, "
              "Replay, Rebuild), the job page notice, an approved run exactly once with exact values, Cause on the build "
              "page, marker re-use recorded (SPEC 6, 4, 10, D-30)"),
+    # e2e-24 #37 (wave A). r24/user_cause.py deletes and re-creates its own items (r24-ucause*) and activates one through
+    # an approved ACTIVATE request; the deprecated cause is submitted from the script console and the CLI groovy command.
+    Unit("r24-user-cause", 1.6, [("r24-user-cause", py("r24/user_cause.py"))], group="runs and switches",
+         doc="e2e-24 #37: a submission whose only cause is the deprecated Cause.UserCause is refused like UserIdCause "
+             "(same refusal and records; console and CLI; activated and not activated); guards: UserIdCause, a job "
+             "without approval, an approved run once"),
     # e2e-22 R4-02 (bug-hunt batch B). r22/scripted_build.py arranges its own item (r22-script) and a requester API token
     # it revokes at its end.
     Unit("r22-scripted-build", 0.4, [("r22-scripted-build", py("r22/scripted_build.py"))],

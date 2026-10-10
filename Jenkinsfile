@@ -135,6 +135,8 @@ void runChecks(Map platform, boolean primary) {
     }
   }
   if (primary) {
+    // The changelist is <count>.v<hash>, the version ${revision}.<changelist> (1.0.<count>.v<hash>):
+    // the leading '*' of each part of the pattern matches the "1.0." prefix, as in buildPlugin.
     String changelist = readFile(changelistFile)
     dir("${tmp}/m2repo") {
       archiveArtifacts(artifacts: "**/*${changelist}/*${changelist}*", excludes: '**/*.lastUpdated',
