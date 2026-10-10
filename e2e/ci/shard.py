@@ -153,6 +153,14 @@ UNITS = [
          doc="e2e-25 #43: runs.csv, incidents.csv, changes.csv and requests.csv (REST, filtered, empty, and the History "
              "page's download buttons) start with the UTF-8 BOM and the header row; guards: content type and "
              "attachment name unchanged, the existing columns, Korean values in UTF-8"),
+    # e2e-26 #36 (wave B). r26/activation_write.py deletes and re-creates its own items (r26-aw-hold, r26-aw-act), makes
+    # batch-control/activations/ unwritable with `docker exec -u root` around each approval, restores its exact modes, and
+    # restarts Jenkins (last).
+    Unit("r26-activation-write", 0.6, [("r26-activation-write", py("r26/activation_write.py"))], last=True,
+         group="crawl and ui checks",
+         doc="e2e-26 #36: an approved HOLD/ACTIVATE whose activation state cannot be written is refused (4xx 'could not "
+             "be saved', no Oops), stays PENDING, the job page, state file and records are unchanged; after a restart the "
+             "state is what the page said; once writable, the same approval works"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
