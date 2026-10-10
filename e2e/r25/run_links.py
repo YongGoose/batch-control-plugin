@@ -55,15 +55,17 @@ def path_of(url):
     return u.split("?")[0].split("#")[0]
 
 
-def run_url(full, number):
-    """The run's own URL path, as Jenkins reports it (REST `url`), e.g. /jenkins/job/r25-links-mx/X=a/3/."""
+def run_info(full, number):
+    """The run's own URL path and display name, as Jenkins reports them (REST `url`, `fullDisplayName`), e.g.
+    (/jenkins/job/r25-links-mx/X=a/3/, "r25-links-mx » a #3": a configuration is displayed by its axis value)."""
     if "/X=" in full:
         parent, cfg = full.rsplit("/", 1)
-        path = f"{J(parent)}/{cfg}/{number}/api/json?tree=url"
+        path = f"{J(parent)}/{cfg}/{number}/api/json?tree=url,fullDisplayName"
     else:
-        path = f"{J(full)}/{number}/api/json?tree=url"
+        path = f"{J(full)}/{number}/api/json?tree=url,fullDisplayName"
     r = api("admin", path)
-    return path_of(r.json().get("url")) if r.status_code == 200 else None
+    j = r.json() if r.status_code == 200 else {}
+    return path_of(j.get("url")) if j else None, j.get("fullDisplayName")
 
 
 def config_builds(cfg):
@@ -116,7 +118,7 @@ def sec_A():
             S["runs"][f"{MX}/{c}#{new[-1]}"] = {"contract": True}
     for rid, v in S["runs"].items():
         full, num = rid.rsplit("#", 1)
-        v["url"] = run_url(full, int(num))
+        v["url"], v["name"] = run_info(full, int(num))
     recs = {r.get("jobFullName") + "#" + r.get("number", "") for r in csv_rows("runs.csv")}
     incs = csv_rows("incidents.csv")
     S["incidents"] = {r["runId"]: r["id"] for r in incs if r.get("runId") in S["runs"]}
@@ -206,9 +208,12 @@ def sec_H():
             s.page.wait_for_load_state("load")
             landed = {"url": path_of(s.page.url), "title": s.page.title()}
         s.shot("#main-panel, body", "R25-42-2-history-config-click")
-        check("H", "#42 contract (screen): following the History link of r25-links-mx/X=a lands on its run page",
-              landed is not None and landed["url"] == S["runs"][cfg]["url"] and "404" not in landed["title"]
-              and "X=a" in landed["title"], landed=landed, expected=S["runs"][cfg]["url"])
+        want = S["runs"][cfg]
+        check("H", "#42 contract (screen): following the History link of r25-links-mx/X=a lands on its run page (its "
+              "own URL; the page title is the run's display name, not Not Found)", landed is not None
+              and landed["url"] == want["url"] and "Not Found" not in landed["title"]
+              and bool(want.get("name")) and landed["title"].startswith(want["name"]),
+              landed=landed, expected={"url": want["url"], "title": want.get("name")})
     s.done()
 
 
