@@ -294,10 +294,10 @@ public class HistorySection implements ModelObject, StaplerProxy {
         }
     }
 
-    /** The store's existing month buckets inside the filter range (no month cap). */
+    /** The stored month buckets that may hold a record in the period, including neighbouring buckets (#33; no month cap). */
     private List<YearMonth> storedMonths() {
         if (storedMonths == null) {
-            storedMonths = getFilter().months(Store.get().listStoredMonths());
+            storedMonths = Store.get().listStoredMonths(period());
         }
         return storedMonths;
     }
