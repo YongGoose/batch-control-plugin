@@ -334,6 +334,17 @@ public interface Store {
     List<YearMonth> listStoredMonths();
 
     /**
+     * #33: the stored month buckets (as {@link #listStoredMonths()}) that may hold a record whose
+     * timestamp lies in {@code period}, whatever time zone the plugin clock had when the record was
+     * written: a bucket is named by the month of the record in the zone of its writer (SPEC 4), so
+     * after the controller's zone changed, a record near a month boundary sits in the neighbouring
+     * month's bucket. A date-range query reads these buckets and keeps the records inside
+     * {@code period}; existing files need no migration. A bucket outside the period's own months
+     * is included only when the period comes within the largest zone offset (18 hours) of it.
+     */
+    List<YearMonth> listStoredMonths(Period period);
+
+    /**
      * Deletes every record bucket of the given month: the runs and changes JSONL files, the
      * diff patches of that month's change records, the incident XMLs listed in that month's
      * index and the index file itself. This is the ONLY deletion path of the store
