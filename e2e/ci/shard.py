@@ -276,6 +276,12 @@ UNITS = [
          doc="e2e-25 #45: paging one list on the Run Requests, Grants or Activations page keeps the other lists' page "
              "parameters and pages; guards: the own list pages, every list honours its parameter, markup in a "
              "parameter is escaped"),
+    # e2e-26 #34 (wave B). r26/store_force.py re-creates its own item (r26-sf) and runs an strace sidecar
+    # (r26/strace.Dockerfile, --pid=container:<jenkins> --cap-add SYS_PTRACE) only for its traced section; the Jenkins
+    # container gets no extra capability. It revokes its window at its end.
+    Unit("r26-store-force", 0.5, [("r26-store-force", py("r26/store_force.py"))], group="job ui windows and disk",
+         doc="e2e-26 #34: fsync/fdatasync (strace) of the temporary file, the directory and the month file of a grant "
+             "approval, a revocation, a run request and its decision and an activation decision; writes behave as before"),
     Unit("role", 6.0, [
         ("role-setup", py("r14/role/setup.py")),
         ("role-manage", py("r14/role/manage_roles.py")),
