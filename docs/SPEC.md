@@ -143,6 +143,7 @@ Creating a job does not put it into service. Whether a job may run unattended (a
 - 수용 기준: 취소는 요청자 본인 또는 `Manage` 권한자만 가능하고, PENDING 상태에서만 가능하다.
 - 수용 기준: 요청 상태 전이는 원자적이다(compare-and-set). 동시 승인 2건 중 정확히 1건만 성립하고 빌드는 정확히 1회만 투입된다. 승인과 취소가 경합하면 하나만 성립하며 상태 혼합(예: CANCELLED에 executedRunId)이 없다. 큐 투입 직전에 만료를 재확인(check-at-submit)하여 만료된 승인 건은 절대 투입되지 않는다. (R-5, D-20)
 - 수용 기준: PENDING/APPROVED 요청의 대상 잡이 rename 또는 move되면 요청은 상태 INVALIDATED로 종료되고 이력에 남는다. (R-6, D-21)
+- Acceptance: deleting a job, or a folder above it, ends its PENDING and APPROVED run requests as INVALIDATED with a reason that names the deletion, like the activation requests of a deleted job. Approving a run request whose job no longer exists is refused with nothing scheduled, and a job re-created under the same name never runs a request made for the deleted one. (#38, D-87)
 
 ### 변경 통제
 
@@ -277,7 +278,7 @@ ChangeRecord      id, type(CREATE|CONFIGURE|DELETE|RENAME|MOVE|CONFIG_TOGGLE|RET
 RunRequest:  PENDING -> APPROVED -> EXECUTED
              PENDING -> REJECTED | CANCELLED | EXPIRED
              APPROVED -> EXPIRED (approvedRunTimeout)
-             PENDING | APPROVED -> INVALIDATED (대상 잡 rename/move, D-21)
+             PENDING | APPROVED -> INVALIDATED (대상 잡 rename/move, D-21; job or folder deleted, D-87)
 GrantRequest: PENDING -> APPROVED(=Grant 생성) | REJECTED | CANCELLED | EXPIRED
 Grant:       ACTIVE -> EXPIRED(시각) | REVOKED(수동)
 Incident:    OPEN -> ACKNOWLEDGED -> RESOLVED  (역방향 없음, RESOLVED에서 코멘트 추가는 가능)
