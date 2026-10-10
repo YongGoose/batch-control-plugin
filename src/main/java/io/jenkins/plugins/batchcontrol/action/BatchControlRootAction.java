@@ -8,6 +8,7 @@ import hudson.security.Permission;
 import io.jenkins.plugins.batchcontrol.config.BatchControlConfigurationLink;
 import io.jenkins.plugins.batchcontrol.ui.GrantRequestLinks;
 import io.jenkins.plugins.batchcontrol.ui.GuardInfo;
+import io.jenkins.plugins.batchcontrol.ui.Paging;
 import io.jenkins.plugins.batchcontrol.ui.ReplayedRuns;
 import io.jenkins.plugins.batchcontrol.ui.SectionAccess;
 import io.jenkins.plugins.batchcontrol.ui.SectionTabs;
@@ -114,6 +115,17 @@ public class BatchControlRootAction implements RootAction, ModelObjectWithContex
     /** Permissions for the landing page's {@code l:layout}: any Batch Control permission. */
     public Permission[] getViewPermissions() {
         return SectionAccess.viewPermissions(SectionAccess.anyPermission(), SectionAccess.canOpenRoot());
+    }
+
+    /**
+     * #45: the query string of a {@code bc:pager} link to {@code page} of the list paged with
+     * {@code parameter}, keeping the current URL's other parameters ({@link Paging#query}). The
+     * tag reaches it through this action, as {@code bc:tabs} does, because {@code j:invokeStatic}
+     * loads classes with core's class loader and cannot see plugin classes in a real Jenkins.
+     * {@code long}, so the view's arithmetic on the page number binds whatever its number type.
+     */
+    public String pagerQuery(String parameter, long page) {
+        return Paging.query(parameter, page);
     }
 
     /** The tabs the viewer may open, with their open-item badges (overview page). */

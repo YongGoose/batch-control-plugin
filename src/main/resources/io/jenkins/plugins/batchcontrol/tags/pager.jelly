@@ -17,21 +17,17 @@
     <st:attribute name="singular" use="required">The counted noun for one row, for example "request".</st:attribute>
     <st:attribute name="plural" use="required">The counted noun for other counts, for example "requests".</st:attribute>
   </st:documentation>
+  <!-- #45: the links keep the current URL's other parameters (ui.Paging#query), reached through
+       the root action, not j:invokeStatic: invokeStatic loads classes with core's class loader
+       and cannot see plugin classes in a real Jenkins (only a flat test classpath; see bc:tabs). -->
+  <j:set var="bcRoot" value="${app.getExtensionList('io.jenkins.plugins.batchcontrol.action.BatchControlRootAction').get(0)}"/>
   <div class="jenkins-buttons-row jenkins-!-margin-top-1" role="navigation" aria-label="Pages of ${attrs.label}">
       <j:if test="${attrs.hasPrevious}">
-        <j:invokeStatic var="pagerPrevious" className="io.jenkins.plugins.batchcontrol.ui.Paging" method="query">
-          <j:arg type="java.lang.String" value="${attrs.param}"/>
-          <j:arg type="int" value="${attrs.page - 1}"/>
-        </j:invokeStatic>
-        <a class="jenkins-button" href="?${pagerPrevious}">Previous</a>
+        <a class="jenkins-button" href="?${bcRoot.pagerQuery(attrs.param, attrs.page - 1)}">Previous</a>
       </j:if>
       <span>Page ${attrs.page} (${attrs.total} ${attrs.total == 1 ? attrs.singular : attrs.plural})</span>
       <j:if test="${attrs.hasNext}">
-        <j:invokeStatic var="pagerNext" className="io.jenkins.plugins.batchcontrol.ui.Paging" method="query">
-          <j:arg type="java.lang.String" value="${attrs.param}"/>
-          <j:arg type="int" value="${attrs.page + 1}"/>
-        </j:invokeStatic>
-        <a class="jenkins-button" href="?${pagerNext}">Next</a>
+        <a class="jenkins-button" href="?${bcRoot.pagerQuery(attrs.param, attrs.page + 1)}">Next</a>
       </j:if>
     </div>
 </j:jelly>

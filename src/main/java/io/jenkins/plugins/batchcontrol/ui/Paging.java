@@ -77,7 +77,7 @@ public final class Paging {
      * @param parameter the query parameter of the paged list
      * @param page the 1-based page the link opens
      */
-    public static String query(String parameter, int page) {
+    public static String query(String parameter, long page) {
         StringBuilder query = new StringBuilder();
         StaplerRequest2 req = Stapler.getCurrentRequest2();
         String raw = req == null ? null : req.getQueryString();
