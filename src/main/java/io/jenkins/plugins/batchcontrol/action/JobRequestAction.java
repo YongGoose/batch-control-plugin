@@ -788,6 +788,12 @@ public class JobRequestAction implements Action {
      * ({@link RequestBodyLimit#partNames}) is recorded in {@code uploaded} under the parameter's
      * name, for the kept-size check. It is measured first because creating a value may consume
      * its part (a stashed file value deletes the part it copied).
+     *
+     * <p>#40: a parameter the job defines that the {@code parameter} array leaves out (or the
+     * whole array, when the blob has none) is added as its
+     * {@link ParameterDefinition#getDefaultParameterValue() default} at request time, the same
+     * fallback {@link #parseRawParameters} uses, so every submission form stores a value for
+     * every parameter. No uploaded size is recorded for such a value: it was not uploaded.
      */
     private void parseParameters(StaplerRequest2 req, JSONObject formData, List<ParameterValue> submitted,
                                  Map<String, Long> uploaded) {
@@ -796,11 +802,8 @@ public class JobRequestAction implements Action {
             return;
         }
         Object parameter = formData.opt("parameter");
-        if (parameter == null) {
-            return;
-        }
         Set<String> seen = new HashSet<>();
-        for (Object entry : JSONArray.fromObject(parameter)) {
+        for (Object entry : parameter == null ? List.of() : JSONArray.fromObject(parameter)) {
             if (!(entry instanceof JSONObject)) {
                 continue;
             }
@@ -825,6 +828,17 @@ public class JobRequestAction implements Action {
             }
             if (value != null) {
                 submitted.add(value);
+            }
+        }
+        // #40 (security-08 S-10): a parameter the blob leaves out is stored as the job's default
+        // now, explicitly, as on the raw channel, so the approver sees every value and the build
+        // runs with them even if the defaults change before it starts.
+        for (ParameterDefinition definition : property.getParameterDefinitions()) {
+            if (!seen.contains(definition.getName())) {
+                ParameterValue value = definition.getDefaultParameterValue();
+                if (value != null) {
+                    submitted.add(value);
+                }
             }
         }
     }
