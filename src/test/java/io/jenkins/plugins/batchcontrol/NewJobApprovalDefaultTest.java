@@ -37,6 +37,7 @@ import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -138,6 +139,7 @@ public class NewJobApprovalDefaultTest {
      * about approvals. The default must be applied to the resulting job.
      */
     @Test
+    @Tag("core")
     public void t_08_20_restConfigXmlCreationDefaultsToApprovalRequired() throws Exception {
         JenkinsRule.WebClient admin = webClient().login("admin");
         assertTrue(createFromXml(admin, "", "rest-new", MINIMAL_FREESTYLE_XML) < 400, "the REST creation must succeed");
@@ -256,6 +258,7 @@ public class NewJobApprovalDefaultTest {
      * nothing.
      */
     @Test
+    @Tag("core")
     public void t_08_25_runControlOffDoesNotForceTheDefault() throws Exception {
         setRunControl(false);
 

@@ -25,6 +25,9 @@
 - [ ] The pull request **title represents the desired changelog entry**: it becomes
       the line in the release notes (CONTRIBUTING §7, *Releases*).
 - [ ] Opened from a topic branch, not from the `main` branch of your fork.
+- [ ] The `build` workflow (and, for a UI or behaviour change, `e2e`) passed on
+      that branch in your fork before this pull request was opened
+      (CONTRIBUTING §7).
 - [ ] `mvn clean verify` passed locally: **0 failures**, SpotBugs
       **`BugInstance size is 0`**.
 - [ ] **Behaviour change?** `docs/SPEC.md` says so — the spec is the arbiter, and

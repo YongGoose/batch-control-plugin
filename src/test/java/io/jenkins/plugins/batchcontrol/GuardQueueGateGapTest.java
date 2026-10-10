@@ -35,6 +35,7 @@ import org.jenkinsci.plugins.workflow.cps.replay.ReplayAction;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -130,6 +131,7 @@ public class GuardQueueGateGapTest {
      * same submission for the activated {@code remote-free} (no approval required) builds.
      */
     @Test
+    @Tag("core")
     public void t_gap_267_remoteCauseFromCodeIsRefusedAndRecorded() throws Exception {
         FreeStyleProject job = activated("remote-x");
         setBatchControl(job, new BatchControlJobProperty(true));
@@ -175,6 +177,7 @@ public class GuardQueueGateGapTest {
      * Guard: the store was asked to append at least once.
      */
     @Test
+    @Tag("core")
     public void t_gap_269_failingAuditStoreDoesNotLetARefusedRunThrough() throws Exception {
         FreeStyleProject tokenJob = withToken(activated("token-y"));
         setBatchControl(tokenJob, new BatchControlJobProperty(true));

@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * reason — {@code "\t=1+1"} carries no CR, LF, comma or quote and must therefore come out
  * prefixed and <em>unquoted</em>.
  */
+@Tag("core")
 public class CsvFormulaPrefixTest {
 
     /**

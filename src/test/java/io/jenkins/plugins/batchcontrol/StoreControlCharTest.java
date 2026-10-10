@@ -32,6 +32,7 @@ import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -113,6 +114,7 @@ public class StoreControlCharTest {
      * back unchanged.
      */
     @Test
+    @Tag("core")
     public void t_04_30_storeRefusesToWriteAnEntityItCannotReadBack() throws Exception {
         for (String bad : new String[] {VT, "\u001B", "￾", "\uD800"}) {
             GrantRequest grant = GrantRequest.create(new GrantScope(GrantScope.Type.ITEM, "batch-x"),

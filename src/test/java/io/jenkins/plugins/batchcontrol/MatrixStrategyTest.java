@@ -26,6 +26,7 @@ import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -134,6 +135,7 @@ public class MatrixStrategyTest {
      * subclass again, not the plain parent.
      */
     @Test
+    @Tag("core")
     public void t_02_11_jobPropertySurvivesUiSaveAndSecurityFormKeepsSubclass() throws Exception {
         install();
         FreeStyleProject p = j.createFreeStyleProject("job");
@@ -174,6 +176,7 @@ public class MatrixStrategyTest {
      * {@code f} now confers Configure on {@code f} only and nothing on {@code f/job} (note 260).
      */
     @Test
+    @Tag("core")
     public void t_02_12_grantLayeredOverPerItemAclAndExpires() throws Exception {
         install();
         StrategyFixtures.changeControlOn();

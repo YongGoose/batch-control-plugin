@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 import org.htmlunit.Page;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -651,6 +652,7 @@ public class RefusedRerunAuditTest {
      * marker exists) is refused and recorded as TRIGGER_BLOCKED naming a cause kind.
      */
     @Test
+    @Tag("core")
     public void t_06_64_refusedRebuildOfManualRunIsRecordedAsTriggerBlocked() throws Exception {
         FreeStyleProject job = uncontrolled(j.createFreeStyleProject("rr-rebuild-manual"));
         BatchControlFixtures.activate(job);

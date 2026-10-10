@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Written from docs/SPEC.md and docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class RequestConcurrencyTest {
 
     private JenkinsRule j;
