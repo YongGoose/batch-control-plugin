@@ -26,6 +26,7 @@ import org.htmlunit.HttpMethod;
 import org.htmlunit.Page;
 import org.htmlunit.WebRequest;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -81,6 +82,7 @@ public class GrantWebTest {
      * (was 403; SPEC item 2 / #31 changed this for a user with zero Batch Control permissions).
      */
     @Test
+    @Tag("core")
     public void t_08_13_createGrantRequestWithoutPermissionIs403() throws Exception {
         JenkinsRule.WebClient wc = webClient().login("u0");
         Page page = wc.getPage(new WebRequest(
@@ -91,6 +93,7 @@ public class GrantWebTest {
 
     /** T-SEC-06 (remainder): GET on the revoke endpoint is rejected; the grant stays active. */
     @Test
+    @Tag("core")
     public void t_sec_06_getRevokeIsRejected() throws Exception {
         Grant grant = activeGrant();
 
@@ -113,6 +116,7 @@ public class GrantWebTest {
      * URL beneath it are absent for u0 -&gt; 404 (SPEC item 2 / #31), not 403.
      */
     @Test
+    @Tag("core")
     public void revokePostWithoutManageIs403() throws Exception {
         Grant grant = activeGrant();
 
@@ -135,6 +139,7 @@ public class GrantWebTest {
 
     /** T-08-05 (web layer): a Manage holder's revoke POST works and leaves the GRANT_REVOKE record. */
     @Test
+    @Tag("core")
     public void t_08_05_revokePostByManageHolderWorks() throws Exception {
         Grant grant = activeGrant();
 
@@ -157,6 +162,7 @@ public class GrantWebTest {
      * root action and every URL beneath it are absent for u0 -&gt; 404, not 403.
      */
     @Test
+    @Tag("core")
     public void grantsListPermissionGate() throws Exception {
         activeGrant(); // some content to list
 
@@ -205,6 +211,7 @@ public class GrantWebTest {
 
     /** The approve endpoint of the contract works: POST by the designated approver creates the grant. */
     @Test
+    @Tag("core")
     public void approvePostCreatesActiveGrant() throws Exception {
         GrantRequest request = pendingRequest();
 
@@ -222,6 +229,7 @@ public class GrantWebTest {
 
     /** The cancel endpoint of the contract works: the requester cancels their PENDING grant request. */
     @Test
+    @Tag("core")
     public void cancelPostByRequesterWorks() throws Exception {
         GrantRequest request = pendingRequest();
 

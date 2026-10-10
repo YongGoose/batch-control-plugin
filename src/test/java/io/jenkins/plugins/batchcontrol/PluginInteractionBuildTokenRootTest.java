@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import javax.xml.transform.stream.StreamSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -45,6 +46,7 @@ public class PluginInteractionBuildTokenRootTest {
      * call with the right token does not queue a run of an approval-required job.
      */
     @Test
+    @Tag("core")
     public void t_06_31_buildByTokenIsBlocked() throws Exception {
         FreeStyleProject job = withToken(j.createFreeStyleProject("btr-x"));
         setBatchControl(job, new BatchControlJobProperty(true));

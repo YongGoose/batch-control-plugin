@@ -28,6 +28,7 @@ import org.htmlunit.WebRequest;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -61,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * docs/DESIGN-ACTIVATION-APPROVAL.md only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class ActivationGateTest {
 
     private JenkinsRule j;

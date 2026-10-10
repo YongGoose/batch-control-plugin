@@ -23,6 +23,7 @@ import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.matrixauth.inheritance.InheritParentStrategy;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
@@ -43,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Written from docs/SPEC.md, docs/DECISIONS.md D-35a and docs/POC-RESULTS.md PoC-5 only
  * (no src/main knowledge).
  */
+@Tag("core")
 public class StrategyPersistenceTest {
 
     @RegisterExtension

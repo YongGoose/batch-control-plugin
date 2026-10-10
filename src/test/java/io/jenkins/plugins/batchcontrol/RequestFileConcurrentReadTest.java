@@ -30,6 +30,7 @@ import org.htmlunit.WebRequest;
 import org.htmlunit.WebResponse;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
@@ -72,6 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class RequestFileConcurrentReadTest {
 
     private static final Logger LOGGER = Logger.getLogger(RequestFileConcurrentReadTest.class.getName());

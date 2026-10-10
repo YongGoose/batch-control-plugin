@@ -11,6 +11,7 @@ import org.jenkinsci.plugins.authorizeproject.AuthorizeProjectProperty;
 import org.jenkinsci.plugins.authorizeproject.ProjectQueueItemAuthenticator;
 import org.jenkinsci.plugins.authorizeproject.strategy.SpecificUsersAuthorizationStrategy;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -53,6 +54,7 @@ public class PluginInteractionAuthorizeProjectTest {
      * build URL and through the CLI.
      */
     @Test
+    @Tag("core")
     public void t_06_40_buildAuthorisedAsAnotherUserIsBlocked() throws Exception {
         FreeStyleProject job = runAsAdmin(j.createFreeStyleProject("ap-x"));
         setBatchControl(job, new BatchControlJobProperty(true));
@@ -82,6 +84,7 @@ public class PluginInteractionAuthorizeProjectTest {
 
     /** T-06-42: an approved request on the authorize-project job is queued exactly once and starts. */
     @Test
+    @Tag("core")
     public void t_06_42_approvedRunStarts() throws Exception {
         FreeStyleProject job = runAsAdmin(j.createFreeStyleProject("ap-approved"));
         setBatchControl(job, new BatchControlJobProperty(true));

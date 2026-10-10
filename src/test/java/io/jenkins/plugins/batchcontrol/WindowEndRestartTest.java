@@ -35,6 +35,7 @@ import org.htmlunit.html.DomElement;
 import org.htmlunit.html.HtmlPage;
 import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -94,6 +95,7 @@ public class WindowEndRestartTest {
      * write despite the read-only bits (root, Windows).
      */
     @Test
+    @Tag("core")
     public void t_sec_95_windowEndedWhileTheStoreRefusedWritesStaysEndedAfterManyRecordsAndARestart() throws Throwable {
         session.then(r -> {
             prepare(r);
@@ -214,6 +216,7 @@ public class WindowEndRestartTest {
      * T-SEC-109.
      */
     @Test
+    @Tag("core")
     public void t_sec_106_tornChangeLogLineEndsEveryOpenWindowAtStartup() throws Throwable {
         openWindowsOnAAndC();
         appendTornLine();
@@ -249,6 +252,7 @@ public class WindowEndRestartTest {
      * appended after the torn line is not merged into it and lost.
      */
     @Test
+    @Tag("core")
     public void t_sec_108_recordsAppendedAfterATornLineStayReadable() throws Throwable {
         openWindowsOnAAndC();
         appendTornLine();

@@ -40,6 +40,7 @@ import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.jvnet.hudson.test.FailureBuilder;
@@ -93,6 +94,7 @@ public class IncidentTest {
 
     /** T-11-01: a cron-caused FAILURE opens an incident (cause never matters) with a bounded logTail. */
     @Test
+    @Tag("core")
     public void t_11_01_cronFailureOpensIncidentWithLogTail() throws Exception {
         // D-34 (matrix notes 42, 46): a job created while run control is on starts locked out of
         // its own timer, so this row states the job's state instead of inheriting it. Incident
@@ -119,6 +121,7 @@ public class IncidentTest {
 
     /** T-11-02: an approved, successful rerun sets resolvedByRunId but never auto-resolves. */
     @Test
+    @Tag("core")
     public void t_11_02_successfulRerunLinksResolvedByRunIdButStaysOpen() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("rerun-x");
         job.addProperty(new ParametersDefinitionProperty(
@@ -181,6 +184,7 @@ public class IncidentTest {
 
     /** T-11-04: acknowledge and resolve each record user, time and comment in transitions. */
     @Test
+    @Tag("core")
     public void t_11_04_transitionsRecordUserTimeAndComment() throws Exception {
         Incident incident = openIncident("ack-x");
 
@@ -209,6 +213,7 @@ public class IncidentTest {
 
     /** T-11-05: no reverse transition from RESOLVED, but comments are still allowed there. */
     @Test
+    @Tag("core")
     public void t_11_05_reverseTransitionRejectedButCommentsAllowedOnResolved() throws Exception {
         Incident incident = openIncident("resolve-x");
         try (ACLContext ignored = as("u1")) {
@@ -302,6 +307,7 @@ public class IncidentTest {
      * in the incident logTail; the plaintext never appears there.
      */
     @Test
+    @Tag("core")
     public void t_rt_13_secretParameterValueIsMaskedInLogTail() throws Exception {
         final String secretValue = "S3CR3T-TOKEN-X7K9Q2";
 

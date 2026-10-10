@@ -21,6 +21,7 @@ import java.util.List;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -65,6 +66,7 @@ public class ActivationSeedingTest {
      * existing schedules keep running; a job created after the upgrade is not activated.
      */
     @Test
+    @Tag("core")
     public void t_06a_32_existingJobsAreSeededAsActivatedOnUpgrade() throws Throwable {
         session.then(r -> buildPreUpgradeHome(r, true));
         session.then(r -> {
@@ -166,6 +168,7 @@ public class ActivationSeedingTest {
      * of a seeded job both survive a restart, and the restart does not re-activate the held job.
      */
     @Test
+    @Tag("core")
     public void t_06a_36_approvedActivationAndHoldSurviveRestart() throws Throwable {
         session.then(r -> buildPreUpgradeHome(r, true));
         session.then(r -> {

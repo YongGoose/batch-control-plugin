@@ -38,6 +38,7 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -81,6 +82,7 @@ public class RunRecordListenerTest {
 
     /** T-10-01: Freestyle and Pipeline completions are both recorded with an accurate causeType. */
     @Test
+    @Tag("core")
     public void t_10_01_freestyleAndPipelineAreBothRecorded() throws Exception {
         // This row measures the recorder, not the queue gate: both jobs stay out of run control
         // (D-31 would otherwise make them approval-required at creation and block the USER cause).
@@ -140,6 +142,7 @@ public class RunRecordListenerTest {
 
     /** T-10-03: causes classify as USER / TIMER / UPSTREAM / SCM / OTHER / APPROVED_REQUEST. */
     @Test
+    @Tag("core")
     public void t_10_03_causeTypesAreClassified() throws Exception {
         // the first five causes must reach the recorder unblocked, so the job starts outside run
         // control (D-31 attaches approvalRequired=true at creation while run control is on)
@@ -193,6 +196,7 @@ public class RunRecordListenerTest {
 
     /** T-10-04: an approved-request run links record and request in both directions. */
     @Test
+    @Tag("core")
     public void t_10_04_approvedRequestRunLinksRecordAndRequest() throws Exception {
         FreeStyleProject job = j.createFreeStyleProject("appr-x");
         setBatchControl(job, new BatchControlJobProperty(true));
@@ -223,6 +227,7 @@ public class RunRecordListenerTest {
      * merely refused -&gt; 404 (was 403); a ViewHistory holder still gets 200.
      */
     @Test
+    @Tag("core")
     public void t_10_05_dashboardWithoutViewHistoryIs403() throws Exception {
         JenkinsRule.WebClient noHistory = j.createWebClient()
                 .withThrowExceptionOnFailingStatusCode(false).login("nohist");

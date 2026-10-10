@@ -31,6 +31,7 @@ import jenkins.model.Jenkins;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.util.NameValuePair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -187,6 +188,7 @@ public class PermissionBoundaryGapTest {
      * endpoints.
      */
     @Test
+    @Tag("core")
     public void t_02_124_userWithoutBatchControlPermissionGets404OnTheRemainingEndpoints() throws Exception {
         Grant grant = openWindow("g2", "batch-x");
         String activation = ActivationFixtures.submitActivationOk(j, "u1", job, "ACTIVATE", "go live", "a1");
@@ -213,6 +215,7 @@ public class PermissionBoundaryGapTest {
      * PENDING with no decider, nothing runs. Guard: a1 approves and the build runs once.
      */
     @Test
+    @Tag("core")
     public void t_03_27_managerCannotDecideAPendingRunRequest() throws Exception {
         String id = ApproverFormFixtures.submitRunOk(j, "u1", job, "month-end batch", "a1");
         assertClientError(ApproverFormFixtures.decideRun(j, "m1", id, "approve", "manager approves"), "m1's approval");
@@ -235,6 +238,7 @@ public class PermissionBoundaryGapTest {
      * cancels it (CANCELLED).
      */
     @Test
+    @Tag("core")
     public void t_07_11_designatedApproverCannotCancelSomeoneElsesRequest() throws Exception {
         String id = ApproverFormFixtures.submitRunOk(j, "u1", job, "month-end batch", "a1");
         assertClientError(ApproverFormFixtures.post(j, "a1", "batch-control/requests/" + id + "/cancel", List.of()),

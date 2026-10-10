@@ -34,6 +34,7 @@ import org.jenkinsci.plugins.matrixauth.PermissionEntry;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -81,6 +82,7 @@ public class TypedParameterRestartTest {
      * file holds exactly the uploaded bytes.
      */
     @Test
+    @Tag("core")
     public void t_05_51_coreFileSurvivesARestartBeforeTheApproval() throws Throwable {
         byte[] content = payload(CORE_MARKER, 7000);
         session.then(r -> {

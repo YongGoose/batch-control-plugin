@@ -12,6 +12,7 @@ import io.jenkins.plugins.batchcontrol.queue.ApprovedCause;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * docs/TEST-MATRIX.md only (no src/main knowledge).
  */
 @WithJenkins
+@Tag("core")
 public class ApprovedRunQueueFoldTest {
 
     private JenkinsRule j;
