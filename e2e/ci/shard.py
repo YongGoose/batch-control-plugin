@@ -202,6 +202,10 @@ UNITS = [
     Unit("r22-nonascii-reason", 0.5, [("r22-nonascii-reason", py("r22/nonascii_reason.py"))],
          doc="e2e-22 R4-03: a non-ASCII reason survives the refusal of the multipart Request Run form and is stored as "
              "typed; a multipart client without the json field stores reason and DATE as sent; url-encoded guard"),
+    # e2e-24 #40 (wave A). r24/json_params.py deletes and re-creates its own item (r24-json) and changes its defaults.
+    Unit("r24-json-params", 0.4, [("r24-json-params", py("r24/json_params.py"))], group="crawl and ui checks",
+         doc="e2e-24 #40: a json submission with all, some or no parameters (url-encoded and multipart) stores every "
+             "parameter, the approver's page lists them, and the build runs with them after the defaults changed"),
     # e2e-19 (gap audit, docs/reports/e2e-19.md): SPEC acceptance lines no CI step checked before. r19/arrange.py is
     # idempotent and self-contained (items r19-*, accounts from JCasC). Each driver exits non-zero and prints FAIL lines,
     # and restores what it changes globally (executors, authorize-project's authenticator). Weights: minutes measured on

@@ -10,7 +10,7 @@
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>batch-control</artifactId>
-  <version>${changelist}</version>
+  <version>${revision}.${changelist}</version>
   <packaging>hpi</packaging>
 
   <name>Batch Control</name>
@@ -32,6 +32,12 @@
   </scm>
 
   <properties>
+    <!-- Versions are ${revision}.${changelist}, the "manually controlled prefix" of
+         https://www.jenkins.io/doc/developer/publishing/releasing-cd/ : CD releases are
+         1.0.<commit count>.v<commit hash> (.mvn/maven.config: -Dchangelist.format=%d.v%s),
+         local builds 1.0.999999-SNAPSHOT. Bump revision to 1.1 for a feature line or to 2.0
+         for a breaking one; the third component is the commit count. -->
+    <revision>1.0</revision>
     <changelist>999999-SNAPSHOT</changelist>
     <jenkins.baseline>2.568</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
