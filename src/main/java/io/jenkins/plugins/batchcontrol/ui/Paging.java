@@ -1,5 +1,8 @@
 package io.jenkins.plugins.batchcontrol.ui;
 
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import org.kohsuke.accmod.Restricted;
@@ -61,6 +64,42 @@ public final class Paging {
             return new ArrayList<>();
         }
         return new ArrayList<>(all.subList(from, Math.min(from + PAGE_SIZE, all.size())));
+    }
+
+    /**
+     * #45: the query string (without the leading {@code ?}) of a pager link to {@code page} of the
+     * list paged with {@code parameter}: every other parameter of the current URL's query string,
+     * in its order (the other lists' {@code pendingPage}, {@code activePage}, {@code endedPage}),
+     * then {@code parameter=page}. Only the query string is read, never a form body, and each
+     * name and value is decoded and URL-encoded again, so a hostile value travels as data; the
+     * view escapes the result as an attribute value too. A pair that does not decode is dropped.
+     *
+     * @param parameter the query parameter of the paged list
+     * @param page the 1-based page the link opens
+     */
+    public static String query(String parameter, int page) {
+        StringBuilder query = new StringBuilder();
+        StaplerRequest2 req = Stapler.getCurrentRequest2();
+        String raw = req == null ? null : req.getQueryString();
+        if (raw != null) {
+            for (String pair : raw.split("&")) {
+                int eq = pair.indexOf('=');
+                String name;
+                String value;
+                try {
+                    name = URLDecoder.decode(eq < 0 ? pair : pair.substring(0, eq), StandardCharsets.UTF_8);
+                    value = eq < 0 ? "" : URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    continue; // a malformed escape: not a parameter worth keeping
+                }
+                if (name.isEmpty() || name.equals(parameter)) {
+                    continue;
+                }
+                query.append(URLEncoder.encode(name, StandardCharsets.UTF_8)).append('=')
+                        .append(URLEncoder.encode(value, StandardCharsets.UTF_8)).append('&');
+            }
+        }
+        return query.append(URLEncoder.encode(parameter, StandardCharsets.UTF_8)).append('=').append(page).toString();
     }
 
     /** Whether a newer page exists (every page after the first). */
