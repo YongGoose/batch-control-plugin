@@ -418,18 +418,33 @@ public final class GrantRequestService {
                 throw new IllegalStateException("Grant request " + id
                         + " passed its pending timeout and is now EXPIRED.");
             }
-            request.setStatus(RequestStatus.APPROVED);
-            request.setDecidedAt(now);
-            request.setDecidedBy(Jenkins.getAuthentication2().getName());
-            request.setDecisionComment(comment);
-            store.saveGrantRequest(request);
-            Grant grant = Grant.createFor(request, now);
+            String decidedBy = Jenkins.getAuthentication2().getName();
+            Grant[] made = new Grant[1];
             // Registration persists the grant and makes it effective in the same critical
             // section, so approval and effectiveness are atomic. D-74: on the item checked above,
             // under its name at registration (it follows a rename that happened meanwhile).
             // D-71c (3), S-39-02: registration re-verifies that this item is still at its name;
             // if it was deleted meanwhile, the window ends at once ("its item was deleted").
-            endedAtOnce = !GrantService.get().register(grant, item);
+            //
+            // #39: the decision runs inside GrantService's monitor, the one revokeAllActive holds when
+            // change control is turned off, and checks the switch again there. The check above may
+            // have passed just before a switch-off; this one either sees the switch off and refuses
+            // with the same message, leaving the request PENDING and nothing registered, or runs
+            // before the switch-off's revocation, which then ends the window. Lock order: this
+            // service's lock, then GrantService's monitor, then the store; nothing below takes the
+            // configuration's monitor (the switch is a volatile read), so the switch-off path
+            // (configuration monitor, then GrantService's monitor) cannot deadlock with this.
+            endedAtOnce = !GrantService.get().registerApproved(item, () -> {
+                checkChangeControlEnabled("approved", request.getScope() == null ? null : request.getScope().getFullName());
+                request.setStatus(RequestStatus.APPROVED);
+                request.setDecidedAt(now);
+                request.setDecidedBy(decidedBy);
+                request.setDecisionComment(comment);
+                store.saveGrantRequest(request);
+                made[0] = Grant.createFor(request, now);
+                return made[0];
+            });
+            Grant grant = made[0];
             if (!endedAtOnce) {
                 LOGGER.info(() -> "Grant " + grant.getId() + " created for user '" + grant.getUser()
                         + "' on " + grant.getScope() + " until " + grant.getExpiresAt());
