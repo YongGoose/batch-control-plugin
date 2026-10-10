@@ -495,13 +495,24 @@ public final class ActivationService {
                         + " cannot be approved now; it stays PENDING.");
             }
             String decider = Jenkins.getAuthentication2().getName();
+            // #36: the new state is written before the request is saved as APPROVED. A state that
+            // cannot be written refuses the approval with nothing changed: the request stays PENDING,
+            // memory and the state file keep the old state, no record is written and no other
+            // request is invalidated.
+            ActivationState previous = applyApprovedState(request, decider, now, identity);
             request.setStatus(RequestStatus.APPROVED);
             request.setDecidedAt(now);
             request.setDecidedBy(decider);
             request.setDecisionComment(comment);
             request.setSelfApproved(selfApproval);
-            store.saveActivationRequest(request);
-            applyApproved(request, decider, now, selfApproval, identity);
+            try {
+                store.saveActivationRequest(request);
+            } catch (RuntimeException e) {
+                // The request stays PENDING, so the state goes back to what it was.
+                restoreState(request.getJobFullName(), previous, e);
+                throw e;
+            }
+            recordApproved(request, decider, selfApproval);
             // S-13-07: the other pending requests of the item were asked against the state before
             // this decision; a stale ACTIVATE must not be able to undo this HOLD (or the reverse).
             invalidatePending(request.getJobFullName(), false, "Superseded by the approval of activation request "
@@ -514,24 +525,48 @@ public final class ActivationService {
     }
 
     /**
-     * Writes the state and the change record of an approved request; under {@link #lock}. A change
-     * record that cannot be written does not fail the approval ({@link #appendRecord}): the caller
-     * still invalidates the other pending requests (S-13-07) and sends the approval notification.
+     * Writes the state of a request being approved, before the request is saved (#36); under
+     * {@link #lock}. A write that fails throws {@link io.jenkins.plugins.batchcontrol.store.StoreWriteException}
+     * and leaves the state file as it was (the write is atomic) and memory following that file.
+     *
+     * @return the state it replaced; {@code null} when there was none or it could not be read
      */
-    private void applyApproved(ActivationRequest request, String decider, Instant now, boolean selfApproval,
-                               String identity) {
+    private ActivationState applyApprovedState(ActivationRequest request, String decider, Instant now, String identity) {
         String fullName = request.getJobFullName();
-        boolean activate = request.getAction() == ActivationRequest.Action.ACTIVATE;
         ActivationState state;
-        if (activate) {
+        ActivationState previous;
+        if (request.getAction() == ActivationRequest.Action.ACTIVATE) {
+            previous = loadStateQuietly(fullName);
             state = ActivationState.activated(fullName, decider, now, request.getId(), identity);
         } else {
-            ActivationState existing = store.loadActivationState(fullName);
-            state = existing == null
+            previous = store.loadActivationState(fullName);
+            state = previous == null
                     ? ActivationState.notActivated(fullName, identity).heldBy(decider, now, request.getId())
-                    : existing.heldBy(decider, now, request.getId());
+                    : previous.heldBy(decider, now, request.getId());
         }
-        saveState(state);
+        String key = state.getJobFullName();
+        // S-13-04/05: memory says "not activated" while the file is replaced ...
+        setCached(key, Cached.NOT_ACTIVATED);
+        try {
+            store.saveActivationState(state);
+        } catch (RuntimeException e) {
+            // ... and #36: a refused write left the file as it was, so memory follows the file again.
+            forgetCached(key);
+            throw e;
+        }
+        setCached(key, Cached.of(state));
+        return previous;
+    }
+
+    /**
+     * Writes the change record of an approval whose state and request are saved; under
+     * {@link #lock}. A change record that cannot be written does not fail the approval
+     * ({@link #appendRecord}): the caller still invalidates the other pending requests (S-13-07)
+     * and sends the approval notification.
+     */
+    private void recordApproved(ActivationRequest request, String decider, boolean selfApproval) {
+        String fullName = request.getJobFullName();
+        boolean activate = request.getAction() == ActivationRequest.Action.ACTIVATE;
         String detail = (activate ? "Activated" : "Put on hold") + " by approval of activation request "
                 + request.getId() + " (" + request.getAction() + ", requested by " + request.getRequester()
                 + (selfApproval ? ", self-approved" : "") + ")";
@@ -539,6 +574,35 @@ public final class ActivationService {
                 fullName, decider, detail));
         LOGGER.info(() -> "Job '" + fullName + "' " + (activate ? "activated" : "put on hold")
                 + " by '" + decider + "' (activation request " + request.getId() + ")");
+    }
+
+    /**
+     * Puts back the state an approval replaced when the approved request could not be saved (#36),
+     * so the PENDING request and the state agree. A state that cannot be put back is logged; the
+     * item is then left not activated at worst, never activated (S-13-05).
+     */
+    private void restoreState(String fullName, ActivationState previous, RuntimeException cause) {
+        try {
+            if (previous == null) {
+                deleteState(fullName);
+            } else {
+                saveState(previous);
+            }
+        } catch (RuntimeException again) {
+            cause.addSuppressed(again);
+            LOGGER.log(Level.SEVERE, again, () -> "The approved activation request of '" + fullName + "' could not be"
+                    + " saved, and its activation state could not be put back; it stays not activated");
+        }
+    }
+
+    /** The stored state of {@code fullName}, or {@code null} when there is none or it cannot be read. */
+    private ActivationState loadStateQuietly(String fullName) {
+        try {
+            return store.loadActivationState(fullName);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, e, () -> "Could not read the activation state of '" + fullName + "'");
+            return null;
+        }
     }
 
     /** Rejects a PENDING request; the comment is mandatory (SPEC item 5 rule). Nothing else changes. */
@@ -953,6 +1017,14 @@ public final class ActivationService {
         synchronized (cacheMonitor) {
             generation.incrementAndGet();
             cache().put(fullName, value);
+        }
+    }
+
+    /** Drops the cached state of {@code fullName}: the next read takes it from its file again. */
+    private void forgetCached(String fullName) {
+        synchronized (cacheMonitor) {
+            generation.incrementAndGet();
+            cache().remove(fullName);
         }
     }
 
