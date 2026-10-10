@@ -13,6 +13,34 @@
 
 ---
 
+## 2026-10-10 02:15 — bug hunt merged; ci.jenkins.io moved to non-spot agents; first release waits for its check
+- **Bug hunt** (owner request: find bugs in code, prove each with an e2e PoC, then fix): 26 candidates, 12 reproduced.
+  - All 12 fixed, each with a red test, the fix and an e2e unit, one PR per bug: #47–#57.
+  - Decisions D-80..D-84 (#46).
+  - Low-severity findings filed as issues #32–#45.
+- **Follow-ups merged:**
+  - #60: a failed change record never breaks the operation it records. This is the R3-01 rule in four more places; its e2e unit has 30 checks and fails on R3-01.
+  - #59: a pending lock retry never writes a deleted job back (TEST-MATRIX note 284 (c)). This was the flaky `FailClosedGapTest.t_gap_438`: 1 failure in 20 runs before, 60 of 60 passes after.
+  - #56 also carries:
+    - a test-fixture fix: `t_gap_113` rebuilt the job directory in place, and ext4 handed back the same inode;
+    - the merge with #60 in `ActivationService.java`.
+- **Windows** (merged earlier on 10-09):
+  - #28: a manual Windows workflow;
+  - #29: skip storage-fault fixtures Windows cannot build;
+  - #30: store writes survive a concurrent open handle.
+  - #27: ten feature groups per JDK; Build went from 22 to 13 minutes.
+- **ci.jenkins.io** had never passed on main.
+  - After #16 the remaining failures were "Agent was removed": the `maven-<jdk>` pods run on spot nodes, which were reclaimed during the ~2 h suite, and buildPlugin retries on spot.
+  - #61 runs Linux on `maven-<jdk>-nonspot` (jenkins-infra/helpdesk#5171, jenkinsci/jenkins#26895). Its first run on `da1109c` scheduled on the nonspot labels.
+- **CD:** `cd` skips the release while the `Jenkins` check on the main HEAD is not green. The owner's dispatch at 16:35Z skipped for that reason.
+- **Repository:** all merged or contained remote branches were deleted; `main` is the only branch left.
+- **Waiting:**
+  - ci.jenkins.io on `da1109c`. Main stays frozen until it finishes; then the owner decides on running `cd`.
+  - Review of the outside PR #58 (`tabs.jelly`, issue #9).
+- **Prepared, to merge after the release:**
+  - this TEST-MATRIX reorder (notes 294–305 and misplaced rows; content unchanged);
+  - Dependabot alert 1 (`requests` 2.33.0 in the e2e harness).
+
 ## 2026-10-09 (later) — plugin page docs, old issue numbers, ci.jenkins.io, multi-approver defect
 - Merged: #14 (required checks, e2e path filter, feature-named test jobs), #13 (CD on manual dispatch only), #12 into #11's branch (its base was `e2e/gap-audit`; #11 now carries both).
 - Delegated: release-manager ← README shortened to 220 lines for plugins.jenkins.io, with the detail moved verbatim to the new `docs/USER-GUIDE.md`; the review findings M2–M11 and L1–L12 fixed (CONTRIBUTING, PR template with Testing done and a Releases section, LIMITATIONS); README.ko.md re-translated from the new README. e2e-tester ← five screenshots in `docs/images/` and `e2e/readme-screenshots/capture.py` to regenerate them. Main session ← CLAUDE.md brought up to date, with owners for `docs/USER-GUIDE.md` (release-manager) and `docs/images/**` (e2e-tester), approved by the owner.
