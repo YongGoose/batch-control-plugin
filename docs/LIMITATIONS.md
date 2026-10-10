@@ -1356,6 +1356,11 @@ code does on purpose.
     later core release changes that API, the request dialogs on the new job
     page may stop opening. The full request pages under `/batch-control/`
     keep working either way.
+51. **CSV exports start with a UTF-8 byte order mark.** Every CSV export
+    begins with a BOM (D-85, issue #43) so that Excel reads non-ASCII text
+    correctly. A strict CSV parser that does not expect a BOM sees it before
+    the first header name (for example `\ufeffrunId`). Excel, LibreOffice and
+    most CSV libraries handle it; otherwise strip the first three bytes.
 
 ## Out of scope by design
 

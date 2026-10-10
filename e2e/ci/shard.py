@@ -147,6 +147,12 @@ UNITS = [
     Unit("r23-xml-chars", 0.6, [("r23-xml-chars", py("r23/xml_chars.py"))], group="crawl and ui checks",
          doc="e2e-23 R1-01: an ANSI-coloured console tail leaves the incident readable (list, page, incidents.csv, "
              "summary); a comment or grant reason holding U+000B is refused with a 4xx and stores nothing"),
+    # e2e-25 #43 (Wave C-UI, D-85 BOM by default). r25/csv_bom.py arranges its own item (r25-csv-배치), runs it once
+    # per pass through an approved request and alternates its activation (ACTIVATE/HOLD) to write a change record.
+    Unit("r25-csv-bom", 0.7, [("r25-csv-bom", py("r25/csv_bom.py"))], group="crawl and ui checks",
+         doc="e2e-25 #43: runs.csv, incidents.csv, changes.csv and requests.csv (REST, filtered, empty, and the History "
+             "page's download buttons) start with the UTF-8 BOM and the header row; guards: content type and "
+             "attachment name unchanged, the existing columns, Korean values in UTF-8"),
     # e2e-16 (hosting review round 6: D-71..D-74). Each unit arranges its own items/accounts (r16/arrange.py is idempotent)
     # so it is self-contained on whatever shard it lands on. Drivers exit non-zero and print FAIL lines. Weights: minutes
     # measured on the 2026-10-06 runs (arrangement included), calibrated against CI (above).
