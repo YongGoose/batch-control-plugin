@@ -364,6 +364,11 @@ public class StoreRestartGapTest {
                 assertNotNull(created, "premise: request " + n + " is created");
                 assertTrue(System.nanoTime() - start < TimeUnit.SECONDS.toNanos(30), "D-36: a blocked notifier does not delay the creation");
             }
+            long blockedDeadline = System.currentTimeMillis() + NotificationCapture.DELIVERY_TIMEOUT_MS;
+            while (System.currentTimeMillis() < blockedDeadline && Blocking.SEEN.isEmpty()) {
+                Thread.sleep(50); // polling for asynchronous delivery, not waiting for an expiry
+            }
+            assertFalse(Blocking.SEEN.isEmpty(), "premise: the first notifier is blocked on its first delivery before the restart: " + Blocking.SEEN);
         });
         session.then(r -> {
             FreeStyleProject job = (FreeStyleProject) r.jenkins.getItemByFullName("nb");
