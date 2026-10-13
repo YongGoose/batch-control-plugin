@@ -13,6 +13,32 @@
 
 ---
 
+## 2026-10-13 17:50 — two releases out; ci.jenkins.io runs the core tests only; work goes through the fork
+- **Releases** (JEP-229 CD, manual `cd` dispatch):
+  - `1124.vfe83a_6d946c3` on 2026-10-10, the first release.
+  - `1244.ve130334a_a_2a_9` on 2026-10-13 (16:35Z on 10-12), from main `e130334`. All 60 checks on that commit were green, including `Jenkins`, Build, E2E and Windows tests. The update center lists it.
+  - #66 had switched the version to `1.0.<count>.v<hash>`, which Jenkins orders below 1124. #86 went back to the default `<count>.v<hash>` before the second release.
+- **Merged since the last entry:**
+  - Second round of the bug-hunt issues, one PR per bug, each with a red test, the fix and an e2e unit: #69–#76 (10-10) and #82 (#36), #83 (#34), #84 (#33) (10-13).
+  - #62 (Windows test premises), #64 and #67 (docs: TEST-MATRIX order, D-85, D-86), #65 (e2e dependency).
+- **ci.jenkins.io:**
+  - #61 and #63 moved the build to non-spot agents and split the tests across 33 parallel agents. On 10-10 about 40 pushed branches each started such a build. A ci.jenkins.io administrator cancelled them and opened #80.
+  - #81: plain `buildPlugin` on spot agents, Linux JDK 25 and Windows JDK 21, only the tests tagged `core` (about 54 minutes). The whole suite runs on GitHub Actions: Build (Linux, JDK 21 and 25) and Windows tests (JDK 21).
+  - Owner rule since 10-11: work branches are pushed only to the fork `YongGoose/batch-control-plugin`. A PR to jenkinsci is opened from there after a PR inside the fork is green, and jenkinsci keeps `main` only.
+- **README (#85):** screenshots retaken with frames and the section arranged by role and step, on the fork branch `docs/readme-screenshots-by-role`. The owner approved it on 10-13; the fork-side checks are running before the upstream PR.
+- **Housekeeping on 10-13:**
+  - Issues #87 (flaky e2e unit `def07:def07-new`) and #88 (Windows tests on main: extension download, lost middle run).
+  - The seven identical duplicate lines in TEST-MATRIX (notes 300, 302, 304, 305; rows T-05-90, T-05-144) are removed in the same change as this entry.
+  - Merged branches and worktrees removed, on the fork and locally.
+- **Unfinished, local only** (started 10-10, on no remote; the owner asked on 10-13 to finish them one after another, with thorough e2e):
+  - UI (#18, #6, #7): d1 request page titles, ID row, revert inside Advanced; d2 status labels and History filter dropdowns; d3 one decision box and 7-column run tables (tests committed, implementation uncommitted); d4 administrator checks on the overview (tests only).
+  - Bugs: #32 (assembled with its e2e unit), #35 and #44 (test and fix, no e2e unit yet), #1 follow-ups (14 commits).
+- **Waiting:** the outside PR #58 (`tabs.jelly`, issue #9): changes requested on 10-09, no answer since.
+- **Open requests:**
+  - `CLAUDE.md` line 49 (human-only) still says the `Jenkinsfile` builds Linux on 21 and 25; it builds Linux 25 and Windows 21 since #81. The line "Agents only commit; the human pushes" also predates the fork rule.
+  - `.claude/agents/release-manager.md` line 25 still prescribes the old `Jenkinsfile` configurations.
+  - `pom.xml` and `CONTRIBUTING.md` say the core-only build fails when tests are lost; it fails only when no core test runs at all. TEST-MATRIX note 330, `Jenkinsfile` and `CONTRIBUTING.md` give three different numbers for the core test time (release-manager, test-author).
+
 ## 2026-10-10 02:15 — bug hunt merged; ci.jenkins.io moved to non-spot agents; first release waits for its check
 - **Bug hunt** (owner request: find bugs in code, prove each with an e2e PoC, then fix): 26 candidates, 12 reproduced.
   - All 12 fixed, each with a red test, the fix and an e2e unit, one PR per bug: #47–#57.
