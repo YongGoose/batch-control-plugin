@@ -425,9 +425,11 @@ def sec_R():
         abtn.click()
     s2.page.wait_for_load_state("load")
     stored2 = lib.stored("run", rid2)
+    # The completed expect_navigation already proves no dialog blocked the post.
+    # EXECUTED is accepted because the approved run starts right away.
     check("R", "#93 Approve still posts with a single click (no confirmation)",
-          stored2.get("status") in ("APPROVED", "EXECUTED") and stored2.get("decisionComment") == "e2e-27 R ok",
-          stored=stored2)
+          stored2.get("status") in ("APPROVED", "EXECUTED") and stored2.get("decidedBy") == "approver-1"
+          and stored2.get("decisionComment") == "e2e-27 R ok", stored=stored2)
     s2.done()
 
 

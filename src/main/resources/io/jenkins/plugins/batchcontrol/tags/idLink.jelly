@@ -2,9 +2,9 @@
 <!-- e2e-11 DEF-05 (after D-68): a request or window id in a list. A UUID (36 characters) is
      shown cut to its first characters with an ellipsis, so the id column does not push a list
      past 1280 px; the element still holds the whole id (copy, find in page, assistive technology)
-     and carries it as tooltip. Request and window ids are always UUIDs (D-68, D-69), so the cut applies to every id. The link goes
-     to the full-id URL. Escaped by default. D-74: the cut is the plugin stylesheet's class
-     batch-control-short-id, no inline style. -->
+     and carries it as tooltip. Request and window ids are always UUIDs (D-68), so the cut applies
+     to every id. The link goes to the full-id URL. Escaped by default. D-74: the cut is the plugin
+     stylesheet's class batch-control-short-id, no inline style. -->
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler">
   <st:documentation>
     An id, linked when href is given.
