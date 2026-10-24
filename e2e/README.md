@@ -91,9 +91,18 @@ that way). `r15/check.py` writes `"ok": false` as a hint for the reviewer (e2e-1
 judges its rows from `r15/out/check.jsonl` and leaves out exactly the known or provoked items of e2e-13/14/15
 (`r15_problems` in `ci/shard.py`: core's GET 405/404 links, the build history widget's repeated status labels, the
 400 of the deliberately empty submit, core's D-70 MIME line and core's breadcrumb `reading 'replace'` page error,
-U-1); anything else fails. The assertions of the drivers are unchanged. The crawl, `actions.py` and `jobui.py` are
-observational (they log rows for review, as in the e2e-12/14 reports); `summary.md` counts their notable rows (controls
-that do nothing, broken links, console errors, exceptions) without turning them into a verdict.
+U-1); anything else fails. The crawl, `actions.py`, `jobui.py`, `misc.py`, the targeted scripts (`errpages.py`,
+`s_listpager.py`, `s_incident.py`, `helpcheck.py`, `helpcheck2.py`, `s_monitor.py`), `r14/role/*` and r15's
+`side_dialog.py`, `folder_compare.py` and `menu.py` used to be observational; since H1 (2026-10-24) each judges its own
+rows at its end with `ci/h1_rules.py` and prints `FAIL <driver> <check> <json>` for a finding no rule explains: a page
+status other than the role's expectation table (in both directions: a 200 where the SPEC requires 404 fails too), a
+broken link, a control that cannot be clicked or does nothing, a dialog that does not close, a state change that did not
+happen, and every console error or page error that the keyed allowlist does not name (role list, anchored URL-pattern
+regex, exact status or whole normalised message, a page error's leading stack frames; each entry names its triage
+class and source). Warnings are never judged. An allowlist entry that applied and matched nothing prints
+`STALE allow <id>`, a warning that `summary.md` lists. `python3 e2e/ci/selftest_h1.py` replays recorded rows and
+synthetic findings through the rules without Jenkins (also part of `ci/test_selftest_content.py`). `summary.md` still
+counts the notable rows of crawl, actions and jobui.
 
 Isolation between units: the admin crawl clicks every control it may, including the Dismiss of the strategy monitor on
 `/manage/` (e2e-12 Known 5), which disables that monitor for good. `misc.py` S then reverts the strategy and finds no
