@@ -8,7 +8,15 @@ R refusal pages (approval required, grant required, move refusal) and their link
 S strategy monitor: Mark as reviewed, Revert (Cancel/OK), Install (Cancel/OK)
 M job page "Mark as reviewed" (JobRequestAction) and Request again on the grants page
 K dark theme render of every Batch Control page
-Rows: out/misc.jsonl."""
+Rows: out/misc.jsonl.
+
+H1 (2026-10-24): the rows are judged at the end (ci/h1_rules.py judge_misc): statuses per role against MISC_STATUS
+(both directions), the saved and the refused value, the History kinds, filter, date messages, downloads and monthly
+page, paging, breadcrumb and menu links (and the menu per role), tab links, the refusal pages and their links, the
+strategy monitor's Revert/Install/Mark as reviewed, the job page's Mark as reviewed, Request again, the dark theme.
+Recorded so that they mean that: the configuration link is counted on /manage/ before navigating away (M-01); each
+console list holds only the messages of the page it is about (M-02, M-04); an inline validation message is listed
+once (M-03); the build entry of the new job page is looked for in the main panel too (M-08)."""
 import json, re, sys, time
 from lib import opened, gone, Session, close, api, groovy, BASE, clean, pw
 import lib
@@ -17,8 +25,12 @@ WANT = sys.argv[1] if len(sys.argv) > 1 else "CHPBTRSMK"
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
+ROWS = []
+
+
 def emit(sec, row):
     row["sec"] = sec
+    ROWS.append(row)
     lib.log("misc", row)
     print(json.dumps(row)[:400])
 
@@ -36,13 +48,14 @@ def sec_C():
     for role in ["admin", "manager", "approver-1", "requester", "nobc"]:
         s = Session(role)
         s.go("/manage/" if role in ("admin", "manager") else "/")
-        link = s.page.locator("a[href*='batch-control-configuration']")
+        link_visible = s.page.locator("a[href*='batch-control-configuration']").count()  # M-01: counted on this page
+        nc = len(s.console)
         r = s.go("/manage/batch-control-configuration/")
         st = r.status if r else None
-        row = {"role": role, "link_visible": link.count(), "page_status": st}
+        row = {"role": role, "link_visible": link_visible, "page_status": st}
         if st == 200:
             row["buttons"] = [t.strip() for t in s.page.locator("#main-panel button, #main-panel a.jenkins-button").all_inner_texts() if t.strip()]
-            row["console"] = [c for c in s.console if "MIME" not in c][:3]
+            row["console"] = s.console[nc:][:10]  # M-02: this page's messages only
             # valid save: change pending timeout 1 -> 2
             f = s.page.locator("input[name='_.pendingTimeoutHours']")
             old = cfg_value("pendingTimeoutHours")
@@ -57,7 +70,9 @@ def sec_C():
             s.go("/manage/batch-control-configuration/")
             s.page.locator("input[name='_.pendingTimeoutHours']").fill("-5")
             s.page.locator("input[name='_.pendingTimeoutHours']").blur(); s.page.wait_for_timeout(1200)
-            row["inline_validation"] = [t.strip() for t in s.page.locator(".error, .validation-error-area").all_inner_texts() if t.strip()][:2]
+            msgs = [t.strip() for t in s.page.locator(".validation-error-area .error").all_inner_texts() if t.strip()] or \
+                [t.strip() for t in s.page.locator(".error").all_inner_texts() if t.strip()]
+            row["inline_validation"] = list(dict.fromkeys(msgs))[:3]  # M-03: the area and its .error child are one message
             with s.page.expect_navigation() as nav:
                 s.page.locator("button[name=Submit], button.jenkins-button--primary", has_text="Save").first.click()
             row["refused_status"] = nav.value.status
@@ -89,6 +104,7 @@ def sec_H():
     for role in ["approver-1", "admin", "reqonly", "nobc", "manager"]:
         s = Session(role)
         r = s.go("/batch-control/history/")
+        nc0 = len(s.console)
         row = {"role": role, "status": r.status if r else None}
         if row["status"] != 200:
             emit("H", row); s.done(); continue
@@ -151,7 +167,7 @@ def sec_H():
             if prevb.count():
                 prevb.first.click(); s.page.wait_for_load_state("load")
                 row["monthly_prev"] = s.page.url.replace(BASE, "")
-        row["console"] = [c for c in s.console if "MIME" not in c][:3]
+        row["console"] = s.console[nc0:][:10]  # the History pages' messages (from the first History load on)
         s.shot("#main-panel", f"H-{role}-history")
         s.done()
         emit("H", row)
@@ -207,6 +223,7 @@ def sec_B():
     for role in ["admin", "requester", "approver-1", "manager", "nobc"]:
         s = Session(role)
         for page in ["/batch-control/requests/", "/batch-control/history/", "/job/batch-daily/batch-control/"]:
+            nc = len(s.console)
             r = s.go(page)
             row = {"role": role, "page": page, "status": r.status if r else None}
             if row["status"] != 200:
@@ -242,7 +259,7 @@ def sec_B():
                         row["menu_click_landing"] = s.page.url.replace(BASE, "")
             r = s.context.request.get(BASE + "/batch-control/contextMenu")
             row["contextMenu_GET"] = (r.status, r.text()[:200])
-            row["console"] = [c for c in s.console if "MIME" not in c][:3]
+            row["console"] = s.console[nc:][:10]  # M-04: this page's messages only
             emit("B", row)
         s.done()
 
@@ -285,8 +302,11 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
         for job in ["batch-pipeline", "batch-daily"]:
             s.go(f"/job/{job}/")
             row = {"role": role, "ui": ui, "job": job}
-            cands = s.page.locator("#tasks a, .jenkins-app-bar a, .jenkins-app-bar button", has_text=re.compile("^(Build Now|Direct Build|Build with Parameters)"))
-            row["build_entries"] = [t.strip() for t in cands.all_inner_texts()]
+            # M-08: the new job page shows the build entry in the main panel (jobui lists it as "main"), not in an app bar
+            cands = s.page.locator("#tasks a, .jenkins-app-bar a, .jenkins-app-bar button, .app-page-body__header a, "
+                                   ".app-page-body__header button, #main-panel a, #main-panel button",
+                                   has_text=re.compile("^(Build Now|Direct Build|Build with Parameters)"))
+            row["build_entries"] = list(dict.fromkeys(t.strip() for t in cands.all_inner_texts()))
             if cands.count():
                 nb = len(s.bad)
                 cands.first.click(); s.page.wait_for_timeout(2500)
@@ -297,6 +317,7 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
                         b.first.click(); s.page.wait_for_timeout(3500)
                 s.page.wait_for_load_state("load")
                 row["after"] = {"url": s.page.url.replace(BASE, ""), "h1": s.page.locator("h1").first.inner_text()[:80] if s.page.locator("h1").count() else None,
+                                "dialog_open": s.page.locator("dialog[open]").count(),
                                 "notifications": [t.strip()[:150] for t in s.page.locator(".jenkins-notification, #notification-bar, .tippy-box").all_inner_texts() if t.strip()][:2],
                                 "bad": s.bad[nb:][:3], "text": re.sub(r"\s+", " ", s.text())[:300]}
                 links = []
@@ -548,3 +569,4 @@ for k in WANT:
     except Exception as e:  # noqa
         emit(k, {"EXCEPTION": str(e)[:300]})
 close()
+lib.h1.report("misc", ROWS, {"sections": WANT})
