@@ -16,7 +16,9 @@ page, paging, breadcrumb and menu links (and the menu per role), tab links, the 
 strategy monitor's Revert/Install/Mark as reviewed, the job page's Mark as reviewed, Request again, the dark theme.
 Recorded so that they mean that: the configuration link is counted on /manage/ before navigating away (M-01); each
 console list holds only the messages of the page it is about (M-02, M-04); an inline validation message is listed
-once (M-03); the build entry of the new job page is looked for in the main panel too (M-08)."""
+once (M-03); the build entry of the new job page is looked for in the main panel too (M-08); the move refusal gets its
+premise, a CREATE window for mover1 on the destination folder team, so that cloudbees-folder lists the destination,
+and the window is revoked afterwards (M-10)."""
 import json, re, sys, time
 from lib import opened, gone, Session, close, api, groovy, BASE, clean, pw
 import lib
@@ -372,10 +374,14 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
     row["still_exists"] = api("admin", "/job/prod/job/x/api/json").status_code
     emit("R", row)
     s.done()
-    # move refusal: mover1 moves prod/z -> team (no window)
+    # move refusal: mover1 moves prod/z -> team. M-10: cloudbees-folder's move page offers only destinations where the
+    # user may create items (StandardHandler.permitted: Job.CREATE), and mover1 holds Item/Move and RequestGrant only;
+    # so mover1 first gets an approved CREATE window on team (as r9/s83.py was arranged). The move still lacks Item/Delete
+    # on prod/z, which no window can confer on a move here: the refusal page (D-59) must answer.
+    wid = create_window("mover1", "team")
     s = Session("mover1")
     r = s.go("/job/prod/job/z/move/")
-    row = {"case": "move refusal", "role": "mover1", "move_page": r.status if r else None}
+    row = {"case": "move refusal", "role": "mover1", "window": wid, "move_page": r.status if r else None}
     if r and r.status == 200:
         sel = s.page.locator("select[name=destination]")
         opts = [o.get_attribute("value") for o in sel.locator("option").all()]
@@ -398,8 +404,24 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
                 row["request_click"] = {"dialog": s.page.locator("dialog[open]").count(), "url": s.page.url.replace(BASE, ""),
                                         "dialog_text": re.sub(r"\s+", " ", s.page.locator("dialog[open]").first.inner_text())[:200] if s.page.locator("dialog[open]").count() else None}
     row["still_in_prod"] = api("admin", "/job/prod/job/z/api/json").status_code
+    if wid:
+        row["window_revoked"] = api("admin", f"/batch-control/grants/{wid}/revoke", "POST").status_code
     emit("R", row)
     s.done()
+
+
+def create_window(user, item, actions=("CREATE",)):
+    """An approved permission window for user on item (REST, as r9/grants.py); returns its id or None."""
+    data = [("scopeFullName", item), ("durationMinutes", "15"), ("reason", f"e2e-12 misc R premise for {user}"),
+            ("approvers", "approver-1")] + [("actions", a) for a in actions]
+    r = api(user, "/batch-control/grants/create", "POST", data=data)
+    m = re.search(UUID, r.headers.get("Location", ""))
+    if not m:
+        print(f"misc R: the {actions} window for {user} on {item} was not created: {r.status_code}", flush=True)
+        return None
+    a = api("approver-1", f"/batch-control/grants/{m.group(0)}/approve", "POST", data={"comment": "misc R premise"})
+    print(f"misc R: window {m.group(0)} for {user} on {item}: create {r.status_code}, approve {a.status_code}", flush=True)
+    return m.group(0)
 
 
 # ---------------------------------------------------------------- S
