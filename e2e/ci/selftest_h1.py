@@ -259,6 +259,12 @@ U1_ENTRY = ("pageerror: Cannot read properties of undefined (reading 'replace')\
 U1_OTHER_STACK = ("pageerror: Cannot read properties of undefined (reading 'replace')\nstack: TypeError: x\n"
                   "    at render (http://localhost:18080/jenkins/plugin/batch-control/ui/dialogOpener.js:12:3)\n"
                   "url: http://localhost:18080/jenkins/batch-control/requests/")
+ACT_FAST = "/job/fast/batch-control-activation/"
+# the two history pages of CI run 40158487092 (trace of crawl-reqonly-classic, buildHistory/ajax of job fast)
+HIST_P1 = {"newest": "-9223372036854775744", "oldest": "-9223372036854775773", "has_up": "false", "has_down": "true",
+           "count": 30, "first": 64, "last": 35}
+HIST_P2 = {"newest": "-9223372036854775774", "oldest": "-9223372036854775803", "has_up": "true", "has_down": "true",
+           "count": 30, "first": 34, "last": 5}
 TOGGLE = "/job/ops/job/mb/batch-control-activation/"
 WS_PAGE = "/job/ops/job/job-a/batch-control/"
 D70_LINE = ("error: Refused to execute script from 'http://localhost:18080/jenkins/static/b1c10f94/' because its MIME type "
@@ -289,6 +295,31 @@ def synthetic():
         ("a control gone on its fresh load", "crawl", [click(req, "gone-on-reload", label="Revoke")], crawl_ctx(), "fail", "click"),
         ("a build entry that left the history on reload is not a failure", "crawl",
          [click("/job/batch-cron/", "gone-on-reload", label="", data={"href": "/jenkins/job/batch-cron/1234/"})], crawl_ctx(), "pass", None),
+        # core's build-history pager (CI run 40158487092: its in-place page swap was read as NOTHING)
+        ("core's Older builds pages the history in place, Newer builds brings it back", "crawl",
+         [dict(click(ACT_FAST, "paged", role="reqonly", ui="classic", label="Older builds",
+                     detail={"pager": "down", "history_before": HIST_P1, "history_after": HIST_P2,
+                             "newer": {"result": "paged", "history_after": HIST_P1}, "console": []}),
+               tag="button", region="side")], crawl_ctx("reqonly", "classic"), "pass", None),
+        ("core's Older builds on a job with exactly two pages (no Newer step recorded)", "crawl",
+         [dict(click("/job/fast/", "paged", role="admin", ui="classic", label="Older builds",
+                     detail={"pager": "down", "history_before": HIST_P1, "history_after": HIST_P2, "console": []}),
+               tag="button", region="side")], crawl_ctx("admin", "classic"), "pass", None),
+        ("not hidden: core's Older builds whose list does not page", "crawl",
+         [dict(click(ACT_FAST, "NOTHING", role="reqonly", ui="classic", label="Older builds",
+                     detail={"pager": "down", "history_before": HIST_P1, "history_after": HIST_P1, "console": []}),
+               tag="button", region="side")], crawl_ctx("reqonly", "classic"), "fail", "click"),
+        ("not hidden: Newer builds on the older page does nothing", "crawl",
+         [dict(click(ACT_FAST, "paged", role="reqonly", ui="classic", label="Older builds",
+                     detail={"pager": "down", "history_before": HIST_P1, "history_after": HIST_P2,
+                             "newer": {"result": "NOTHING", "history_after": HIST_P2}, "console": []}),
+               tag="button", region="side")], crawl_ctx("reqonly", "classic"), "fail", "pager"),
+        ("not hidden: a paged row without core's pager markup", "crawl",
+         [dict(click(ACT_FAST, "paged", role="reqonly", ui="classic", label="Older builds", detail={"console": []}),
+               tag="button", region="side")], crawl_ctx("reqonly", "classic"), "fail", "pager"),
+        ("not hidden: a plugin side-panel button that does nothing", "crawl",
+         [dict(click(ACT_FAST, "NOTHING", role="reqonly", ui="classic", label="Request Change Permission", detail={"console": []}),
+               tag="button", region="side")], crawl_ctx("reqonly", "classic"), "fail", "click"),
         ("role profile: 200 where the requester must get 404 outside team", "crawl",
          [page("/job/batch-daily/", 200, role="requester")], crawl_ctx("requester", profile="role"), "fail", "page-status"),
         ("role profile: the requester reads team's jobs", "crawl",
