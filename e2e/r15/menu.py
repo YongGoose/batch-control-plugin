@@ -1,10 +1,15 @@
 """e2e-15: the new job page app-bar "More actions" menu on the job-subpage activation pages vs the same menu on the
 job's own page (requester, admin; new job page on). Items: text, tag, href; duplicates; empty-href anchors; each
 URL-less item clicked (Permalinks must open its submenu, Request Change Permission its dialog).
-Usage: menu.py [tag]   -> out/menu.jsonl, run-15/M-<tag>-<user>-<page>.png"""
+Usage: menu.py [tag]   -> out/menu.jsonl, run-15/M-<tag>-<user>-<page>.png
+H1 (2026-10-24): judged at the end by ci/h1_rules.py (judge_r15 "menu"): every linked entry answers 200, no duplicate
+or empty-href entry, Request Change Permission opens its dialog, Permalinks its submenu; console errors only through
+the allowlist (D-70, exact message: triage X-01)."""
 import json, sys
 from urllib.parse import urljoin
+import lib
 from lib import Session, close, log, groovy, gone, react, until
+ROWS = []
 TAG = sys.argv[1] if len(sys.argv) > 1 else "a"
 JOBS = ["/job/team-mb/job/main/", "/job/team-mb/job/feature-1/", "/job/batch-pipeline/", "/job/batch-daily/"]
 ITEMS = """() => [...document.querySelectorAll('.tippy-box .jenkins-dropdown__item')].map(i => ({text: i.innerText.trim(),
@@ -73,6 +78,8 @@ for user in ("requester", "admin"):
                                         "url": s.page.url.replace(s.page.url.split('/jenkins')[0], ''), "hover": hover}
             row["console"] = list(s.console); row["bad"] = list(s.bad)
             log("menu", row)
+            ROWS.append(row)
             print(row['user'], row['page'], len(row['items'] or []))
     s.done()
 close()
+lib.h1.report("r15/menu", ROWS)

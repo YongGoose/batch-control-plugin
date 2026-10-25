@@ -11,6 +11,28 @@ For every page reached (start set + Batch Control links found on the way, two pa
     second open, with its Cancel button; both must close it.
 Rows go to out/crawl.jsonl. Nothing is POSTed here (state-changing buttons are clicked in actions.py).
 
+H1 (2026-10-24): at its end the crawl judges its own rows with ci/h1_rules.py (judge_crawl) and prints a
+"FAIL crawl <check> <json>" line per finding no rule explains: a page status other than the role's expectation table
+(both directions), a BROKEN link or POST form, a DEAD-HREF, a click that failed or did nothing, a dialog that Escape or
+Cancel does not close, and an error/pageerror in the console that no allowlist entry (exact message, page pattern, role)
+explains. How the rows are recorded, so that they mean what they say:
+  * the browser's own "Failed to load resource" line for the page's document is dropped when the page answers 4xx
+    (it repeats the page status, which the table judges);
+  * core's help "?" (a.jenkins-help-button, wired by its helpurl) is a help-button row whose help URL is fetched;
+  * a link that core posts (data-callback, data-task-post="true", the list view's build button) to a build or rebuild
+    URL answers 405 to a GET: a post-link row, like a POST form;
+  * a disabled control, or one whose "disabled" class sets pointer-events:none, is an inert row and not clicked (core's
+    "Newer builds" on the first page);
+  * a control is found again on its fresh load by tag, label, href, data-href, region and occurrence, not by its index
+    in the document (the page may have changed in between); one that is gone is a gone-on-reload row, a failure unless
+    it points at a numbered build (batch-cron's history moves on every minute);
+  * a menu chevron (.jenkins-menu-dropdown-chevron, or an unlabelled button with data-href) is clicked after hovering
+    its link, as core requires (it takes pointer events only while the link is hovered); a failed click keeps
+    Playwright's whole message (triage U-1: if the first-row chevron still cannot be clicked, it is a FAIL);
+  * a dialog's Cancel and its title close button are counted apart (cancel_button, close_button);
+  * core's administrative monitor "Dismiss" (data-url .../administrativeMonitor/<id>/disable) posts without asking and
+    is not clicked (a not-clicked row): clicking it hid the monitor's own controls from the rest of the crawl.
+
 Content checks (CI, 2026-10-05), on every page reached with status < 400, all roles: a row with kind "content" and a
 "FAIL content ..." line (once per check, URL pattern and finding) for
   * empty-cell: an empty data cell on a Batch Control page in a column (or th/td row) whose value always exists
@@ -50,7 +72,6 @@ MENUS = ".tippy-box, .jenkins-dropdown, [data-tippy-root]"
 ROLE, UI = sys.argv[1], sys.argv[2]
 ids = json.loads((lib.HERE / "out" / "ids.json").read_text())
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-KNOWN_CORE_CONSOLE = ("MIME type ('text/html')",)          # D-70 core DialogEvent, see e2e-11 UX 2
 SKIP = re.compile(r"/logout|/exit|/restart|/safeRestart|/quietDown|/doDelete|/delete$|/script$|/cli/|/login\b")
 FN = lambda f: "/job/" + "/job/".join(f.split("/")) + "/"  # noqa
 
@@ -94,8 +115,12 @@ def crawlable(path):
     return "/batch-control" in path
 
 
+ROWS = []  # every row of this run, judged at the end (H1)
+
+
 def emit(row):
     row.update(role=ROLE, ui=UI)
+    ROWS.append(row)
     lib.log(os.environ.get("BC_CRAWL_LOG", "crawl"), row)
 
 
@@ -115,7 +140,9 @@ ELEMENTS_JS = r"""
       href: el.getAttribute('href'), anchor: !!(el.id || el.getAttribute('name')) && !el.hasAttribute('href') && !(el.innerText||'').trim(), abs: el.href || null, type: el.getAttribute('type'),
       onclick: el.getAttribute('onclick'), cls: el.className && el.className.baseVal === undefined ? el.className : '',
       data: Object.fromEntries(Object.entries(el.dataset || {}).slice(0, 8)),
-      disabled: !!el.disabled,
+      disabled: !!el.disabled, helpurl: el.getAttribute('helpurl'), pe: getComputedStyle(el).pointerEvents,
+      chevron: el.classList.contains('jenkins-menu-dropdown-chevron')
+        || (el.tagName === 'BUTTON' && !!(el.dataset || {}).href && !(el.innerText || '').trim()),
       form: f ? {method: (f.getAttribute('method') || 'get').toLowerCase(), action: f.action, name: f.getAttribute('name')} : null});
   });
   return out;
@@ -277,23 +304,54 @@ def expand_advanced(s):
     return pressed
 
 
+CONTROLS = "a, button, input[type=submit], input[type=button], [role=button], select"
+# The indices of the controls with the same signature as when they were listed (H1 C-18: the document index alone can
+# point at another control once the page changed, e.g. batch-cron's build history after a timer run).
+REFIND_JS = r"""
+(sig) => {
+  const regionOf = el => el.closest('#breadcrumbBar, .jenkins-breadcrumbs, [data-type=breadcrumb]') ? 'crumb'
+     : el.closest('#side-panel') ? 'side' : el.closest('#main-panel, .app-page-body, main') ? 'main'
+     : el.closest('header, #page-header, footer') ? 'chrome' : 'other';
+  const text = el => (el.innerText || el.value || el.getAttribute('aria-label') || el.title || '').trim().replace(/\s+/g,' ').slice(0,80);
+  const out = [];
+  document.querySelectorAll(sig.sel).forEach((el, i) => {
+    if (el.tagName.toLowerCase() === sig.tag && text(el) === sig.text && el.getAttribute('href') === sig.href
+        && ((el.dataset || {}).href || null) === sig.dhref && regionOf(el) === sig.region) out.push(i);
+  });
+  return out;
+}"""
+
+
+def signature(el):
+    return (el["tag"], el["text"], el.get("href"), (el.get("data") or {}).get("href"), el["region"])
+
+
 def classify_click(s, path, el):
-    """Fresh load, Advanced expanded as when the controls were listed, click element el (by index among the same
-    selector), observe."""
+    """Fresh load, Advanced expanded as when the controls were listed, find el again by its signature and occurrence,
+    click it (a menu chevron after hovering its link), observe."""
     p = s.page
     s.go(path)
     expand_advanced(s)
-    loc = p.locator("a, button, input[type=submit], input[type=button], [role=button], select").nth(el["i"])
-    if not loc.count() or not loc.is_visible():
+    tag, text, href, dhref, region = signature(el)
+    found = p.evaluate(REFIND_JS, {"sel": CONTROLS, "tag": tag, "text": text, "href": href, "dhref": dhref, "region": region})
+    if len(found) <= el.get("occ", 0):
+        return "gone-on-reload", {"found": len(found), "occ": el.get("occ", 0)}
+    loc = p.locator(CONTROLS).nth(found[el.get("occ", 0)])
+    if not loc.is_visible():
         return "not-visible-on-reload", {}
     before_url = p.url
     before_html = len(p.content())
     n_console = len(s.console)
     menus_before = p.locator(MENUS).count()
+    info0 = {}
     try:
+        if el.get("chevron"):  # core: .model-link:hover .jenkins-menu-dropdown-chevron{pointer-events:all}
+            host = loc.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' model-link ')][1]")
+            (host if host.count() else loc.locator("xpath=..")).first.hover(timeout=5000)
+            info0["hovered"] = True
         loc.click(timeout=5000)
     except Exception as e:  # noqa
-        return "click-failed", {"err": str(e)[:120]}
+        return "click-failed", dict(info0, err=str(e))
     # e2e-20: a dialog, a navigation or a new menu ends the wait at once (it was a fixed 1.2 s); a click that does none of
     # these is still observed for the same 1.2 s before it is classified as a DOM change or as doing nothing
     if react(p, before_url, timeout=1200, menus=MENUS, menus_before=menus_before) == "menu":
@@ -301,7 +359,7 @@ def classify_click(s, path, el):
             p.locator(MENUS).last.locator("a, button").first.wait_for(state="visible", timeout=2000)
         except Exception:
             pass
-    info = {"console": [c for c in s.console[n_console:] if not any(k in c for k in KNOWN_CORE_CONSOLE)][:3]}
+    info = dict(info0, console=s.console[n_console:][:10])
     dlg = p.locator("dialog[open]")
     if dlg.count():
         info["dialog"] = re.sub(r"\s+", " ", dlg.first.inner_text())[:160]
@@ -320,10 +378,13 @@ def classify_click(s, path, el):
                 pass
         d2 = p.locator("dialog[open]")
         if d2.count():
-            c = d2.first.locator("button[data-id=cancel], button:has-text('Cancel'), .jenkins-dialog__close, button[aria-label='Close']")
-            info["cancel_button"] = c.count()
-            if c.count():
-                c.first.click()
+            # H1 C-19: Cancel and the title close button counted apart; core's parameters dialog (dialog.wizard) has
+            # only button.jenkins-dialog__title__close-button, which the old selector did not know
+            c = d2.first.locator("button[data-id=cancel], button:has-text('Cancel')")
+            x = d2.first.locator("button.jenkins-dialog__title__close-button, .jenkins-dialog__close, button[aria-label='Close']")
+            info["cancel_button"], info["close_button"] = c.count(), x.count()
+            if c.count() or x.count():
+                (c if c.count() else x).first.click()
                 info["cancel_closes"] = gone(p)  # e2e-20: was a fixed 0.5 s
         info["url_unchanged"] = p.url == before_url
         return "dialog", info
@@ -362,11 +423,18 @@ def main():
             emit({"page": path, "kind": "page", "result": "load-error", "detail": str(e)[:200]})
             continue
         time.sleep(0.3)
-        cons = [c for c in s.console[nc:] if not any(k in c for k in KNOWN_CORE_CONSOLE)]
+        cons = list(s.console[nc:])
         bad = [b for b in s.bad[nb:] if not b.endswith(path) and "favicon" not in b]
+        dropped = None
+        if status and status >= 400 and f"{status} GET {BASE}{path}" in s.bad[nb:]:
+            # H1 C-12: the browser repeats the document's own 4xx status as a console error; the status is judged itself
+            own = f"error: Failed to load resource: the server responded with a status of {status} "
+            dropped = next((c for c in cons if c.startswith(own)), None)
+            if dropped:
+                cons.remove(dropped)
         h1 = s.page.locator("h1").first.inner_text().strip()[:80] if s.page.locator("h1").count() else ""
-        emit({"page": path, "kind": "page", "status": status, "final": s.page.url.replace(BASE, ""), "h1": h1,
-              "console": cons[:5], "bad_subrequests": bad[:5]})
+        emit({"page": path, "kind": "page", "start": path in START, "status": status, "final": s.page.url.replace(BASE, ""),
+              "h1": h1, "console": cons[:10], "bad_subrequests": bad[:5], "own_status_line_dropped": bool(dropped)})
         if status and status >= 400:
             continue
         content_checks(s, path, pt)
@@ -377,7 +445,10 @@ def main():
             content_checks(s, path, pt)
         els = s.page.evaluate(ELEMENTS_JS)
         is_bc = "/batch-control" in path
+        occ = {}
         for el in els:
+            el["occ"] = occ.get(signature(el), 0)
+            occ[signature(el)] = el["occ"] + 1
             label = el["text"] or el.get("href") or ""
             relevant = is_bc or el["region"] == "crumb" or re.search(
                 r"batch-control|Request|Activation|Approval|approval|Hold|Permission|Direct Build|Rebuild|Build",
@@ -385,10 +456,15 @@ def main():
             if not relevant or (not el["visible"] and el["tag"] != "a") or el.get("anchor"):
                 continue
             row = {"page": path, "pattern": pt, "region": el["region"], "visible": el["visible"], "tag": el["tag"], "label": label[:80],
-                   "href": el.get("href"), "data": el["data"]}
+                   "href": el.get("href"), "data": el["data"], "cls": (el.get("cls") or "")[:80]}
             href = el.get("href")
             # --- links
             if el["tag"] == "a":
+                if el.get("helpurl") or "jenkins-help-button" in (el.get("cls") or "").split():
+                    # H1 C-20: core's help "?" (Behaviour wires it through helpurl): its help text must load
+                    st = check_url(s, urljoin(BASE + "/", el["helpurl"]), cache)[0] if el.get("helpurl") else None
+                    emit(dict(row, kind="link", result="help-button", target=el.get("helpurl"), status=st))
+                    continue
                 if href is None or href.strip() in ("", "#") or href.startswith("javascript:"):
                     has_handler = bool(el["onclick"] or el["data"])
                     emit(dict(row, kind="link", result="handler-only" if has_handler else "DEAD-HREF"))
@@ -407,8 +483,14 @@ def main():
                 if SKIP.search(tpath):
                     continue
                 st, fin = check_url(s, url, cache)
-                emit(dict(row, kind="link", status=st, target=tpath, final=fin,
-                          result="OK" if 200 <= st < 400 else "BROKEN"))
+                posted = (el["data"].get("callback") or el["data"].get("taskPost") == "true"
+                          or "jenkins-!-build-color" in (el.get("cls") or "").split())
+                if st == 405 and posted and re.search(r"/(build|rebuild)(/|\?|$)", tpath):
+                    # H1 C-01/C-02: core posts this link (its JS); a GET answers 405 like a POST form's action
+                    emit(dict(row, kind="link", status=st, target=tpath, final=fin, result="post-link"))
+                else:
+                    emit(dict(row, kind="link", status=st, target=tpath, final=fin,
+                              result="OK" if 200 <= st < 400 else "BROKEN"))
                 if el["data"].get("dialogUrl") or el["data"].get("callback") or "task-link" in (el["cls"] or "") and "batch-control" in tpath:
                     key = (pt, label)
                     if key not in clicked:
@@ -433,6 +515,18 @@ def main():
             if el["tag"] == "select":
                 emit(dict(row, kind="select", result="present"))
                 continue
+            if el.get("disabled") or (el.get("pe") == "none" and "disabled" in (el.get("cls") or "") and not el.get("chevron")):
+                # H1 C-16: a disabled control (core's "Newer builds" on the first page: its --disabled class sets
+                # pointer-events:none) takes no click; a menu chevron takes pointer events only while its link is
+                # hovered and is clicked below, after the hover
+                emit(dict(row, kind="click", result="inert", detail={"disabled": el.get("disabled"), "pointer_events": el.get("pe")}))
+                continue
+            if re.search(r"/administrativeMonitor/[^/]+/disable$", el["data"].get("url") or ""):
+                # CI run 40080830269: core's monitor "Dismiss" posts at once (no confirmation) and disables the monitor for
+                # good, so the crawl's own click removed the Batch Control monitor and its Mark as reviewed entries
+                # before they were clicked (gone-on-reload). Nothing is POSTed here (see above): not clicked.
+                emit(dict(row, kind="click", result="not-clicked", detail={"why": "posts at once: disables the monitor"}))
+                continue
             key = (pt, label, el["data"].get("href", "")[:0] or el["region"])
             if key in clicked:
                 emit(dict(row, kind="click", result="same-as-checked"))
@@ -442,6 +536,8 @@ def main():
             emit(dict(row, kind="click", result=res, detail=info))
     s.done()
     close()
+    lib.h1.report("crawl", ROWS, {"role": ROLE, "ui": UI, "ids": ids, "prefix": urlparse(BASE).path.rstrip("/"),
+                                  "profile": "role" if os.environ.get("BC_CRAWL_LOG") == "crawl-role" else "matrix"})
 
 
 if __name__ == "__main__":
