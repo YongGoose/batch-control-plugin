@@ -29,7 +29,9 @@ explains. How the rows are recorded, so that they mean what they say:
   * a menu chevron (.jenkins-menu-dropdown-chevron, or an unlabelled button with data-href) is clicked after hovering
     its link, as core requires (it takes pointer events only while the link is hovered); a failed click keeps
     Playwright's whole message (triage U-1: if the first-row chevron still cannot be clicked, it is a FAIL);
-  * a dialog's Cancel and its title close button are counted apart (cancel_button, close_button).
+  * a dialog's Cancel and its title close button are counted apart (cancel_button, close_button);
+  * core's administrative monitor "Dismiss" (data-url .../administrativeMonitor/<id>/disable) posts without asking and
+    is not clicked (a not-clicked row): clicking it hid the monitor's own controls from the rest of the crawl.
 
 Content checks (CI, 2026-10-05), on every page reached with status < 400, all roles: a row with kind "content" and a
 "FAIL content ..." line (once per check, URL pattern and finding) for
@@ -518,6 +520,12 @@ def main():
                 # pointer-events:none) takes no click; a menu chevron takes pointer events only while its link is
                 # hovered and is clicked below, after the hover
                 emit(dict(row, kind="click", result="inert", detail={"disabled": el.get("disabled"), "pointer_events": el.get("pe")}))
+                continue
+            if re.search(r"/administrativeMonitor/[^/]+/disable$", el["data"].get("url") or ""):
+                # CI run 40080830269: core's monitor "Dismiss" posts at once (no confirmation) and disables the monitor for
+                # good, so the crawl's own click removed the Batch Control monitor and its Mark as reviewed entries
+                # before they were clicked (gone-on-reload). Nothing is POSTed here (see above): not clicked.
+                emit(dict(row, kind="click", result="not-clicked", detail={"why": "posts at once: disables the monitor"}))
                 continue
             key = (pt, label, el["data"].get("href", "")[:0] or el["region"])
             if key in clicked:

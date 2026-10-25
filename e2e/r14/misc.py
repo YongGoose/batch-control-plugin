@@ -304,14 +304,25 @@ def u=hudson.model.User.getById('%s',true); def m=new HashMap(); m.put('new-job-
         for job in ["batch-pipeline", "batch-daily"]:
             s.go(f"/job/{job}/")
             row = {"role": role, "ui": ui, "job": job}
-            # M-08: the new job page shows the build entry in the main panel (jobui lists it as "main"), not in an app bar
-            cands = s.page.locator("#tasks a, .jenkins-app-bar a, .jenkins-app-bar button, .app-page-body__header a, "
-                                   ".app-page-body__header button, #main-panel a, #main-panel button",
-                                   has_text=re.compile("^(Build Now|Direct Build|Build with Parameters)"))
-            row["build_entries"] = list(dict.fromkeys(t.strip() for t in cands.all_inner_texts()))
-            if cands.count():
+            # M-08: the new job page shows the build entry in the main panel (jobui lists it as "main"), not in an app bar.
+            # The label is matched on the visible element's normalised inner text, as jobui.py does: an anchored has_text
+            # regex missed the new job page's button: its text content starts with whitespace and an svg before the label
+            # (Playwright trace of CI run 40080830269, misc step, nobc new UI).
+            sel = ("#tasks a, .jenkins-app-bar a, .jenkins-app-bar button, .app-page-body__header a, "
+                   ".app-page-body__header button, #main-panel a, #main-panel button")
+            label_rx = re.compile(r"^(Build Now|Direct Build|Build with Parameters)")
+            cands = []
+            for el in s.page.locator(sel).all():
+                try:
+                    t = re.sub(r"\s+", " ", el.inner_text() or el.get_attribute("aria-label") or "").strip()
+                    if el.is_visible() and label_rx.match(t):
+                        cands.append((t, el))
+                except Exception:  # noqa: an element that left the page
+                    continue
+            row["build_entries"] = list(dict.fromkeys(t for t, _ in cands))
+            if cands:
                 nb = len(s.bad)
-                cands.first.click(); s.page.wait_for_timeout(2500)
+                cands[0][1].click(); s.page.wait_for_timeout(2500)
                 d = s.page.locator("dialog[open]")
                 if d.count():
                     b = d.first.get_by_role("button", name=re.compile("^Build$"))

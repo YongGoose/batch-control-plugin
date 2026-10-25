@@ -334,7 +334,11 @@ class Judge:
     def lines(self):
         out = []
         for (check, _), (obj, n) in sorted(self.fails.items()):
-            out.append(f"FAIL {self.driver} {check} " + json.dumps(dict(obj, rows=n), default=str)[:900])
+            # the key (what is judged) is never cut; only the example is (CI run 40080830269 cut an RS-7 line at 600)
+            key = {k: v for k, v in obj.items() if k != "example"}
+            ex = json.dumps(obj["example"], default=str)[:300] if "example" in obj else None
+            out.append(f"FAIL {self.driver} {check} " + json.dumps(dict(key, rows=n), default=str)
+                       + (f" example={ex}" if ex else ""))
         for a in ALLOW:
             if self.seen.get(a.id):
                 out.append(f"ALLOW {a.id} matched {self.seen[a.id]}")
@@ -732,6 +736,9 @@ RS_STRATEGY = "BatchControlRoleBasedAuthorizationStrategy"
 
 def judge_role(name, res, ctx=None):
     """res: the one dict the role script logs. Tables from e2e-13/14 RS (SPEC D-35f/D-35g, D-35a)."""
+    # the script passes its dict as built (tuples); the log and the tables hold JSON (lists): compare JSON with JSON
+    # (CI run 40080830269: RS-7 "differed" only by tuple vs list)
+    res = json.loads(json.dumps(res, default=str))
     j = Judge("role", ctx)
     bad_req = lambda: [x for x in res.get("requests") or [] if int(x.split()[0]) >= 400]  # noqa: E731
     if name == "grant_overlay":
@@ -776,7 +783,7 @@ def judge_role(name, res, ctx=None):
         diff = {k: [got7.get(k), v] for k, v in RS7.items() if got7.get(k) != v}
         diff.update({k: [v, None] for k, v in got7.items() if k not in RS7})
         if diff:
-            j.fail("RS-7", {"differs (got, expected)": diff})
+            j.fail("RS-7", {"differs": [{"key": k, "got": g, "expected": e} for k, (g, e) in sorted(diff.items())]})
         if res.get("strategy") != RS_STRATEGY:
             j.fail("RS-7", {"strategy": res.get("strategy")})
     return j

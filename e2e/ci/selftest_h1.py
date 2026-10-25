@@ -208,7 +208,7 @@ def upgrade(unit):
 def is_u1(line):
     if not line.startswith("FAIL crawl click "):
         return False
-    o = json.loads(line[len("FAIL crawl click "):])
+    o = json.loads(line[len("FAIL crawl click "):].split(" example=", 1)[0])
     return (o.get("result") == "click-failed" and o.get("label") == "" and re.fullmatch(r"/job/[^/]+/", o.get("target") or "")
             and re.fullmatch(r"/batch-control/(dashboard/|incidents/|history/(\?kind=[a-z]+(&from=\{d\}&to=\{d\})?)?)", o.get("page") or ""))
 
@@ -263,6 +263,14 @@ TOGGLE = "/job/ops/job/mb/batch-control-activation/"
 WS_PAGE = "/job/ops/job/job-a/batch-control/"
 D70_LINE = ("error: Refused to execute script from 'http://localhost:18080/jenkins/static/b1c10f94/' because its MIME type "
             "('text/html') is not executable, and strict MIME type checking is enabled.")
+
+
+def _endpoints(change=None):
+    """endpoints.py's res as the script holds it when it calls report(): RS-7 values are tuples, not JSON lists."""
+    rs7 = {k: tuple(v) if isinstance(v, list) else v for k, v in h1.RS7.items()}
+    rs7.update(change or {})
+    return {"RS-6 admin forwarded == role-strategy": {"checkPattern 'team('": (200, True, "x")}, "RS-7 refusals": rs7,
+            "strategy": h1.RS_STRATEGY}
 
 
 def synthetic():
@@ -350,6 +358,9 @@ def synthetic():
          [{"0 before: requester configure": 403, "1 requested (pending): requester configure": 403,
            "2 approved (window open): requester configure": 200, "3 after a Manage Roles save during the window: requester configure": 403,
            "4 revoked: requester configure": 403, "browser configure after revoke": 403}], {}, "fail", "overlay"),
+        ("role: RS-7 as the script builds it (tuples) equals the table", "role/endpoints", [_endpoints()], {}, "pass", None),
+        ("role: RS-7 with one refusal turned into 200", "role/endpoints", [_endpoints({"checkSidName POST nobc": (200, "")})],
+         {}, "fail", "RS-7"),
         ("r15: a menu entry answering 404", "r15/menu",
          [{"user": "admin", "page": "/job/batch-daily/", "items": [{"text": "Move"}], "status": {"Move": 404}, "duplicates": [],
            "empty_href_anchors": [], "clicks": {}, "console": [], "bad": []}], {}, "fail", "menu"),
