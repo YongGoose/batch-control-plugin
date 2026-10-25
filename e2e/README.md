@@ -307,22 +307,32 @@ holding Item/Read only after their leftover windows are revoked).
 
 ### CI contract (for `.github/workflows`)
 
-Proposed workflow `e2e.yml`, non-blocking at first (not a required status). Pin every action by commit SHA as
-`build.yml` does; `permissions: contents: read` only (no PR comments, no uploads to third parties), so fork pull
-requests work with the default read-only token.
+Workflow `e2e.yml`. Pin every action by commit SHA as `build.yml` does; `permissions: contents: read` only (no PR
+comments, no uploads to third parties), so fork pull requests work with the default read-only token. `e2e result` is
+the one job meant to be a required status check on main (next to `build` from `build.yml` and ci.jenkins.io's
+`Jenkins`); the other job names are kept distinct from every required check, because a required check is matched by
+name.
 
-The workflow runs only when an input of the suite changes: its `paths` filter (the same list on `push` to main and on
-`pull_request`, since #14) is `src/main/**`, `pom.xml`, `.mvn/**`, `e2e/**` and `.github/workflows/e2e.yml`;
-`workflow_dispatch` runs it on any ref. A change to `e2e/ci/shard.py` (the groups) is under `e2e/**`, so it runs the
-suite. Only a workflow with no required check may be path-filtered (a skipped workflow would leave a required check
-pending).
+The workflow runs on every `pull_request` and every `push` to main, with no workflow-level `paths` filter (a skipped
+workflow would leave a required check pending). The first job, `changes`, decides from `git diff --name-only` whether an
+input of the suite changed: `src/main/**`, `pom.xml`, `.mvn/**`, `e2e/**` or `.github/workflows/e2e.yml`. Pull request:
+`base...head` (three-dot, from the merge base, as in the PR's "Files changed"); push to main: `before..after`;
+`workflow_dispatch`, a new branch (all-zero `before`) or a diff that cannot be computed: the suite runs. `build` and
+`groups` run only when `changes` says so, and with them the shards and `coverage`. A change to `e2e/ci/shard.py` (the
+groups) is under `e2e/**`, so it runs the suite.
+
+`e2e result` always runs last. It is green when the suite was not needed, or when `build`, `groups`, every shard and
+`coverage` succeeded; red otherwise, including a job cancelled or skipped while the suite was needed, and when `changes`
+itself did not succeed. Its log gives the reason in one line.
 
 | Job | Runner and tools | Steps |
 |---|---|---|
-| `build` | `ubuntu-latest`; `actions/setup-java` (temurin 21, `cache: maven`) | `mvn -ntp -B clean package -DskipTests`; upload artifact `e2e-build` = `target/batch-control.hpi` + `target/classes/` (one build: the classes must be the ones in the hpi) |
-| `groups` (no `needs`, in parallel with `build`; output `matrix`) | `ubuntu-latest`; its `python3` (`shard.py` uses the standard library only) | `python3 e2e/ci/shard.py check` (fails the run on a bad `GROUPS`, writes the group table to the job summary), then `matrix="$(python3 e2e/ci/shard.py matrix)"` and `echo "matrix=$matrix" >> "$GITHUB_OUTPUT"` |
+| `changes` (output `run` = `true`/`false`, `timeout-minutes: 5`) | `ubuntu-latest`; `actions/checkout` with `fetch-depth: 0` (the merge base and the previous tip must be present) | `git diff --name-only` over the range above, matched against `^(src/main/\|\.mvn/\|e2e/)\|^(pom\.xml\|\.github/workflows/e2e\.yml)$`; `echo "run=$run" >> "$GITHUB_OUTPUT"` |
+| `build` (`needs: changes`, `if: needs.changes.outputs.run == 'true'`) | `ubuntu-latest`; `actions/setup-java` (temurin 21, `cache: maven`) | `mvn -ntp -B clean package -DskipTests`; upload artifact `e2e-build` = `target/batch-control.hpi` + `target/classes/` (one build: the classes must be the ones in the hpi) |
+| `groups` (`needs: changes`, same `if`, in parallel with `build`; output `matrix`) | `ubuntu-latest`; its `python3` (`shard.py` uses the standard library only) | `python3 e2e/ci/shard.py check` (fails the run on a bad `GROUPS`, writes the group table to the job summary), then `matrix="$(python3 e2e/ci/shard.py matrix)"` and `echo "matrix=$matrix" >> "$GITHUB_OUTPUT"` |
 | `e2e` (`needs: [build, groups]`, `name: e2e (${{ matrix.label }})`, `matrix: ${{ fromJSON(needs.groups.outputs.matrix) }}`, `fail-fast: false`, `timeout-minutes: 90`) | `ubuntu-latest` (Docker and Compose v2 are preinstalled); `actions/setup-python` 3.12 | download `e2e-build` into `target/`; `pip install -r e2e/ci/requirements.txt`; `python -m playwright install --with-deps chromium`; `BC_BUILD=never PY=python e2e/ci/run.sh "$SHARD/$OF"` with `SHARD=${{ matrix.shard }}` and `OF=${{ matrix.of }}`; `if: always()`: `cat e2e/ci/out/${{ matrix.shard }}/summary.md >> "$GITHUB_STEP_SUMMARY"` and upload artifact `e2e-shard-${{ matrix.shard }}` = `e2e/ci/out/${{ matrix.shard }}/` (exec, summaries, step logs, `jenkins.log`, screenshots; keep 7-14 days). The artefacts and directories keep the shard index, so `coverage` does not depend on the labels |
 | `coverage` (`needs: [build, e2e]`, `if: always() && needs.build.result == 'success'`) | `ubuntu-latest`; `actions/checkout` with `fetch-depth: 0` (the merge base must be present); setup-java 21 (to run the JaCoCo CLI) and setup-python 3.12 | download `e2e-build` into `target/`; download `pattern: e2e-shard-*` into `e2e/ci/out/` (without `merge-multiple`: one directory per artifact, `e2e/ci/out/e2e-shard-<k>/jacoco-<k>.exec`); `pip install -r e2e/ci/requirements.txt`; optionally `python -m playwright install --with-deps chromium` and `python e2e/ci/selftest_content.py` (about 10 s); `e2e/ci/fetch-jacoco.sh`; `python e2e/ci/coverage-diff.py --exec 'e2e/ci/out/*/jacoco-*.exec' --base "$BASE" --annotations on` with `BASE=${{ github.event.pull_request.base.sha }}` on pull requests (`${{ github.event.before }}` on a push to main; skip the step when it is all zeros); upload `e2e/ci/out/coverage/` as `e2e-coverage` |
+| `result` (`name: e2e result`, `needs: [changes, build, groups, e2e, coverage]`, `if: always()`, `timeout-minutes: 5`) | `ubuntu-latest`; no checkout | reads the `needs.*.result` values and `needs.changes.outputs.run`: exit 0 when `changes` succeeded and `run` is not `true`, or when `build`, `groups`, `e2e` and `coverage` are all `success`; otherwise `::error::` with every result, exit 1 |
 
 - Merging: `coverage-diff.py` merges whatever `--exec` matches (one exec per shard, each with two identical sessions)
   with `jacococli merge`; to merge by hand: `java -jar e2e/ci/.cache/jacoco/jacococli.jar merge e2e/ci/out/*/jacoco-*.exec
