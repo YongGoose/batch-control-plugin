@@ -29,7 +29,13 @@ explains. How the rows are recorded, so that they mean what they say:
     does not page is NOTHING, as for any other control (CI run 40158487092 read its in-place swap as NOTHING);
   * a control is found again on its fresh load by tag, label, href, data-href, region and occurrence, not by its index
     in the document (the page may have changed in between); one that is gone is a gone-on-reload row, a failure unless
-    it points at a numbered build (batch-cron's history moves on every minute);
+    it points at a numbered build (batch-cron's history moves on every minute) or is an entry of core's Build Queue or
+    Build Executor Status pane (the row's "widget": buildQueue/executors, see CORE_STOP; a queued or running build
+    leaves them at any moment); such an entry does not use up its click key, so the next control with that key is
+    clicked;
+  * core's stop button in those panes (a.stop-button-link to queue/cancelItem or .../executors/<n>/stopBuild) is a
+    post-link row (405 on a GET) and never clicked; a one-off executor's that answers 404 is transient-gone (the build
+    ended);
   * a menu chevron (.jenkins-menu-dropdown-chevron, or an unlabelled button with data-href) is clicked after hovering
     its link, as core requires (it takes pointer events only while the link is hovered); a failed click keeps
     Playwright's whole message (triage U-1: if the first-row chevron still cannot be clicked, it is a FAIL);
@@ -145,6 +151,7 @@ ELEMENTS_JS = r"""
       onclick: el.getAttribute('onclick'), cls: el.className && el.className.baseVal === undefined ? el.className : '',
       data: Object.fromEntries(Object.entries(el.dataset || {}).slice(0, 8)),
       disabled: !!el.disabled, helpurl: el.getAttribute('helpurl'), pe: getComputedStyle(el).pointerEvents,
+      widget: (w => w ? w.id : null)(el.closest('#side-panel div.pane-frame#buildQueue, #side-panel div.pane-frame#executors')),
       chevron: el.classList.contains('jenkins-menu-dropdown-chevron')
         || (el.tagName === 'BUTTON' && !!(el.dataset || {}).href && !(el.innerText || '').trim()),
       form: f ? {method: (f.getAttribute('method') || 'get').toLowerCase(), action: f.action, name: f.getAttribute('name')} : null});
@@ -308,6 +315,15 @@ def expand_advanced(s):
     return pressed
 
 
+# Core's transient side-panel widgets (CI run 40175641627, manager new, /job/ops/job/mb/batch-control-activation/: the
+# chevron of the Build Queue's "batch-cron" entry, "Started by timer, Waiting for next available executor", listed with
+# the page and gone on the fresh load, where the pane read "No builds in the queue."). Core renders them as
+# div.pane-frame#buildQueue (lib/hudson/queue.jelly, l:pane id="buildQueue") and div.pane-frame#executors
+# (lib/hudson/executors.jelly) and replaces them in place (widget-refresh.js); their entries come and go with every
+# queued or running build (batch-cron and fast run every minute). ELEMENTS_JS records that pane's id as "widget"; it is
+# only ever core's markup there, no Batch Control control is rendered inside these panes.
+# Its stop buttons (a.stop-button-link, lib/layout/stopButton.jelly) post to these core URLs:
+CORE_STOP = re.compile(r"/queue/cancelItem\?id=\d+|/computer/[^/?]+/(executors|oneOffExecutors)/\d+/stopBuild\?runExtId=[^&]*")
 CONTROLS = "a, button, input[type=submit], input[type=button], [role=button], select"
 # The indices of the controls with the same signature as when they were listed (H1 C-18: the document index alone can
 # point at another control once the page changed, e.g. batch-cron's build history after a timer run).
@@ -535,6 +551,8 @@ def main():
                 continue
             row = {"page": path, "pattern": pt, "region": el["region"], "visible": el["visible"], "tag": el["tag"], "label": label[:80],
                    "href": el.get("href"), "data": el["data"], "cls": (el.get("cls") or "")[:80]}
+            if el.get("widget"):
+                row["widget"] = el["widget"]  # core's build queue / executors pane (see CORE_STOP)
             href = el.get("href")
             # --- links
             if el["tag"] == "a":
@@ -563,7 +581,17 @@ def main():
                 st, fin = check_url(s, url, cache)
                 posted = (el["data"].get("callback") or el["data"].get("taskPost") == "true"
                           or "jenkins-!-build-color" in (el.get("cls") or "").split())
-                if st == 405 and posted and re.search(r"/(build|rebuild)(/|\?|$)", tpath):
+                stop = (el.get("widget") and "stop-button-link" in (el.get("cls") or "").split()
+                        and CORE_STOP.fullmatch(tpath))
+                if st == 405 and stop:
+                    # core's stop button in its build queue / executors pane (l:stopButton, posted by core's JS after its
+                    # confirmation): a GET answers 405 like a POST form's action; never clicked (it cancels the build)
+                    emit(dict(row, kind="link", status=st, target=tpath, final=fin, result="post-link"))
+                elif st == 404 and stop and "/oneOffExecutors/" in tpath:
+                    # a one-off (flyweight, e.g. a Pipeline run's) executor exists only while its build runs: the build
+                    # ended between the listing and this GET (a regular executor slot stays and keeps answering 405)
+                    emit(dict(row, kind="link", status=st, target=tpath, final=fin, result="transient-gone"))
+                elif st == 405 and posted and re.search(r"/(build|rebuild)(/|\?|$)", tpath):
                     # H1 C-01/C-02: core posts this link (its JS); a GET answers 405 like a POST form's action
                     emit(dict(row, kind="link", status=st, target=tpath, final=fin, result="post-link"))
                 else:
@@ -612,6 +640,10 @@ def main():
             clicked.add(key)
             res, info = classify_click(s, path, el)
             emit(dict(row, kind="click", result=res, detail=info))
+            if res in ("gone-on-reload", "not-visible-on-reload") and el.get("widget"):
+                # the queue/executor entry ended before the fresh load (judged as such in ci/h1_rules.py): the next
+                # control with the same key (another side chevron, e.g. Built-In Node's) is clicked instead
+                clicked.discard(key)
     s.done()
     close()
     lib.h1.report("crawl", ROWS, {"role": ROLE, "ui": UI, "ids": ids, "prefix": urlparse(BASE).path.rstrip("/"),

@@ -258,10 +258,17 @@ ACTION_PROBES = {
                 "incident": (200, ["Acknowledge", "Add Comment", "Request Rerun"])},
     "nobc": {k: (404, []) for k in ("run", "run_reqonly", "act", "hold", "grant", "window", "incident")},
 }
-# the state a control leaves, on the page (State row, else Status) and on the server (the same row read over REST)
+# the state a control leaves, on the page (State row, else Status) and on the server (the same row read over REST);
+# (control, item kinds or None for any, page, server). A state the SPEC moves on from by itself is accepted in each
+# state it legitimately passes through, on the page as on the server, and nothing else: an approved run request is
+# scheduled at once and becomes EXECUTED when its build starts (SPEC 4: PENDING -> APPROVED -> EXECUTED; CI run
+# 40175641627: admin's page already read "Executed", as the server did in #102); an approved activation or hold stays
+# APPROVED and an approved grant opens its window for its whole duration (15 minutes here), so these keep one state.
 ACTION_STATE = [
-    (r"Approve", "grant", r"Open, .*", r"Open, .*"),
-    (r"Approve( Activation| Hold)?", None, r"Approved.*", r"(Approved|Executed).*"),
+    (r"Approve", ("grant",), r"Open, .*", r"Open, .*"),
+    (r"Approve", ("run", "run_reqonly"), r"(Approved|Executed)\b.*", r"(Approved|Executed)\b.*"),
+    (r"Approve Activation", ("act",), r"Approved\b.*", r"Approved\b.*"),
+    (r"Approve Hold", ("hold",), r"Approved\b.*", r"Approved\b.*"),
     (r"Reject", None, r"Rejected", r"Rejected"),
     (r"Cancel Request", None, r"Cancelled", r"Cancelled"),
     (r"Revoke", None, r"Revoked by {role}", r"Revoked by {role}"),
@@ -283,6 +290,9 @@ MISC_STATUS = {
     ("M", "page"): {"admin": 200, "requester": 200, "approver-1": 404, "manager": 200},
     ("M", "mark_button"): {"admin": 1, "requester": 0, "manager": 0},
 }
+# misc.py P: lists that grow at their top while the pager is walked (page -> how far page 1's first row may move down:
+# the timer runs of a few seconds, two jobs every minute)
+GROWING_LISTS = {"/batch-control/history/?kind=runs": 5}
 # the Batch Control breadcrumb menu per role (SPEC 2: a tab only for a user who may open its section)
 _TABS = ["Overview", "Run Requests", "Activations", "Grants"]
 _HIST = _TABS + ["Changes", "Dashboard", "Incidents", "History"]
@@ -353,6 +363,22 @@ def _st(v):
 
 # ------------------------------------------------------------------ crawl
 CORE_PARAMS_DIALOG = ("Direct Build (needs approval)", "Build with Parameters")
+# Core's transient side-panel widgets (CI run 40175641627: manager, new UI, /job/ops/job/mb/batch-control-activation/,
+# the menu chevron of the Build Queue's "batch-cron" entry, "Started by timer, Waiting for next available executor",
+# gone on the fresh load where the pane read "No builds in the queue."). r14/crawl.py records the id of the enclosing
+# core pane as "widget" only for #side-panel div.pane-frame#buildQueue (core lib/hudson/queue.jelly) and
+# div.pane-frame#executors (lib/hudson/executors.jelly); their entries come and go with every queued or running build
+# (batch-cron and fast run every minute). Keyed exactly: that pane, the side region, an anchor or chevron button, and a
+# target core puts there (a job or build, a node, or the root for a pending executor); only "gone" or "not visible" on
+# the fresh load. A Batch Control control is never inside these panes; one that disappears still FAILS.
+TRANSIENT_WIDGETS = ("buildQueue", "executors")
+TRANSIENT_TARGET = re.compile(r"(/job/[^/]+)+/(\{n\}/)?|/computer/[^/]+/|/")
+
+
+def transient_widget_entry(r, res, target):
+    return (res in ("gone-on-reload", "not-visible-on-reload") and r.get("widget") in TRANSIENT_WIDGETS
+            and r.get("region") == "side" and r.get("tag") in ("a", "button")
+            and bool(TRANSIENT_TARGET.fullmatch(target or "")))
 
 
 def judge_crawl(rows, ctx):
@@ -386,7 +412,8 @@ def judge_crawl(rows, ctx):
             target = page_key((r.get("data") or {}).get("href") or r.get("href") or "", ids, prefix)
             cbase = dict(base, label=r.get("label"), target=target)
             rotated = res == "gone-on-reload" and re.search(r"/\{n\}/$", target)  # a build entry that left the history
-            if res in ("click-failed", "NOTHING", "not-visible-on-reload", "gone-on-reload") and not rotated:
+            if res in ("click-failed", "NOTHING", "not-visible-on-reload", "gone-on-reload") and not rotated \
+                    and not transient_widget_entry(r, res, target):
                 j.fail("click", dict(cbase, result=res), {"err": d.get("err"), "tag": r.get("tag"), "region": r.get("region")})
             j.console("click-console", d.get("console"), cbase)
             if res == "paged":
@@ -420,7 +447,7 @@ def judge_crawl(rows, ctx):
 # ------------------------------------------------------------------ actions
 def _state_rule(label, item):
     for rx, it, page_rx, srv_rx in ACTION_STATE:
-        if re.fullmatch(rx, label or "") and (it is None or it == item):
+        if re.fullmatch(rx, label or "") and (it is None or item in it):
             return page_rx, srv_rx
     return None, None
 
@@ -603,7 +630,13 @@ def judge_misc(rows, ctx=None):
         elif sec == "P":
             if r.get("next_links"):
                 nx, pv = r.get("next") or {}, r.get("prev")
-                if not nx.get("first_row_changed") or not isinstance(pv, dict) or not pv.get("first_row_restored"):
+                # the run history is newest first and gains a row with every timer run (batch-cron and fast run every
+                # minute) while Next and Previous are walked: Previous is right when it brings back page 1 with its
+                # first row moved down by the runs that finished meanwhile (a few; a broken Previous shows page 2,
+                # where page 1's first row is not). Only that list; every other paged list must restore its first row.
+                moved = (r.get("page") in GROWING_LISTS and isinstance(pv, dict)
+                         and isinstance(pv.get("first_row_at"), int) and 0 < pv["first_row_at"] <= GROWING_LISTS[r["page"]])
+                if not nx.get("first_row_changed") or not isinstance(pv, dict) or not (pv.get("first_row_restored") or moved):
                     j.fail("P-paging", {"page": r.get("page"), "next": nx, "prev": pv})
         elif sec == "B":
             want = MISC_STATUS[("B", r.get("page"))].get(role)
