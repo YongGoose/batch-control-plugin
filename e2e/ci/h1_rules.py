@@ -389,6 +389,14 @@ def judge_crawl(rows, ctx):
             if res in ("click-failed", "NOTHING", "not-visible-on-reload", "gone-on-reload") and not rotated:
                 j.fail("click", dict(cbase, result=res), {"err": d.get("err"), "tag": r.get("tag"), "region": r.get("region")})
             j.console("click-console", d.get("console"), cbase)
+            if res == "paged":
+                # core's build-history pager (crawl.py PAGER_JS): "paged" is only recorded for that markup, and only when
+                # the list showed a strictly older page; "Newer builds", enabled there, must bring the newer page back
+                if d.get("pager") not in ("down", "up") or not d.get("history_after"):
+                    j.fail("pager", dict(cbase, problem="paged without core's pager markup or a new history page"))
+                elif (d.get("newer") or {}).get("result") not in (None, "paged"):
+                    j.fail("pager", dict(cbase, problem="Newer builds on the older page: " + d["newer"]["result"]),
+                           {"err": d["newer"].get("err")})
             if res == "dialog":
                 problems = []
                 if d.get("escape_closes") is not True:
