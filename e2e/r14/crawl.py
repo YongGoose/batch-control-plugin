@@ -23,6 +23,10 @@ explains. How the rows are recorded, so that they mean what they say:
     URL answers 405 to a GET: a post-link row, like a POST form;
   * a disabled control, or one whose "disabled" class sets pointer-events:none, is an inert row and not clicked (core's
     "Newer builds" on the first page);
+  * core's build-history pager ("Older builds", button#down of .app-builds-container__controls, on a job page or a job
+    action page once the job has more than one page of builds) pages the list in place: a paged row when the list shows
+    a strictly older page (then "Newer builds", now enabled, must bring the newer page back: detail "newer"); a list that
+    does not page is NOTHING, as for any other control (CI run 40158487092 read its in-place swap as NOTHING);
   * a control is found again on its fresh load by tag, label, href, data-href, region and occurrence, not by its index
     in the document (the page may have changed in between); one that is gone is a gone-on-reload row, a failure unless
     it points at a numbered build (batch-cron's history moves on every minute);
@@ -64,7 +68,7 @@ words is the known, deferred UX review item UX-4/UX-5 (owner: UX fixes only on r
 Text inside pre/code/textarea and hidden elements is not checked. BC_CRAWL_LOG names the log (default "crawl")."""
 import json, os, re, sys, time
 from urllib.parse import urljoin, urlparse
-from lib import Session, close, BASE, groovy, react, gone
+from lib import Session, close, BASE, groovy, react, gone, until
 import lib
 
 MENUS = ".tippy-box, .jenkins-dropdown, [data-tippy-root]"
@@ -326,6 +330,57 @@ def signature(el):
     return (el["tag"], el["text"], el.get("href"), (el.get("data") or {}).get("href"), el["region"])
 
 
+# Core's build-history pager (the builds card of a job page, and of every job action page in the classic side panel,
+# e.g. /job/<x>/batch-control-activation/): div.app-builds-container__controls holds button#up ("Newer builds") and
+# button#down ("Older builds"); core's builds card script (core src/main/js/pages/project/builds-card.js) answers a click
+# with GET buildHistory/ajax?older-than=<oldest entry id> (newer-than=<newest> for #up) and swaps the page of entries of
+# div#jenkins-build-history in place: same URL, no dialog, no menu, and a page of 30 builds replacing another one barely
+# changes the document's length (CI run 40158487092, reqonly classic, /job/fast/batch-control-activation/: builds #64..#35
+# replaced by #34..#5, an HTML fragment 40743 -> 40721 bytes, read as NOTHING). The crawl reads that list instead: its
+# entry ids (page-entry-id, a long that grows with the build) and build numbers, before and after the click.
+PAGER_JS = """el => (el.matches('.app-builds-container__controls > button#up, .app-builds-container__controls > button#down')
+  && document.getElementById('jenkins-build-history')) ? el.id : null"""
+HISTORY_JS = r"""() => {
+  const h = document.getElementById('jenkins-build-history');
+  if (!h) return null;
+  const pg = h.querySelector('[data-page-entry-newest]') || {dataset: {}};
+  const items = [...h.querySelectorAll('.app-builds-container__item[page-entry-id]')];
+  const nums = items.map(it => { const a = [...it.querySelectorAll('a[href]')].map(x => x.getAttribute('href'))
+      .map(u => (u.match(/\/(\d+)\/(?:console)?$/) || [])[1]).find(Boolean); return a ? +a : null; });
+  return {newest: pg.dataset.pageEntryNewest || null, oldest: pg.dataset.pageEntryOldest || null,
+          has_up: pg.dataset.pageHasUp || null, has_down: pg.dataset.pageHasDown || null, count: items.length,
+          first: nums[0] ?? null, last: nums[nums.length - 1] ?? null};
+}"""
+
+
+def _hist_key(h, end):
+    """The newest/oldest entry of a history page as a number (its page-entry-id; its build number if core drops the id)."""
+    if not h or not h.get("count"):
+        return None
+    v = h.get(end)
+    try:
+        return (0, int(v))
+    except (TypeError, ValueError):
+        return (1, h.get("first" if end == "newest" else "last"))
+
+
+def pager_click(p, loc, which, before):
+    """Click core's pager button `which` (down = Older builds, up = Newer builds) and wait until the history list shows a
+    page strictly older (down) or newer (up) than `before`; core's periodic refresh of page 1 (a new batch-cron build)
+    does not count. Returns the history after, or None when the list did not page within 3 s."""
+    loc.click(timeout=5000)
+
+    def moved():
+        h = p.evaluate(HISTORY_JS)
+        a, b = (_hist_key(h, "newest"), _hist_key(before, "oldest")) if which == "down" else \
+            (_hist_key(h, "oldest"), _hist_key(before, "newest"))
+        if a is None or b is None or a[0] != b[0]:
+            return None
+        return h if (a[1] < b[1] if which == "down" else a[1] > b[1]) else None
+    got = until(p, moved, 3000)
+    return got if isinstance(got, dict) else None
+
+
 def classify_click(s, path, el):
     """Fresh load, Advanced expanded as when the controls were listed, find el again by its signature and occurrence,
     click it (a menu chevron after hovering its link), observe."""
@@ -344,6 +399,29 @@ def classify_click(s, path, el):
     n_console = len(s.console)
     menus_before = p.locator(MENUS).count()
     info0 = {}
+    pager = loc.evaluate(PAGER_JS)
+    if pager:  # core's build-history pager: its effect is the list paging in place (see PAGER_JS)
+        h0 = p.evaluate(HISTORY_JS)
+        try:
+            h1_ = pager_click(p, loc, pager, h0)
+        except Exception as e:  # noqa
+            return "click-failed", {"pager": pager, "err": str(e)}
+        info = {"pager": pager, "history_before": h0, "console": s.console[n_console:][:10]}
+        if p.url != before_url:
+            return "navigated", dict(info, to=p.url.replace(BASE, ""))
+        if not h1_:
+            return "NOTHING", dict(info, history_after=p.evaluate(HISTORY_JS))
+        info["history_after"] = h1_
+        if pager == "down" and h1_.get("has_up") == "true":
+            # on the older page core enables "Newer builds" (#up): it must bring the newer page back
+            up = p.locator(".app-builds-container__controls > button#up")
+            try:
+                h2 = pager_click(p, up.first, "up", h1_)
+                info["newer"] = {"result": "paged" if h2 else "NOTHING", "history_after": h2 or p.evaluate(HISTORY_JS)}
+            except Exception as e:  # noqa
+                info["newer"] = {"result": "click-failed", "err": str(e)}
+            info["console"] = s.console[n_console:][:10]
+        return "paged", info
     try:
         if el.get("chevron"):  # core: .model-link:hover .jenkins-menu-dropdown-chevron{pointer-events:all}
             host = loc.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' model-link ')][1]")
