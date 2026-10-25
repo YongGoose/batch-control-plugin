@@ -857,14 +857,40 @@ def judge_r15(name, rows, ctx=None):
                 problems.append({"duplicates": r.get("duplicates"), "empty_href_anchors": r.get("empty_href_anchors")})
             if "Request Change Permission" in clicks and clicks["Request Change Permission"].get("dialog") != 1:
                 problems.append({"Request Change Permission": clicks["Request Change Permission"]})
-            if "Permalinks" in clicks and not (clicks["Permalinks"].get("submenu_items") or 0) > 0:
+            if "Permalinks" in clicks and not _permalinks_entries(clicks["Permalinks"]):
                 problems.append({"Permalinks": clicks["Permalinks"]})
             if [b for b in r.get("bad") or [] if not b.startswith("404 GET ") or "/static/" not in b]:
                 problems.append({"bad": r.get("bad")})
             if problems:
                 j.fail("menu", dict(base, problems=problems))
             j.console("console", r.get("console"), base)
+    if name == "menu":
+        # e2e-15: the activation page's menu is the job's; its Permalinks submenu lists the same permalinks (by href:
+        # "#2" in the text moves on when a build finishes)
+        subs = {}
+        for r in rows:
+            got = _permalinks_entries(((r.get("clicks") or {}).get("Permalinks")) or {})
+            if got and all(i.get("href") for i in got):
+                subs[(r.get("user"), r.get("page"))] = sorted({i.get("href") or i.get("text") for i in got})
+        for (user, page), hrefs in sorted(subs.items()):
+            job = page[:-len("batch-control-activation/")] if page.endswith("/batch-control-activation/") else None
+            if job and (user, job) in subs and subs[(user, job)] != hrefs:
+                j.fail("menu", {"role": user, "page": page, "problems": [{"Permalinks differ from the job page's":
+                                                                          {"page": hrefs, "job page": subs[(user, job)]}}]})
     return j
+
+
+def _permalinks_entries(c):
+    """The Permalinks submenu entries a menu.py row saw: core opens the submenu on hover, and a click on the entry whose
+    submenu is already open may toggle it closed again (CI run 40183795439: the hover read 4 entries, the click left no
+    menu), so either step showing them counts; a submenu that neither step showed (or that shows nothing) FAILS."""
+    hover = (c.get("hover") or {}).get("items") or []
+    if hover:
+        return hover
+    if c.get("submenu"):
+        return c["submenu"]
+    n = c.get("submenu_items") or 0  # rows of the driver before CI run 40183795439: a difference of counts
+    return [{"text": f"entry {k + 1}"} for k in range(n)] if n > 0 else []
 
 
 # ------------------------------------------------------------------ entry point for the drivers

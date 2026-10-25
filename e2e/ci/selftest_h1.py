@@ -295,6 +295,23 @@ def _paged(p, restored, at):
             "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at}}
 
 
+PL4 = [{"text": f"{t}\n#2", "tag": "a", "href": h, "cls": "jenkins-dropdown__item"} for t, h in
+       (("Last build", "lastBuild"), ("Last stable build", "lastStableBuild"), ("Last successful build", "lastSuccessfulBuild"),
+        ("Last completed build", "lastCompletedBuild"))]
+
+
+def _menu(p, hover_items, click_items, boxes_after=2, legacy=None):
+    """A r15/menu.py row (requester) with its Permalinks click; legacy: the old driver's count difference instead."""
+    c = {"dialog": 0, "boxes_before": 1, "boxes_after": boxes_after, "url": "/jenkins" + p,
+         "hover": {"boxes": 2 if hover_items else 1, "items": hover_items, "settled": True}}
+    if legacy is not None:
+        c["submenu_items"] = legacy
+    else:
+        c.update(settled=True, submenu_items=len(click_items), submenu=click_items)
+    return {"user": "requester", "page": p, "items": [{"text": "Permalinks", "tag": "button", "href": None}], "status": {},
+            "duplicates": [], "empty_href_anchors": [], "clicks": {"Permalinks": c}, "console": [], "bad": []}
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -413,6 +430,22 @@ def synthetic():
         ("not hidden: a queue entry that does nothing when clicked", "crawl",
          [dict(_widget(TOGGLE, "buildQueue", "button", "", "http://localhost:18080/jenkins/job/batch-cron/"), result="NOTHING")],
          crawl_ctx(), "fail", "click"),
+        # r15 menu: core's Permalinks submenu (CI run 40183795439: the hover showed it, the click toggled the menu closed)
+        ("r15: Permalinks shown on hover, the click toggled the menu closed", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", PL4, [], boxes_after=0)], {}, "pass", None),
+        ("r15: the failing row of CI run 40183795439 as the old driver recorded it", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", PL4, None, boxes_after=0, legacy=-4)], {}, "pass", None),
+        ("r15: Permalinks shown by the click only", "r15/menu",
+         [_menu("/job/batch-daily/", [], PL4)], {}, "pass", None),
+        ("r15: job page and activation page list the same permalinks (build numbers moved on)", "r15/menu",
+         [_menu("/job/batch-daily/", PL4, PL4),
+          _menu("/job/batch-daily/batch-control-activation/", [dict(i, text=i["text"].replace("#2", "#3")) for i in PL4], [])],
+         {}, "pass", None),
+        ("not hidden: a Permalinks submenu neither the hover nor the click showed", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", [], [], boxes_after=1)], {}, "fail", "menu"),
+        ("not hidden: the activation page's Permalinks submenu lost an entry", "r15/menu",
+         [_menu("/job/batch-daily/", PL4, PL4), _menu("/job/batch-daily/batch-control-activation/", PL4[:3], PL4[:3])],
+         {}, "fail", "menu"),
         # misc P: the newest-first run history gains timer runs while its pager is walked
         ("misc: Previous on the run history brings page 1 back with two new runs on top", "misc",
          [_paged("/batch-control/history/?kind=runs", False, 2)], {}, "pass", None),
