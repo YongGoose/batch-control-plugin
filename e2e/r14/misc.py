@@ -212,8 +212,12 @@ def sec_P():
             prv = s.page.locator("#main-panel a", has_text=re.compile("^(Previous|Newer)"))
             if prv.count():
                 prv.first.click(); s.page.wait_for_load_state("load")
-                back = s.page.locator("#main-panel table tbody tr").first.inner_text()[:60]
-                row["prev"] = {"url": s.page.url.replace(BASE, ""), "first_row_restored": back == first}
+                back_rows = [t[:60] for t in s.page.locator("#main-panel table").first.locator("tbody tr").all_inner_texts()]
+                back = back_rows[0] if back_rows else None
+                row["prev"] = {"url": s.page.url.replace(BASE, ""), "first_row_restored": back == first,
+                               # where the first row of page 1 is now: the newest-first run history gains a row with
+                               # every timer run (batch-cron, fast) while the pager is walked (judged in h1_rules.py)
+                               "first_row_at": back_rows.index(first) if first in back_rows else None}
             else:
                 row["prev"] = "MISSING on page 2"
         emit("P", row)

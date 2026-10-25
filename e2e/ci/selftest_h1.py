@@ -279,6 +279,39 @@ def _endpoints(change=None):
             "strategy": h1.RS_STRATEGY}
 
 
+def _act(role, item, control, page_state, server_state):
+    return {"role": role, "item": item, "control": control, "ctype": "form", "state_before": "Pending", "post_status": [302],
+            "state_after_page": page_state, "server_after": [200, server_state], "console": []}
+
+
+def _widget(p, widget, tag, label, href, role="admin", result="gone-on-reload"):
+    """A crawl click row of an entry of one of core's side-panel panes as r14/crawl.py records it."""
+    return dict(click(p, result, role=role, label=label, data={"href": href}, detail={"found": 0, "occ": 0}),
+                tag=tag, region="side", widget=widget, cls="jenkins-menu-dropdown-chevron")
+
+
+def _paged(p, restored, at):
+    return {"sec": "P", "page": p, "next_links": 1, "next": {"url": p + "&page=2", "first_row_changed": True},
+            "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at}}
+
+
+PL4 = [{"text": f"{t}\n#2", "tag": "a", "href": h, "cls": "jenkins-dropdown__item"} for t, h in
+       (("Last build", "lastBuild"), ("Last stable build", "lastStableBuild"), ("Last successful build", "lastSuccessfulBuild"),
+        ("Last completed build", "lastCompletedBuild"))]
+
+
+def _menu(p, hover_items, click_items, boxes_after=2, legacy=None):
+    """A r15/menu.py row (requester) with its Permalinks click; legacy: the old driver's count difference instead."""
+    c = {"dialog": 0, "boxes_before": 1, "boxes_after": boxes_after, "url": "/jenkins" + p,
+         "hover": {"boxes": 2 if hover_items else 1, "items": hover_items, "settled": True}}
+    if legacy is not None:
+        c["submenu_items"] = legacy
+    else:
+        c.update(settled=True, submenu_items=len(click_items), submenu=click_items)
+    return {"user": "requester", "page": p, "items": [{"text": "Permalinks", "tag": "button", "href": None}], "status": {},
+            "duplicates": [], "empty_href_anchors": [], "clicks": {"Permalinks": c}, "console": [], "bad": []}
+
+
 def synthetic():
     """(name, driver, rows, ctx, expected: "fail" | "pass", check that must (not) fail)"""
     req = "/batch-control/requests/"
@@ -367,6 +400,59 @@ def synthetic():
         ("actions: a control answering 403", "actions",
          [{"role": "approver-1", "item": "run", "control": "Approve", "ctype": "form", "state_before": "Pending", "post_status": [403],
            "state_after_page": "Pending", "server_after": [200, "Pending"], "console": []}], {}, "fail", "control-status"),
+        # states that move on by themselves (CI run 40175641627: the approved run request already read Executed)
+        ("actions: an approved run request already Executed (page and server)", "actions",
+         [_act("admin", "run_reqonly", "Approve", "Executed", "Executed")], {}, "pass", None),
+        ("actions: an approved run request still waiting to run", "actions",
+         [_act("approver-1", "run", "Approve", "Approved, waiting to run", "Executed")], {}, "pass", None),
+        ("not hidden: Rejected after Approve on a run request", "actions",
+         [_act("admin", "run_reqonly", "Approve", "Rejected", "Executed")], {}, "fail", "state-page"),
+        ("not hidden: Pending after Approve on a run request (server)", "actions",
+         [_act("admin", "run", "Approve", "Approved, waiting to run", "Pending")], {}, "fail", "state-server"),
+        ("not hidden: an approved activation never reads Executed", "actions",
+         [_act("admin", "act", "Approve Activation", "Executed", "Approved")], {}, "fail", "state-page"),
+        ("not hidden: Approve on a grant that leaves it Approved, not an open window", "actions",
+         [_act("admin", "grant", "Approve", "Approved", "Approved")], {}, "fail", "state-page"),
+        # core's transient side-panel widgets (CI run 40175641627: the Build Queue's batch-cron entry, gone on reload)
+        ("a Build Queue entry's chevron gone on the fresh load (the build left the queue)", "crawl",
+         [_widget(TOGGLE, "buildQueue", "button", "", "http://localhost:18080/jenkins/job/batch-cron/", role="manager")],
+         crawl_ctx("manager"), "pass", None),
+        ("an executor entry gone on the fresh load (the build finished)", "crawl",
+         [_widget(TOGGLE, "executors", "button", "", "http://localhost:18080/jenkins/job/batch-cron/1234/")], crawl_ctx(), "pass", None),
+        ("not hidden: a plugin side-panel control gone on the fresh load", "crawl",
+         [dict(click(TOGGLE, "gone-on-reload", label="Request Change Permission",
+                     data={"dialogUrl": "/jenkins/batch-control/grants/dialog?scopeFullName=ops%2Fmb"}), tag="a", region="side")],
+         crawl_ctx(), "fail", "click"),
+        ("not hidden: a Batch Control target inside the queue pane", "crawl",
+         [_widget(TOGGLE, "buildQueue", "button", "", "http://localhost:18080/jenkins/batch-control/requests/")], crawl_ctx(), "fail", "click"),
+        ("not hidden: a pane id outside core's two transient panes", "crawl",
+         [_widget(TOGGLE, "batch-control-pane", "button", "", "http://localhost:18080/jenkins/job/batch-cron/")], crawl_ctx(), "fail", "click"),
+        ("not hidden: a queue entry that does nothing when clicked", "crawl",
+         [dict(_widget(TOGGLE, "buildQueue", "button", "", "http://localhost:18080/jenkins/job/batch-cron/"), result="NOTHING")],
+         crawl_ctx(), "fail", "click"),
+        # r15 menu: core's Permalinks submenu (CI run 40183795439: the hover showed it, the click toggled the menu closed)
+        ("r15: Permalinks shown on hover, the click toggled the menu closed", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", PL4, [], boxes_after=0)], {}, "pass", None),
+        ("r15: the failing row of CI run 40183795439 as the old driver recorded it", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", PL4, None, boxes_after=0, legacy=-4)], {}, "pass", None),
+        ("r15: Permalinks shown by the click only", "r15/menu",
+         [_menu("/job/batch-daily/", [], PL4)], {}, "pass", None),
+        ("r15: job page and activation page list the same permalinks (build numbers moved on)", "r15/menu",
+         [_menu("/job/batch-daily/", PL4, PL4),
+          _menu("/job/batch-daily/batch-control-activation/", [dict(i, text=i["text"].replace("#2", "#3")) for i in PL4], [])],
+         {}, "pass", None),
+        ("not hidden: a Permalinks submenu neither the hover nor the click showed", "r15/menu",
+         [_menu("/job/batch-daily/batch-control-activation/", [], [], boxes_after=1)], {}, "fail", "menu"),
+        ("not hidden: the activation page's Permalinks submenu lost an entry", "r15/menu",
+         [_menu("/job/batch-daily/", PL4, PL4), _menu("/job/batch-daily/batch-control-activation/", PL4[:3], PL4[:3])],
+         {}, "fail", "menu"),
+        # misc P: the newest-first run history gains timer runs while its pager is walked
+        ("misc: Previous on the run history brings page 1 back with two new runs on top", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 2)], {}, "pass", None),
+        ("not hidden: Previous on the run history lands on a page without page 1's first row", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, None)], {}, "fail", "P-paging"),
+        ("not hidden: a moved first row on a list no timer writes to (changes)", "misc",
+         [_paged("/batch-control/changes/", False, 1)], {}, "fail", "P-paging"),
         ("actions: nobc may open a run request (200 where 404)", "actions",
          [{"role": "nobc", "item": "run", "probe_status": 200, "controls": []}], {}, "fail", "probe"),
         ("misc: nobc reads the History (200 where 404)", "misc", [{"sec": "H", "role": "nobc", "status": 200}], {}, "fail", "H-status"),
