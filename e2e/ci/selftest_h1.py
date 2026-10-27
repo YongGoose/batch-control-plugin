@@ -290,9 +290,14 @@ def _widget(p, widget, tag, label, href, role="admin", result="gone-on-reload"):
                 tag=tag, region="side", widget=widget, cls="jenkins-menu-dropdown-chevron")
 
 
-def _paged(p, restored, at):
-    return {"sec": "P", "page": p, "next_links": 1, "next": {"url": p + "&page=2", "first_row_changed": True},
-            "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at}}
+def _paged(p, restored, at, first="2026-10-27 12:00:00 UTC", above=None, changed=True):
+    """A misc.py P row: page 1's first row came back at index `at` below the rows whose Started times are `above`
+    (default: `at` rows each one second newer than `first`)."""
+    if above is None:
+        above = [f"2026-10-27 12:00:{at - i:02d} UTC" for i in range(at)] if at else []
+    return {"sec": "P", "page": p, "next_links": 1, "next": {"url": p + "&page=2", "first_row_changed": changed},
+            "prev": {"url": p + "&page=1", "first_row_restored": restored, "first_row_at": at,
+                     "time_col": "Started", "first_row_time": first, "above_times": above}}
 
 
 PL4 = [{"text": f"{t}\n#2", "tag": "a", "href": h, "cls": "jenkins-dropdown__item"} for t, h in
@@ -449,10 +454,37 @@ def synthetic():
         # misc P: the newest-first run history gains timer runs while its pager is walked
         ("misc: Previous on the run history brings page 1 back with two new runs on top", "misc",
          [_paged("/batch-control/history/?kind=runs", False, 2)], {}, "pass", None),
+        ("misc: Previous on the run history brings page 1 back moved down 6 rows, all newer (run 40326682006)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6)], {}, "pass", None),
+        ("misc: Previous on the run history restores page 1 exactly", "misc",
+         [_paged("/batch-control/history/?kind=runs", True, 0, above=[])], {}, "pass", None),
+        ("not hidden: the run history's first row moved down 6 rows with an older row above it", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6, above=["2026-10-27 12:00:06 UTC", "2026-10-27 12:00:05 UTC", "2026-10-27 11:59:59 UTC",
+                                       "2026-10-27 12:00:03 UTC", "2026-10-27 12:00:02 UTC", "2026-10-27 12:00:01 UTC"])],
+         {}, "fail", "P-paging"),
+        ("misc: the run history's first row moved down below a row of the same second (equal is sorted correctly)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["2026-10-27 12:00:00 UTC"])], {}, "pass", None),
+        ("not hidden: the run history's first row moved down below a row of the same second and an older row", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 2, above=["2026-10-27 12:00:00 UTC", "2026-10-27 11:59:59 UTC"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down below a same-second row in another zone", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["2026-10-27 12:00:00 KST"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down below a row whose time does not parse", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 1, above=["yesterday"])], {}, "fail", "P-paging"),
+        ("not hidden: the run history's first row moved down with no times recorded above it", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 2, above=[])], {}, "fail", "P-paging"),
+        ("not hidden: run 40326682006's row as the old driver recorded it (moved 6, no times to prove them newer)", "misc",
+         [{"sec": "P", "page": "/batch-control/history/?kind=runs", "next_links": 1,
+           "next": {"url": "/batch-control/history/?kind=runs&page=2", "first_row_changed": True},
+           "prev": {"url": "/batch-control/history/?kind=runs&page=1", "first_row_restored": False, "first_row_at": 6}}],
+         {}, "fail", "P-paging"),
         ("not hidden: Previous on the run history lands on a page without page 1's first row", "misc",
          [_paged("/batch-control/history/?kind=runs", False, None)], {}, "fail", "P-paging"),
-        ("not hidden: a moved first row on a list no timer writes to (changes)", "misc",
-         [_paged("/batch-control/changes/", False, 1)], {}, "fail", "P-paging"),
+        ("not hidden: Next on the run history did not change the first row (moved-down Previous otherwise fine)", "misc",
+         [_paged("/batch-control/history/?kind=runs", False, 6, changed=False)], {}, "fail", "P-paging"),
+        ("not hidden: a moved first row on a list no timer writes to (changes), newer rows above", "misc",
+         [_paged("/batch-control/changes/", False, 6)], {}, "fail", "P-paging"),
+        ("misc: a list no timer writes to (changes) restored exactly", "misc",
+         [_paged("/batch-control/changes/", True, 0, above=[])], {}, "pass", None),
         ("actions: nobc may open a run request (200 where 404)", "actions",
          [{"role": "nobc", "item": "run", "probe_status": 200, "controls": []}], {}, "fail", "probe"),
         ("misc: nobc reads the History (200 where 404)", "misc", [{"sec": "H", "role": "nobc", "status": 200}], {}, "fail", "H-status"),

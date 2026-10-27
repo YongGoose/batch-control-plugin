@@ -25,6 +25,7 @@ Standard library only: ci/selftest_h1.py feeds it recorded rows without Jenkins 
 import json
 import re
 from collections import Counter
+from datetime import datetime
 
 URL = re.compile(r"https?://[^\s'\"<>)]+")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -290,9 +291,45 @@ MISC_STATUS = {
     ("M", "page"): {"admin": 200, "requester": 200, "approver-1": 404, "manager": 200},
     ("M", "mark_button"): {"admin": 1, "requester": 0, "manager": 0},
 }
-# misc.py P: lists that grow at their top while the pager is walked (page -> how far page 1's first row may move down:
-# the timer runs of a few seconds, two jobs every minute)
-GROWING_LISTS = {"/batch-control/history/?kind=runs": 5}
+# misc.py P: newest-first lists that grow at their top while the pager is walked (the timer runs finishing meanwhile).
+# On these, Previous may bring page 1 back with its first row moved down, but only below rows that are newer than it
+# or of the same second by the table's time column (see _shift_ok); no fixed row limit. Every other paged list restores exactly.
+GROWING_LISTS = {"/batch-control/history/?kind=runs"}
+def _shown_time(text):
+    """A time cell as the plugin shows it (ui/Dates.java: "yyyy-MM-dd HH:mm:ss z") -> (datetime, zone), else None."""
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\S+)", (text or "").strip())
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"), m.group(2)
+    except ValueError:
+        return None
+
+
+def _shift_ok(pv):
+    """Previous on a growing list: page 1's first row is back on page 1 at index k >= 0 and each of the k rows above it
+    is newer than it or of the same second by the time column (same zone; the list is sorted by start time descending,
+    so an equal time at second resolution is a correct order; older, unparseable or missing times fail). A first row
+    pushed off page 1 altogether fails: more new rows than a page holds in a few seconds is not expected, and judging
+    it would need page 2 read too."""
+    if pv.get("first_row_restored"):
+        return True  # k == 0 (also the records from before first_row_at was recorded)
+    k = pv.get("first_row_at")
+    if not isinstance(k, int) or isinstance(k, bool) or k < 0:
+        return False
+    if k == 0:
+        return True
+    above = pv.get("above_times")
+    first = _shown_time(pv.get("first_row_time"))
+    if first is None or not isinstance(above, list) or len(above) != k:
+        return False
+    for t in above:
+        a = _shown_time(t)
+        if a is None or a[1] != first[1] or not a[0] >= first[0]:
+            return False
+    return True
+
+
 # the Batch Control breadcrumb menu per role (SPEC 2: a tab only for a user who may open its section)
 _TABS = ["Overview", "Run Requests", "Activations", "Grants"]
 _HIST = _TABS + ["Changes", "Dashboard", "Incidents", "History"]
@@ -632,11 +669,12 @@ def judge_misc(rows, ctx=None):
                 nx, pv = r.get("next") or {}, r.get("prev")
                 # the run history is newest first and gains a row with every timer run (batch-cron and fast run every
                 # minute) while Next and Previous are walked: Previous is right when it brings back page 1 with its
-                # first row moved down by the runs that finished meanwhile (a few; a broken Previous shows page 2,
-                # where page 1's first row is not). Only that list; every other paged list must restore its first row.
-                moved = (r.get("page") in GROWING_LISTS and isinstance(pv, dict)
-                         and isinstance(pv.get("first_row_at"), int) and 0 < pv["first_row_at"] <= GROWING_LISTS[r["page"]])
-                if not nx.get("first_row_changed") or not isinstance(pv, dict) or not (pv.get("first_row_restored") or moved):
+                # first row moved down only by rows not older than it (the runs that finished meanwhile; a broken Previous
+                # shows page 2, where page 1's first row is not, or older rows). Only those lists; every other paged
+                # list must restore its first row exactly.
+                ok = isinstance(pv, dict) and (_shift_ok(pv) if r.get("page") in GROWING_LISTS
+                                               else bool(pv.get("first_row_restored")))
+                if not nx.get("first_row_changed") or not ok:
                     j.fail("P-paging", {"page": r.get("page"), "next": nx, "prev": pv})
         elif sec == "B":
             want = MISC_STATUS[("B", r.get("page"))].get(role)
