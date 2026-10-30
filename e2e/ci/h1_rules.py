@@ -897,6 +897,31 @@ def r15_duplicates(els, regions=("side", "appbar")):
     return problems, inside
 
 
+# r15/check.py's GET of every same-origin href: core's stop buttons in those widgets (lib/layout/stopButton.jelly,
+# a.stop-button-link, posted by core's JS after its confirmation) answer 405 to a GET (CI run 40504779419: the
+# executors pane's "Cancel" of a running batch-cron build). Each pane's stop URL, relative to the Jenkins root:
+R15_CORE_STOP = (
+    ("buildQueue", re.compile(r"/queue/cancelItem\?id=\d+")),  # lib/hudson/queue.jelly
+    ("executors", re.compile(r"/computer/[^/?]+/(executors|oneOffExecutors)/\d+/stopBuild\?runExtId=[^&]*")),  # executors.jelly
+    ("jenkins-build-history", re.compile(r"(/job/[^/?]+)+/\d+/stop")),  # HistoryWidget/entry.jelly: ${link}stop
+)
+
+
+def r15_core_stop(e, path, status):
+    """The known-core kind of a fetched link of r15/check.py, or None (then a status >= 400 stays a problem): core's stop
+    button inside its own widget pane, on that pane's stop URL (full match of path + query), answering 405 to the GET;
+    or a one-off executor's stopBuild answering 404 (a flyweight executor exists only while its build runs)."""
+    if "stop-button-link" not in (e.get("cls") or "").split():
+        return None
+    for widget, rx in R15_CORE_STOP:
+        if e.get("widget") == widget and rx.fullmatch(path or ""):
+            if status == 405:
+                return "known_core_get_405"
+            if status == 404 and widget == "executors" and "/oneOffExecutors/" in path:
+                return "known_core"
+    return None
+
+
 def judge_r15(name, rows, ctx=None):
     j = Judge("r15", ctx)
     for r in rows:

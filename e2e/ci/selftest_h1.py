@@ -598,11 +598,44 @@ def r15_check_cases():
     ]
 
 
+STOP_CI = "/computer/(built-in)/executors/1/stopBuild?runExtId=batch-cron%2321"
+
+
+def r15_stop_cases():
+    """r15/check.py's fetched links (h1.r15_core_stop, then shard.r15_problems): (name, element, path, status, want)."""
+    stop = lambda w: {"tag": "a", "text": "Cancel", "region": "side", "cls": "stop-button-link", "widget": w}  # noqa: E731
+    return [
+        # CI run 40504779419 (admin, new job page, /job/team-mb/batch-control-activation/)
+        ("r15 check: the executors pane's stop button of CI run 40504779419, GET 405", stop("executors"), STOP_CI, 405, "pass"),
+        ("r15 check: a one-off executor's stop button whose build ended, GET 404", stop("executors"),
+         "/computer/(built-in)/oneOffExecutors/0/stopBuild?runExtId=batch-pipeline%237", 404, "pass"),
+        ("r15 check: the Build Queue's cancel button, GET 405", stop("buildQueue"), "/queue/cancelItem?id=42", 405, "pass"),
+        ("r15 check: the build history's stop button of a running build, GET 405", stop("jenkins-build-history"),
+         "/job/team-mb/job/main/3/stop", 405, "pass"),
+        ("not hidden: the same stop URL outside a widget", stop(None), STOP_CI, 405, "fail"),
+        ("not hidden: the same stop URL answering 500", stop("executors"), STOP_CI, 500, "fail"),
+        ("not hidden: a regular executor's stopBuild answering 404", stop("executors"), STOP_CI, 404, "fail"),
+        ("not hidden: a plugin link in the executors pane answering 405, not a stop path", stop("executors"),
+         "/job/batch-daily/batch-control-activation/submit", 405, "fail"),
+        ("not hidden: the stop URL without core's stop-button-link class", dict(stop("executors"), cls="task-link"),
+         STOP_CI, 405, "fail"),
+        ("not hidden: a stop URL of another pane (queue cancel in the executors pane)", stop("executors"),
+         "/queue/cancelItem?id=42", 405, "fail"),
+        ("not hidden: a stop URL with a trailing extra (no full match)", stop("executors"), STOP_CI + "&x=1", 405, "fail"),
+    ]
+
+
 def run_r15_check():
     spec = importlib.util.spec_from_file_location("bc_shard", HERE / "shard.py")
     shard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shard)
     results = []
+    for name, e, path, st, want in r15_stop_cases():
+        kind = h1.r15_core_stop(e, path, st) or "link_status"  # r15/check.py's fallback for a status >= 400
+        left = shard.r15_problems({"problems": [{"kind": kind, "text": e["text"], "region": e["region"], "url": path,
+                                                 "status": st}], "console": [], "bad_responses": []})
+        ok = bool(left) if want == "fail" else not left
+        results.append((ok, name, want, left[:2]))
     for name, els, want in r15_check_cases():
         dups, _ = h1.r15_duplicates(els)
         left = shard.r15_problems({"user": "admin", "flag": "false", "page": "/job/batch-daily/batch-control-activation/",

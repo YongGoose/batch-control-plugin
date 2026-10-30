@@ -5,7 +5,8 @@ Per (account, flag, page): every link and button in the side panel, app bar, bre
 including dropdown templates (overflow menu, breadcrumb menus). Checks: no anchor with an empty/missing href, no
 duplicate visible entry in the side panel or app bar (outside core's build history, Build Queue and Build Executor
 Status widgets, whose entries repeat by design: ci/h1_rules.py r15_duplicates), every same-origin href answers < 400
-to a GET with the account's own session (POST-only links are recorded, not fetched; /logout is never fetched), no console error, no
+to a GET with the account's own session (core's stop buttons in those widgets may answer 405, ci/h1_rules.py
+r15_core_stop; POST-only links are recorded, not fetched; /logout is never fetched), no console error, no
 response >= 400 while loading. Anchors with an empty href are clicked to see whether they do anything.
 
 Usage: check.py crawl            (requester, admin x flag true/false; approver-1 404 check)
@@ -53,6 +54,7 @@ COLLECT = r"""() => {
 
 # e2e-11 UX 2: the same line appears on the core job page /job/<job>/ itself for a new-job-page user (probe.py)
 KNOWN_CONSOLE = "Refused to execute script from"
+ROOT_PATH = urlparse(BASE).path.rstrip("/")  # the context path (/jenkins); stop URLs are matched relative to it
 KNOWN_GET_405 = re.compile(r"/(build|toggleCollapse|doDelete|reload|disable|enable)(\?.*)?$")
 
 
@@ -114,7 +116,10 @@ def check_page(s, user, flag, path):
         st = fetched[u]
         if isinstance(st, int) and st >= 400:
             path_ = urlparse(u).path
-            kind = ("known_core_get_405" if st == 405 and KNOWN_GET_405.search(path_) else
+            pu = urlparse(u)
+            root = pu.path[len(ROOT_PATH):] if pu.path.startswith(ROOT_PATH + "/") else pu.path
+            stop = lib.h1.r15_core_stop(e, root + ("?" + pu.query if pu.query else ""), st)  # core's widget stop buttons
+            kind = stop or ("known_core_get_405" if st == 405 and KNOWN_GET_405.search(path_) else
                     "known_core" if (st == 404 and (path_.endswith("/toggleCollapse") or path_.endswith("/ws/"))) else "link_status")
             problems.append({"kind": kind, "text": e["text"], "region": e["region"], "url": u, "status": st})
     row["links_fetched"] = len(fetched)
