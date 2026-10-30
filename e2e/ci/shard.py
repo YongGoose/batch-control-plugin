@@ -696,17 +696,14 @@ def r15_rows(before):
 
 
 # r15/check.py writes "ok": false as a hint for the reviewer (e2e-15 judged each row). The runner judges a row from its
-# data, leaving out exactly these known or provoked items (everything else still fails):
-BUILD_HISTORY = re.compile(r"^(Success|Failed|Unstable|Aborted|Not built|In progress|Pending)$")
-
-
+# data, leaving out exactly these known or provoked items (everything else still fails). Repeats inside core's
+# side-panel widgets (build history, Build Queue, Build Executor Status) are not duplicate problems at all: check.py
+# leaves them out by DOM containment (ci/h1_rules.py r15_duplicates), not by their text.
 def r15_problems(row):
     left = []
     for p in row.get("problems", []):
         if p.get("kind", "").startswith("known_core"):
             continue  # r15/check.py's own classification (core GET 405/404, e2e-15 Known)
-        if p.get("kind") == "duplicate" and p.get("region") == "side" and BUILD_HISTORY.match(p.get("text", "")):
-            continue  # the classic side panel's build history widget: one status label per build
         left.append(p)
     provoked = row.get("step") == "submit"  # the empty submit first: the form re-renders with errors as HTTP 400
     bad = [b for b in row.get("bad_responses", []) if not (provoked and re.match(r"400 POST .*/batch-control-activation/submit", b))]
