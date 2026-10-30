@@ -869,6 +869,59 @@ def judge_role(name, res, ctx=None):
 
 
 # ------------------------------------------------------------------ r15
+# r15/check.py's duplicate check (side panel, app bar). Core's side-panel widgets list one entry per build, queue item or
+# executor, so their texts repeat by design (CI run 40504779419: "Success" twice, the status badges of builds #1 and #2
+# in the build history): the build history card (hudson/widgets/HistoryWidget/index.jelly: l:card#jenkins-builds around
+# div#jenkins-build-history), the Build Queue pane (lib/hudson/queue.jelly, l:pane id="buildQueue") and the Build
+# Executor Status pane (lib/hudson/executors.jelly, div.pane-frame#executors). check.py's COLLECT records the id of the
+# enclosing one as "widget" (DOM containment, not the text); only core's markup is rendered there.
+R15_REPEATING_WIDGETS = frozenset({"jenkins-builds", "jenkins-build-history", "buildQueue", "executors"})
+
+
+def r15_duplicates(els, regions=("side", "appbar")):
+    """The duplicate problems of a page's collected elements: a visible text that appears more than once in a region,
+    counting only entries outside core's repeating widgets (task links of core and of the plugin, the app bar).
+    Returns (problems, widget_duplicates); the second lists the repeats inside the widgets, for the record only."""
+    problems, inside = [], []
+    for reg in regions:
+        seen, seen_w = {}, {}
+        for e in els:
+            if e.get("region") == reg and e.get("visible") and e.get("text"):
+                if e.get("widget") in R15_REPEATING_WIDGETS:
+                    k = (e["widget"], e["text"])
+                    seen_w[k] = seen_w.get(k, 0) + 1
+                else:
+                    seen[e["text"]] = seen.get(e["text"], 0) + 1
+        problems += [{"kind": "duplicate", "region": reg, "text": t, "count": n} for t, n in seen.items() if n > 1]
+        inside += [{"region": reg, "widget": w, "text": t, "count": n} for (w, t), n in seen_w.items() if n > 1]
+    return problems, inside
+
+
+# r15/check.py's GET of every same-origin href: core's stop buttons in those widgets (lib/layout/stopButton.jelly,
+# a.stop-button-link, posted by core's JS after its confirmation) answer 405 to a GET (CI run 40504779419: the
+# executors pane's "Cancel" of a running batch-cron build). Each pane's stop URL, relative to the Jenkins root:
+R15_CORE_STOP = (
+    ("buildQueue", re.compile(r"/queue/cancelItem\?id=\d+")),  # lib/hudson/queue.jelly
+    ("executors", re.compile(r"/computer/[^/?]+/(executors|oneOffExecutors)/\d+/stopBuild\?runExtId=[^&]*")),  # executors.jelly
+    ("jenkins-build-history", re.compile(r"(/job/[^/?]+)+/\d+/stop")),  # HistoryWidget/entry.jelly: ${link}stop
+)
+
+
+def r15_core_stop(e, path, status):
+    """The known-core kind of a fetched link of r15/check.py, or None (then a status >= 400 stays a problem): core's stop
+    button inside its own widget pane, on that pane's stop URL (full match of path + query), answering 405 to the GET;
+    or a one-off executor's stopBuild answering 404 (a flyweight executor exists only while its build runs)."""
+    if "stop-button-link" not in (e.get("cls") or "").split():
+        return None
+    for widget, rx in R15_CORE_STOP:
+        if e.get("widget") == widget and rx.fullmatch(path or ""):
+            if status == 405:
+                return "known_core_get_405"
+            if status == 404 and widget == "executors" and "/oneOffExecutors/" in path:
+                return "known_core"
+    return None
+
+
 def judge_r15(name, rows, ctx=None):
     j = Judge("r15", ctx)
     for r in rows:

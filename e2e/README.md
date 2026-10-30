@@ -89,9 +89,12 @@ A step fails when its driver exits non-zero or prints one of the drivers' own fa
 `FAIL ` (`round3.py`, `def07.py`, the crawl's content checks) or `"EXCEPTION":` (`misc.py` logs a section's exception
 that way). `r15/check.py` writes `"ok": false` as a hint for the reviewer (e2e-15 judged each row by hand); the runner
 judges its rows from `r15/out/check.jsonl` and leaves out exactly the known or provoked items of e2e-13/14/15
-(`r15_problems` in `ci/shard.py`: core's GET 405/404 links, the build history widget's repeated status labels, the
-400 of the deliberately empty submit, core's D-70 MIME line and core's breadcrumb `reading 'replace'` page error,
-U-1); anything else fails. The crawl, `actions.py`, `jobui.py`, `misc.py`, the targeted scripts (`errpages.py`,
+(`r15_problems` in `ci/shard.py`: core's GET 405/404 links, the 400 of the deliberately empty submit, core's D-70 MIME line and core's breadcrumb `reading 'replace'` page error,
+U-1); anything else fails. Repeated entries inside core's side-panel widgets (build history, Build Queue, Build
+Executor Status) are not duplicates: `r15/check.py` records each element's enclosing widget and counts only the
+others (`r15_duplicates` in `ci/h1_rules.py`); core's stop buttons in those widgets (a.stop-button-link on the pane's
+own cancelItem / stopBuild / `<build>/stop` URL) answering 405 to the GET, or 404 for a one-off executor whose build
+ended, are core's known GET 405/404 (`r15_core_stop`). The crawl, `actions.py`, `jobui.py`, `misc.py`, the targeted scripts (`errpages.py`,
 `s_listpager.py`, `s_incident.py`, `helpcheck.py`, `helpcheck2.py`, `s_monitor.py`), `r14/role/*` and r15's
 `side_dialog.py`, `folder_compare.py` and `menu.py` used to be observational; since H1 (2026-10-24) each judges its own
 rows at its end with `ci/h1_rules.py` and prints `FAIL <driver> <check> <json>` for a finding no rule explains: a page
