@@ -480,6 +480,19 @@ UNITS = [
     Unit("r22-grant-monitor", 0.3, [("r22-grant-monitor", py("r22/grant_monitor.py"))],
          doc="e2e-22 R3-04: while another thread holds the GrantService monitor, the requester's job lists and an item "
              "answer at once with the baseline content and no permission check is BLOCKED on it (T-08-196 end to end)"),
+    # Gap H3 (upgrade from the released plugin). h3/upgrade.py starts a controller of its own (h3/compose.yml: own compose
+    # project bc-h3-<shard>, container, JENKINS_HOME volume and port BC_PORT + 100) with the released .hpi (pinned sha256,
+    # BC_RELEASED_HPI or downloaded into ci/.cache/released/), makes data there, re-creates it with target/batch-control.hpi
+    # on the same volume and removes it at its end. It never touches the shard's Jenkins, so it is not `last` (every group
+    # already has one). Group: the restart theme of "job ui params and restart". Weight: 97 s in a shard through ci/run.sh
+    # next to the shard's Jenkins, 113 and 130 s alone (2026-10-31, local); most of it is two controller boots and two
+    # waits for a cron minute (up to 60 s each), so 2.5 leaves room for a slower runner.
+    Unit("h3-upgrade", 2.5, [("h3-upgrade", py("h3/upgrade.py"))], group="job ui params and restart",
+         doc="gap H3: a controller upgraded from batch-control 1414.vc347803c1997 to this build loads its data (plugin "
+             "active at the new version, no XStream/class error or Batch Control warning in the log, no old-data entry; "
+             "strategy, configuration, every request, window, activation, incident, page status and CSV row as before) "
+             "and keeps working: the queued approved run starts once, the activated cron job's timer fires after the "
+             "upgrade (SPEC 6a), the pending request runs, the window still confers, pending requests can be decided"),
 ]
 BY_NAME = {u.name: u for u in UNITS}
 ORDER = {u.name: i for i, u in enumerate(UNITS)}
