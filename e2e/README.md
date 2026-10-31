@@ -351,7 +351,10 @@ itself did not succeed. Its log gives the reason in one line.
   Docker Hub, updates.jenkins.io / get.jenkins.io, Maven Central (JaCoCo), PyPI, the Playwright CDN. The unit
   `r26-store-force` (#34) also builds `r26/strace.Dockerfile` (`alpine:3.24` plus `strace` from the Alpine package
   mirror) and runs it as a sidecar in the Jenkins container's PID namespace with `--cap-add SYS_PTRACE` (the runner's
-  Docker allows it; the Jenkins container gets no extra capability).
+  Docker allows it; the Jenkins container gets no extra capability). The unit `h3-upgrade` (gap H3) starts a second
+  controller from the same image on `localhost:$((BC_PORT + 100))` (18180) with its own compose project and volume, and
+  downloads the released `batch-control.hpi` from updates.jenkins.io (redirected to a get.jenkins.io mirror) unless
+  `BC_RELEASED_HPI` names a file with the pinned digest (a workflow may cache `e2e/ci/.cache/released/`).
 - Secrets: none. `run.sh` writes `e2e/.env` with random passwords and masks them (`::add-mask::`).
 - Durations: on the runner (run 37883661045, the five earlier groups) 19.8-35.0 min per shard job: about 3.2 min of
   the job's own steps (Jenkins ready after 2.4-2.6 min, image build included), 3.1 min setup, then the units. The seven
@@ -622,6 +625,63 @@ activations, windows, changes and incidents through the plugin's own endpoints; 
 page per account), `analyze.py`/`summarize.py` condense `out/crawl.jsonl`. State-changing controls: `actions.py`;
 entry points and dialog cycles: `jobui.py <new|classic>`; targeted: `misc.py [CHPBTRSMK]`, `errpages.py`,
 `helpcheck*.py`, `s_incident.py`, `s_listpager.py`, `s_monitor.py`.
+
+## Gap H3 driver (`h3/`): upgrade from the released plugin
+
+CI unit `h3-upgrade` (group "job ui params and restart", not `last`; weight in `ci/shard.py`). `h3/upgrade.py` upgrades a
+real controller from batch-control `1414.vc347803c1997` to the `.hpi` of this build and asserts that the existing data
+loads and keeps working. Verdicts `PASS h3 <check> {json}` / `FAIL h3 <check> {json}`, exit 1 on any FAIL; artefacts in
+`h3/out/` (both snapshots as JSON, the controller log before and after the upgrade, `upgrade.jsonl`).
+
+- **Its own controller.** `h3/compose.yml` is a stack of its own: compose project `bc-h3-<shard>` (`BC_H3_PROJECT`),
+  container `<project>-jenkins`, JENKINS_HOME volume `<project>_h3_home`, port `BC_PORT + 100` (`BC_H3_PORT`; 18180
+  under `ci/run.sh`), root context, no mail sink, no JaCoCo agent. It uses the image of `docker-compose.yml` (the core of
+  `pom.xml`, the plugins of `plugins.txt`), so on CI it costs no image build. Nothing of the shard's Jenkins is touched,
+  which is why the unit is not `last`. The driver removes the stack and its volume at its end (`BC_KEEP=1` keeps them);
+  `ci/run.sh` removes a `bc-h3-<k>` stack left by a step killed by its timeout. Its JCasC profile `h3/casc/jenkins.yaml`
+  holds only the accounts (admin, requester, approver-1, approver-2) and the URL: JCasC re-applies at every boot, so it
+  must own nothing the upgrade has to carry over (the strategy, the Batch Control configuration, the executors).
+- **The released `.hpi`.** Pinned by sha256 `9fabaa19a12b49864ccfb162c385849cd9abfea75bbe3690ab8db3f3bc6d3706` (computed
+  from the download and equal to the `sha256` of the update center's `plugin-versions.json` entry for that version).
+  `BC_RELEASED_HPI=<path>`: used when the file exists and matches, otherwise downloaded there; default path
+  `ci/.cache/released/batch-control-1414.vc347803c1997.hpi` (git-ignored). The download follows the redirect from
+  updates.jenkins.io to a mirror and retries up to six times with backoff on 429, 5xx and connection errors (honouring
+  `Retry-After`); a file with another digest is a FAIL, never used.
+- **The swap.** Both plugins are mounted, one at a time, as `/usr/share/jenkins/ref/plugins/batch-control.jpi.override`
+  (as in `docker-compose.yml`). Phase B stops the controller cleanly (the queue is saved), then re-creates the container
+  with `BC_H3_HPI` pointing at `target/batch-control.hpi` (`BC_H3_CURRENT_HPI`) on the same volume; `jenkins.sh` copies
+  the override over `plugins/batch-control.jpi` at boot. `C-plugin-swapped` proves the swap: the active version is the
+  build's (`Plugin-Version` of its manifest), not the release.
+- **Phase A** (released plugin, fresh home): the Batch Control matrix strategy (script console), the Batch Control
+  configuration saved on its page in a browser (both switches, approvers, non-default numbers, admin self-approval off),
+  six jobs created and configured over REST plus one whose CREATE record is written with the plugin clock in last month
+  (two month buckets), `h3-cron` (every minute) activated by an approved ACTIVATE request and running on its timer,
+  `h3-held` (every minute) with only a pending ACTIVATE request, run requests EXECUTED, REJECTED, CANCELLED, PENDING and
+  APPROVED-with-its-run-in-the-queue (executors 0), an approved CONFIGURE window on `h3-target` and a pending DELETE
+  window request on `h3-other`, an incident (failing build) acknowledged. Then the snapshot: every entity loaded through
+  the plugin's store (every getter of every request, window, grant, activation request and state, incident; the values
+  files), each item page's status, the job pages' activation notices, the four History CSV exports, the configuration,
+  the strategy class and entries, the active Batch Control monitors, the store's file names, queue and builds.
+- **Phase C** checks: loading (`C-plugin-swapped`, `C-log-clean`: no XStream or class-loading error and no Batch Control
+  WARNING/SEVERE line in the new boot's log, `C-old-data-monitor`, `C-monitors`); identical state (`C-strategy`,
+  `C-config`, `C-entities-<kind>` for each entity kind with no entity missing, `C-approved-expiry-rebased`: the one value
+  a restart legitimately moves, SPEC 7, later never earlier, `C-no-reseeding`, `C-pages`, `C-activation-notices`,
+  `C-csv-<kind>`, `C-store-files`, `C-queue-restored`, `C-history-listings` with last month's record); still working
+  (`C-queued-approved-runs-once`, `C-timer-fires-after-upgrade`: a timer build of `h3-cron` whose queue item was not
+  restored from phase A, SPEC 6a, `C-held-timer-still-refused`, `C-pending-approved-runs`, `C-window-confers`: the
+  requester changes `h3-target`'s config.xml (200, the CONFIGURE record names the window) and not `h3-other`'s (403),
+  `C-pending-window-approved`, `C-pending-activation-approved`, `C-new-request`, `C-incident-resolved`,
+  `C-log-clean-at-end`). Every wait is a bounded poll.
+- **Proof hook.** `BC_H3_TAMPER='<sh>'` runs a shell snippet on the volume between the phases (throwaway container,
+  working directory JENKINS_HOME, the phase A ids as variables `PENDING`, `APPROVED`, `GRANT`, `ACT_PENDING`, ...), to
+  show that the checks go red; never set in CI. For example `rm batch-control/grants/$GRANT.xml` fails
+  `C-entities-grants`, `C-store-files` and `C-window-confers`.
+
+Alone, without a shard: `BC_RELEASED_HPI=... venv/bin/python e2e/h3/upgrade.py` (needs `e2e/.env` and
+`target/batch-control.hpi`; about 2 to 2.5 minutes locally). In a shard: `BC_UNITS=h3-upgrade PY=$PWD/venv/bin/python
+e2e/ci/run.sh 4/7`. Not covered: an upgrade between two different code bases (on 2026-10-31 the release and `main` had
+the same `src/main`, so today the unit guards the next change), Pipeline jobs, folders, file and secret parameters
+(`r19/restart.py` covers those across a restart), role-strategy, a JCasC-configured Batch Control, retention.
 
 ## e2e-21 driver (`r21/`): Reject button colour
 
