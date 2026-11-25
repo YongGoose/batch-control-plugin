@@ -1,5 +1,6 @@
 package io.jenkins.plugins.batchcontrol;
 
+import hudson.Extension;
 import hudson.ExtensionList;
 import hudson.init.InitMilestone;
 import hudson.init.Initializer;
@@ -13,6 +14,7 @@ import hudson.security.ACLContext;
 import hudson.security.GlobalMatrixAuthorizationStrategy;
 import io.jenkins.plugins.batchcontrol.config.BatchControlGlobalConfiguration;
 import io.jenkins.plugins.batchcontrol.config.BatchControlJobProperty;
+import io.jenkins.plugins.batchcontrol.model.ChangeType;
 import io.jenkins.plugins.batchcontrol.model.RequestStatus;
 import io.jenkins.plugins.batchcontrol.model.RunRequest;
 import io.jenkins.plugins.batchcontrol.ops.ExpiryPeriodicWork;
@@ -38,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -65,7 +68,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Issue #163: startup recovery of approved run requests when it runs before Jenkins core restores the
- * build queue, and recovering one request fails. Matrix rows T-04-76 and T-04-77 (note 376).
+ * build queue, and recovering one request fails. Matrix rows T-04-76, T-04-77 (note 376) and T-04-78
+ * (note 377).
  *
  * <p>Basis: SPEC item 4 (a request approved but not yet queued when the controller stops is queued
  * automatically after the restart, with no double submission), item 7 (the approved-run timeout is
@@ -96,6 +100,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * U+FFFE into the first request's stored reason when the recovery submits that request's run; from
  * then on the request still loads and every save of it is refused (premises asserted). The other
  * request is untouched.
+ *
+ * <p><b>A submission that fails after the gate (T-04-78).</b> A queue handler consulted after Batch
+ * Control's gate ({@link ThrowAfterGate}, a negative ordinal; the order is asserted from
+ * {@link Queue.QueueDecisionHandler#all()}) throws for the first request's run while the recovery
+ * runs. Queue scheduling stops at the first handler that refuses, so a handler after the gate is
+ * consulted only once the gate has accepted the submission.
  *
  * <p>Written from docs/SPEC.md, docs/ARCHITECTURE.md sections 1, 2, 3 and 5, docs/TEST-MATRIX.md and
  * issue #163's behaviour description only (no src/main knowledge).
@@ -155,17 +165,43 @@ public class RunRequestRecoveryFaultTest {
         }
     }
 
+    /**
+     * Throws for a run of {@link #FIRST} while armed. Its negative ordinal puts it after Batch
+     * Control's gate (ordinal 0 unless the plugin says otherwise; the order is asserted in
+     * {@link #assertConsultedAfterTheGate()}). A {@code @TestExtension} cannot take an ordinal and a
+     * nested class of a test sorts before the gate, so this is a plain extension, present in every
+     * test of the fork and inert unless armed (as CreationSaveRetryGapTest's listeners).
+     */
+    @Extension(ordinal = -100000)
+    public static final class ThrowAfterGate extends Queue.QueueDecisionHandler {
+        static final AtomicBoolean ARMED = new AtomicBoolean();
+        static final AtomicInteger THROWN = new AtomicInteger();
+
+        @Override
+        public boolean shouldSchedule(Queue.Task p, List<Action> actions) {
+            if (ARMED.get() && p instanceof Item item && FIRST.equals(item.getFullName())) {
+                THROWN.incrementAndGet();
+                throw new IllegalStateException("test: a queue handler after Batch Control's gate fails the submission of "
+                        + FIRST);
+            }
+            return true;
+        }
+    }
+
     @BeforeEach
     public void disarm() {
         FaultWhenSubmitted.ARMED.set(null);
         FaultWhenSubmitted.FAULTED.set(null);
         FaultWhenSubmitted.FIRED.set(0);
+        ThrowAfterGate.ARMED.set(false);
+        ThrowAfterGate.THROWN.set(0);
     }
 
     @AfterEach
     public void resetClock() {
         BatchClock.reset();
         FaultWhenSubmitted.ARMED.set(null);
+        ThrowAfterGate.ARMED.set(false);
     }
 
     /**
@@ -274,6 +310,94 @@ public class RunRequestRecoveryFaultTest {
         });
     }
 
+    /**
+     * T-04-78: as T-04-76, but the store works and a queue handler consulted after Batch Control's gate
+     * throws for the first request's run while the recovery runs (the gate has accepted that
+     * submission). After core's queue load and the expiry work at the recovery time: the unrelated
+     * build is still queued; the second request is queued exactly once and APPROVED; the first request
+     * has no queue item and no build, is APPROVED in memory and on disk; the recovery step threw
+     * nothing. With executors back the unrelated job and the second request run once, the first
+     * request does not run. After a real restart without the throwing handler the first request runs
+     * exactly once (it was not used up by the failed submission), nothing runs twice, and no marker
+     * re-use is recorded for either job.
+     */
+    @Test
+    public void t_04_78_aSubmissionFailingAfterTheGateLeavesTheRequestToTheNextRestart() throws Throwable {
+        AtomicReference<String> first = new AtomicReference<>();
+        AtomicReference<String> second = new AtomicReference<>();
+        session.then(r -> {
+            BatchClock.setForTest(Clock.fixed(T0, ZoneOffset.UTC));
+            int executors = prepare(r);
+            first.set(approvedNeverQueued(r, FIRST, FIRST_REASON));
+            second.set(approvedNeverQueued(r, SECOND, SECOND_REASON));
+            assertConsultedAfterTheGate();
+
+            Throwable thrown = restartWithRecoveryBeforeTheQueueLoad(r, ThrowAfterGate.ARMED);
+            assertTrue(ThrowAfterGate.THROWN.get() >= 1, "fixture: the recovery submitted the first request's run, Batch"
+                    + " Control's gate accepted it, and the handler after the gate threw");
+            runExpiryWork(); // at the recovery time, 61 minutes after the approvals
+
+            assertEquals(1, queued(r, UNRELATED), "the queued build of " + UNRELATED + " survives the restart although the"
+                    + " submission of another request failed: " + describeQueue(r));
+            assertEquals(1, queued(r, SECOND), "the second approved request is queued exactly once although the first"
+                    + " one's submission failed: " + describeQueue(r));
+            assertEquals(RequestStatus.APPROVED, status(second.get()), "the second request waits in the queue, APPROVED: the"
+                    + " expiry work at the recovery time did not expire it");
+            assertEquals(0, queued(r, FIRST), "the first request's failed submission left no queue item: " + describeQueue(r));
+            assertTrue(job(r, FIRST).getBuilds().isEmpty(), "no build of " + FIRST);
+            assertEquals(RequestStatus.APPROVED, status(first.get()), "the first request is still APPROVED after its failed"
+                    + " submission and the expiry work at the recovery time");
+            assertStoredStatus(requestFile(r, first.get()), "APPROVED", "the first request is stored as APPROVED");
+            assertNull(thrown, "the recovery step completes although one submission failed: " + thrown);
+
+            releaseExecutors(r, executors);
+            assertBuiltOnce(r, UNRELATED, "after the executors are back");
+            assertRanOnce(r, SECOND, second.get(), "after the executors are back");
+            assertTrue(job(r, FIRST).getBuilds().isEmpty(), "the first request does not run in this session");
+            assertEquals(0, queued(r, FIRST), "nothing of " + FIRST + " is queued in this session");
+        });
+
+        // the throwing handler is gone (disarmed) and the controller restarts
+        ThrowAfterGate.ARMED.set(false);
+        BatchClock.setForTest(Clock.fixed(NEXT_START, ZoneOffset.UTC));
+
+        session.then(r -> {
+            r.waitUntilNoActivity();
+            r.jenkins.getQueue().scheduleMaintenance();
+            r.waitUntilNoActivity();
+            assertRanOnce(r, FIRST, first.get(), "after the next restart (approved, not queued at the restart: queued after"
+                    + " it)");
+            assertStoredStatus(requestFile(r, first.get()), "EXECUTED", "the first request's run is stored as executed");
+            assertRanOnce(r, SECOND, second.get(), "after the next restart (no second submission)");
+            assertBuiltOnce(r, UNRELATED, "after the next restart");
+            for (String name : new String[] {FIRST, SECOND}) {
+                assertTrue(ActivationFixtures.recordsFor(ChangeType.MARKER_REUSE_BLOCKED, name).isEmpty(), "no marker"
+                        + " re-use is recorded for " + name + ": each approved run was queued once"
+                        + " (SPEC 6: one normal run writes no such record)");
+            }
+        });
+    }
+
+    /**
+     * The premise of T-04-78: Jenkins consults its queue handlers in the order of
+     * {@link Queue.QueueDecisionHandler#all()}, and {@link ThrowAfterGate} comes after Batch Control's
+     * gate ({@code queue.ApprovalQueueDecisionHandler}, ARCHITECTURE 3) and every other handler of the
+     * plugin's {@code queue} package.
+     */
+    private static void assertConsultedAfterTheGate() {
+        List<Queue.QueueDecisionHandler> handlers = Queue.QueueDecisionHandler.all();
+        List<String> names = handlers.stream().map(h -> h.getClass().getName()).collect(Collectors.toList());
+        int gate = names.indexOf("io.jenkins.plugins.batchcontrol.queue.ApprovalQueueDecisionHandler");
+        int thrower = names.indexOf(ThrowAfterGate.class.getName());
+        assertTrue(gate >= 0, "fixture: Batch Control's queue gate is registered: " + names);
+        assertTrue(thrower >= 0, "fixture: the throwing handler is registered: " + names);
+        for (int i = 0; i < names.size(); i++) {
+            if (names.get(i).startsWith("io.jenkins.plugins.batchcontrol.queue.")) {
+                assertTrue(i < thrower, "fixture: the throwing handler is consulted after " + names.get(i) + ": " + names);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- the replayed restart
 
     /**
@@ -282,6 +406,12 @@ public class RunRequestRecoveryFaultTest {
      * the recovery step threw, or null.
      */
     private static Throwable restartWithRecoveryBeforeTheQueueLoad(JenkinsRule r) throws Exception {
+        return restartWithRecoveryBeforeTheQueueLoad(r, new AtomicBoolean());
+    }
+
+    /** As above; {@code duringRecovery} is true exactly while Batch Control's recovery step runs. */
+    private static Throwable restartWithRecoveryBeforeTheQueueLoad(JenkinsRule r, AtomicBoolean duringRecovery)
+            throws Exception {
         Queue queue = r.jenkins.getQueue();
         Path queueXml = r.jenkins.getRootDir().toPath().resolve("queue.xml");
         Path aside = queueXml.resolveSibling("queue.xml.set-aside-by-test");
@@ -301,7 +431,12 @@ public class RunRequestRecoveryFaultTest {
         BatchClock.setForTest(Clock.fixed(RECOVERY, ZoneOffset.UTC));
         Throwable thrown;
         try (ACLContext ignored = ACL.as2(ACL.SYSTEM2)) { // the init reactor runs as SYSTEM
-            thrown = runStartupRecovery(r);
+            duringRecovery.set(true);
+            try {
+                thrown = runStartupRecovery(r);
+            } finally {
+                duringRecovery.set(false);
+            }
             Queue.init(r.jenkins);
         }
         return thrown;
