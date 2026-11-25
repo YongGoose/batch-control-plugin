@@ -1382,6 +1382,11 @@ public final class RunRequestService {
      * runs under the queue lock: if {@code queue.xml} is still present the persisted queue is
      * loaded here first (core's later {@code load()} re-reads the state re-saved below), so
      * the recovery dedup always sees the restored queue items.
+     *
+     * <p>#163: a request that cannot be recovered (its file cannot be read or written, or its
+     * submission fails, for example because the queue gate cannot store its claim) is logged and
+     * left as it is stored; the others are still recovered, and a queue loaded here is always saved
+     * again, so core's later load never finds the queue gone (other jobs' queue items included).
      */
     public void recoverApprovedRequests() {
         Jenkins jenkins = Jenkins.getInstanceOrNull();
@@ -1400,73 +1405,110 @@ public final class RunRequestService {
         if (loadedHere) {
             queue.load();
         }
-        Set<String> queuedIds = queuedMarkerRequestIds(jenkins);
-        Instant now = BatchClock.now();
-        for (RunRequest snapshot : store.listOpenRunRequests()) {
-            if (snapshot.getStatus() != RequestStatus.APPROVED || snapshot.getExecutedRunId() != null) {
-                continue;
-            }
-            if (snapshot.getQueueCancelledAt() != null) {
-                LOGGER.info(() -> "Not recovering approved run request " + snapshot.getId()
-                        + ": its queue item was cancelled");
-                continue;
-            }
-            Job<?, ?> job = jenkins.getItemByFullName(snapshot.getJobFullName(), Job.class);
-            if (job == null) {
-                LOGGER.warning(() -> "Cannot recover run request " + snapshot.getId()
-                        + ": job '" + snapshot.getJobFullName() + "' no longer exists");
-                continue;
-            }
-            Run<?, ?> existing = runFor(job, snapshot.getId());
-            if (existing != null) {
-                // A build for this request already exists, so it is never submitted again. Its start
-                // was not written (the request file refused the EXECUTED state, or Jenkins stopped
-                // first): write it now, so the approved-run timeout does not end it as never started.
-                markExecuted(snapshot.getId(), job.getFullName() + "#" + existing.getNumber());
-                continue;
-            }
-            boolean submit = false;
-            RunRequest request = null;
-            List<ParameterValue> values = null;
-            lock.lock();
-            try {
-                request = loadCurrent(snapshot.getId());
-                if (request == null || request.getStatus() != RequestStatus.APPROVED
-                        || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null) {
-                    continue;
+        try {
+            Set<String> queuedIds = queuedMarkerRequestIds(jenkins);
+            Instant now = BatchClock.now();
+            for (RunRequest snapshot : store.listOpenRunRequests()) {
+                try {
+                    recoverRequest(jenkins, snapshot, queuedIds, now);
+                } catch (RuntimeException e) {
+                    // #163: one request that cannot be recovered never stops the recovery of the
+                    // others; it stays as it is stored (APPROVED), and the next restart or the
+                    // approved-run timeout handles it.
+                    LOGGER.log(java.util.logging.Level.WARNING, "Could not recover approved run request "
+                            + snapshot.getId(), e);
                 }
-                // SPEC 7 exception: downtime does not count against approvedRunTimeoutMinutes.
-                request.setExpiryBase(now);
-                if (queuedIds.contains(request.getId())) {
-                    // The restored queue item will run it; just persist the new expiry base.
-                    persist(request);
-                } else {
-                    // Re-issue the consumption ticket for exactly one recovery submission.
-                    request.setQueuedAt(null);
-                    persist(request);
-                    // The values the build receives (D-72), read for this submission only.
-                    values = requireValues(request.getId());
-                    submit = true;
-                }
-            } catch (RuntimeException e) {
-                // One unreadable request must not stop the recovery of the others; it stays
-                // APPROVED and the approved-run timeout ends it.
-                LOGGER.log(java.util.logging.Level.WARNING, "Could not recover approved run request "
-                        + snapshot.getId(), e);
-                continue;
-            } finally {
-                lock.unlock();
             }
-            if (submit) {
-                LOGGER.info("Recovering approved run request " + request.getId()
-                        + " for job " + request.getJobFullName());
-                submitApproved(request, values);
+        } finally {
+            if (loadedHere) {
+                // #163: Queue.load() above moved queue.xml to queue.xml.bak, and core's Queue.init
+                // (later in the same initializer band) clears the live queue and loads queue.xml
+                // again. It is written whatever happened above, so that load restores exactly the
+                // state recovery left behind, and never an empty queue.
+                queue.save();
             }
         }
-        if (loadedHere) {
-            // Re-save so the core Queue.init load() (running later in the same initializer
-            // band) restores exactly the state recovery left behind.
-            queue.save();
+    }
+
+    /**
+     * Recovers one open request found at startup (see {@link #recoverApprovedRequests}). Called
+     * under the queue lock; throws only for this request.
+     */
+    private void recoverRequest(Jenkins jenkins, RunRequest snapshot, Set<String> queuedIds, Instant now) {
+        if (snapshot.getStatus() != RequestStatus.APPROVED || snapshot.getExecutedRunId() != null) {
+            return;
+        }
+        if (snapshot.getQueueCancelledAt() != null) {
+            LOGGER.info(() -> "Not recovering approved run request " + snapshot.getId()
+                    + ": its queue item was cancelled");
+            return;
+        }
+        Job<?, ?> job = jenkins.getItemByFullName(snapshot.getJobFullName(), Job.class);
+        if (job == null) {
+            LOGGER.warning(() -> "Cannot recover run request " + snapshot.getId()
+                    + ": job '" + snapshot.getJobFullName() + "' no longer exists");
+            return;
+        }
+        Run<?, ?> existing = runFor(job, snapshot.getId());
+        if (existing != null) {
+            // A build for this request already exists, so it is never submitted again. Its start
+            // was not written (the request file refused the EXECUTED state, or Jenkins stopped
+            // first): write it now, so the approved-run timeout does not end it as never started.
+            markExecuted(snapshot.getId(), job.getFullName() + "#" + existing.getNumber());
+            return;
+        }
+        RunRequest request;
+        List<ParameterValue> values;
+        lock.lock();
+        try {
+            request = loadCurrent(snapshot.getId());
+            if (request == null || request.getStatus() != RequestStatus.APPROVED
+                    || request.getExecutedRunId() != null || request.getQueueCancelledAt() != null) {
+                return;
+            }
+            // SPEC 7 exception: downtime does not count against approvedRunTimeoutMinutes.
+            request.setExpiryBase(now);
+            if (queuedIds.contains(request.getId())) {
+                // The restored queue item will run it; just persist the new expiry base.
+                persist(request);
+                return;
+            }
+            // Re-issue the consumption ticket for exactly one recovery submission.
+            request.setQueuedAt(null);
+            persist(request);
+            // The values the build receives (D-72), read for this submission only.
+            values = requireValues(request.getId());
+        } finally {
+            lock.unlock();
+        }
+        LOGGER.info("Recovering approved run request " + request.getId()
+                + " for job " + request.getJobFullName());
+        submitRecovered(jenkins, request, values);
+    }
+
+    /**
+     * #163: the recovery submission of {@code request}, whose ticket was re-issued (unclaimed). A
+     * submission that fails is this request's alone: it is logged, and the request stays APPROVED,
+     * so the next restart submits it again unless the approved-run timeout ends it first.
+     *
+     * <p>No queue item of it is left without its claim stored: the queue gate claims the ticket in
+     * {@code shouldSchedule} and accepts only after the claim is stored, and core consults every
+     * queue decision handler before it adds an item, so a submission that throws (a claim the store
+     * refused included) has queued nothing. A claim the gate did store before the submission failed
+     * (a queue handler consulted after the gate threw, or the store failed after replacing the file)
+     * is released as for a refused submission ({@link #releaseRefusedClaim}) unless a queue item
+     * carries the request's marker; a ticket that is still unclaimed is not written again, so a
+     * request file the store refuses is left exactly as it is.
+     */
+    private void submitRecovered(Jenkins jenkins, RunRequest request, @CheckForNull List<ParameterValue> values) {
+        try {
+            submitApproved(request, values);
+        } catch (RuntimeException e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Could not submit the approved run of request "
+                    + request.getId() + " for job " + request.getJobFullName() + " after the restart; it stays"
+                    + " APPROVED and is submitted again after the next restart, unless the approved-run timeout"
+                    + " ends it first", e);
+            releaseRefusedClaim(jenkins, request.getId());
         }
     }
 
@@ -1621,12 +1663,14 @@ public final class RunRequestService {
 
     /**
      * S7 M-1, D-72b (7): a submission of {@code requestId} whose ticket was unclaimed has just been
-     * refused ({@code scheduleBuild2} answered {@code null}, synchronously). If the request's ticket
+     * refused ({@code scheduleBuild2} answered {@code null}, synchronously), or has failed with an
+     * exception during startup recovery (#163, {@link #submitRecovered}). If the request's ticket
      * is now claimed, Batch Control's gate claimed it during that call and a queue handler
-     * consulted after the gate refused the submission, so nothing was queued and no build exists:
-     * the claim is released. Taken under the queue lock and then this service's lock, the order
-     * the gate uses; nothing is released while a queue item carries the request's marker, or once
-     * its run started or its queue item was cancelled.
+     * consulted after the gate refused or failed the submission, so nothing was queued and no build
+     * exists: the claim is released. Taken under the queue lock and then this service's lock, the
+     * order the gate uses; nothing is released while a queue item carries the request's marker, or
+     * once its run started or its queue item was cancelled. A ticket that is still unclaimed is not
+     * written.
      */
     private void releaseRefusedClaim(Jenkins jenkins, String requestId) {
         Queue.withLock(() -> {
@@ -1643,9 +1687,9 @@ public final class RunRequestService {
                 }
                 request.setQueuedAt(null);
                 persist(request);
-                LOGGER.warning(() -> "The approved run of request " + requestId + " was refused by another queue"
-                        + " handler after Batch Control accepted it; nothing was queued. The request stays APPROVED"
-                        + " until it runs after a restart or the approved-run timeout ends it.");
+                LOGGER.warning(() -> "The approved run of request " + requestId + " was refused or failed after"
+                        + " Batch Control accepted it; nothing was queued. The request stays APPROVED until it runs"
+                        + " after a restart or the approved-run timeout ends it.");
             } finally {
                 lock.unlock();
             }
